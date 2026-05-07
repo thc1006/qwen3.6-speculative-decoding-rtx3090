@@ -2,6 +2,16 @@
 
 <a href="https://doi.org/10.5281/zenodo.19776558"><img src="https://zenodo.org/badge/1216484498.svg" alt="DOI"></a>
 
+> **2026-05-07 — v3 update**: DFlash via llama.cpp PR #22105 added. First
+> public RTX 3090 + DFlash + Q4 datapoint. Result: best DFlash config
+> (`--draft-max=8`) is 77.0 tok/s vs 138.9 baseline = **NET LOSS −44 %**.
+> Slightly less bad than Oleg draft-spec (−52 %) but still net negative.
+> The MoE-expert-routing × consumer-Ampere bandwidth hypothesis from v2.x
+> generalises to DFlash too — co-trained spec heads (vLLM MTP, see
+> [sister repo](https://github.com/thc1006/qwen3.6-vllm-2x3090)) remain
+> the only positive yield path on this hardware. Full results, raw logs,
+> and reproducer in [`v3_dflash_2026_05_07/`](v3_dflash_2026_05_07/).
+
 > **2026-04-26 — Exp 2 (code/JSON workload, N=3, standalone 3090) added.**
 > A reader-suggested hypothesis was that structured / low-entropy prompts
 > (code, JSON config, SQL) might let llama.cpp's `--draft-min/--draft-max`

@@ -1,0 +1,9 @@
+== bench start 2026-05-07T10:33:41Z ==
+== host: 3090 ==
+== llama.cpp: version: 8889 (bcb5eeb64) ==
+== GPU state ==
+name, clocks.current.graphics [MHz], clocks.current.memory [MHz], clocks.max.graphics [MHz], clocks.max.memory [MHz], power.limit [W], power.default_limit [W]
+NVIDIA GeForce RTX 3090, 1965 MHz, 9751 MHz, 2100 MHz, 9751 MHz, 350.00 W, 350.00 W
+== model files ==
+-rw-r--r-- 1 thc1006 users   532517120 Apr 22 22:45 /home/thc1006/models/Qwen3.5-0.8B-Q4_K_M.gguf
+-rw-r--r-- 1 thc1006 users 22360456160 Apr 22 22:45 /home/thc1006/models/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf

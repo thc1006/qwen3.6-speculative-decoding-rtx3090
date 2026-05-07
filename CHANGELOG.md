@@ -5,6 +5,50 @@ All notable changes to this bench are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning is not strictly semver — each numbered release is a public
 publication point with its own data set.
+## [v3.0] — 2026-05-07
+
+### Added
+
+- **DFlash speculative-decoding bench** via llama.cpp PR #22105 on the same
+  hardware as v2.x. Full content in [`v3_dflash_2026_05_07/`](v3_dflash_2026_05_07/).
+  - Setup: same RTX 3090 (single card) + `Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf` target.
+    Drafter is `z-lab/Qwen3.6-35B-A3B-DFlash` (HF safetensors), converted to
+    GGUF via PR #22105's modified `convert_hf_to_gguf.py` with `--target-model-dir`.
+  - 5 prompts x 1 trial x 3 draft-max configs (4, 8, 16) = 15 measurements.
+  - Result: **NET LOSS -44 % at best (DFlash --draft-max=8: 77.0 tok/s vs
+    138.9 tok/s no-spec baseline)**. Slightly less bad than v2.x's Oleg
+    draft-spec NET LOSS (-52 %), but still net negative.
+  - First public RTX 3090 + DFlash + Q4 quantized target datapoint.
+  - Reproduction: [`v3_dflash_2026_05_07/bench/bench_dflash.sh`](v3_dflash_2026_05_07/bench/bench_dflash.sh)
+    (note: do NOT use `set -euo pipefail` + `grep | tail` combo; empty grep
+    matches kill the whole script via pipefail).
+
+### Cross-method ranking (single 3090, Qwen3.6-35B-A3B Q4_K_XL target)
+
+| method | tok/s (mean) | vs baseline |
+|---|---:|---:|
+| no spec (baseline) | 138.9 | reference |
+| Oleg draft-spec max=32 | 65.5 | -52.8 % |
+| Oleg draft-spec max=16 | 66.6 | -52.1 % |
+| DFlash --draft-max 16 | 65.8 | -52.6 % |
+| **DFlash --draft-max 8** | **77.0** | **-44.6 %** (best DFlash) |
+| DFlash --draft-max 4 | 74.9 | -46.1 % |
+
+### Mechanism note
+
+Per llama.cpp PR #22105 author: *"for Qwen3.5/3.6 MoE, performance is
+currently not optimal due to MoE + hybrid structure not well supported."*
+The wider mechanism is **MoE expert-routing x consumer-Ampere bandwidth**:
+Qwen3.6-35B-A3B routes 8-of-256 experts per token, expert-saturation
+threshold ~94 tokens. At single-stream batch=1 with `--draft-max ≤ 32`,
+drafted tokens stay below saturation, so verification has to load the
+union of expert slices, exceeding savings even at 100 % acceptance. This
+is **not Q4-specific or consumer-GPU-specific in isolation** — it's the
+joint MoE-routing × bandwidth × Q4-coupling effect. Cross-reference: the
+[sister repo](https://github.com/thc1006/qwen3.6-vllm-2x3090) v3.0/v4.0
+shows vLLM MTP (co-trained head, no separate KV cache) is +27 % NET WIN
+on the same hardware.
+
 
 ## [v2.3] — 2026-04-26 (afternoon)
 
