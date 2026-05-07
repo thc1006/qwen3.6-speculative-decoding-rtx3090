@@ -27,15 +27,19 @@ RESULT_DIRS = [ROOT / "results", ROOT / "results/verify"]
 OUT_DIR = ROOT / "analysis"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-# 2026-04-26 update annotation — applied to all v1 charts as a small footer.
-# Honest about scope: today's N=3 specifically verified the v2 sub-set of configs
-# (baseline + Oleg + srogmann), not the full v1 19-config matrix. The v2.2
-# corroboration we attach here is the cross-hardware A100 NVLink datapoint.
+# 2026-05-08 update annotation — applied to all v1 charts as a small footer.
+# Originally (2026-04-26) said "hardware-class-independent" based on the
+# A100 NVLink Δ −11.4 % datapoint. The v3 clean A/B retest in the sibling
+# repo (cache-OFF) flipped the vLLM 2× RTX 3090 sign to +27.5 %, and the
+# v3.0 README correction (commit 3eef116) reframes the negative finding
+# as **engine + spec-method specific to llama.cpp draft-spec on consumer
+# Ampere with Q4 target**, not hardware-class-independent. The v3 DFlash
+# bench (2026-05-07) confirms the same direction for DFlash specifically.
 V22_FOOTER = (
-    "Updated 2026-04-26 · cross-hardware A100 NVLink clean A/B confirms "
-    "Δ −11.4 % (decode-only, TTFT-robust) on the same model — hardware-"
-    "class-independent. See plot_cross_hardware.png in sibling repo "
-    "qwen3.6-vllm-2x3090."
+    "Updated 2026-05-08 · negative finding is engine+spec-method specific "
+    "to llama.cpp draft-spec / DFlash on consumer Ampere + Q4 target; vLLM "
+    "MTP on 2× RTX 3090 PCIe is +27.5 % (sibling repo qwen3.6-vllm-2x3090 "
+    "v3/v4). DFlash on 3090: NET LOSS −44 % (v3_dflash_2026_05_07/)."
 )
 
 
