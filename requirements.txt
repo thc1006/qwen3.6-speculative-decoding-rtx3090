@@ -1,4 +1,4 @@
-# Runtime requirements for running bench_runner.py
+# Runtime requirements for running bench_runner.py (v1/v2 — top-level bench).
 # Pin: these are the versions used in the published benchmark (2026-04-21).
 # Regenerate via: pip install -r requirements.txt
 
@@ -6,3 +6,23 @@ matplotlib>=3.10,<4
 numpy>=2.0,<3
 pandas>=2.2,<3
 # stdlib: urllib, json, subprocess, shlex — no extra packages needed
+
+# ----------------------------------------------------------------------------
+# v3 DFlash (2026-05-07) — convert HF safetensors → GGUF
+# ----------------------------------------------------------------------------
+# The DFlash drafter from z-lab is HF safetensors; PR #22105's modified
+# convert_hf_to_gguf.py needs additional Python deps in a SEPARATE venv
+# (CPU-only torch is fine for the one-shot conversion). Use llama.cpp's
+# own requirements file rather than pinning here, since the DFlash branch
+# may move:
+#
+#   python -m venv ~/dflash_convert_venv
+#   ~/dflash_convert_venv/bin/pip install -r \
+#       <llama.cpp checkout>/requirements/requirements-convert_hf_to_gguf.txt
+#
+# Versions actually used in v3 (for reference, see BENCHMARK_ENV.md v3 section):
+#   transformers==5.5.1
+#   torch==2.6.0+cpu
+#   gguf==0.19.0
+#   sentencepiece==0.2.1
+#   safetensors==0.7.0
