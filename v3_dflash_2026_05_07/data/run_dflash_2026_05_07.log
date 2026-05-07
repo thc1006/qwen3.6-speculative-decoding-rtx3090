@@ -1,0 +1,38 @@
+
+=== config: 05_dflash_max16 === args: --draft-max 16
+  -- [05_dflash_max16] prompt 1 --
+[ Prompt: 467.3 t/s | Generation: 60.1 t/s ]
+  -- [05_dflash_max16] prompt 2 --
+[ Prompt: 484.1 t/s | Generation: 78.8 t/s ]
+  -- [05_dflash_max16] prompt 3 --
+[ Prompt: 484.4 t/s | Generation: 62.4 t/s ]
+  -- [05_dflash_max16] prompt 4 --
+[ Prompt: 478.2 t/s | Generation: 69.6 t/s ]
+  -- [05_dflash_max16] prompt 5 --
+[ Prompt: 504.9 t/s | Generation: 57.9 t/s ]
+
+=== config: 06_dflash_max8 === args: --draft-max 8
+  -- [06_dflash_max8] prompt 1 --
+[ Prompt: 478.9 t/s | Generation: 71.3 t/s ]
+  -- [06_dflash_max8] prompt 2 --
+[ Prompt: 550.1 t/s | Generation: 90.8 t/s ]
+  -- [06_dflash_max8] prompt 3 --
+[ Prompt: 483.6 t/s | Generation: 78.2 t/s ]
+  -- [06_dflash_max8] prompt 4 --
+[ Prompt: 450.4 t/s | Generation: 75.2 t/s ]
+  -- [06_dflash_max8] prompt 5 --
+[ Prompt: 508.9 t/s | Generation: 69.5 t/s ]
+
+=== config: 07_dflash_max4 === args: --draft-max 4
+  -- [07_dflash_max4] prompt 1 --
+[ Prompt: 482.4 t/s | Generation: 72.1 t/s ]
+  -- [07_dflash_max4] prompt 2 --
+[ Prompt: 548.8 t/s | Generation: 79.4 t/s ]
+  -- [07_dflash_max4] prompt 3 --
+[ Prompt: 482.4 t/s | Generation: 74.1 t/s ]
+  -- [07_dflash_max4] prompt 4 --
+[ Prompt: 425.9 t/s | Generation: 78.2 t/s ]
+  -- [07_dflash_max4] prompt 5 --
+[ Prompt: 507.3 t/s | Generation: 70.8 t/s ]
+
+=== bench DFlash complete 2026-05-07T11:32:33Z ===

@@ -1,0 +1,58 @@
+ggml_cuda_init: found 1 CUDA devices (Total VRAM: 24115 MiB):
+  Device 0: NVIDIA GeForce RTX 3090, compute capability 8.6, VMM: yes, VRAM: 24115 MiB
+--no-conversation is not supported by llama-cli
+please use llama-completion instead
+
+Loading model... |-\|/-\|/-\|/-\|/-\|/-\|/-\ 
+
+
+▄▄ ▄▄
+██ ██
+██ ██  ▀▀█▄ ███▄███▄  ▀▀█▄    ▄████ ████▄ ████▄
+██ ██ ▄█▀██ ██ ██ ██ ▄█▀██    ██    ██ ██ ██ ██
+██ ██ ▀█▄██ ██ ██ ██ ▀█▄██ ██ ▀████ ████▀ ████▀
+                                    ██    ██
+                                    ▀▀    ▀▀
+
+build      : b8942-67cb0d507
+model      : Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf
+modalities : text
+
+available commands:
+  /exit or Ctrl+C     stop or exit
+  /regen              regenerate the last response
+  /clear              clear the chat history
+  /read <file>        add a text file
+  /glob <pattern>     add text files using globbing pattern
+
+
+> Explain TCP vs UDP in 3 concise bullet points. /no_think
+
+| [Start thinking]
+Here's a thinking process:
+
+1.  **Analyze User Input:**
+   - **Topic:** TCP vs UDP
+   - **Format:** 3 concise bullet points
+   - **Constraint:** /no_think (implies direct output without showing reasoning)
+
+2.  **Identify Key Differences (TCP vs UDP):**
+   - TCP: Connection-oriented, reliable, ordered, error-checking, slower/heavier, used for web, email, file transfer.
+   - UDP: Connectionless, unreliable, unordered, faster/lighter, used for streaming, gaming, DNS.
+   - Need to distill this into exactly 3 concise bullet points.
+
+3.  **Draft Bullet Points (Mental Refinement):**
+   - **Connection & Reliability:** TCP establishes a dedicated connection and guarantees delivery with acknowledgments and retransmissions, while UDP sends datagrams without setup or delivery guarantees.
+   - **Ordering & Overhead:**common_memory_breakdown_print: | memory breakdown [MiB] | total   free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - CUDA0 (RTX 3090)   | 24115 =  745 + (21445 = 20798 +     105 +     541) +        1924 |
+common_memory_breakdown_print: |   - Host               |                   531 =   515 +       0 +      16                |
+llama_perf_context_print:        load time =     422.59 ms
+llama_perf_context_print: prompt eval time =     179.52 ms /   232 tokens (    0.77 ms per token,  1292.31 tokens per second)
+llama_perf_context_print:        eval time =       0.00 ms /     1 runs   (    0.00 ms per token,      inf tokens per second)
+llama_perf_context_print:       total time =    3140.96 ms /   233 tokens
+llama_perf_context_print:    graphs reused =          0
+
+
+[ Prompt: 482.4 t/s | Generation: 74.1 t/s ]
+
+Exiting...

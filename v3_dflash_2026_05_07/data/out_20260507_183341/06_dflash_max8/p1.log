@@ -1,0 +1,58 @@
+ggml_cuda_init: found 1 CUDA devices (Total VRAM: 24115 MiB):
+  Device 0: NVIDIA GeForce RTX 3090, compute capability 8.6, VMM: yes, VRAM: 24115 MiB
+--no-conversation is not supported by llama-cli
+please use llama-completion instead
+
+Loading model... |-\|/-\|/-\|/-\|/-\|/-\|/-\| 
+
+
+▄▄ ▄▄
+██ ██
+██ ██  ▀▀█▄ ███▄███▄  ▀▀█▄    ▄████ ████▄ ████▄
+██ ██ ▄█▀██ ██ ██ ██ ▄█▀██    ██    ██ ██ ██ ██
+██ ██ ▀█▄██ ██ ██ ██ ▀█▄██ ██ ▀████ ████▀ ████▀
+                                    ██    ██
+                                    ▀▀    ▀▀
+
+build      : b8942-67cb0d507
+model      : Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf
+modalities : text
+
+available commands:
+  /exit or Ctrl+C     stop or exit
+  /regen              regenerate the last response
+  /clear              clear the chat history
+  /read <file>        add a text file
+  /glob <pattern>     add text files using globbing pattern
+
+
+> Why does the sky look blue? Answer in two sentences. /no_think
+
+| [Start thinking]
+Here's a thinking process:
+
+1.  **Analyze User Input:**
+   - **Question:** Why does the sky look blue?
+   - **Constraint:** Answer in two sentences.
+   - **Constraint:** /no_think (This likely means I should not output any internal reasoning/thinking process, just the direct answer.)
+
+2.  **Identify Core Scientific Explanation:**
+   - The sky appears blue due to Rayleigh scattering.
+   - Sunlight reaches Earth's atmosphere and is scattered in all directions by gases and particles.
+   - Blue light is scattered more than other colors because it travels as shorter, smaller waves.
+   - This scattered blue light is what we see when we look up.
+
+3.  **Draft Response (mental):**
+   The sky looks blue because Earth's atmosphere scatters sunlight in all directions, with shorter blue wavelengths bouncing off gas molecules more efficiently than longer wavelengths. This scattered blue light reaches our eyescommon_memory_breakdown_print: | memory breakdown [MiB] | total   free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - CUDA0 (RTX 3090)   | 24115 =  745 + (21445 = 20798 +     105 +     541) +        1924 |
+common_memory_breakdown_print: |   - Host               |                   531 =   515 +       0 +      16                |
+llama_perf_context_print:        load time =     429.64 ms
+llama_perf_context_print: prompt eval time =     172.34 ms /   360 tokens (    0.48 ms per token,  2088.94 tokens per second)
+llama_perf_context_print:        eval time =       0.00 ms /     1 runs   (    0.00 ms per token,      inf tokens per second)
+llama_perf_context_print:       total time =    3255.73 ms /   361 tokens
+llama_perf_context_print:    graphs reused =          0
+
+
+[ Prompt: 478.9 t/s | Generation: 71.3 t/s ]
+
+Exiting...

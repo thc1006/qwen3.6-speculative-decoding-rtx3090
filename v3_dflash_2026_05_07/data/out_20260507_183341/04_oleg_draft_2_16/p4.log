@@ -1,0 +1,59 @@
+ggml_cuda_init: found 1 CUDA devices (Total VRAM: 24115 MiB):
+  Device 0: NVIDIA GeForce RTX 3090, compute capability 8.6, VMM: yes, VRAM: 24115 MiB
+--no-conversation is not supported by llama-cli
+please use llama-completion instead
+
+Loading model... |-\|/-\|/-\|/-\|/-\|/-\|/-\ 
+
+
+▄▄ ▄▄
+██ ██
+██ ██  ▀▀█▄ ███▄███▄  ▀▀█▄    ▄████ ████▄ ████▄
+██ ██ ▄█▀██ ██ ██ ██ ▄█▀██    ██    ██ ██ ██ ██
+██ ██ ▀█▄██ ██ ██ ██ ▀█▄██ ██ ▀████ ████▀ ████▀
+                                    ██    ██
+                                    ▀▀    ▀▀
+
+build      : b8889-bcb5eeb64
+model      : Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf
+modalities : text
+
+available commands:
+  /exit or Ctrl+C     stop or exit
+  /regen              regenerate the last response
+  /clear              clear the chat history
+  /read <file>        add a text file
+  /glob <pattern>     add text files using globbing pattern
+
+
+> Give 5 numbered steps to cook firm tofu at home. /no_think
+
+| [Start thinking]
+Here's a thinking process:
+
+1.  **Analyze User Input:**
+   - **Task:** Give 5 numbered steps to cook firm tofu at home.
+   - **Constraint:** /no_think (This means I should output the answer directly without any internal reasoning or extra text, but since I'm an AI, I'll just output the final response directly as requested.)
+   - **Key Elements:** 5 steps, numbered, firm tofu, cooking at home.
+
+2.  **Identify Core Requirements for Cooking Firm Tofu:**
+   - Pressing/draining to remove excess water
+   - Cutting/prepping
+   - Cooking method (pan-frying is common and straightforward)
+   - Seasoning/flavoring
+   - Finishing/serving
+
+3.  **Draft Steps (Mental Refinement):**
+   1. Press the tofu: Wrap the block in paper towels or a clean kitchen towel, place a heavy object oncommon_memory_breakdown_print: | memory breakdown [MiB] | total   free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - CUDA0 (RTX 3090)   | 24115 =  893 + (21528 = 20798 +     232 +     497) +        1693 |
+common_memory_breakdown_print: |   - Host               |                   555 =   515 +       0 +      40                |
+llama_perf_context_print:        load time =     330.81 ms
+llama_perf_context_print: prompt eval time =     195.83 ms /   215 tokens (    0.91 ms per token,  1097.92 tokens per second)
+llama_perf_context_print:        eval time =     370.28 ms /   157 runs   (    2.36 ms per token,   424.00 tokens per second)
+llama_perf_context_print:       total time =    3514.66 ms /   372 tokens
+llama_perf_context_print:    graphs reused =        157
+
+
+[ Prompt: 440.1 t/s | Generation: 65.5 t/s ]
+
+Exiting...

@@ -1,0 +1,26 @@
+
+=== config: 03_oleg_draft_2_32 === args: -md /home/thc1006/models/Qwen3.5-0.8B-Q4_K_M.gguf --draft-min 2 --draft-max 32
+  -- [03_oleg_draft_2_32] prompt 1 -- 10:52:43 --
+[ Prompt: 435.4 t/s | Generation: 63.6 t/s ]
+  -- [03_oleg_draft_2_32] prompt 2 -- 10:52:49 --
+[ Prompt: 548.1 t/s | Generation: 76.0 t/s ]
+  -- [03_oleg_draft_2_32] prompt 3 -- 10:52:55 --
+[ Prompt: 487.4 t/s | Generation: 63.5 t/s ]
+  -- [03_oleg_draft_2_32] prompt 4 -- 10:53:01 --
+[ Prompt: 482.6 t/s | Generation: 62.3 t/s ]
+  -- [03_oleg_draft_2_32] prompt 5 -- 10:53:07 --
+[ Prompt: 478.8 t/s | Generation: 62.2 t/s ]
+
+=== config: 04_oleg_draft_2_16 === args: -md /home/thc1006/models/Qwen3.5-0.8B-Q4_K_M.gguf --draft-min 2 --draft-max 16
+  -- [04_oleg_draft_2_16] prompt 1 -- 10:53:14 --
+[ Prompt: 479.9 t/s | Generation: 66.0 t/s ]
+  -- [04_oleg_draft_2_16] prompt 2 -- 10:53:20 --
+[ Prompt: 503.1 t/s | Generation: 75.9 t/s ]
+  -- [04_oleg_draft_2_16] prompt 3 -- 10:53:25 --
+[ Prompt: 483.2 t/s | Generation: 63.5 t/s ]
+  -- [04_oleg_draft_2_16] prompt 4 -- 10:53:32 --
+[ Prompt: 440.1 t/s | Generation: 65.5 t/s ]
+  -- [04_oleg_draft_2_16] prompt 5 -- 10:53:38 --
+[ Prompt: 502.4 t/s | Generation: 61.9 t/s ]
+
+=== bench 03/04 complete 2026-05-07T10:53:44Z ===

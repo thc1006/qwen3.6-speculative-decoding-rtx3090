@@ -1,0 +1,57 @@
+ggml_cuda_init: found 1 CUDA devices (Total VRAM: 24115 MiB):
+  Device 0: NVIDIA GeForce RTX 3090, compute capability 8.6, VMM: yes, VRAM: 24115 MiB
+--no-conversation is not supported by llama-cli
+please use llama-completion instead
+
+Loading model... |-\|/-\|/-\|/-\|/-\|/-\|/-\ 
+
+
+▄▄ ▄▄
+██ ██
+██ ██  ▀▀█▄ ███▄███▄  ▀▀█▄    ▄████ ████▄ ████▄
+██ ██ ▄█▀██ ██ ██ ██ ▄█▀██    ██    ██ ██ ██ ██
+██ ██ ▀█▄██ ██ ██ ██ ▀█▄██ ██ ▀████ ████▀ ████▀
+                                    ██    ██
+                                    ▀▀    ▀▀
+
+build      : b8942-67cb0d507
+model      : Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf
+modalities : text
+
+available commands:
+  /exit or Ctrl+C     stop or exit
+  /regen              regenerate the last response
+  /clear              clear the chat history
+  /read <file>        add a text file
+  /glob <pattern>     add text files using globbing pattern
+
+
+> Write a short haiku about debugging a memory leak at 2am. /no_think
+
+| [Start thinking]
+Thinking Process:
+
+1.  **Deconstruct the request:**
+    *   Topic: Debugging a memory leak at 2am.
+    *   Format: Short haiku (5-7-5 syllables).
+    *   Constraint: /no_think (implies I should output the result directly without showing internal reasoning, though as an AI, I still need to "think" to generate the text, the output should just be the haiku).
+
+2.  **Brainstorming imagery and keywords:**
+    *   Keywords: Memory, leak, 2am, sleep, code, crash, coffee, screen, dark, heap, stack, zombie, process.
+    *   Imagery: Glowing screen, tired eyes, coffee cups, endless loop, memory growing, system slowing down.
+
+3.  **Drafting lines (Syllable counting):**
+    *   *Attempt 1:*
+        *   Memory leaks slowlycommon_memory_breakdown_print: | memory breakdown [MiB] | total   free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - CUDA0 (RTX 3090)   | 24115 =  743 + (21445 = 20798 +     105 +     541) +        1926 |
+common_memory_breakdown_print: |   - Host               |                   531 =   515 +       0 +      16                |
+llama_perf_context_print:        load time =     419.41 ms
+llama_perf_context_print: prompt eval time =     183.08 ms /   236 tokens (    0.78 ms per token,  1289.06 tokens per second)
+llama_perf_context_print:        eval time =       0.00 ms /     1 runs   (    0.00 ms per token,      inf tokens per second)
+llama_perf_context_print:       total time =    3258.04 ms /   237 tokens
+llama_perf_context_print:    graphs reused =          0
+
+
+[ Prompt: 507.3 t/s | Generation: 70.8 t/s ]
+
+Exiting...

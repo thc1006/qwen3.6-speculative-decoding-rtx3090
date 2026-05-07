@@ -1,0 +1,55 @@
+ggml_cuda_init: found 1 CUDA devices (Total VRAM: 24115 MiB):
+  Device 0: NVIDIA GeForce RTX 3090, compute capability 8.6, VMM: yes, VRAM: 24115 MiB
+--no-conversation is not supported by llama-cli
+please use llama-completion instead
+
+Loading model... |-\|/-\|/-\|/-\|/-\|/-\|/ 
+
+
+▄▄ ▄▄
+██ ██
+██ ██  ▀▀█▄ ███▄███▄  ▀▀█▄    ▄████ ████▄ ████▄
+██ ██ ▄█▀██ ██ ██ ██ ▄█▀██    ██    ██ ██ ██ ██
+██ ██ ▀█▄██ ██ ██ ██ ▀█▄██ ██ ▀████ ████▀ ████▀
+                                    ██    ██
+                                    ▀▀    ▀▀
+
+build      : b8889-bcb5eeb64
+model      : Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf
+modalities : text
+
+available commands:
+  /exit or Ctrl+C     stop or exit
+  /regen              regenerate the last response
+  /clear              clear the chat history
+  /read <file>        add a text file
+  /glob <pattern>     add text files using globbing pattern
+
+
+> Give 5 numbered steps to cook firm tofu at home. /no_think
+
+| [Start thinking]
+Here's a thinking process:
+
+1.  **Analyze User Input:**
+   - **Task:** Give 5 numbered steps to cook firm tofu at home.
+   - **Constraint:** `/no_think` (This means I should output only the requested steps without any extra thinking, explanation, or conversational filler.)
+   - **Format:** 5 numbered steps.
+
+2.  **Identify Key Requirements for Cooking Firm Tofu:**
+   - Need to drain/press it first to remove excess moisture.
+   - Cut it into desired shapes.
+   - Choose a cooking method (pan-frying is common and straightforward).
+   - Season/cook properly.
+   - Serve.
+
+3.  **Draft Steps (Mental Refinement):**
+   1. Drain the tofu package and press it for 15–20 minutes using a tofu press or heavy plates to remove excess water.
+   2. Cut the pressedcommon_memory_breakdown_print: | memory breakdown [MiB] | total   free     self   model   context   compute    unaccounted |
+common_memory_breakdown_print: |   - CUDA0 (RTX 3090)   | 24115 = 2135 + (21528 = 20798 +     232 +     497) +         451 |
+common_memory_breakdown_print: |   - Host               |                   555 =   515 +       0 +      40                |
+
+
+[ Prompt: 473.2 t/s | Generation: 139.4 t/s ]
+
+Exiting...
