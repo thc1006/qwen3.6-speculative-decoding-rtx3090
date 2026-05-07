@@ -2,6 +2,26 @@
 
 _Target URL: https://github.com/ggml-org/llama.cpp/pull/19493 (or as a fresh comment on Issue #20039 linking to repo)_
 
+> **UPDATE 2026-05-07 — v3 DFlash via llama.cpp PR #22105.** First public
+> RTX 3090 + DFlash + Q4 datapoint added to the repo under
+> `v3_dflash_2026_05_07/`. Setup: same `3090` host + same target Q4_K_XL
+> as v2; drafter `z-lab/Qwen3.6-35B-A3B-DFlash` converted to GGUF using
+> PR #22105's modified `convert_hf_to_gguf.py` with `--target-model-dir`.
+> Result: best DFlash config (`--draft-max=8`) is **77.0 tok/s vs 138.9
+> baseline (NET LOSS −44 %)**. Slightly less bad than v2 Oleg draft-spec
+> (−52 %) but still net negative. The MoE-expert-routing × consumer-Ampere
+> bandwidth pathology from v2 generalises: at single-stream batch=1 with
+> draft-max ≤ 16 the verify pass loads the union of expert sets at
+> K ≪ T_thres ≈ 94, exceeding savings. Q4-target hidden-state mismatch
+> with the BF16-trained drafter likely contributes; recovery would
+> require an FP16/BF16 target which doesn't fit on a single 3090 (35 GB
+> in BF16, 17.5 GB in AWQ Q4). Cross-engine status unchanged: vLLM MTP
+> on 2× RTX 3090 PCIe remains the only positive-yield speculative
+> decoding path on this hardware (sister repo
+> [`thc1006/qwen3.6-vllm-2x3090`](https://github.com/thc1006/qwen3.6-vllm-2x3090)
+> v3.0/v4.0). DFlash data + reproducer in
+> [`v3_dflash_2026_05_07/`](v3_dflash_2026_05_07/).
+
 > **UPDATE 2026-04-22** — follow-up v2 bench was added to the public
 > repo under `v2_3090_followup/` after an HF discussion comment
 > questioned `--draft-min 48` aggressiveness and the 100 % acceptance

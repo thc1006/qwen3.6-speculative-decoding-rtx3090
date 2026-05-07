@@ -1,8 +1,12 @@
 # Benchmark environment snapshot
 
-_v1 (original 19-config bench) collected at 2026-04-21T08:00:30+08:00.
-A v2 environment snapshot appears at the bottom of this file for the
-follow-up bench in `v2_3090_followup/`._
+_v1 (original 19-config bench) collected at 2026-04-21T08:00:30+08:00 on
+the s1 dual-3090 host. A v2 environment snapshot appears below for the
+follow-up bench in `v2_3090_followup/` on the single-3090 `3090` host._
+_v3 environment snapshot (DFlash via llama.cpp PR #22105) is also below;
+v3 ran on the **same** physical `3090` host as v2 (single RTX 3090,
+Tailscale name `3090`), but with llama.cpp PR #22105 checked out from
+master and a separate Python venv for the HF→GGUF drafter convert step._
 
 ## Hardware
 ```
@@ -179,3 +183,140 @@ v2 isolates the "spec-decode active" regime).
 ## Script
 `v2_3090_followup/bench_3090_oleg.sh` reproduces the v2 run on any
 single-3090 box with the model files + a llama-cli binary present.
+
+---
+
+## v3 environment snapshot (DFlash, 2026-05-07)
+
+_v3 (DFlash via llama.cpp PR #22105) collected at 2026-05-07T18:33:41Z on
+the **same** physical `3090` host as v2 (Tailscale name `3090`, hostname
+`3090`, IP `100.112.135.98`). What changed vs v2: llama.cpp commit
+(`bcb5eeb64` master → `67cb0d507` on the PR #22105 branch), drafter
+(z-lab DFlash drafter converted to GGUF added), and a separate convert
+venv with transformers/torch/gguf for the one-shot HF→GGUF step._
+
+### Hardware
+
+```
+$ nvidia-smi --query-gpu=index,name,memory.total,driver_version,compute_cap --format=csv
+index, name, memory.total [MiB], driver_version, compute_cap
+0, NVIDIA GeForce RTX 3090, 24576 MiB, 580.126.09, 8.6
+
+# Same single-3090 host as v2 (`3090` Tailscale node).
+
+$ nvidia-smi --query-gpu=clocks.current.graphics,clocks.max.graphics,clocks.current.memory,clocks.max.memory,power.limit,power.default_limit,power.max_limit --format=csv
+clocks.current.graphics [MHz], clocks.max.graphics [MHz], clocks.current.memory [MHz], clocks.max.memory [MHz], power.limit [W], power.default_limit [W], power.max_limit [W]
+1965 MHz, 2100 MHz, 9751 MHz, 9751 MHz, 350.00 W, 350.00 W, 350.00 W
+```
+
+Stock card, no OC. Power limit pinned at default 350 W.
+
+### Software
+
+```
+$ uname -srm
+Linux 6.x.x x86_64
+
+$ python3 --version
+Python 3.12.3
+
+$ nvcc --version | tail -1
+Cuda compilation tools, release 12.0, V12.0.140
+```
+
+### llama.cpp build
+
+```
+$ cd ~/bench/llama.cpp
+$ git remote -v
+origin  https://github.com/ggml-org/llama.cpp.git (fetch)
+origin  https://github.com/ggml-org/llama.cpp.git (push)
+
+$ git fetch origin pull/22105/head:pr-22105
+$ git checkout pr-22105
+$ git log --oneline -1
+67cb0d507 dflash: enable llama-cli & llama-server with np=1
+$ git log --oneline -5
+67cb0d507 dflash: enable llama-cli & llama-server with np=1
+e344c4a71 dflash: remove redundant logic & correct bias naming
+85a0089e6 dflash: add support for qwen3.5/3.6 moe models
+0724d66e5 dflash: first working POC
+91b03e4c9 Merge branch 'master' into pr/18039
+
+$ cd build && cmake --build . --config Release -j$(nproc)
+$ ls bin/
+... llama-cli, llama-server, llama-speculative-simple, ...
+
+$ ./bin/llama-cli --version | head -1
+version: 8889 (bcb5eeb64) -- inherited from master at fork point, plus DFlash patch on top.
+```
+
+CUDA backend built with `-DGGML_CUDA=ON`, `CMAKE_CUDA_ARCHITECTURES=86`,
+`-DGGML_CCACHE=ON`. ccache cache reused from prior master build, so the
+DFlash branch incremental rebuild took ~5 min (vs ~30+ min cold).
+
+### Models
+
+```
+$ ls -la ~/models/
+-rw-r--r--  1  21G  Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf       # target (same as v1/v2)
+-rw-r--r--  1 508M  Qwen3.5-0.8B-Q4_K_M.gguf              # vocab-matched draft (same as v1/v2)
+drwxr-xr-x  ...    qwen36-dflash/                         # DFlash drafter (HF safetensors)
+-rw-r--r--  1 905M  qwen36-dflash.gguf                    # DFlash drafter, BF16 GGUF (converted)
+drwxr-xr-x  ...    qwen36-target-meta/                    # tokenizer + config from Qwen/Qwen3.6-35B-A3B
+                                                           # (used for `--target-model-dir` during
+                                                           # convert_hf_to_gguf.py)
+```
+
+DFlash drafter source: `z-lab/Qwen3.6-35B-A3B-DFlash`, downloaded via
+`~/.local/bin/hf download`.  Conversion HF → GGUF uses PR #22105's
+modified `convert_hf_to_gguf.py` with the new `--target-model-dir` flag
+(set to a directory containing the target model's `config.json`,
+`tokenizer.json`, `tokenizer_config.json`, `vocab.json`, `merges.txt`).
+
+### Conversion venv (one-shot, CPU-only torch is fine)
+
+```
+$ python3 -m venv ~/dflash_convert_venv
+$ ~/dflash_convert_venv/bin/pip install -r ~/bench/llama.cpp/requirements/requirements-convert_hf_to_gguf.txt
+$ ~/dflash_convert_venv/bin/pip list | grep -iE "torch|transformers|gguf|sentencepiece|safetensors"
+gguf               0.19.0
+sentencepiece      0.2.1
+torch              2.6.0+cpu
+transformers       5.5.1
+safetensors        0.7.0
+```
+
+### Disk
+
+```
+$ df -h ~/models/
+Filesystem       Size  Used Avail Use% Mounted on
+/dev/...         913G  ~620G ~250G  72% /
+```
+
+### Bench script
+
+`bench_dflash.sh` (in `v3_dflash_2026_05_07/bench/`) — does NOT use
+`set -euo pipefail` because `grep | tail` empty-match interaction with
+`pipefail` killed the v2 master bench script when a config errored. The
+v3 script tolerates per-config failures and continues to the next one.
+
+### Reproduction smoke test
+
+```
+$ ~/bench/llama.cpp/build/bin/llama-cli \
+    -m ~/models/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf \
+    -md ~/models/qwen36-dflash.gguf \
+    --dflash --draft-max 16 \
+    -ngl 999 -c 4096 -fa on -ctk q8_0 -ctv q8_0 \
+    -n 100 --temp 0.5 --seed 42 -no-cnv -st \
+    -p "Why does the sky look blue? Answer in two sentences. /no_think"
+...
+[ Prompt: 449.4 t/s | Generation: 66.8 t/s ]
+common_memory_breakdown_print: |   - CUDA0 (RTX 3090) | 24115 = 761 + (21445 = 20798 + 105 + 541) + 1908 |
+```
+
+GPU memory: ~20.8 GB model weights + ~1.9 GB CUDA workspace, fits comfortably in 24 GB.
+
+---
