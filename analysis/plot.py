@@ -39,7 +39,7 @@ V22_FOOTER = (
     "Updated 2026-05-08 · negative finding is engine+spec-method specific "
     "to llama.cpp draft-spec / DFlash on consumer Ampere + Q4 target; vLLM "
     "MTP on 2× RTX 3090 PCIe is +27.5 % (sibling repo qwen3.6-vllm-2x3090 "
-    "v3/v4). DFlash on 3090: NET LOSS −44 % (v3_dflash_2026_05_07/)."
+    "v3/v4). DFlash on 3090: NET LOSS −44.6 % (v3_dflash_2026_05_07/)."
 )
 
 

@@ -8,7 +8,7 @@ _Target URL: https://github.com/ggml-org/llama.cpp/pull/19493 (or as a fresh com
 > as v2; drafter `z-lab/Qwen3.6-35B-A3B-DFlash` converted to GGUF using
 > PR #22105's modified `convert_hf_to_gguf.py` with `--target-model-dir`.
 > Result: best DFlash config (`--draft-max=8`) is **77.0 tok/s vs 138.9
-> baseline (NET LOSS −44 %)**. Slightly less bad than v2 Oleg draft-spec
+> baseline (NET LOSS −44.6 %)**. Slightly less bad than v2 Oleg draft-spec
 > (−52 %) but still net negative. The MoE-expert-routing × consumer-Ampere
 > bandwidth pathology from v2 generalises: at single-stream batch=1 with
 > draft-max ≤ 16 the verify pass loads the union of expert sets at

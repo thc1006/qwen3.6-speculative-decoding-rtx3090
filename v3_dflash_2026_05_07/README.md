@@ -11,7 +11,7 @@ v3.0 adds **DFlash** (block-diffusion drafter, llama.cpp PR #22105) — the newe
 
 ## TL;DR
 
-**DFlash on RTX 3090 + Q4_K_XL target via llama.cpp PR #22105 = NET LOSS −44 %** vs no-spec baseline. Best DFlash config (max=8) gets 77 tok/s vs 138 tok/s baseline. Slightly less bad than Oleg draft-spec's −52 % NET LOSS, but still net negative. Confirms: **no llama.cpp speculative-decoding method tested gives a positive yield on consumer Ampere with Q4 quantized target.**
+**DFlash on RTX 3090 + Q4_K_XL target via llama.cpp PR #22105 = NET LOSS −44.6 %** vs no-spec baseline. Best DFlash config (max=8) gets 77 tok/s vs 138 tok/s baseline. Slightly less bad than Oleg draft-spec's −52 % NET LOSS, but still net negative. Confirms: **no llama.cpp speculative-decoding method tested gives a positive yield on consumer Ampere with Q4 quantized target.**
 
 ## Setup
 
@@ -53,7 +53,7 @@ Same hardware/model as v2.3:
 
 The DFlash architecture conditions a small block-diffusion drafter on **multiple target hidden-states**. The drafter we used (z-lab/Qwen3.6-35B-A3B-DFlash, BF16) was trained against target hidden states in **FP16**. Our test target is **Q4_K_XL** quantized — the hidden-state distribution shifts subtly under aggressive 4-bit quantization, and the drafter is no longer cleanly aligned with the verifier.
 
-Per llama.cpp PR #22105 author's own note: *"for Qwen3.5/3.6 MoE, performance is currently not optimal due to MoE + hybrid structure not well supported."* Our number (−44 %) sits inside that envelope.
+Per llama.cpp PR #22105 author's own note: *"for Qwen3.5/3.6 MoE, performance is currently not optimal due to MoE + hybrid structure not well supported."* Our number (−44.6 %) sits inside that envelope.
 
 ### 2. The wider mechanism — MoE expert routing × consumer-Ampere bandwidth
 

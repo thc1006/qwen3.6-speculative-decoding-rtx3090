@@ -4,7 +4,7 @@
 
 > **2026-05-07 — v3 update**: DFlash via llama.cpp PR #22105 added. First
 > public RTX 3090 + DFlash + Q4 datapoint. Result: best DFlash config
-> (`--draft-max=8`) is 77.0 tok/s vs 138.9 baseline = **NET LOSS −44 %**.
+> (`--draft-max=8`) is 77.0 tok/s vs 138.9 baseline = **NET LOSS −44.6 %**.
 > Slightly less bad than Oleg draft-spec (−52 %) but still net negative.
 > The MoE-expert-routing × consumer-Ampere bandwidth hypothesis from v2.x
 > generalises to DFlash too — co-trained spec heads (vLLM MTP, see

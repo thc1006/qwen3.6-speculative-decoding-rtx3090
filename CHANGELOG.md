@@ -15,7 +15,7 @@ publication point with its own data set.
     Drafter is `z-lab/Qwen3.6-35B-A3B-DFlash` (HF safetensors), converted to
     GGUF via PR #22105's modified `convert_hf_to_gguf.py` with `--target-model-dir`.
   - 5 prompts x 1 trial x 3 draft-max configs (4, 8, 16) = 15 measurements.
-  - Result: **NET LOSS -44 % at best (DFlash --draft-max=8: 77.0 tok/s vs
+  - Result: **NET LOSS -44.6 % at best (DFlash --draft-max=8: 77.0 tok/s vs
     138.9 tok/s no-spec baseline)**. Slightly less bad than v2.x's Oleg
     draft-spec NET LOSS (-52 %), but still net negative.
   - First public RTX 3090 + DFlash + Q4 quantized target datapoint.
