@@ -241,6 +241,9 @@ threshold (~94 tokens for this sparsity), so each drafted token pulls
 new experts through the memory hierarchy and verification pays for
 the union.
 
-[Unreleased]: https://github.com/thc1006/qwen3.6-speculative-decoding-rtx3090/compare/v2.0...HEAD
+[Unreleased]: https://github.com/thc1006/qwen3.6-speculative-decoding-rtx3090/compare/v3.0...HEAD
+[v3.0]: https://github.com/thc1006/qwen3.6-speculative-decoding-rtx3090/releases/tag/v3.0
+[v2.3]: https://github.com/thc1006/qwen3.6-speculative-decoding-rtx3090/releases/tag/v2.3
+[v2.1]: https://github.com/thc1006/qwen3.6-speculative-decoding-rtx3090/releases/tag/v2.1
 [v2.0]: https://github.com/thc1006/qwen3.6-speculative-decoding-rtx3090/releases/tag/v2.0
 [v1.0]: https://github.com/thc1006/qwen3.6-speculative-decoding-rtx3090/releases/tag/v1.0
