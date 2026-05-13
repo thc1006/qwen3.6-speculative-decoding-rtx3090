@@ -1,6 +1,6 @@
 # Qwen3.6-35B-A3B speculative decoding on RTX 3090 — first public benchmark
 
-<a href="https://doi.org/10.5281/zenodo.19776558"><img src="https://zenodo.org/badge/1216484498.svg" alt="DOI"></a>
+[![DOI](https://zenodo.org/badge/1216484498.svg)](https://doi.org/10.5281/zenodo.19776558)
 
 > **2026-05-07 — v3 update**: DFlash via llama.cpp PR #22105 added. First
 > public RTX 3090 + DFlash + Q4 datapoint. Result: best DFlash config
