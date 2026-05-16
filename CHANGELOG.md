@@ -5,6 +5,15 @@ All notable changes to this bench are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning is not strictly semver — each numbered release is a public
 publication point with its own data set.
+
+## [Sibling-repo notice] — vllm-2x3090 v5.0 (2026-05-17)
+
+A natural follow-up to this repo's MTP findings was published in the sibling [`qwen3.6-vllm-2x3090` v5.0](https://github.com/thc1006/qwen3.6-vllm-2x3090/releases/tag/v5.0): a same-hardware A/B between the production MoE Qwen3.6-35B-A3B-AWQ + MTP k=3 + TP=2 stack and the new dense sibling **Qwen3.6-27B-AWQ** on a voice-agent workload (10 prompts × 3 trials × 2 models = 60 samples).
+
+Result: **MoE+MTP production stack wins decisively** — TTFT 178 ms vs Dense 771 ms (**4.34×**), tok/s 88 vs 16 (**5.42×**), e2e 274 ms vs 1684 ms (**6.13×**). The "Dense 27B fits TP=1, should be cheaper to serve" intuition is falsified on this hardware × workload, and the MTP k=3 production recommendation from this repo's v3.0 is corroborated by the absence of any cheaper Dense-no-spec alternative.
+
+Caveat: see the [vllm-2x3090 v5 README scope section](https://github.com/thc1006/qwen3.6-vllm-2x3090/blob/master/v5_2026_05_17/README.md#scope-and-known-caveats) — N=3, single hardware, plus several vLLM-config and prompt-specification confounds documented in the ERRATA. **Latency findings are compute-bound and robust; tool-accuracy findings need a prompt-matched retest.** This repo (`qwen3.6-speculative-decoding-rtx3090`) does not get a version bump or new release for this event — the work belongs in the sibling repo's lineage.
+
 ## [v3.0] — 2026-05-07
 
 ### Added
