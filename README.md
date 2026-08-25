@@ -173,6 +173,26 @@ verification rounds that were accepted in full", a quantity guaranteed to equal
 `analysis/plot_accept_vs_speed.png` — every one of whose 140 points sat at
 exactly 100 % — has been deleted.
 
+**And the original intuition survives, on honest evidence at last.** The
+published claim was "100 % acceptance yet slower". That 100 % was the artefact
+above. But sweeping `--spec-draft-p-min`, which truncates a draft once the
+drafter's confidence drops, produces genuine high-acceptance configurations:
+
+| configuration | real acceptance | pooled tok/s | vs baseline |
+|---|---:|---:|---:|
+| no speculation | — | 123.8 | — |
+| `n_max` 8, `p_min` 0.75 | 80.2 % | **42.8** | **−65.5 %** |
+| `n_max` 8, `p_min` 0.90 | **88.2 %** | 42.5 | −65.6 % |
+| `n_max` 8, `p_min` 0 | 29.7 % | 32.7 | −73.6 % |
+
+**Nine drafted tokens in ten accepted, correctly counted, and still nearly three
+times slower than not speculating.** The intuition was right; the evidence for
+it was not, and the MoE conclusion drawn from it was an overreach. `p_min` also
+turns out to be the knob that matters rather than `n_max`: at `p_min` 0.75,
+`n_max` 32 and `n_max` 128 are byte-identical — 6159 drafted tokens, 70.9 %
+acceptance, 42.0 tok/s each. See
+[A10](ERRATA.md#a10-the-single-regressor-law-is-falsified-out-of-sample-and-p_min-is-the-lever-that-matters).
+
 **What the same log does support.** It contains a direct cost decomposition
 that nobody in the earlier write-ups used. For 200 tokens generated at
 63.2 tok/s (≈ 3165 ms):

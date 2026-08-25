@@ -450,6 +450,55 @@ Consequences:
   it: `n_max` 8 at `p_min` ∈ {0, 0.5, 0.75, 0.9}, plus `n_max` 32 and 128 at
   0.75.
 
+### A10. The single-regressor law is falsified out of sample, and `p_min` is the lever that matters
+
+A7's law was fitted entirely at `p_min = 0`. A8 flagged that as a confound. The
+sweep that measures it is now done — 7 arms, 3 repeats, run-to-run SD
+0.13–0.39 tok/s — and it does two things at once: it **falsifies the law** and
+it produces the cleanest version of this repository's original claim.
+
+| arm | draft/gen | real acceptance | pooled tok/s | vs baseline | law residual |
+|---|---:|---:|---:|---:|---:|
+| baseline | — | — | 123.8 | — | — |
+| `n_max` 8, **`p_min` 0.75** | 0.61 | **80.2 %** | **42.8** | **−65.5 %** | −20.7 % |
+| `n_max` 8, `p_min` 0.90 | 0.46 | **88.2 %** | 42.5 | −65.6 % | −18.5 % |
+| `n_max` 128, `p_min` 0.75 | 0.68 | 70.9 % | 42.0 | −66.1 % | −20.0 % |
+| `n_max` 32, `p_min` 0.75 | 0.68 | 70.9 % | 42.0 | −66.1 % | −19.9 % |
+| `n_max` 8, `p_min` 0.50 | 0.94 | 58.8 % | 39.6 | −68.0 % | −17.9 % |
+| `n_max` 8, `p_min` 0 (the whole audit matrix) | 1.85 | 29.7 % | 32.7 | −73.6 % | −11.3 % |
+
+**The law fails.** `ms/tok = 27.00 + 4.040 × draft/gen`, fitted at `p_min = 0`,
+over-predicts cost by a mean of **19.4 %** on every arm with `p_min > 0`, all in
+the same direction. Draft volume is therefore **not** a sufficient statistic:
+truncating a draft on low confidence is cheaper than removing the same number of
+tokens by shortening `n_max`. A7's law holds in the regime it was fitted in and
+nowhere else, which is now stated there.
+
+**`p_min` is the dominant knob, not `n_max`.** Going from 0 to 0.75 at fixed
+`n_max` 8 halves draft volume, raises real acceptance from 29.7 % to 80.2 %, and
+lifts throughput by **31 %**. Meanwhile `n_max` 32 and `n_max` 128 at
+`p_min = 0.75` are not merely similar — they are **identical**, 6159 drafted
+tokens each, 70.9 % acceptance each, 42.0 tok/s each. Above the confidence
+threshold, `n_max` is inert.
+
+That last point retires a question rather than answering it. On the default and
+historical configuration the MoESD coverage threshold is not just un-crossed,
+it is **unreachable**: the drafter stops on confidence long before a draft
+approaches 95 tokens. The threshold-crossing sweep in A7 could only exist
+because `p_min = 0` disabled the mechanism that would otherwise prevent it.
+
+**And this is where the repository's original claim finally gets honest
+evidence.** The published version was "100 % acceptance yet slower, therefore an
+MoE pathology". The 100 % was a counter artefact (A1). But at `p_min = 0.90`
+the acceptance rate is a genuine, correctly counted **88.2 %** — and throughput
+is still **−65.6 %**. So the *intuition* was right all along: high acceptance
+does not imply speedup here. It was the evidence that was wrong, and the
+conclusion that was overreached. Nine drafted tokens in ten are accepted and
+the configuration is still nearly three times slower than not speculating.
+
+Best speculative configuration measured anywhere in this audit: `n_max` 8 with
+`p_min` 0.75, at 42.8 tok/s against a 123.8 baseline. **−65.5 %.**
+
 ### A9. Upstream already documents two of the mechanisms this audit "found"
 
 Credit where it belongs. Reading llama.cpp PR #22105's description turns up
