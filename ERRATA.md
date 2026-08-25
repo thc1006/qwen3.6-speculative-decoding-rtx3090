@@ -453,13 +453,44 @@ implementer:
 > step than during single-token autoregressive decoding** (same observation as
 > in #18039 for gpt-oss EAGLE3).
 
-That is the expert-union effect this repository's original write-up asserted.
-It is real enough that the implementer records it and cross-references a second
-PR observing it for EAGLE3. This audit's narrower finding stands — no
-*coverage-threshold* signature appears in the sweep, and a single regressor in
-draft volume accounts for 99.3 % of the cost — but "no MoE effect exists" was
-never the claim, and upstream evidence for a qualitative one predates this
-repository.
+That is the expert-union effect this repository's original write-up asserted,
+and the implementer cross-references a second PR observing it for EAGLE3.
+
+**The cross-check behind that cross-reference is the strongest external evidence
+this repository has ever had, and it was never cited.** In
+[PR #18039](https://github.com/ggml-org/llama.cpp/pull/18039#issuecomment-3755925892)
+the same maintainer reran the comparison on **SGLang** — a different engine —
+on **DGX Spark** with **gpt-oss-120b + EAGLE3**, to check whether llama.cpp was
+at fault:
+
+| prompt | baseline | EAGLE3, draft 8 | speedup | EAGLE3, draft 3 | speedup |
+|---|---:|---:|---:|---:|---:|
+| quicksort in Python | 52.50 t/s | 36.4 | **0.69×** | 37.36 | 0.71× |
+| explain the Pythagorean theorem | 52.64 t/s | 24.4 | **0.46×** | 27.96 | 0.53× |
+| plan a one-day trip to DC | 52.69 t/s | 24.7 | **0.47×** | 26.53 | 0.50× |
+
+Different engine, different hardware, different model, different speculative
+method — and speculative decoding is still a **29–54 % net loss** on a MoE
+target at batch 1. That is this repository's finding, reproduced independently
+by someone who had every incentive to find the opposite.
+
+He also names the lever, and it is not draft length:
+
+> A larger batch size means more experts are already activated during native
+> decoding, so activating additional experts in the target model may not become
+> a bottleneck during the Eagle3 verification stage.
+
+and notes that lmsys's published gpt-oss speedups used tensor parallelism across
+four H200s, so the positive results live at multi-GPU, multi-batch scale.
+
+This sharpens rather than softens the audit's position. The narrow findings
+stand: no *coverage-threshold* signature appears in the sweep, and a single
+regressor in draft volume accounts for 99.3 % of the cost across `n_max`
+1 → 128. But "no MoE effect exists" was never the claim, upstream evidence for
+a qualitative one predates this repository, and **the untested dimension is
+batching** — which the original README listed as caveat (iv) and never
+pursued. Single-stream is exactly the regime where the effect is expected to be
+worst.
 
 > Speedup is intrinsically limited on hybrid target models … each rejected step
 > may require one extra target forward … A more fundamental future improvement
