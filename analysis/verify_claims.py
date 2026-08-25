@@ -1,0 +1,133 @@
+"""Regression-check every numeric claim the audit docs make against the data.
+
+Every number quoted in README.md, ERRATA.md, RETEST_TODO.md, CHANGELOG.md and
+v4_audit_2026_08_25/README.md is re-derived here from the committed measurement
+files. If a document and the data ever disagree, this fails loudly.
+
+Covers: the v1 matrix aggregates and activation counts, the empty-content count
+behind ERRATA A5, the full speculative accounting behind A1/A4 (which closes on
+three independent paths), both v4 audit runs, and the MoE coverage arithmetic
+behind E1.
+
+Run: python analysis/verify_claims.py   (from the repo root; exits non-zero on
+any mismatch)
+"""
+import sys
+import csv, json, glob, math, re, statistics as st
+from collections import defaultdict
+
+FAIL=[]
+def chk(name, got, want, tol=0.05):
+    ok = (abs(got-want) <= tol) if isinstance(want,(int,float)) else (got==want)
+    print(f"  {'PASS' if ok else 'FAIL'}  {name:52s} got={got!r} want={want!r}")
+    if not ok: FAIL.append(name)
+
+print("=== v1 matrix (analysis/summary.csv) ===")
+rows=list(csv.DictReader(open('analysis/summary.csv')))
+for r in rows:
+    for k in ('tok_s','predicted_ms'): r[k]=float(r[k])
+    for k in ('predicted_n','draft_n','draft_acc','max_tokens'): r[k]=int(float(r[k]))
+by=defaultdict(list)
+for r in rows: by[r['config']].append(r)
+def agg(c):
+    v=by[c]; rates=[x['tok_s'] for x in v]
+    return dict(mean=st.mean(rates), pooled=1000*sum(x['predicted_n'] for x in v)/sum(x['predicted_ms'] for x in v),
+                med=st.median(rates), mn=min(rates), act=sum(1 for x in v if x['draft_n']>0))
+b=agg('baseline'); b1=agg('baseline-1000tok')
+chk("labels", len(by), 19)
+chk("labels with a draft round", sum(1 for c in by if any(x['draft_n']>0 for x in by[c])), 14)
+chk("labels without", sum(1 for c in by if not any(x['draft_n']>0 for x in by[c])), 5)
+for c,mean,pooled,med,mn in [('baseline',135.7,135.7,135.6,135.3),('ngram-mod-n24',131.1,131.1,130.0,129.6),
+                             ('draft-q35-08b-max8',121.1,109.9,135.6,59.2),('ngram-cache',119.1,111.3,135.6,65.3)]:
+    a=agg(c); chk(f"{c} req-mean",round(a['mean'],1),mean,0.06); chk(f"{c} pooled",round(a['pooled'],1),pooled,0.06)
+    chk(f"{c} median",round(a['med'],1),med,0.06); chk(f"{c} min",round(a['mn'],1),mn,0.06)
+chk("draft-max8 vs base req-mean %", round(100*(agg('draft-q35-08b-max8')['mean']/b['mean']-1),1), -10.8, 0.06)
+chk("draft-max8 vs base pooled %",  round(100*(agg('draft-q35-08b-max8')['pooled']/b['pooled']-1),1), -19.0, 0.06)
+chk("ngram-cache vs base pooled %", round(100*(agg('ngram-cache')['pooled']/b['pooled']-1),1), -18.0, 0.06)
+chk("ngcache-1000tok pooled vs b1000 %", round(100*(agg('ngcache-1000tok')['pooled']/b1['pooled']-1),1), -25.7, 0.06)
+chk("draft-max8 activation", agg('draft-q35-08b-max8')['act'], 2)
+chk("ngram-cache activation", agg('ngram-cache')['act'], 3)
+chk("ngram-mod-n24 activation", agg('ngram-mod-n24')['act'], 8)
+chk("baseline-1000tok lengths", [x['predicted_n'] for x in by['baseline-1000tok']],
+    [354,514,801,427,1000,891,1000,384,1000,484])
+chk("all 300-tok configs constant at 300", sorted({x['predicted_n'] for x in rows if x['max_tokens']==300}), [300])
+mins={'ngmod-n8':120.0,'ngmod-n12':119.8,'ngmod-n16':123.8,'ngmod-n20':128.8,'ngram-mod-n24':129.6}
+for c,m in mins.items(): chk(f"{c} min", round(agg(c)['mn'],1), m, 0.06)
+
+print("\n=== v1 empty content (ERRATA A5) ===")
+tot=e=0; per=defaultdict(lambda:[0,0])
+for f in sorted(glob.glob("results/*.json"))+sorted(glob.glob("results/verify/*.json")):
+    for r in json.load(open(f))["rows"]:
+        tot+=1; blank=not (r.get("content_head") or "").strip(); e+=blank
+        per[r["tag"]][0]+=blank; per[r["tag"]][1]+=1
+chk("empty content count", e, 144); chk("total requests", tot, 190)
+chk("empty %", round(100*e/tot,1), 75.8, 0.06)
+chk("reasoning empty", per["reasoning"], [19,19]); chk("code_small empty", per["code_small"], [19,19])
+
+print("\n=== verbose.log accounting (ERRATA A1/A4) ===")
+t=open('v2_3090_followup/v2_oleg_suggestions/verbose.log',errors='replace').read()
+gen=[int(x) for x in re.findall(r"called impl \w+, hist size = \d+, call_count = \d+, gen = (\d+)", t)]
+small=[int(x) for x in re.findall(r"ignoring small draft: (\d+) < \d+", t)]
+att=[(int(a),int(b)) for a,b in re.findall(r"update_slots: n_draft=(\d+), accepted=(\d+)", t)]
+m=re.search(r"#gen drafts = (\d+), #acc drafts = (\d+), #gen tokens = (\d+), #acc tokens = (\d+), dur\(b,g,a\) = [\d.]+, ([\d.]+),", t)
+gd,ad,gt,at,dg=int(m.group(1)),int(m.group(2)),int(m.group(3)),int(m.group(4)),float(m.group(5))
+ck=[float(x) for x in re.findall(r"created speculative checkpoint \(pos_min = \d+, pos_max = \d+, n_tokens = \d+, size = ([\d.]+) MiB\)", t)]
+rs=[int(x) for x in re.findall(r"restoring speculative checkpoint \(pos_min = \d+, pos_max = \d+, size = (\d+)\)", t)]
+chk("gen drafts",gd,81); chk("gen tokens",gt,214); chk("acc tokens",at,115); chk("acc drafts",ad,33)
+chk("token acceptance %", round(100*at/gt,1), 53.7, 0.06)
+chk("draft acceptance %",  round(100*ad/gd,1), 40.7, 0.06)
+chk("sum(gen)==#gen tokens", sum(gen), gt)
+chk("verification attempts", len(att), 53)
+chk("full accepts", sum(1 for a,bb in att if bb==a+1), 33)
+chk("partial accepts", sum(1 for a,bb in att if bb<a+1), 20)
+chk("restores == partials", len(rs), 20)
+chk("ignoring-small lines", len(small), 49); chk("tokens dropped", sum(small), 48)
+chk("tokens reaching verification", gt-sum(small), 166)
+chk("checkpoints created", len(ck), 33); chk("checkpoint MiB", round(ck[0],1), 62.8, 0.06)
+chk("GiB written", round(sum(ck)/1024,2), 2.02, 0.01); chk("GiB restored", round(sum(rs)/2**30,2), 1.23, 0.01)
+chk("drafter gen ms", round(dg,1), 999.6, 0.1)
+chk("drafter share %", round(100*dg/(1000*200/63.2),1), 31.6, 0.06)
+
+print("\n=== v4 audit runs ===")
+def load(d):
+    a=defaultdict(list)
+    for f in sorted(glob.glob(f"v4_audit_2026_08_25/data/{d}/*__rep*.json")): a[json.load(open(f))["arm"]].append(json.load(open(f)))
+    return a
+def stats(runs):
+    rates=[];n=0;ms=0.0;dn=0;da=0;comp=0
+    for r in runs:
+        if len(r["rows"])==10: comp+=1
+        for x in r["rows"]:
+            rates.append(x["predicted_per_second"]);n+=x["predicted_n"];ms+=x["predicted_ms"];dn+=x["draft_n"];da+=x["draft_n_accepted"]
+    return st.mean(rates),1000*n/ms,dn,da,comp,len(runs)
+A=load("A_bcb5eeb64_legacy"); B=load("B_master_3737e4137")
+for arm,mean,pooled,dn,da,comp in [("baseline",123.0,122.9,0,0,2),("draft-max8-translate",113.9,100.3,194,194,0),("draft-max8-matched",113.5,101.0,194,194,0)]:
+    m_,p_,d_,a_,c_,n_=stats(A[arm]); chk(f"A {arm} mean",round(m_,1),mean,0.06); chk(f"A {arm} pooled",round(p_,1),pooled,0.06)
+    chk(f"A {arm} drafted/accepted",(d_,a_),(dn,da)); chk(f"A {arm} complete",c_,comp)
+for arm,mean,pooled,dn,da,comp in [("baseline",132.9,133.3,0,0,3),("draft-max8-translate",33.6,32.6,16590,4926,3),("draft-max8-matched",33.7,32.6,16590,4926,3)]:
+    m_,p_,d_,a_,c_,n_=stats(B[arm]); chk(f"B {arm} mean",round(m_,1),mean,0.06); chk(f"B {arm} pooled",round(p_,1),pooled,0.06)
+    chk(f"B {arm} drafted/accepted",(d_,a_),(dn,da)); chk(f"B {arm} complete",c_,comp)
+chk("B acceptance %", round(100*4926/16590,1), 29.7, 0.06)
+per=defaultdict(lambda: defaultdict(list)); acc={}
+for arm,runs in B.items():
+    for r in runs:
+        for x in r["rows"]:
+            per[x["tag"]][arm].append(x["predicted_per_second"])
+            if x["draft_n"] and arm=="draft-max8-matched": acc[x["tag"]]=(x["draft_n_accepted"],x["draft_n"])
+xs=[];ys=[]
+for tag,v in per.items():
+    xs.append(100*acc[tag][0]/acc[tag][1]); ys.append(st.mean(v["draft-max8-matched"]))
+mx,my=st.mean(xs),st.mean(ys)
+r_=sum((x-mx)*(y-my) for x,y in zip(xs,ys))/((sum((x-mx)**2 for x in xs)*sum((y-my)**2 for y in ys))**0.5)
+chk("Pearson r(acceptance, tok/s)", round(r_,3), 0.998, 0.001)
+
+print("\n=== theory (ERRATA E1/E2) ===")
+rho=8/256
+chk("rho", round(rho,5), 0.03125, 1e-9)
+chk("T_95 exact", round(math.log(0.05)/math.log(1-rho),2), 94.36, 0.01)
+chk("T_95 ceil", math.ceil(math.log(0.05)/math.log(1-rho)), 95)
+chk("coverage at 94 < 0.95", 1-(1-rho)**94 < 0.95, True)
+chk("coverage at 95 >= 0.95", 1-(1-rho)**95 >= 0.95, True)
+
+print(f"\n{'='*70}\n{'ALL CLAIMS VERIFIED' if not FAIL else 'FAILURES: ' + ', '.join(FAIL)}\n{'='*70}")
+sys.exit(1 if FAIL else 0)
