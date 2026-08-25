@@ -144,11 +144,17 @@ requests. Any master comparison must pass `--spec-type` explicitly.
 
 ### Still running / next
 
-- P0-1 on master with `--spec-type draft-simple`: does the abort persist, and
-  what is the slowdown on a post-merge binary?
 - No-speculation baseline is **~6 % faster on master** than on `bcb5eeb64`
   on the same host (133–137 vs 125–129 tok/s), so absolute rates must not be
   compared across those two binaries.
+- **Run K** — bracket the DFlash draft-length optimum from below and test the
+  winner under batching. Run J puts the peak at or below `n_max 4`.
+- **Run L** — does the DFlash win survive thinking off? Workload shape has moved
+  a result here before: ngram-mod went from −6.8 % to −0.7 % between the
+  think-on and think-off matrices and drafted zero tokens in the latter.
+- **Five repeats for the DFlash headline.** Run J has three.
+- `draft-eagle3` and `draft-mtp` are exposed by post-merge master and remain
+  unevaluated here; both need head weights this repository does not have.
 
 ---
 
@@ -355,13 +361,30 @@ sha256sum build-retest/bin/llama-server   # goes in the manifest
 Pin an explicit SHA — do not track a moving master. **Cost** ~30–45 min CPU
 with ccache warm.
 
-### P2-2 · DFlash off vs on, one binary
+### P2-2 · DFlash off vs on, one binary — **DONE 2026-08-26, and it reverses the sign**
 
-Same binary, same target, same prompts, DFlash disabled vs enabled, ≥ 5
-repeats, ABBA. Also re-check whether the DFlash drafter GGUF has the same
-missing-BOS problem as P0-1, and whether it still needs re-conversion against
-the merged converter. **Cost** ~1.5 h GPU. **Closes** D4 and lets the v3
-conclusion be restated or retracted.
+Run J: one binary, one placement policy, three repeats per arm. The archived
+drafter did need re-conversion — post-merge master rejects it for lacking
+`target_layers`. No BOS problem: DFlash reuses the target's vocabulary, so the
+special-token gate that broke P0-1 is not in play.
+
+| arm | aggregate | vs no speculation |
+|---|---|---|
+| `spec-dflash-n4` | 130.2 | **+18.7 %** |
+| no speculation | 109.7 | — |
+| `spec-dflash-n8` | 93.5 | −14.8 % |
+| `spec-dflash-n16` | 57.7 | −47.4 % |
+
+Three repeats rather than five, and the control is the part that took the work:
+`-fit on` is required for the BF16 drafter to load, so it was applied to every
+arm including the baseline, and that baseline lands within −0.01 % of the pinned
+one at identical 41/41 placement. D4 is closed and v3's conclusion is retracted
+— what v3 measured was a binary change, and the method it blamed is the fastest
+thing in this repository at a short draft window.
+
+Still open from this: the configuration is marginal on a 24 GiB card (peaks at
+23946 MiB of 24576), five repeats were not run, and the draft-length optimum is
+being bracketed in run K.
 
 ---
 
@@ -392,6 +415,18 @@ merge**. Check current master's `server-context.cpp` and re-run
 still returns `FULL`, that is a reportable upstream finding in its own right —
 and a defensible reason to open an issue with this repository's data attached.
 **Cost** ~20 min.
+
+**DONE 2026-08-26 — the path still exists; the counter no longer depends on
+it.** At `3737e4137` the partial-accept branch still returns early
+(`server-context.cpp:3835`) and the checkpoint restore still happens: a hybrid
+Gated-DeltaNet/MoE target still cannot roll back part of a sequence. What moved
+is the denominator, which is what made the ratio a tautology.
+`n_draft_tokens += draft.size()` now runs at `:2939`, when the draft is
+*produced*, and a replaying slot never reaches it because
+`drafting.push_back(&slot)` at `:2921` sits inside the `else` of
+`if (!slot.spec_draft.empty())` at `:2893`. The numerator subtracts one on a
+replay (`:3851`). So master reports honest ratios — 29.7 %, 55.8 % — where
+`97895129e` could only report 1.00000. Full derivation in ERRATA A1.
 
 ### P3-3 · Expert-routing instrumentation (optional, expensive)
 

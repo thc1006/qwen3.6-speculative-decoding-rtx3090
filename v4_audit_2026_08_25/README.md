@@ -299,6 +299,8 @@ ten-prompt set, mean of three repeats:
 | 4 | 154.3 ± 0.27 | 27.0 ± 0.73 | 0.18× |
 | 8 | 180.0 ± 15.21 | 28.1 ± 0.66 | 0.16× |
 
+![Run I: aggregate throughput against concurrency](../analysis/plot_batching.png)
+
 **Batching helps the target and does nothing for the drafter.** No speculation
 gains +40.6 % at c=4 and +64.0 % at c=8. Speculation moves −11.7 % and −8.4 %
 over the same range. The gap therefore widens with batching rather than
@@ -371,6 +373,8 @@ drafter layers. The control is not being handicapped.
 | `spec-dflash-n8` | 105.2 | 93.5 ± 0.56 | −14.8 % | 18 114 | 36.8 % |
 | `spec-dflash-n16` | 62.8 | 57.7 ± 0.19 | −47.4 % | 31 728 | 21.4 % |
 | `spec-draft-n8` (matched vocab) | 31.4 | 30.5 ± 0.18 | −72.2 % | 16 641 | 29.7 % |
+
+![DFlash draft-length sweep, runs J and K](../analysis/plot_dflash_sweep.png)
 
 **DFlash at `n_max 4` is +18.7 % on aggregate throughput and +24.0 % pooled.**
 It is the first configuration in this repository that beats not speculating,
