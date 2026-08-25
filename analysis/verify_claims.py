@@ -4,6 +4,15 @@ Every number quoted in README.md, ERRATA.md, RETEST_TODO.md, CHANGELOG.md and
 v4_audit_2026_08_25/README.md is re-derived here from the committed measurement
 files. If a document and the data ever disagree, this fails loudly.
 
+Two layers:
+
+  data      re-derives each quantity from the committed measurement files and
+            compares it with the value this script expects. Catches the data
+            and the analysis drifting apart.
+  documents greps the Markdown for the signature figures, so a typo in a
+            document is caught too. Without this layer the script would only
+            prove the data is self-consistent, which its name over-promises.
+
 Covers: the v1 matrix aggregates and activation counts, the empty-content count
 behind ERRATA A5, the full speculative accounting behind A1/A4 (which closes on
 three independent paths), both v4 audit runs, and the MoE coverage arithmetic
@@ -128,6 +137,47 @@ chk("T_95 exact", round(math.log(0.05)/math.log(1-rho),2), 94.36, 0.01)
 chk("T_95 ceil", math.ceil(math.log(0.05)/math.log(1-rho)), 95)
 chk("coverage at 94 < 0.95", 1-(1-rho)**94 < 0.95, True)
 chk("coverage at 95 >= 0.95", 1-(1-rho)**95 >= 0.95, True)
+
+print("\n=== do the documents actually quote these figures? ===")
+import pathlib
+
+# The documents use typographic minus (U+2212) and en/em dashes; a needle typed
+# with an ASCII hyphen would fail against correct prose. Twice during this audit
+# a checker was wrong rather than the thing it checked - once over anchors
+# keeping underscores, once over this - so normalise both sides.
+_DASHES = {"\u2212": "-", "\u2013": "-", "\u2014": "-", "\u2011": "-"}
+
+
+def _norm(t: str) -> str:
+    for a, b in _DASHES.items():
+        t = t.replace(a, b)
+    return t
+DOC_CLAIMS = [
+    ("ERRATA.md",   "115 / 214",   "A1 true token acceptance"),
+    ("ERRATA.md",   "53.7",        "A1 acceptance percentage"),
+    ("ERRATA.md",   "33 / 81",     "A1 draft-sequence acceptance"),
+    ("ERRATA.md",   "999.6",       "A4 drafter generate() ms"),
+    ("ERRATA.md",   "31.6",        "A4 drafter share of wall-clock"),
+    ("ERRATA.md",   "144 of the 190", "A5 empty-content count"),
+    ("ERRATA.md",   "75.8",        "A5 empty-content percentage"),
+    ("ERRATA.md",   "248044",      "A2 target BOS id"),
+    ("ERRATA.md",   "= 94.36",     "E1 coverage arithmetic"),
+    ("ERRATA.md",   "T_95 = 95",   "E1 coverage threshold"),
+    ("ERRATA.md",   "+0.998",      "A7 acceptance-speed correlation"),
+    ("ERRATA.md",   "29.7",        "A7 master acceptance"),
+    ("README.md",   "+0.998",      "README correlation"),
+    ("README.md",   "109.9",       "README pooled draft-max8"),
+    ("README.md",   "-19.0 %",     "README pooled delta"),
+    ("v4_audit_2026_08_25/README.md", "16590", "v4 drafted tokens"),
+    ("v4_audit_2026_08_25/README.md", "4926",  "v4 accepted tokens"),
+]
+root = pathlib.Path(__file__).resolve().parents[1]
+for f, needle, what in DOC_CLAIMS:
+    txt = _norm((root / f).read_text(encoding="utf-8"))
+    ok = _norm(needle) in txt
+    print(f"  {'PASS' if ok else 'FAIL'}  {f:32s} quotes {needle!r:20s} ({what})")
+    if not ok:
+        FAIL.append(f"{f}:{needle}")
 
 print(f"\n{'='*70}\n{'ALL CLAIMS VERIFIED' if not FAIL else 'FAILURES: ' + ', '.join(FAIL)}\n{'='*70}")
 sys.exit(1 if FAIL else 0)
