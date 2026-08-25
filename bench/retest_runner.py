@@ -167,6 +167,13 @@ ARMS: dict[str, list[str]] = {
     "spec-draft-n8":  _draft(8),
     "spec-draft-n16": _draft(16),
     "spec-draft-n32": _draft(32),
+    # Past MoESD's ~95-token expected-coverage threshold. A sweep that stops at
+    # 32 cannot test that argument at all, so these three exist to reach the
+    # regime it actually describes: if the amortisation MoESD predicts is real,
+    # throughput should stop falling somewhere around here.
+    "spec-draft-n64": _draft(64),
+    "spec-draft-n96": _draft(96),
+    "spec-draft-n128": _draft(128),
     # v1's actual classic-draft configuration, for comparability
     "spec-draft-v1cfg": _draft(8, 4),
 

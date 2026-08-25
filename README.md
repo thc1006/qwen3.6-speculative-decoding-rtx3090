@@ -267,8 +267,10 @@ the mistake this audit corrects.
 
 *Within one configuration, across prompts*, prompts the drafter predicts well
 run faster, almost exactly in proportion. On post-merge master `3737e4137`,
-5 repeats of a 13-arm matrix, **seven independent draft configurations each
-reproduce this at r ≥ +0.996**, spanning acceptance from 5 % to 83 %:
+5 repeats of a 13-arm matrix, **six distinct draft lengths each reproduce this
+at r ≥ +0.996**, spanning acceptance from 5 % to 83 %. A control makes it hard
+to explain away: with no speculation the prompt barely matters, `baseline`
+spanning only 1.4 % across the same ten prompts.
 
 | `--spec-draft-n-max` | 1 | 2 | 4 | 8 | 16 | 32 |
 |---|---:|---:|---:|---:|---:|---:|
@@ -286,10 +288,11 @@ drafting method is a third, independent term.
 **The slowdown is the per-round cost of drafting, times how much is drafted,
 divided by how much is accepted.** That is ordinary speculative-decoding
 economics. There is no anomaly left, and **no MoE-specific pathology is needed**
-— this repository never had evidence for one. Note also that the sweep peaks at
-n_max = 4 and gets worse in both directions, while MoESD's coverage heuristic
-predicts longer drafts should help as they approach 95 tokens. Nothing here
-moves that way. Full detail: [A7](ERRATA.md#a7-with-acceptance-measured-properly-there-is-no-anomaly-left-to-explain).
+— this repository never had evidence for one. The sweep peaks at n_max = 4 and
+worsens in both directions; it stops at 32 and so cannot reach the ~95-token
+regime MoESD's coverage argument is about, which means it neither confirms nor
+refutes that argument. Full detail:
+[A7](ERRATA.md#a7-with-acceptance-measured-properly-there-is-no-anomaly-left-to-explain).
 
 **The vocabulary defect is real but is not the cause.** Same binary, same draft
 file, same flags, only the BOS override differing:

@@ -292,9 +292,19 @@ configuration reproduces this independently:
 | `--spec-draft-n-max 32` | **+0.999** | 5.2 – 15.7 % |
 | v1's configuration (max 8, min 4) | **+0.999** | 20.4 – 52.2 % |
 
-Seven independent configurations spanning acceptance from 5 % to 83 %, all at
-r ≥ +0.996. This is not a single lucky correlation; it is the relationship
-ordinary speculative-decoding economics predicts, replicated seven times.
+**Six distinct draft lengths**, spanning acceptance from 5 % to 83 %, all at
+r ≥ +0.996. The seventh row is not an independent configuration and should not
+be counted as one: v1's setting differs from `n_max 8` only in `n_min`, and at
+this draft length that changes almost nothing — 32.27 against 32.10 pooled
+tok/s, 29.69 % against 29.67 % acceptance, and three of ten prompts drafting a
+byte-identical number of tokens. What it does establish is that `n_min` is not
+the knob that matters here.
+
+A control makes the correlation harder to explain away: with no speculation the
+prompt barely affects speed at all. `baseline` spans **122.1 – 123.8 tok/s
+across the ten prompts, a 1.4 % total spread**, so the large per-prompt
+variation inside every speculative arm is driven by speculation rather than by
+some prompts being intrinsically faster to decode.
 
 **Contrast 2 — across configurations.** Here the sign flips:
 r = **−0.544** over the eleven speculative arms. That is not a contradiction,
@@ -337,10 +347,16 @@ change.
 | 32 | 17.3 | −86.0 % | 102 575 | 8.0 % |
 
 There is an optimum, at n_max = 4 — and it is still 71 % below the
-no-speculation baseline. Note the direction: cost grows and acceptance falls as
-the draft window widens. MoESD's expected-coverage heuristic points the other
-way, predicting that longer drafts help once they approach the 95-token
-threshold. Nothing in this sweep moves toward that.
+no-speculation baseline. The peak is real but shallow: per-repeat SD is 0.055
+for n_max 2 and 0.076 for n_max 4, against a 1.4 tok/s gap between them.
+
+**This sweep cannot test the MoESD prediction, and saying otherwise would be
+the same kind of overreach this file exists to correct.** MoESD's
+expected-coverage argument concerns draft lengths approaching ~95 tokens; the
+sweep stops at 32 and never enters that regime. What it shows is narrower: over
+the range actually reachable here, cost grows and acceptance falls
+monotonically as the window widens, with no sign of the amortisation turning
+around. Extending the sweep past 95 is the experiment that would settle it.
 
 **Conclusion. No MoE-specific pathology is needed to explain any of this**, and
 this repository never had evidence for one. The slowdown is the per-round cost
