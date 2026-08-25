@@ -38,6 +38,9 @@ Everything is configured through the environment:
     BENCH_MAX_TOKENS   max_tokens per completion               (default 300)
     BENCH_ARMS         comma-separated arm names to run        (default: all)
     BENCH_FLAVOR       legacy | master  - speculative flag spelling (default legacy)
+    BENCH_FIT          on | off - drop the -ngl 999 pin so llama.cpp's memory
+                       fitter can adjust unset parameters. Applied to every arm
+                       in the run so placement policy stays constant.
     BENCH_CONCURRENCY  N  - send N prompts at once and add --parallel N to the
                        server (default 1). Above 1 the honest metric changes:
                        per-request predicted_per_second is no longer system
@@ -87,13 +90,24 @@ _THINK_RAW = os.environ.get("BENCH_THINK", "on").strip().lower()
 THINK = "off" if _THINK_RAW in ("off", "0", "false", "no", "think_off",
                                 "disabled", "none") else "on"
 CONCURRENCY = max(1, int(os.environ.get("BENCH_CONCURRENCY", "1")))
+# Pinning -ngl 999 makes llama.cpp's memory fitter abort ("n_gpu_layers already
+# set by user to 999, abort") instead of adjusting the parameters the caller
+# left unset. That is why the BF16 DFlash drafter appeared not to fit: with -ngl
+# unset the same drafter loads at the full 16384 context. BENCH_FIT=on drops the
+# pin for EVERY arm in a run, so the placement policy stays constant across the
+# comparison instead of differing between the arm that needed it and the rest.
+FIT = os.environ.get("BENCH_FIT", "off").strip().lower() in ("on", "1", "true", "yes")
 
 # v1's fixed server flags, kept verbatim so the retest stays comparable.
-COMMON_ARGS = [
+COMMON_ARGS_PINNED = [
     "-ngl", "999", "-c", "16384", "--jinja",
     "-fa", "on", "-ctk", "q8_0", "-ctv", "q8_0",
     "--no-webui", "-v",
 ]
+COMMON_ARGS = ([a for i, a in enumerate(COMMON_ARGS_PINNED)
+                if not (a == "-ngl" or (i > 0 and COMMON_ARGS_PINNED[i - 1] == "-ngl"))]
+               if os.environ.get("BENCH_FIT", "off").strip().lower() in ("on", "1", "true", "yes")
+               else COMMON_ARGS_PINNED)
 
 # The BOS key the draft GGUF never received: Qwen/Qwen3.5-0.8B has no
 # generation_config.json upstream (HTTP 404), so convert_hf_to_gguf wrote no
@@ -474,7 +488,7 @@ def main() -> None:
         "arms": {a: ARMS[a] for a in arms},
         "repeats": REPEATS, "max_tokens": MAX_TOKENS,
         "temperature": 0.0, "seed": 42, "think": THINK, "think_env": _THINK_RAW,
-        "concurrency": CONCURRENCY,
+        "concurrency": CONCURRENCY, "fit": FIT,
         "ordering": "ABBA: arm order is reversed on odd repeats",
         "gpu_fields": GPU_FIELDS,
         "nvidia_smi": nvidia_smi(),
