@@ -4,8 +4,12 @@
 
 matplotlib>=3.10,<4
 numpy>=2.0,<3
-pandas>=2.2,<3
-# stdlib: urllib, json, subprocess, shlex — no extra packages needed
+# pandas was dropped in the 2026-08-25 audit rewrite of analysis/plot.py; the
+# aggregation is stdlib csv + statistics now, so nothing imports it.
+# stdlib only elsewhere: csv, json, statistics, subprocess, hashlib, urllib.
+#
+# analysis/verify_claims.py and analysis/verbose_accounting.py need no
+# third-party packages at all.
 
 # ----------------------------------------------------------------------------
 # v3 DFlash (2026-05-07) — convert HF safetensors → GGUF
