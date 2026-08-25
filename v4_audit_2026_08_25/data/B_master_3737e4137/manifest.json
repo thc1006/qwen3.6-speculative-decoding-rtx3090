@@ -1,0 +1,61 @@
+{
+  "created": "2026-08-25T20:02:51+0800",
+  "host": "3090",
+  "gpu_env": "0",
+  "server_bin": "/home/thc1006/bench/llama-retest/build/bin/llama-server",
+  "server_sha256": "b6a5c490bb932ffa9bf8a0d887f15eb0aade1d00a5e29b177a27249a2c539903",
+  "target": "/home/thc1006/models/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf",
+  "target_sha256": "707a55a8a4397ecde44de0c499d3e68c1ad1d240d1da65826b4949d1043f4450",
+  "draft": "/home/thc1006/models/Qwen3.5-0.8B-Q4_K_M.gguf",
+  "draft_sha256": "bd258782e35f7f458f8aced1adc053e6e92e89bc735ba3be89d38a06121dc517",
+  "common_args": [
+    "-ngl",
+    "999",
+    "-c",
+    "16384",
+    "--jinja",
+    "-fa",
+    "on",
+    "-ctk",
+    "q8_0",
+    "-ctv",
+    "q8_0",
+    "--no-webui",
+    "-v"
+  ],
+  "flavor": "master",
+  "arms": {
+    "baseline": [],
+    "draft-max8-translate": [
+      "-md",
+      "{DRAFT}",
+      "-ngld",
+      "99",
+      "--spec-draft-n-max",
+      "8",
+      "--spec-draft-n-min",
+      "4",
+      "--spec-type",
+      "draft-simple"
+    ],
+    "draft-max8-matched": [
+      "-md",
+      "{DRAFT}",
+      "-ngld",
+      "99",
+      "--spec-draft-n-max",
+      "8",
+      "--spec-draft-n-min",
+      "4",
+      "--spec-type",
+      "draft-simple",
+      "--override-kv",
+      "tokenizer.ggml.bos_token_id=int:248044"
+    ]
+  },
+  "repeats": 3,
+  "max_tokens": 300,
+  "temperature": 0.0,
+  "ordering": "ABBA: arm order is reversed on odd repeats",
+  "nvidia_smi": "0, NVIDIA GeForce RTX 3090, 82 MiB, 0 %, 210 MHz, 405 MHz, 30.76 W, 52"
+}
