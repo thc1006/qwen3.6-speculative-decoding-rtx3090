@@ -127,6 +127,21 @@ master run looked like a clean "no crash, no slowdown" result until the server
 log showed zero `generate_draft` calls and `draft_n = 0` on all thirty
 requests. Any master comparison must pass `--spec-type` explicitly.
 
+### Known failure modes to check for, not assume away
+
+- **Acceptance collapsing to zero under `-np N`.** llama.cpp
+  [#27572](https://github.com/ggml-org/llama.cpp/issues/27572) reports draft
+  acceptance going to exactly 0.00000 under parallel slots on a hybrid Qwen3.x
+  target, with generation falling below no-speculation speed and completions
+  coming back with empty `content`. That report is HIP + `draft-mtp` and this
+  work is CUDA + `draft-simple`, so it probably does not apply — but the
+  batching run must **verify** acceptance is non-zero rather than presume it,
+  because the symptom is silent.
+- **Checkpoint invalidation on hybrid targets.**
+  [#24055](https://github.com/ggml-org/llama.cpp/issues/24055). The audit
+  measured 1639 checkpoints of 101.3 MiB for one 300-token request; whether
+  that is the same bug is untested here.
+
 ### Still running / next
 
 - P0-1 on master with `--spec-type draft-simple`: does the abort persist, and
