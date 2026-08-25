@@ -222,12 +222,13 @@ Requirements:
 
 **Cost** ~2.5–3 h GPU for 19 labels × 5 repeats.
 
-### P1-2 · The missing fp16-KV no-speculation baseline
+### P1-2 · The missing fp16-KV no-speculation baseline — **DONE**
 
-`ngcache-kv-fp16` has no matched control, so it cannot separate a speculation
-effect from a KV-precision effect. The new heatmap shows fp16 KV is 1–2 %
-*faster* than q8_0 when speculation is idle. Add `baseline-kv-fp16`.
-**Cost** ~10 min. **Closes** [B7](ERRATA.md#b7-the-fp16-kv-row-is-a-one-sided-control).
+Run in the 13-arm matrix on post-merge master, 5 repeats: `baseline-kvfp16`
+reaches 125.7 pooled tok/s against `baseline`'s 123.4 (**+1.9 %**), while
+`ngram-cache-kvfp16` reaches 70.9 against `ngram-cache`'s 74.0 (**−4.2 %**).
+fp16 KV is faster than q8_0 with no speculation running and does not help when
+speculation is on. **Closes** [B7](ERRATA.md#b7-the-fp16-kv-row-is-a-one-sided-control--now-closed-by-measurement).
 
 ### P1-3 · Length-matched long-output comparison
 

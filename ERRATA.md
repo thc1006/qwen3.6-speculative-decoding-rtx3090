@@ -271,33 +271,87 @@ attempted it and failed (D1/D2). The defect is common to all four experiments.
 This repository's central claim was an *anomaly*: 100 % acceptance yet slower,
 therefore something MoE-specific must be destroying the speedup. Upstream has
 since made the partial-accept path reachable, so the counter now reports real
-ratios. Re-running the same three arms on post-merge master `3737e4137` with
-`--spec-type draft-simple`, 3 repeats, ABBA-ordered
-([`v4_audit_2026_08_25/`](v4_audit_2026_08_25/)):
+ratios, and the anomaly disappears.
 
-| prompt | baseline | with draft | vs baseline | real acceptance |
-|---|---:|---:|---:|---:|
-| reasoning | 132.7 | 45.5 | −65.7 % | 52 % |
-| code_small | 132.7 | 45.5 | −65.7 % | 50 % |
-| zh_hant | 133.0 | 35.3 | −73.5 % | 35 % |
-| medium_rec | 133.3 | 36.4 | −72.7 % | 35 % |
-| long_explain | 132.8 | 31.3 | −76.4 % | 28 % |
-| short_greet | 133.0 | 31.0 | −76.7 % | 27 % |
-| multi_turn_2 | 132.5 | 29.5 | −77.7 % | 24 % |
-| short_q | 133.3 | 27.8 | −79.1 % | 22 % |
-| medium_chat | 133.1 | 27.3 | −79.5 % | 20 % |
-| multi_turn_1 | 132.6 | 27.1 | −79.6 % | 20 % |
+**The contrast matters, so name it.** Two different comparisons are available
+and they point in opposite directions. Reporting either without saying which
+one it is would repeat the mistake this audit exists to correct.
 
-**Pearson r between real acceptance rate and decode rate = +0.998** across the
-ten prompts. Acceptance and speed are almost perfectly correlated, exactly as
-ordinary speculative-decoding economics predicts. The slowdown on this hardware
-is low acceptance plus draft-path cost. **No MoE-specific pathology is needed
-to explain it**, and this repository never had evidence for one.
+**Contrast 1 — within one configuration, across prompts.** Prompts the drafter
+predicts well run faster, almost exactly in proportion. On post-merge master
+`3737e4137`, five repeats of a thirteen-arm matrix, every draft-model
+configuration reproduces this independently:
 
-Aggregate over 3 repeats, whole prompt set: baseline request-mean 132.9 /
-pooled 133.3; with a draft model 33.7 / 32.6 and **4926 of 16590 draft tokens
-accepted (29.7 %)**. The counter reporting 29.7 % rather than 1.00000 is
-independent upstream confirmation of A1.
+| configuration | Pearson r | acceptance range across prompts |
+|---|---:|---|
+| `--spec-draft-n-max 1` | **+0.998** | 55.7 – 83.2 % |
+| `--spec-draft-n-max 2` | **+0.999** | 49.8 – 77.9 % |
+| `--spec-draft-n-max 4` | **+0.996** | 34.4 – 65.8 % |
+| `--spec-draft-n-max 8` | **+0.999** | 20.4 – 52.2 % |
+| `--spec-draft-n-max 16` | **+0.999** | 9.8 – 32.3 % |
+| `--spec-draft-n-max 32` | **+0.999** | 5.2 – 15.7 % |
+| v1's configuration (max 8, min 4) | **+0.999** | 20.4 – 52.2 % |
+
+Seven independent configurations spanning acceptance from 5 % to 83 %, all at
+r ≥ +0.996. This is not a single lucky correlation; it is the relationship
+ordinary speculative-decoding economics predicts, replicated seven times.
+
+**Contrast 2 — across configurations.** Here the sign flips:
+r = **−0.544** over the eleven speculative arms. That is not a contradiction,
+it is a different question. A configuration that drafts aggressively achieves
+*higher* acceptance per attempt while paying for far more drafted tokens, so
+across methods the total cost dominates. Draft volume against speed gives
+r = −0.603, and the ordering makes the mechanism plain:
+
+| arm | draft tokens per generated token | pooled tok/s | acceptance |
+|---|---:|---:|---:|
+| ngram-simple | 0.06 | 118.1 | 4.3 % |
+| ngram-mod n=24 | 0.21 | 115.0 | 4.8 % |
+| ngram-cache | 0.42 | 74.0 | 1.8 % |
+| draft model, n_max 1 | 0.50 | 31.1 | 68.7 % |
+| draft model, n_max 8 | 1.85 | 32.1 | 29.7 % |
+| draft model, n_max 32 | 6.84 | 17.3 | 8.0 % |
+
+Note the fourth row. An external draft model proposing **0.50** tokens per
+generated token runs at 31.1 tok/s, while ngram-cache proposing **0.42** runs
+at 74.0. Volume alone does not explain that, so there is a third term: the
+**per-round cost of the method itself**. An external 0.8 B drafter needs a
+forward pass every round; an ngram lookup is nearly free.
+
+**The honest model therefore has three terms**, not one: the fixed per-round
+cost of the drafting method, the volume of tokens drafted, and the fraction of
+that work accepted. Within a fixed method and draft length, acceptance predicts
+speed almost perfectly. Across methods it does not, because the other two terms
+change.
+
+**The draft-length sweep is not monotone.** Sweeping `--spec-draft-n-max` with
+`n_min` pinned to 1 and matched vocabulary:
+
+| n_max | pooled tok/s | vs baseline | drafted | acceptance |
+|---:|---:|---:|---:|---:|
+| 1 | 31.1 | −74.8 % | 7 450 | 68.7 % |
+| 2 | 34.2 | −72.2 % | 11 070 | 60.3 % |
+| **4** | **35.6** | **−71.1 %** | 16 855 | 45.4 % |
+| 8 | 32.1 | −74.0 % | 27 735 | 29.7 % |
+| 16 | 23.7 | −80.8 % | 53 740 | 15.0 % |
+| 32 | 17.3 | −86.0 % | 102 575 | 8.0 % |
+
+There is an optimum, at n_max = 4 — and it is still 71 % below the
+no-speculation baseline. Note the direction: cost grows and acceptance falls as
+the draft window widens. MoESD's expected-coverage heuristic points the other
+way, predicting that longer drafts help once they approach the 95-token
+threshold. Nothing in this sweep moves toward that.
+
+**Conclusion. No MoE-specific pathology is needed to explain any of this**, and
+this repository never had evidence for one. The slowdown is the per-round cost
+of drafting, multiplied by how much is drafted, divided by how much is
+accepted.
+
+Aggregate for the original three-arm run, 3 repeats: baseline request-mean
+132.9 / pooled 133.3; with a draft model 33.7 / 32.6 and **4926 of 16590 draft
+tokens accepted (29.7 %)**. The counter reporting 29.7 % rather than 1.00000 is
+independent upstream confirmation of A1. Data:
+[`v4_audit_2026_08_25/`](v4_audit_2026_08_25/).
 
 ### A6. `llama-server` plus a draft model aborts on this model at `bcb5eeb64`
 
@@ -438,14 +492,31 @@ but no `results/verify/ngcache-nofa.json` exists — `-fa off` is incompatible
 with `-ctk q8_0`, so that hypothesis was never tested. `run_p0_matrix.sh` says
 so in a comment; the README never mentioned it.
 
-### B7. The fp16-KV row is a one-sided control
+### B7. The fp16-KV row is a one-sided control — now closed by measurement
 
 `ngcache-kv-fp16` was read as "fp16 KV does not rescue — KV quant is not the
-cause". There is no no-speculation fp16-KV baseline in the matrix, so the row
-cannot separate a speculation effect from a KV-precision effect. It is visible
-in the new heatmap: on the seven prompts with no draft round it runs at
+cause". There is no no-speculation fp16-KV baseline in the v1 matrix, so the
+row cannot separate a speculation effect from a KV-precision effect. It is
+visible in the heatmap: on the seven prompts with no draft round it runs at
 101–102 % of the q8_0 baseline, i.e. fp16 KV is *faster* when speculation is
-idle. Comparing its 121.3 against the q8_0 baseline mixes both effects.
+idle.
+
+The audit matrix adds the control v1 lacked. Post-merge master `3737e4137`,
+5 repeats, ABBA-ordered, everything else held:
+
+| arm | pooled tok/s | vs `baseline` |
+|---|---:|---:|
+| `baseline` (q8_0 KV) | 123.4 | — |
+| `baseline-kvfp16` | **125.7** | **+1.9 %** |
+| `ngram-cache` (q8_0 KV) | 74.0 | −40.0 % |
+| `ngram-cache-kvfp16` | 70.9 | −42.5 % |
+
+So fp16 KV is about 2 % faster than q8_0 KV with no speculation running, and it
+does **not** help when speculation is on — the speculative arm is slightly
+worse with fp16 KV, not better. The original reading happened to reach a
+defensible conclusion, but it could not have known that: it was comparing a
+speculative fp16-KV row against a non-speculative q8_0-KV row and attributing
+the whole difference to speculation.
 
 ---
 

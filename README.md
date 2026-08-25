@@ -259,26 +259,37 @@ be read.
 
 Full data and method: [`v4_audit_2026_08_25/`](v4_audit_2026_08_25/).
 
-**With acceptance measured properly, the anomaly disappears.** Upstream has
-since made the partial-accept path reachable, so the counter reports real
-ratios. On post-merge master `3737e4137` with `--spec-type draft-simple`,
-3 repeats, ABBA-ordered:
+**With acceptance measured properly, the anomaly disappears — and the contrast
+has to be named.** Upstream has since made the partial-accept path reachable,
+so the counter reports real ratios. Two comparisons are available and they
+point opposite ways; reporting either without saying which would repeat exactly
+the mistake this audit corrects.
 
-| prompt | baseline | with draft | vs baseline | real acceptance |
-|---|---:|---:|---:|---:|
-| reasoning | 132.7 | 45.5 | −65.7 % | 52 % |
-| code_small | 132.7 | 45.5 | −65.7 % | 50 % |
-| medium_rec | 133.3 | 36.4 | −72.7 % | 35 % |
-| long_explain | 132.8 | 31.3 | −76.4 % | 28 % |
-| short_q | 133.3 | 27.8 | −79.1 % | 22 % |
-| multi_turn_1 | 132.6 | 27.1 | −79.6 % | 20 % |
+*Within one configuration, across prompts*, prompts the drafter predicts well
+run faster, almost exactly in proportion. On post-merge master `3737e4137`,
+5 repeats of a 13-arm matrix, **seven independent draft configurations each
+reproduce this at r ≥ +0.996**, spanning acceptance from 5 % to 83 %:
 
-**Pearson r between real acceptance and decode rate = +0.998** across the ten
-prompts. Acceptance and speed are almost perfectly correlated, exactly as
-ordinary speculative-decoding economics predicts. **There is no anomaly left to
-explain, and no MoE-specific pathology is needed** — the slowdown on this
-hardware is low acceptance plus draft-path cost. That is the single most
-important correction in this audit.
+| `--spec-draft-n-max` | 1 | 2 | 4 | 8 | 16 | 32 |
+|---|---:|---:|---:|---:|---:|---:|
+| Pearson r | +0.998 | +0.999 | +0.996 | +0.999 | +0.999 | +0.999 |
+| pooled tok/s | 31.1 | 34.2 | **35.6** | 32.1 | 23.7 | 17.3 |
+| acceptance | 68.7 % | 60.3 % | 45.4 % | 29.7 % | 15.0 % | 8.0 % |
+
+*Across configurations* the sign flips to r = −0.544, because a configuration
+that drafts harder achieves higher acceptance per attempt while paying for far
+more drafted tokens. An external 0.8 B drafter proposing 0.50 tokens per
+generated token runs at 31.1 tok/s while ngram-cache proposing 0.42 runs at
+74.0, so volume is not the whole story either: the per-round cost of the
+drafting method is a third, independent term.
+
+**The slowdown is the per-round cost of drafting, times how much is drafted,
+divided by how much is accepted.** That is ordinary speculative-decoding
+economics. There is no anomaly left, and **no MoE-specific pathology is needed**
+— this repository never had evidence for one. Note also that the sweep peaks at
+n_max = 4 and gets worse in both directions, while MoESD's coverage heuristic
+predicts longer drafts should help as they approach 95 tokens. Nothing here
+moves that way. Full detail: [A7](ERRATA.md#a7-with-acceptance-measured-properly-there-is-no-anomaly-left-to-explain).
 
 **The vocabulary defect is real but is not the cause.** Same binary, same draft
 file, same flags, only the BOS override differing:
