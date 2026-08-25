@@ -106,6 +106,34 @@ removed or relabelled, and `analysis/plot_accept_vs_speed.png` — whose entire
 x-axis was that artefact, with all 140 points at exactly 100 % — has been
 deleted and replaced by `analysis/plot_acceptance_accounting.png`.
 
+**Upstream fixed this, and the audit's post-merge acceptance figures rest on
+the fix.** Every acceptance percentage this audit reports from master — 29.7 %
+for `spec-draft-n8`, 55.8 % for `spec-dflash-n4` — would be meaningless if the
+same tautology were still in place, so the counter path was read at the tested
+commit `3737e4137` rather than assumed to have changed:
+
+| | `97895129e` (v1) | `3737e4137` (audit) |
+|---|---|---|
+| denominator | after the early `continue` | `server-context.cpp:2939`, at draft **generation** |
+| numerator | after the early `continue` | `server-context.cpp:3859`, with a replay correction |
+| replayed tokens | re-entered both counters | excluded from the denominator |
+
+The partial-accept branch still returns early (`:3835`) — a hybrid target still
+cannot roll back part of a sequence — but the denominator no longer lives behind
+it. `slot.stats.n_draft_tokens += draft.size()` runs when the draft is
+*produced*, and a slot replaying a truncated draft never reaches that line,
+because `drafting.push_back(&slot)` at `:2921` sits inside the `else` of
+`if (!slot.spec_draft.empty())` at `:2893`. The numerator then subtracts one on
+a replay (`:3851`) so the token carried over from the truncated draft is not
+counted twice.
+
+Worked through: a round drafts 8 tokens and 3 are accepted. The denominator
+takes all 8 at generation; the partial branch truncates and returns without
+touching the numerator; the replay round re-verifies the 4-token remainder,
+reaches the numerator with `n_accepted = 4`, decrements to 3 for the replay, and
+the ratio is 3/8. That is the honest quantity, and it is why master reports
+values like 29.7 % where `97895129e` could only ever report 1.00000.
+
 ---
 
 ### A2. The draft model was **not** vocabulary-compatible; the run used the token-translation fallback
