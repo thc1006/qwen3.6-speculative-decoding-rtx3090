@@ -35,6 +35,36 @@ should have used and did not:
 
 ---
 
+## Status board
+
+| # | task | state |
+|---|---|---|
+| P0-1 | draft-GGUF BOS key, matched vs translation A/B | **done** — real defect, worth +0.3 %, not the cause |
+| P0-2 | a thinking control that actually works | **done** — `chat_template_kwargs {"enable_thinking": false}`, verified per request, 50/50 |
+| P0-3 | true acceptance across configurations | **done** — every arm of the matrix carries honest counters on post-merge master |
+| P1-1 | one binary, ABBA, N ≥ 5, full capture | **done** — 13 arms × 5 repeats, 900 requests, hashed manifest |
+| P1-2 | the missing fp16-KV no-speculation control | **done** — closes ERRATA B7 |
+| P1-3 | length-matched long-output comparison | **not done** |
+| P1-4 | repair the prompt set | **partial** — `zh_hant` relabelled; `multi_turn_*` are still two single-turn requests |
+| P1-5 | host isolation, clocks, thermals | **done** — 1317-sample trace, no OC, no meaningful throttling, drift diagnosed as cold-start |
+| P2-1 | build one pinned post-merge binary | **done** — `3737e4137` |
+| P2-2 | DFlash off vs on, one binary | **blocked then unblocked** — the archived drafter GGUF lacks `target_layers`; `bench/convert_dflash.sh` re-converts it, queued behind the matrix |
+| P3-1 | draft-length sweep with cost instrumentation | **done** — 1…32 in run C, 64/96/128 in run E |
+| P3-2 | does the partial-accept fallback still exist upstream | **done** — the abort is gone and the counter is fixed on post-merge master |
+| P3-3 | expert-routing instrumentation | **not done**, and after A7 nothing demands it |
+| P3-4 | dense / FP16 / second-GPU controls | **not done** — out of scope on 24 GiB |
+
+New work the audit generated that was not on the original list:
+
+- the workload-shape comparison Exp 2 could not make (ERRATA D3b)
+- the pre-registered past-threshold prediction and its test
+  ([`v4_audit_2026_08_25/PREREGISTERED_PREDICTION.md`](v4_audit_2026_08_25/PREREGISTERED_PREDICTION.md))
+- `analysis/verify_claims.py`, `check_links.py`, `matrix_report.py`,
+  `thermal_report.py` as standing regression checks
+
+
+---
+
 ## Results so far — runs executed 2026-08-25
 
 All on the `3090` host. Every run's manifest records the binary's sha256, both
@@ -158,7 +188,15 @@ becomes far stronger and is finally measured on a clean path.
 > target, and whether upstream unsloth has since republished the draft GGUF
 > with the key present.
 
-### P0-2 · Thinking control that actually works
+### P0-2 · Thinking control that actually works — **DONE**
+
+The switch that works on this stack is the request-level
+`chat_template_kwargs: {"enable_thinking": false}` on `/v1/chat/completions`,
+and `bench/retest_runner.py` records `thinking_suppressed` per request from the
+length of the reasoning channel rather than assuming it. Measured: 50/50
+suppressed with it, 0/50 without, and completions then stop naturally at
+22–300 tokens instead of every one hitting the cap. Original text below.
+
 
 Replace `llama-cli … -no-cnv … "prompt /no_think"` with `llama-completion` plus
 a real switch, and **prove** it in the output.
@@ -176,7 +214,12 @@ Compare `-rea off`, `--reasoning-budget 0`, and both together; pick whichever
 provably suppresses thinking and record which one was used. **Cost** ~5 min.
 **Closes** D1, D2, and unblocks any Exp 2 replacement.
 
-### P0-3 · Capture the *true* acceptance rate for every config
+### P0-3 · Capture the *true* acceptance rate for every config — **DONE**
+
+Superseded by the matrix: post-merge master fixed the counter, so every arm
+reports honest ratios directly, from 1.4 % to 68.7 % depending on method and
+draft length. Original text below.
+
 
 Every historical run except one used no `-v`, so only one prompt in the whole
 repository has real acceptance data. Re-run the v2/v1 config set with `-v` and
