@@ -1,0 +1,32 @@
+# Data licence
+
+The benchmark data in this repository is dedicated to the public domain under
+CC0 1.0 Universal. Full text: LICENSES/CC0-1.0.txt
+
+## Scope
+
+CC0-1.0 applies to the measurement artefacts:
+
+    results/**                          v1 per-request JSON
+    analysis/summary.csv
+    analysis/summary_by_config.csv
+    analysis/verbose_accounting.json
+    v2_3090_followup/**/*.log           v2 raw llama-cli logs
+    v2_3090_followup/results_v2.json
+    v2_3090_followup/n3_results_20260426.json
+    v2_3090_followup/exp2_codejson_n3/results.json
+    v2_3090_followup/exp2_codejson_n3/master.log
+    v3_dflash_2026_05_07/data/**
+
+Everything else - code, shell scripts, Markdown, and the generated charts -
+is MIT, see LICENSE.
+
+## Not covered
+
+The model weights are not distributed here and are not covered by this
+licence. `Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf` and `Qwen3.5-0.8B-Q4_K_M.gguf`
+carry their own upstream terms; see the Qwen and unsloth model cards.
+
+Raw logs contain model output generated during benchmarking. That text is
+included as measurement evidence and inherits whatever terms apply to the
+model that produced it.

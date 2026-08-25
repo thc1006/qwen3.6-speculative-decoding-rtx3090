@@ -6,6 +6,120 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning is not strictly semver — each numbered release is a public
 publication point with its own data set.
 
+## [v4.0] — 2026-08-25 · audit and retraction
+
+A full adversarial re-examination of everything this repository has published.
+No raw measurement file was edited; `results/`, `v2_3090_followup/v2_*/`,
+`exp2_codejson_n3/master.log`, and `v3_dflash_2026_05_07/data/` are
+byte-identical to the archived releases, and every historical aggregate was
+re-derived from them and reproduced exactly. What changed is the wording, the
+statistics, and the causal claims. Full itemised list with evidence:
+[`ERRATA.md`](ERRATA.md).
+
+### Retracted
+
+- **"100 % draft acceptance."** The ratio is 1.0 by construction on this model.
+  Qwen3.6-35B-A3B is a hybrid Gated-DeltaNet/MoE model, so the context reports
+  `COMMON_CONTEXT_SEQ_RM_TYPE_FULL`; a partially accepted round then takes an
+  early `continue` in `server-context.cpp` that skips both acceptance counters
+  and re-verifies the truncated prefix. The drafter's own counters, printed one
+  line below the quoted `1.00000 (115 / 115)` in the same committed
+  `verbose.log`, report **115 of 214 generated draft tokens accepted (53.7 %)**
+  and **33 of 81 drafts (40.7 %)**. `analysis/plot_accept_vs_speed.png`, whose
+  entire x-axis was that artefact, is deleted.
+- **"Vocab-matched draft model."** llama.cpp rejected the pair on its
+  special-token gate and ran the token-translation fallback for every
+  classic-draft measurement ever published here.
+- **"The regression is structural / engine-independent / hardware-independent."**
+- **"Q4 collapses the technique"**, **"the mechanism generalises to DFlash"**,
+  **"co-trained heads are the only positive yield path"** — all removed from v3.
+- **"Exp 2 refutes the workload-shape hypothesis."** Downgraded to exploratory:
+  `-no-cnv` was rejected, `/no_think` did not disable thinking, and per-request
+  outputs were never committed, so the intended treatment is unverifiable.
+- **All "first public benchmark / first public datapoint" claims**, from the
+  title, the v3 banner, `pr_comment.md`, and this changelog's v3.0 entry. No
+  novelty search was ever performed.
+
+### Corrected
+
+- Pooled decode throughput now reported alongside the request-mean. The gap is
+  material: classic draft `--draft-max 8` is −10.8 % by request-mean but
+  **−19.0 % pooled**; `ngcache-1000tok` is −25.7 % pooled against its matched
+  long-output baseline.
+- `±` columns relabelled as across-prompt spread. Each v1 cell was measured
+  once, so they were never run-to-run uncertainty. Exp 2's `± 7.57` decomposes
+  into a trial-mean SD of **0.058** and prompt-to-prompt spread.
+- "19-config matrix" → 19 run labels, of which 14 recorded a draft round and 5
+  did not.
+- "Every configuration hits 59–67 tok/s" → that band belongs to specific
+  ngram-cache and classic-draft requests; the ngram-mod family bottoms out at
+  119.8–129.6.
+- "Entirely bimodal by prompt class" → three configurations produce three
+  different prompt partitions; ngram-mod fires on exactly the chat prompts the
+  old text said it could not.
+- "all completions reach the cap" → true for the 300-token group, false for
+  the 1000-token group (`baseline-1000tok` returned 354–1000 tokens).
+- Target artefact named consistently as `UD-Q4_K_XL`; `Q4_K_M` is the draft.
+- `T_thres ≈ 94` → `ceil(94.36) = 95`, restated as an expected-coverage
+  heuristic; `k_e = 8` and `γ` replace the overloaded `K`.
+- Qwen3.5-122B-A10B has the **same** 256 experts and top-8 routing, so the
+  "larger active footprint gives a lower `T_thres`" sentence is deleted.
+- PR #20075 reattributed to **eauchs**; it is an external-draft-model plus SSM
+  checkpoint/restore fix, not ngram-mod.
+- Upstream statuses re-checked: #20075 **closed unmerged** 2026-04-25 (was
+  listed OPEN); #22105 **merged** 2026-06-28 (v3 said open draft).
+- Licence conflict resolved: MIT for code and docs, CC0-1.0 for data with
+  `DATA_LICENSE` and `LICENSES/CC0-1.0.txt` present. v3's "Apache 2.0" removed.
+
+### Found during the audit
+
+- **v1 measured truncated thinking, not answers.** 144 of 190 v1 requests
+  (75.8 %) returned an empty `message.content`; `reasoning` and `code_small`
+  are 19/19. The 300-token cap was reached inside the thinking block and
+  `reasoning_content` was never captured.
+- **Root cause of the vocabulary failure.** `Qwen/Qwen3.5-0.8B` has no
+  `generation_config.json` upstream (HTTP 404), so its GGUF carries no
+  `tokenizer.ggml.bos_token_id` and llama.cpp substitutes the hard-coded GPT-2
+  legacy default `11` against the target's `248044`. Both models declare
+  `add_bos_token = false`, so the field that gates speculation is one neither
+  model uses. `--override-kv tokenizer.ggml.bos_token_id=int:248044` flips
+  `vocab_cmpt` from 0 to 1.
+- **The fix does not explain the slowdown.** A same-binary A/B on 2026-08-25
+  moved `long_explain` from 48.4 tok/s to 50–51 tok/s, against a baseline of
+  ~126. The negative finding survives, now measured on a matched-vocabulary
+  path.
+- **`llama-server` plus a draft model aborts at `bcb5eeb64`** with
+  `CUDA error: an unsupported value or parameter` in
+  `ggml_cuda_op_mul_mat_cublas`, reproducibly, immediately after a
+  partial-accept checkpoint restore. 3/3 on `code_small`, in both the
+  translation and matched arms.
+- **The committed v2 script does not match the committed v2 data** — different
+  config directory names — and no v2/v3 log records its own argv.
+- **`--spec-type` is server-only**, not "missing from master" as v3 claimed.
+
+### Added
+
+- [`ERRATA.md`](ERRATA.md) — every corrected claim with its evidence.
+- [`RETEST_TODO.md`](RETEST_TODO.md) — the runnable work queue that closes the
+  open items, with the bench host's verified state.
+- [`analysis/verbose_accounting.py`](analysis/verbose_accounting.py) —
+  reconstructs the acceptance-counter artefact from any `-v` log.
+- [`bench/retest_runner.py`](bench/retest_runner.py) — one pinned binary,
+  ABBA ordering, N repeats, hashed manifest, and per-request capture of text,
+  reasoning channel, stop reason, timings, and token IDs via `logprobs` (near-complete: `probs_output` drops trailing stop-word tokens, `server-context.cpp:2036-2039`, so the list can run a few short of `predicted_n`, which stays the authority for token counts).
+  Thinking suppression is verified per request, not assumed.
+- `analysis/plot_acceptance_accounting.png`, replacing the retracted scatter.
+- `SHA256SUMS`, `CITATION.cff`, `DATA_LICENSE`, `LICENSES/CC0-1.0.txt`.
+- Errata headers on every historical script; all host-specific paths are now
+  environment variables.
+
+### What survives
+
+Under the exact conditions archived here, no tested condition that recorded
+speculative activity beat its matched no-speculation reference in aggregate.
+That statement is narrower than what was published, and it is what the data
+support.
+
 ## [Sibling-repo notice] — vllm-2x3090 v5.0 (2026-05-17)
 
 A natural follow-up to this repo's MTP findings was published in the sibling [`qwen3.6-vllm-2x3090` v5.0](https://github.com/thc1006/qwen3.6-vllm-2x3090/releases/tag/v5.0): a same-hardware A/B between the production MoE Qwen3.6-35B-A3B-AWQ + MTP k=3 + TP=2 stack and the new dense sibling **Qwen3.6-27B-AWQ** on a voice-agent workload (10 prompts × 3 trials × 2 models = 60 samples).
@@ -27,7 +141,8 @@ Caveat: see the [vllm-2x3090 v5 README scope section](https://github.com/thc1006
   - Result: **NET LOSS -44.6 % at best (DFlash --draft-max=8: 77.0 tok/s vs
     138.9 tok/s no-spec baseline)**. Slightly less bad than v2.x's Oleg
     draft-spec NET LOSS (-52 %), but still net negative.
-  - First public RTX 3090 + DFlash + Q4 quantized target datapoint.
+  - ~~First public RTX 3090 + DFlash + Q4 quantized target datapoint.~~
+    **RETRACTED 2026-08-25** — no novelty search was performed (ERRATA F3).
   - Reproduction: [`v3_dflash_2026_05_07/bench/bench_dflash.sh`](v3_dflash_2026_05_07/bench/bench_dflash.sh)
     (note: do NOT use `set -euo pipefail` + `grep | tail` combo; empty grep
     matches kill the whole script via pipefail).
@@ -226,7 +341,10 @@ Initial public release of the spec-decode benchmark matrix.
 - 19-configuration bench matrix on a single RTX 3090 (of the two on s1)
   via `llama-server` at commit `9789512` (post PR #19493 merge).
 - `Qwen3.6-35B-A3B-UD-Q4_K_XL` main + `Qwen3.5-0.8B-Q4_K_M` draft
-  (vocab-matched, 248320 vocab size).
+  (~~vocab-matched~~, 248320 vocab size). **Corrected 2026-08-25:** the vocab
+  *sizes* match, but llama.cpp rejects the pair on its special-token gate and
+  ran every classic-draft measurement through the token-translation fallback.
+  See [`ERRATA.md`](ERRATA.md) A2.
 - llama-server-based Python bench runner (`bench_runner.py`) plus
   three shell driver scripts (`run_matrix.sh`, `run_p0_matrix.sh`,
   `run_verify_matrix.sh`).
@@ -250,7 +368,8 @@ threshold (~94 tokens for this sparsity), so each drafted token pulls
 new experts through the memory hierarchy and verification pays for
 the union.
 
-[Unreleased]: https://github.com/thc1006/qwen3.6-speculative-decoding-rtx3090/compare/v3.0...HEAD
+[Unreleased]: https://github.com/thc1006/qwen3.6-speculative-decoding-rtx3090/compare/v4.0...HEAD
+[v4.0]: https://github.com/thc1006/qwen3.6-speculative-decoding-rtx3090/releases/tag/v4.0
 [v3.0]: https://github.com/thc1006/qwen3.6-speculative-decoding-rtx3090/releases/tag/v3.0
 [v2.3]: https://github.com/thc1006/qwen3.6-speculative-decoding-rtx3090/releases/tag/v2.3
 [v2.1]: https://github.com/thc1006/qwen3.6-speculative-decoding-rtx3090/releases/tag/v2.1

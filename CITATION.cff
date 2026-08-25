@@ -1,0 +1,34 @@
+cff-version: 1.2.0
+title: >-
+  Historical benchmark: llama.cpp speculative decoding for
+  Qwen3.6-35B-A3B UD-Q4_K_XL on one RTX 3090
+message: >-
+  If you cite this dataset, state which release you are citing. Releases
+  v1.0 through v3.0 contain claims retracted by the 2026-08-25 audit; see
+  ERRATA.md.
+type: dataset
+authors:
+  - family-names: Tsai
+    given-names: Hsiu-Chi
+    alias: thc1006
+    email: hctsai1006@cs.nctu.edu.tw
+identifiers:
+  - type: doi
+    value: 10.5281/zenodo.19776558
+    description: Concept DOI for all archived releases
+repository-code: https://github.com/thc1006/qwen3.6-speculative-decoding-rtx3090
+license: MIT
+license-url: https://github.com/thc1006/qwen3.6-speculative-decoding-rtx3090/blob/master/LICENSE
+keywords:
+  - speculative-decoding
+  - llama.cpp
+  - mixture-of-experts
+  - inference-benchmark
+  - RTX-3090
+abstract: >-
+  Archived single-request decode microbenchmarks of llama.cpp speculative
+  decoding for Qwen3.6-35B-A3B-UD-Q4_K_XL on one RTX 3090, collected between
+  2026-04-21 and 2026-05-07 at llama.cpp commits 97895129e, bcb5eeb64, and
+  PR-branch 67cb0d507. The repository preserves per-request timings, raw
+  logs, and an audit (ERRATA.md) documenting which of the originally
+  published claims survive re-examination and which do not.
