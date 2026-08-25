@@ -52,6 +52,17 @@ prompts. v1 never tested that method, and the archived v3 attempt at it compared
 two different binaries. The sign flips with the draft window — +18.7 % at 4,
 −14.8 % at 8, −47.4 % at 16 — so "speculative decoding loses here" was a
 statement about draft-window regimes that this repository had not yet separated.
+
+One qualification travels with that number, and with every speculative
+measurement here: **speculation is not output-preserving on this build.** The
+engine is deterministic — every arm reproduces itself byte-for-byte across
+repeats, and the no-speculation baseline reproduces across separate runs — and
+against that control, turning speculation on changes the generated text in 27 to
+30 of 30 request-pairs. All arms still emit exactly 300 tokens and the baseline's
+decode rate varies only 0.8 % across ten very different prompts, so the
+throughput comparison stands; but this is a faster computation landing on
+slightly different text, not a lossless speedup of the same one
+([ERRATA A11](ERRATA.md#a11-speculative-decoding-is-not-output-preserving-on-this-build-and-the-engine-is-deterministic-enough-to-prove-it)).
 See [`v4_audit_2026_08_25/README.md`](v4_audit_2026_08_25/README.md#run-j--the-first-configuration-that-is-actually-faster).
 
 The one lever upstream names as the fix — batching — was also tested, and does

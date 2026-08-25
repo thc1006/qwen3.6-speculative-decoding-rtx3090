@@ -195,6 +195,31 @@ wins=sum(1 for t,d in per.items()
 chk("J dflash-n4 beats no speculation on every prompt", (wins, len(per)), (10, 10))
 
 
+print("\n=== ERRATA A11: output preservation, and the determinism control ===")
+_J = "v4_audit_2026_08_25/data/matrix_J2_*/*__rep*.json"
+_arms = defaultdict(lambda: defaultdict(dict))
+for _f in glob.glob(_J):
+    _r = json.load(open(_f))
+    for _x in _r["rows"]: _arms[_r["arm"]][_r["repeat"]][_x["tag"]] = _x
+_txt = lambda x: (x.get("reasoning_content") or "") + (x.get("content") or "")
+# the control first: an arm must reproduce itself, or the contrast means nothing
+for _a in sorted(_arms):
+    _reps = sorted(_arms[_a])
+    _same = sum(1 for t in _arms[_a][_reps[0]]
+                if len({_txt(_arms[_a][r][t]) for r in _reps if t in _arms[_a][r]}) == 1)
+    chk(f"A11 control: {_a} reproduces itself", (_same, 10), (10, 10))
+_b = _arms["baseline"]
+for _a, _want in (("spec-dflash-n4",3),("spec-dflash-n8",0),
+                  ("spec-dflash-n16",3),("spec-draft-n8",0)):
+    _id = sum(1 for r in _arms[_a] for t in _arms[_a][r]
+              if (_arms[_a][r][t].get("tokens") or [None]) == (_b[r][t].get("tokens") or [None]))
+    chk(f"A11 {_a} token streams identical to baseline", (_id, 30), (_want, 30))
+_ns = {x["predicted_n"] for a in _arms for r in _arms[a] for x in _arms[a][r].values()}
+chk("A11 every arm generates the same token count", sorted(_ns), [300])
+_rates = [st.mean([_b[r][t]["predicted_per_second"] for r in _b]) for t in _b[0]]
+chk("A11 baseline spread across prompts (%)", round(100*(max(_rates)/min(_rates)-1),1), 0.8, 0.05)
+
+
 print("\n=== theory (ERRATA E1/E2) ===")
 rho=8/256
 chk("rho", round(rho,5), 0.03125, 1e-9)
@@ -246,6 +271,9 @@ DOC_CLAIMS = [
     ("README.md",   "-47.4 %",  "README DFlash n16"),
     ("ERRATA.md",   "+18.7 %",  "D4 resolution"),
     ("ERRATA.md",   "+24.0 %",  "D4 pooled delta"),
+    ("ERRATA.md",   "3 / 30",   "A11 dflash-n4 identical streams"),
+    ("ERRATA.md",   "0.8 %",    "A11 baseline content spread"),
+    ("ERRATA.md",   "110-126",  "A11 median divergence index"),
 ]
 root = pathlib.Path(__file__).resolve().parents[1]
 for f, needle, what in DOC_CLAIMS:

@@ -632,6 +632,57 @@ commit. Evidence: [`v4_audit_2026_08_25/data/abort_evidence_bcb5eeb64.txt`](v4_a
 
 ---
 
+### A11. Speculative decoding is not output-preserving on this build, and the engine is deterministic enough to prove it
+
+Speculative decoding is normally described as exact: at temperature 0 the
+verified tokens are the tokens the target would have produced alone, so the
+method buys speed and changes nothing else. Every throughput comparison in this
+repository has quietly assumed that. It is false here.
+
+Run J logs the full text and the token ids for all 150 requests, so the claim is
+checkable against committed data. Against the no-speculation arm, request by
+request and repeat by repeat:
+
+| arm | token streams identical to no speculation |
+|---|---|
+| `spec-dflash-n4` | 3 / 30 |
+| `spec-dflash-n8` | 0 / 30 |
+| `spec-dflash-n16` | 3 / 30 |
+| `spec-draft-n8` | 0 / 30 |
+
+**The control that makes this readable.** Divergence only means something if the
+engine reproduces itself, and it does, exactly:
+
+- every arm is byte-identical across its own three repeats — 10 / 10 prompts for
+  all five arms;
+- the no-speculation baseline is byte-identical across two *different runs* with
+  different `-fit` settings — 30 / 30.
+
+So the engine is deterministic for a fixed configuration, and turning
+speculation on is what changes the output. The divergence is not early noise
+either: the first differing token sits at index 40 at the earliest, median
+110–126 of 300.
+
+The likely mechanism is ordinary and not a llama.cpp defect: verifying a drafted
+block computes the target's logits at a different batch shape than decoding one
+token at a time, floating-point addition is not associative, and a near-tie in
+the argmax resolves the other way. It is the same batch-invariance problem that
+makes batched inference non-reproducible in general.
+
+**What it changes here.** It does not invalidate run J's +18.7 %: every arm
+generates exactly 300 tokens, so the throughput comparison counts the same
+work, and the no-speculation arm's decode rate varies by only 0.8 % across ten
+very different prompts — content-driven variation of that size cannot produce an
+18.7 % difference. What it changes is the description. This is not a lossless
+speedup of the same computation; it is a faster computation that lands on
+slightly different text.
+
+It also explains an observation v3 recorded without a cause: "outputs were not
+token-identical between conditions" was listed there as a limitation of that
+run (D4). It is a property of speculation on this build, and it reproduces.
+
+---
+
 ## B — statistics that were reported incorrectly
 
 ### B1. `mean tok/s` was the request-mean only; pooled throughput is materially worse

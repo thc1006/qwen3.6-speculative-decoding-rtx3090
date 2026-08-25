@@ -398,6 +398,34 @@ grows. The archived v3 result — DFlash slower — is what this looks like at
 `n_max 8` and 16. v3 measured n_max 4 as well, but across a binary change, and
 read the difference as a DFlash effect.
 
+### The configuration that produced it does not start reliably
+
+Run J's fifteen arm-runs all completed — no crashes, no retries. But the same
+`-c 16384` DFlash configuration, on the same binary and models forty minutes
+later, aborted at its first decode:
+
+```
+ggml_backend_cuda_buffer_type_alloc_buffer: allocating 120.28 MiB on device 0:
+    cudaMalloc failed: out of memory
+srv  update_slots: decode() failed: failed to allocate compute pp buffers
+```
+
+Run J's telemetry peaks at 23946 MiB of 24576 with the drafter resident —
+630 MiB of headroom, 2.6 % of the card — and a 120 MiB allocation still failed,
+so the true transient peak is above what five-second sampling can see. With
+`-fit on` the fitter sizes the target against whatever it reads as free at
+startup, and whether the drafter then fits is decided in that margin.
+
+Run J's numbers are what they are: fifteen clean arm-runs with a matched
+control. But **the configuration is marginal on a 24 GiB card**, and anyone
+reproducing it should expect to lower the context. Run K does exactly that —
+`-c 8192` for every arm including its own baseline — which is why K's absolute
+rates are not comparable with J's and K carries its own control.
+
+The harness now fails fast on this: `wait_health` watches the process instead
+of polling for its full 300-second timeout, so a dead arm costs ~20 seconds to
+discover rather than five minutes per repeat.
+
 **What this does and does not establish.** It establishes that on this host,
 this target, this drafter and this prompt set, a self-speculative method at a
 short draft window beats no speculation by roughly a fifth, with a matched
