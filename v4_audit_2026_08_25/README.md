@@ -516,6 +516,101 @@ Two things checked rather than assumed before reading that −74.1 %:
 
 ---
 
+## Run L — the win is a property of the workload, not of the method
+
+Workload shape has moved a result in this repository before: `ngram-mod` went
+from −6.8 % to −0.7 % between the think-on and think-off matrices and drafted
+zero tokens in the latter (ERRATA D3b). A headline measured with thinking on has
+to be shown with it off.
+
+Run L runs the same five arms twice, five repeats each, at the same context and
+fitter margin, differing only in `enable_thinking`. **Pooled** throughput is the
+metric here: with thinking off the outputs are shorter *and differ in length by
+arm* — median 96 tokens for the baseline against 83 for `dflash-n4` — because
+speculation changes the generated text (A11), and aggregate throughput would mix
+decode rate with output length. Pooled is tokens over decode time and does not.
+
+| arm | thinking ON | | thinking OFF | |
+|---|---|---|---|---|
+| | pooled | vs base | pooled | vs base |
+| no speculation | 122.9 | — | 124.1 | — |
+| `spec-dflash-n2` | 148.8 | **+21.1 %** | 133.5 | **+7.6 %** |
+| `spec-dflash-n4` | 148.5 | +20.9 % | 120.7 | **−2.7 %** |
+| `spec-dflash-n6` | 114.8 | −6.6 % | 93.4 | −24.7 % |
+| `spec-draft-n8` | 30.6 | −75.1 % | 27.5 | −77.8 % |
+
+Thinking was verifiably suppressed on 250/250 requests in the left half and on
+0/250 in the right, measured from the reasoning channel rather than assumed from
+the flag.
+
+**The win survives, and shrinks by two thirds.** At `n_max 2` it goes from
++21.1 % to +7.6 %. At `n_max 4` — the configuration run J headlined — it goes
+**negative**, −2.7 %. Acceptance falls with it: 72.8 % → 58.5 % at `n_max 2`,
+55.6 % → 40.3 % at `n_max 4`.
+
+### Which prompts lose it, and why
+
+`spec-dflash-n2`, per prompt, both halves:
+
+| prompt | ON: acc / Δ | OFF: acc / Δ |
+|---|---|---|
+| `reasoning` | 82.3 % / +30 % | 85.1 % / **+33 %** |
+| `code_small` | 92.4 % / +40 % | 88.6 % / **+33 %** |
+| `short_greet` | 72.8 % / +20 % | 68.0 % / +17 % |
+| `long_explain` | 70.6 % / +19 % | 59.5 % / +9 % |
+| `short_q` | 69.6 % / +18 % | 52.5 % / +4 % |
+| `multi_turn_2` | 60.7 % / +11 % | 53.1 % / +3 % |
+| `medium_rec` | 80.7 % / +28 % | 55.0 % / +2 % |
+| `medium_chat` | 64.6 % / +13 % | 44.8 % / −5 % |
+| `multi_turn_1` | 74.6 % / +23 % | 39.6 % / **−12 %** |
+| `zh_hant` | 66.1 % / +15 % | 28.6 % / **−25 %** |
+
+Ten of ten prompts win with thinking on; seven of ten with it off. The two that
+keep their full gain are the two whose output is most constrained — step-by-step
+arithmetic and Python — and their acceptance barely moves. The one that loses
+most is Traditional Chinese free prose, where acceptance falls from 66 % to 29 %.
+
+Reasoning text is planning prose: enumerated, repetitive, formulaic. A drafter
+predicts it well. Direct answers are shorter and less templated, and Chinese
+free prose least templated of all. **The speed-up is not a property of DFlash;
+it is a property of how predictable the text being generated is**, and the
+thinking channel happens to be very predictable text.
+
+### Acceptance sets the sign — and only the sign
+
+Across all 60 points in run L — ten prompts, three draft lengths, two workloads
+— acceptance and speed-up correlate at **r = +0.946**, and the least-squares
+line crosses zero at **48.2 % acceptance**. Below it 24 of 25 points are slower;
+above it 35 of 35 are faster.
+
+![Acceptance against speed-up, with the out-of-sample test](../analysis/plot_acceptance_threshold.png)
+
+ERRATA A10 is what stops that being written down as a law: a single-regressor
+fit that looked excellent in sample was falsified out of it. So this one was
+pushed at runs J and K, which it never saw and which used a different context
+and a different fitter margin:
+
+| | result |
+|---|---|
+| sign predicted correctly | **10 / 10** |
+| mean magnitude error | +8.1 pp |
+| worst magnitude error | **+52.2 pp** |
+
+**The threshold transfers; the slope does not.** At `n_max 1` the line predicts
++40.5 % from 82 % acceptance and the arm delivers +9.7 %, because one drafted
+token per round cannot buy much however often it lands. The worst miss is
+`spec-draft-n8` at +52.2 pp — a separate 0.8 B draft model pays a full forward
+pass per drafted token where DFlash reuses the target's own layers, so its cost
+per unit of acceptance is not the same quantity at all. Even there the sign was
+right.
+
+So the usable statement is the conservative one: **on this target, a DFlash
+configuration is worth running when it clears roughly 48 % draft acceptance and
+is a net loss when it does not.** How *much* it is worth also depends on draft
+volume, which acceptance alone does not carry.
+
+---
+
 ## Answer 3 — what still needs doing
 
 These runs settle the three questions above. They do **not** make this a

@@ -44,9 +44,9 @@ FOOTER = ("2026-08-26, llama.cpp 3737e4137, one RTX 3090, Qwen3.6-35B-A3B-UD-Q4_
           "Controls and caveats: ERRATA.md, v4_audit_2026_08_25/README.md.")
 
 
-def _footer(fig, extra=""):
-    fig.text(0.5, 0.004, FOOTER + extra, ha="center", va="bottom",
-             fontsize=7.2, color="#5a5a5a", style="italic", wrap=True)
+def _footer(fig, extra="", base=None):
+    fig.text(0.5, 0.004, (FOOTER if base is None else base) + extra, ha="center",
+             va="bottom", fontsize=7.2, color="#5a5a5a", style="italic", wrap=True)
 
 
 def load(pattern: str) -> dict[str, list[dict]]:
@@ -199,6 +199,108 @@ def plot_dflash_sweep() -> None:
     print(f"  wrote {(OUT / 'plot_dflash_sweep.png').relative_to(ROOT)}")
 
 
+# ----------------------------------------------------------------- run L ----
+def plot_acceptance_threshold() -> None:
+    """Acceptance against speed-up, with the out-of-sample points drawn too.
+
+    The line is fitted on run L only. Runs J and K are plotted as open markers
+    because they never informed it - ERRATA A10 is a single-regressor fit that
+    looked excellent in sample and was falsified out of it, so the chart has to
+    show the test, not just the fit.
+    """
+    def series(pattern, only=None):
+        """Per-prompt (acceptance, delta-vs-baseline) points.
+
+        The baseline arm has to be loaded even when it is not plotted, because
+        it is the denominator; filtering the glob instead of the arms is what
+        broke the first version of this function.
+        """
+        per, acc = defaultdict(lambda: defaultdict(list)), defaultdict(lambda: defaultdict(lambda: [0, 0]))
+        for f in glob.glob(str(DATA / pattern)):
+            r = json.load(open(f, encoding="utf-8"))
+            for x in r["rows"]:
+                per[x["tag"]][r["arm"]].append(x["predicted_per_second"])
+                a = acc[x["tag"]][r["arm"]]; a[0] += x["draft_n_accepted"]; a[1] += x["draft_n"]
+        out = []
+        for t in per:
+            if "baseline" not in per[t]:
+                continue
+            for arm in per[t]:
+                if arm == "baseline" or not acc[t][arm][1]:
+                    continue
+                if only and only not in arm:
+                    continue
+                out.append((100 * acc[t][arm][0] / acc[t][arm][1],
+                            100 * (st.mean(per[t][arm]) / st.mean(per[t]["baseline"]) - 1)))
+        return out
+
+    fit = [("thinking on", "matrix_L_thinkon_*/*__rep*.json", "#2f5d8a"),
+           ("thinking off", "matrix_L_thinkoff_*/*__rep*.json", "#c0504d")]
+    xs, ys = [], []
+    fig, ax = plt.subplots(figsize=(9.4, 6.0))
+    for label, pat, colour in fit:
+        # Only the DFlash arms inform the line. spec-draft-n8 is a separate
+        # draft model paying a full forward pass per token, so its cost per unit
+        # of acceptance is a different quantity; it appears in the out-of-sample
+        # markers instead, where it is the worst miss.
+        d = series(pat, only="dflash")
+        xs += [p[0] for p in d]; ys += [p[1] for p in d]
+        ax.scatter([p[0] for p in d], [p[1] for p in d], s=34, color=colour,
+                   alpha=0.8, edgecolor="white", linewidth=0.5,
+                   label=f"run L, {label}  ({len(d)} points, fitted)")
+    mx, my = st.mean(xs), st.mean(ys)
+    slope = sum((a - mx) * (b - my) for a, b in zip(xs, ys)) / sum((a - mx) ** 2 for a in xs)
+    inter = my - slope * mx
+    brk = -inter / slope
+    num = sum((a - mx) * (b - my) for a, b in zip(xs, ys))
+    den = (sum((a - mx) ** 2 for a in xs) * sum((b - my) ** 2 for b in ys)) ** 0.5
+
+    oos = []
+    for pat, bpat in (("matrix_K1_sweep_*/spec-dflash-*__rep*.json", "matrix_K1_sweep_*/baseline__rep*.json"),
+                      ("matrix_J2_*/spec-*__rep*.json", "matrix_J2_*/baseline__rep*.json")):
+        arms = load(pat); base = load(bpat)["baseline"]
+        bp = pooled(base)
+        for a, runs in arms.items():
+            dn = sum(x["draft_n"] for r in runs for x in r["rows"])
+            da = sum(x["draft_n_accepted"] for r in runs for x in r["rows"])
+            if dn:
+                oos.append((100 * da / dn, 100 * (pooled(runs) / bp - 1)))
+    ax.scatter([p[0] for p in oos], [p[1] for p in oos], s=78, facecolor="none",
+               edgecolor="#3f3f46", linewidth=1.4, marker="D",
+               label=f"runs J and K, whole arms ({len(oos)} points, NOT fitted)")
+
+    lo, hi = 15, 95
+    ax.plot([lo, hi], [slope * lo + inter, slope * hi + inter], color="#7a7a82",
+            lw=1.3, ls="-", label=f"least squares on run L  (r = {num / den:+.3f})")
+    ax.axhline(0, color="#3f6d9e", ls="--", lw=1.1)
+    ax.axvline(brk, color="#4a7c59", ls=":", lw=1.6)
+    ax.annotate(f"break-even, {brk:.1f} % accepted", (brk, ax.get_ylim()[1]),
+                textcoords="offset points", xytext=(6, -14), fontsize=9, color="#4a7c59")
+    ax.set_xlim(lo, hi)
+    ax.set_xlabel("draft tokens accepted (%)")
+    ax.set_ylabel("change in decode rate against the matched baseline (%)")
+    ax.set_title("Acceptance decides the sign, and only the sign\n"
+                 "line fitted on run L alone; runs J and K are the out-of-sample test",
+                 fontsize=11.5)
+    ax.legend(loc="upper left", fontsize=8.6, frameon=False)
+    ax.grid(color="#dcdcdc", lw=0.6)
+    ax.set_axisbelow(True)
+    plt.tight_layout(rect=[0, 0.06, 1, 1])
+    # This figure spans both workloads and five repeats, so the shared footer
+    # ("thinking on, three repeats") would be wrong on it.
+    _footer(fig, " Out-of-sample: the sign is right 10 times out of 10; the worst "
+                 "magnitude error is +52.2 pp.",
+            base="2026-08-26, llama.cpp 3737e4137, one RTX 3090, "
+                 "Qwen3.6-35B-A3B-UD-Q4_K_XL, greedy, ten prompts. Fitted points: run L, "
+                 "both workloads, five repeats per arm, per prompt. Out-of-sample points: "
+                 "runs J and K, whole arms, three repeats. "
+                 "Controls and caveats: ERRATA.md, v4_audit_2026_08_25/README.md.")
+    plt.savefig(OUT / "plot_acceptance_threshold.png", dpi=150, bbox_inches="tight")
+    plt.close()
+    print(f"  wrote {(OUT / 'plot_acceptance_threshold.png').relative_to(ROOT)}")
+
+
 if __name__ == "__main__":
     plot_batching()
     plot_dflash_sweep()
+    plot_acceptance_threshold()

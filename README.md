@@ -78,6 +78,24 @@ the plateau at four concurrent requests (+0.4 %) and collapses it at eight
 ([run K](v4_audit_2026_08_25/README.md#run-k--where-the-optimum-is-and-what-batching-does-to-it)).
 On this card, speculation pays for one stream at a time or not at all.
 
+And the win belongs to the workload rather than to the method. Repeated with
+thinking verifiably off on all 250 requests, `n_max 2` falls from +21.1 % to
++7.6 % and `n_max 4` goes **negative** at −2.7 %, tracking draft acceptance down
+with it (72.8 % → 58.5 %, 55.6 % → 40.3 %). Per prompt, step-by-step arithmetic
+and Python keep their full gain — their output is constrained and stays ~85–90 %
+accepted — while Traditional Chinese free prose goes from +15 % to −25 % as
+acceptance falls from 66 % to 29 %. Reasoning text is enumerated, repetitive
+planning prose, which is exactly what a drafter predicts well
+([run L](v4_audit_2026_08_25/README.md#run-l--the-win-is-a-property-of-the-workload-not-of-the-method)).
+
+Across run L's 60 points acceptance and speed-up correlate at **r = +0.946** and
+the line crosses zero near **48 % acceptance**. Pushed out of sample at runs J
+and K it calls the **sign 10 times out of 10** and the magnitude badly wrong —
+worst error +52.2 pp — so the defensible form is the conservative one: a
+configuration here is worth running when it clears roughly 48 % draft
+acceptance, and how much it is worth also depends on draft volume, which
+acceptance alone does not carry.
+
 ![v1 300-token matrix: request-mean vs pooled throughput](analysis/plot_mean_by_config.png)
 
 ---

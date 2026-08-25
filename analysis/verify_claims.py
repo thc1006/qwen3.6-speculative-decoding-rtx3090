@@ -233,6 +233,79 @@ for n, want in ((4, 17.3), (8, -15.8)):
     chk(f"K replicates J at n_max {n}",
         round(100*(_arm(K1 % f"spec-dflash-n{n}")[0]/kb[0]-1), 1), want, 0.05)
 
+print("\n=== run L (2026-08-26): the workload control ===")
+def _pool(pat):
+    rs = [json.load(open(f)) for f in glob.glob("v4_audit_2026_08_25/data/" + pat)]
+    n = sum(x["predicted_n"] for r in rs for x in r["rows"])
+    ms = sum(x["predicted_ms"] for r in rs for x in r["rows"])
+    dn = sum(x["draft_n"] for r in rs for x in r["rows"])
+    da = sum(x["draft_n_accepted"] for r in rs for x in r["rows"])
+    return (1000*n/ms if ms else float("nan")), (100*da/dn if dn else None), rs
+
+for half, pat, want_off in (("think-on", "matrix_L_thinkon_*", 0),
+                            ("think-off", "matrix_L_thinkoff_*", 250)):
+    _rs = [json.load(open(f)) for f in glob.glob(f"v4_audit_2026_08_25/data/{pat}/*__rep*.json")]
+    _sup = sum(1 for r in _rs for x in r["rows"] if x.get("thinking_suppressed"))
+    chk(f"L {half}: requests with thinking suppressed", (_sup, 250), (want_off, 250))
+
+for half, pat, base, rows in (
+        ("think-on",  "matrix_L_thinkon_*",  122.9,
+         (("spec-dflash-n2", 148.8,  21.1, 72.8), ("spec-dflash-n4", 148.5,  20.9, 55.6),
+          ("spec-dflash-n6", 114.8,  -6.6, 43.0), ("spec-draft-n8",   30.6, -75.1, 27.9))),
+        ("think-off", "matrix_L_thinkoff_*", 124.1,
+         (("spec-dflash-n2", 133.5,   7.6, 58.5), ("spec-dflash-n4", 120.7,  -2.7, 40.3),
+          ("spec-dflash-n6",  93.4, -24.7, 30.5), ("spec-draft-n8",   27.5, -77.8, 22.1)))):
+    b = _pool(f"{pat}/baseline__rep*.json")[0]
+    chk(f"L {half} baseline pooled", round(b, 1), base, 0.05)
+    for arm_, pooled_, delta, acc in rows:
+        pv, av, _ = _pool(f"{pat}/{arm_}__rep*.json")
+        chk(f"L {half} {arm_} pooled", round(pv, 1), pooled_, 0.05)
+        chk(f"L {half} {arm_} vs baseline", round(100*(pv/b-1), 1), delta, 0.05)
+        chk(f"L {half} {arm_} acceptance %", round(av, 1), acc, 0.05)
+
+# the relationship, and the out-of-sample test that keeps it honest (cf. A10)
+_xs, _ys = [], []
+for pat in ("matrix_L_thinkon_*", "matrix_L_thinkoff_*"):
+    _per, _acc = defaultdict(lambda: defaultdict(list)), defaultdict(lambda: defaultdict(lambda: [0, 0]))
+    for f in glob.glob(f"v4_audit_2026_08_25/data/{pat}/*__rep*.json"):
+        r = json.load(open(f))
+        for x in r["rows"]:
+            _per[x["tag"]][r["arm"]].append(x["predicted_per_second"])
+            a = _acc[x["tag"]][r["arm"]]; a[0] += x["draft_n_accepted"]; a[1] += x["draft_n"]
+    for t in _per:
+        for a_ in ("spec-dflash-n2", "spec-dflash-n4", "spec-dflash-n6"):
+            if _acc[t][a_][1]:
+                _xs.append(100*_acc[t][a_][0]/_acc[t][a_][1])
+                _ys.append(100*(st.mean(_per[t][a_])/st.mean(_per[t]["baseline"])-1))
+chk("L acceptance-vs-speedup point count", len(_xs), 60)
+
+def _pearson(xs, ys):
+    mx, my = st.mean(xs), st.mean(ys)
+    num = sum((x-mx)*(y-my) for x, y in zip(xs, ys))
+    den = (sum((x-mx)**2 for x in xs) * sum((y-my)**2 for y in ys)) ** 0.5
+    return num / den
+
+chk("L acceptance-vs-speedup Pearson r", round(_pearson(_xs, _ys), 3), 0.946, 0.001)
+_mx, _my = st.mean(_xs), st.mean(_ys)
+_slope = sum((x-_mx)*(y-_my) for x, y in zip(_xs, _ys)) / sum((x-_mx)**2 for x in _xs)
+_break = (_mx*_slope - _my) / _slope
+chk("L break-even acceptance %", round(_break, 1), 48.2, 0.05)
+# out of sample: runs J and K never saw this line
+_oos, _ok = [], 0
+for pat, bpat in (("matrix_K1_sweep_*/spec-dflash-n%s__rep*.json", "matrix_K1_sweep_*/baseline__rep*.json"),):
+    _b = _pool(bpat)[0]
+    for n in (1, 2, 3, 4, 6, 8):
+        pv, av, _ = _pool(pat % n)
+        _oos.append((av, 100*(pv/_b-1)))
+_jb = _pool("matrix_J2_*/baseline__rep*.json")[0]
+for nm in ("spec-dflash-n4", "spec-dflash-n8", "spec-dflash-n16", "spec-draft-n8"):
+    pv, av, _ = _pool(f"matrix_J2_*/{nm}__rep*.json")
+    _oos.append((av, 100*(pv/_jb-1)))
+_ok = sum(1 for a, d in _oos if (a >= _break) == (d > 0))
+chk("L threshold predicts the sign out of sample", (_ok, len(_oos)), (10, 10))
+_err = max((_slope*a + (_my - _slope*_mx)) - d for a, d in _oos)
+chk("L worst out-of-sample magnitude error (pp)", round(_err, 1), 52.2, 0.05)
+
 print("\n=== ERRATA A11: output preservation, and the determinism control ===")
 _J = "v4_audit_2026_08_25/data/matrix_J2_*/*__rep*.json"
 _arms = defaultdict(lambda: defaultdict(dict))
@@ -316,6 +389,12 @@ DOC_CLAIMS = [
     ("v4_audit_2026_08_25/README.md", "-74.1 %", "K c=8 collapse"),
     ("v4_audit_2026_08_25/README.md", "1.305",   "K c=8 draft volume"),
     ("v4_audit_2026_08_25/README.md", "153.2",   "K c=8 baseline"),
+    ("v4_audit_2026_08_25/README.md", "+7.6 %",  "L think-off n2"),
+    ("v4_audit_2026_08_25/README.md", "-2.7 %",  "L think-off n4 goes negative"),
+    ("v4_audit_2026_08_25/README.md", "+0.946",  "L acceptance correlation"),
+    ("v4_audit_2026_08_25/README.md", "48.2 %",  "L break-even acceptance"),
+    ("v4_audit_2026_08_25/README.md", "+52.2 pp", "L worst out-of-sample error"),
+    ("README.md",   "48 % draft",  "README acceptance threshold"),
 ]
 root = pathlib.Path(__file__).resolve().parents[1]
 for f, needle, what in DOC_CLAIMS:
