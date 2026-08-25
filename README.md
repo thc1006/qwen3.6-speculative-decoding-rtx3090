@@ -1,234 +1,607 @@
-# Qwen3.6-35B-A3B speculative decoding on RTX 3090 — first public benchmark
+# Historical benchmark: llama.cpp speculative decoding for Qwen3.6-35B-A3B UD-Q4_K_XL on one RTX 3090
 
 [![DOI](https://zenodo.org/badge/1216484498.svg)](https://doi.org/10.5281/zenodo.19776558)
 
-> **2026-05-07 — v3 update**: DFlash via llama.cpp PR #22105 added. First
-> public RTX 3090 + DFlash + Q4 datapoint. Result: best DFlash config
-> (`--draft-max=8`) is 77.0 tok/s vs 138.9 baseline = **NET LOSS −44.6 %**.
-> Slightly less bad than Oleg draft-spec (−52 %) but still net negative.
-> The MoE-expert-routing × consumer-Ampere bandwidth hypothesis from v2.x
-> generalises to DFlash too — co-trained spec heads (vLLM MTP, see
-> [sister repo](https://github.com/thc1006/qwen3.6-vllm-2x3090)) remain
-> the only positive yield path on this hardware. Full results, raw logs,
-> and reproducer in [`v3_dflash_2026_05_07/`](v3_dflash_2026_05_07/).
-
-> **2026-04-26 — Exp 2 (code/JSON workload, N=3, standalone 3090) added.**
-> A reader-suggested hypothesis was that structured / low-entropy prompts
-> (code, JSON config, SQL) might let llama.cpp's `--draft-min/--draft-max`
-> ngram speculation win where diverse natural-language prompts lost. Tested
-> with 5 code/JSON prompts × 3 trials × 3 configs = 45 measurements.
-> **Result: still NET LOSS** — baseline 139.22 ± 0.46 tok/s, Oleg
-> `--draft-min 2 --draft-max 32` 66.57 ± 7.57 tok/s (**−52 %**), srogmann
-> `--draft-min 48 --draft-max 64` 83.84 ± 1.80 tok/s (**−40 %**). The
-> workload-shape hypothesis is refuted on llama.cpp + Q4 + RTX 3090; the
-> regression is structural (MoE expert-saturation, see "Why" paragraph).
-> Full data + reproducer in
-> [`v2_3090_followup/exp2_codejson_n3/`](v2_3090_followup/exp2_codejson_n3/).
+> [!IMPORTANT]
+> **Audited 2026-08-25.** This repository preserves benchmark runs collected
+> between 2026-04-21 and 2026-05-07. The primary result is a historical,
+> single-request decode microbenchmark for the exact model files, llama.cpp
+> commits, hardware, prompts, and flags listed below. It is not a benchmark of
+> current llama.cpp master, of all RTX 3090 systems, of all Qwen3.6
+> quantisations, of all speculative-decoding methods, or of end-to-end
+> voice-agent latency.
 >
-> **The picture changes for vLLM, however.** A clean A/B retest in the
-> sibling repo [`thc1006/qwen3.6-vllm-2x3090`](https://github.com/thc1006/qwen3.6-vllm-2x3090)
-> on the same physical hardware, run with **matched flags AND
-> `--no-enable-prefix-caching`**, found vLLM `method=mtp num_speculative_tokens=1`
-> is **+27.5 % faster decode rate** (decode TPOT 7.620 ± 0.022 ms → 5.976
-> ± 0.456 ms, holds across all 5 prompts and concurrencies C ∈ {1, 4, 8}).
-> The previously reported vLLM −12 % was a flag confound + an MTP × prefix-cache
-> interaction artifact ([vllm #38182](https://github.com/vllm-project/vllm/issues/38182)
-> reports MTP drops cache hit rate ~92 % → ~71 %). **So: the negative
-> finding in this repo is engine + spec-method specific (llama.cpp draft
-> on consumer Ampere) — not hardware-class-independent as v2.2 stated.**
-> The "Cross-engine confirmation" paragraph below has been corrected
-> accordingly.
-
-> **UPDATE 2026-04-22 — v2 follow-up bench added**
-> In response to [Oleg-dM's comment on the HF discussion](https://huggingface.co/unsloth/Qwen3.6-35B-A3B-GGUF/discussions/14),
-> a second independent bench was run on a fresh single-3090 box, testing
-> `--draft-min 2 --draft-max 32` (Oleg's suggestion), the srogmann-style
-> `--draft-min 48 --draft-max 64`, default `--draft-min 5`, and a control
-> sweep. All artefacts live in [`v2_3090_followup/`](v2_3090_followup/)
-> with methodology + full table in
-> [`v2_3090_followup/SUMMARY.md`](v2_3090_followup/SUMMARY.md).
+> The audit **retracted this repository's headline mechanism.** Earlier
+> versions reported "100 % draft acceptance yet slower, therefore MoE
+> expert-loading overhead". That 100 % is an artefact of how llama.cpp counts
+> acceptance on this model class, not a measurement — see
+> [The "100 % acceptance" retraction](#the-100--acceptance-retraction). Three
+> further defects turned up that no earlier version noticed: the draft model
+> was never actually vocabulary-compatible, three quarters of the v1 requests
+> returned truncated thinking rather than answers, and `llama-server` plus a
+> draft model aborts on this model at `bcb5eeb64`. Every corrected item, with
+> the evidence that settles it, is in [`ERRATA.md`](ERRATA.md); the work queue
+> that closes what is still open is [`RETEST_TODO.md`](RETEST_TODO.md).
 >
-> **Cross-validated on current master** (`bcb5eeb64`, after PR #22227
-> `speculative-simple: add checkpoint support`) — identical results to
-> original commit within ±0.3 % noise, so the regression is not a
-> stale-commit artefact. Raw logs in
-> [`v2_3090_followup/v2_master_cross_check/`](v2_3090_followup/v2_master_cross_check/).
->
-> Short version of what v2 adds:
->
-> - Original "mean 120, bimodal tail 59" is the **mixture** of two
->   regimes — prompts that keep spec-decode active all the way (collapse
->   to 55–85 tok/s) and prompts that exhaust the draft cache and fall
->   back to normal decode (~140 tok/s).
-> - v2 uses 5 predictable structured prompts that keep spec-decode
->   active throughout, so the worst-case degradation (−39 % to −60 %)
->   is more visible than the mixture average.
-> - Oleg's `--draft-min 2 --draft-max 32` beats the `--draft-min=5`
->   defaults (65 vs 55 tok/s) but is still −54 % vs baseline 139.9.
-> - Counter-intuitive finding: aggressive `--draft-min 48 --draft-max 64`
->   is the **least bad** recipe (−39 %) because the large draft window
->   amortises the verify / KV overhead.
-> - `n_acc_tokens / n_gen_tokens` 100 % is real (confirmed via source
->   reading of `common/speculative.cpp` + a `--verbose` run emitting
->   `draft acceptance rate = 1.00000 (115 accepted / 115 generated)`).
->
-> Conclusion of the original post stands: **no spec-decode
-> configuration on a consumer 3090 is a net win for Qwen3.6-35B-A3B
-> at Q4_K_M.**
+> The narrow negative observation survives all of it — and, after the
+> vocabulary defect was fixed and re-measured, it is now on firmer ground than
+> when it was published.
 
-![v2 bench · all configs vs baseline](v2_3090_followup/plot_v2_configs.png)
+## Result in one sentence
 
-**TL;DR.** After llama.cpp [PR #19493](https://github.com/ggml-org/llama.cpp/pull/19493) (merged 2026-04-19) enabled classic draft speculative decoding for Qwen3.5/3.6 MoE models, I ran a 19-config matrix on a single RTX 3090 with `Qwen3.6-35B-A3B-UD-Q4_K_XL` via llama-server at commit `9789512`.
+On one RTX 3090, at llama.cpp commit
+`97895129e5f2bde94d13dc01ca41ee79e9b629f2`, with
+`Qwen3.6-35B-A3B-UD-Q4_K_XL`, greedy decoding, and the ten committed prompts,
+every tested condition that recorded speculative activity had lower
+request-mean **and** lower pooled decode throughput than its matched
+no-speculation reference.
 
-**Finding.** No speculative-decode configuration achieves a net speedup over the non-speculative baseline on this hardware. Mean decode drops **3–12 %** across `ngram-cache`, `ngram-mod`, and classic draft with the vocab-matched `Qwen3.5-0.8B` (vocab 248320) — and **every configuration hits a bimodal tail reaching as low as 59–67 tok/s on reasoning / code prompts**, despite **100 % draft acceptance**.
+The direction holds. The *explanation* published alongside it does not. Re-run
+on a binary where llama.cpp counts acceptance correctly, real acceptance and
+decode rate correlate at **r = +0.998** across the ten prompts — the slowdown
+tracks low acceptance and draft-path cost, which is ordinary speculative-decoding
+economics. The "100 % acceptance yet slower, therefore an MoE pathology"
+anomaly this repository was built around does not exist.
 
-![Cross-hardware comparison: 4 datapoints — 1× 3090 llama.cpp draft (still net loss), 2× 3090 vLLM v1 (confounded), 2× A100 vLLM v2 (cache-ON regime), 2× 3090 vLLM v3 clean A/B (POSITIVE +27.5%)](https://raw.githubusercontent.com/thc1006/qwen3.6-vllm-2x3090/master/analysis/plot_cross_hardware.png)
+![v1 300-token matrix: request-mean vs pooled throughput](analysis/plot_mean_by_config.png)
 
-**Cross-engine status (corrected 2026-04-26):** the negative direction reported here is **engine-specific to llama.cpp + Q4 + draft speculation**, not engine-independent as v2.2 stated. A v3 clean A/B retest in the sibling repo on **2× RTX 3090 PCIe with vLLM 0.19.1** with matched flags `0.90 / 8 / hermes` AND `--no-enable-prefix-caching` flips MTP k=1 to **−21.6 % decode TPOT (≡ +27.5 % faster decode rate)** with N=5 trials × 5 prompts. v1/v2 published vLLM −12 % was a flag confound (0.80/2 vs 0.90/8); the previously cited Modal A100 −11.4 % was prefix-cache-ON and is best read as the prefix-cache-ON-regime A100 datapoint, **not** as evidence MTP is intrinsically negative — vllm [#38182](https://github.com/vllm-project/vllm/issues/38182) reports MTP drops cache hit rate ~92 % → ~71 %, so cache-ON masks MTP's compute speedup with cache-loss penalty. Full v3 methodology + per-prompt + concurrent C∈{1,4,8} data: [thc1006/qwen3.6-vllm-2x3090](https://github.com/thc1006/qwen3.6-vllm-2x3090) (`results/mtp_v3_clean_ab_*.json`).
+---
 
-This is consistent with the MoE-specific pathology in [MoESD (arXiv 2505.19645)](https://arxiv.org/html/2505.19645) and [Utility-Driven SD for MoE (arXiv 2506.20675)](https://arxiv.org/pdf/2506.20675): for a 3B-active MoE like A3B, draft batch `K` stays below the expert-saturation threshold (~94 tokens for this sparsity), so every extra draft token triggers new expert loading that outweighs the verification savings.
+## Experiment registry
 
-![Mean decode by config](analysis/plot_mean_by_config.png)
+These experiments differ in host, tool, commit, sampling, and prompt set. They
+are not a cumulative body of evidence for one hypothesis and must not be pooled.
 
-## Hardware / software
+| ID | Date | Host / runner | Design | Evidence level |
+|---|---|---|---|---|
+| **v1 primary matrix** | 2026-04-21 | one GPU of the dual-3090 `s1` host; `llama-server`; commit `9789512` | 19 run labels (14 recorded draft rounds, 5 did not); 10 prompts; one measured request per prompt/config; `temperature=0`; 300-token cap unless noted | Primary descriptive result. No repeated trials per cell. |
+| **v2 follow-up** | 2026-04-22 | different single-3090 host; `llama-cli`; commits `9789512` and `bcb5eeb64` | 5 prompts; `temperature=0.5`; 200-token cap; different runner and host | Directional check, not a controlled replication of v1 absolute rates. Thinking control did not work ([D1/D2](ERRATA.md#d1--d2--no-cnv-was-rejected-and-no_think-did-not-disable-thinking)). |
+| **Exp 2 code/JSON** | 2026-04-25/26 | v2 host; `llama-cli` at `bcb5eeb64` | 5 prompts × 3 trials × 3 configs | Exploratory only. Intended workload unverified and per-request outputs not committed ([D3](ERRATA.md#d3-exp-2-cannot-be-audited-so-it-cannot-refute-anything)). |
+| **v3 DFlash** | 2026-05-07 | v2 host; `llama-cli` | 5 prompts × 1 run × 3 draft-max settings | Exploratory only. Baseline and treatment used **different binaries** ([D4](ERRATA.md#d4-v3-dflash-compares-two-different-binaries)). |
 
-- **GPU**: 1 × RTX 3090 (`CUDA_VISIBLE_DEVICES=1`), SM 8.6, 24 GB, driver 580.126.09, CUDA 12.6
-- **Host**: Ubuntu 24.04, kernel 6.17, i7-11700, 62 GB RAM
-- **llama.cpp**: commit `9789512` (post #19493 merge, pre #20075 second-round fix)
-- **Model**: [`unsloth/Qwen3.6-35B-A3B-GGUF` · `Qwen3.6-35B-A3B-UD-Q4_K_XL`](https://huggingface.co/unsloth/Qwen3.6-35B-A3B-GGUF/blob/main/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf) — 21 GB
-- **Draft model (for classic SD)**: [`unsloth/Qwen3.5-0.8B-GGUF` · `Qwen3.5-0.8B-Q4_K_M`](https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF) — 508 MB, vocab 248320 (matches target)
-- **Server flags** (fixed across matrix): `-ngl 999 -c 16384 --jinja -fa on -ctk q8_0 -ctv q8_0`
-- **Sampling**: greedy (`temperature=0`), 300 `max_tokens` unless noted; 1 warmup turn; 10 prompts (English chat / reasoning / code / multi-turn / 繁中)
-- Full environment snapshot in [`BENCHMARK_ENV.md`](BENCHMARK_ENV.md)
+The v2 / Exp 2 / v3 files remain valuable archival evidence. Their absolute
+rates and their causal interpretations must be read inside those limits.
 
-## Results
+---
 
-### All configurations (sorted)
+## v1 hardware, software, and artefacts
 
-| config                   | mean tok/s | min     | max    | std    | draft accept     | notes |
-|--------------------------|------------|---------|--------|--------|------------------|-------|
-| **baseline**             | **135.7**  | 135.3   | 136.2  |  0.3   | —                | reference |
-| baseline-rerun           | 135.5      | 135.1   | 136.0  |  0.3   | —                | reproduction |
-| draft-qwen3-0.6b         | 135.3      | 135.0   | 135.5  |  0.2   | — (draft failed) | **vocab 151936 ≠ 248320, draft never attached — treat as baseline, shown for posterity** |
-| ngmod-n32                | 133.7      | 133.5   | 133.9  |  0.1   | 0 %              | N too large to hit — effectively baseline |
-| baseline-1000tok         | 133.2      | 132.7   | 134.0  |  0.4   | —                | —2 % from long output alone |
-| ngram-mod-n24            | 131.1      | 129.6   | 136.1  |  2.6   | 100 % (35/35)    | srogmann-recommended params |
-| ngmod-n24-1000tok        | 131.1      | 124.1   | 138.3  |  3.9   | 100 %            | long output same |
-| ngmod-n{8,12,16,20}      | 129.6–130.0| 119.8–128.8 | 134 | 2–5  | 100 %            | whole ngram-mod family ≈ -4 % |
-| ngcache-kv-fp16          | 121.3      |  67.3   | 137.9  | 27.6   | 100 % (88/88)    | **fp16 KV does not rescue** — KV quant is not the cause |
-| **draft-q35-08b-max8**   | **121.1**  | **59.2**| 136.2  |**30.9**| **100 % (270/270)** | **correct-vocab classic SD, still net-negative** |
-| draft-q35-08b-max16      | 121.0      |  59.6   | 136.1  | 30.3   | 100 %            | increasing K does not help |
-| draft-q35-08b-max32      | 120.3      |  59.5   | 134.8  | 29.7   | 100 %            | |
-| draft-q35-08b-1000tok    | 120.2      |  64.8   | 133.9  | 28.3   | 100 %            | long output same |
-| ngram-cache              | 119.1      |  65.3   | 136.2  | 27.8   | 100 % (96/96)    | |
-| ngcache-rerun            | 118.8      |  65.6   | 135.7  | 27.5   | 100 %            | reproduction |
-| ngcache-1000tok          | 115.9      |  60.0   | 133.6  | 28.7   | 100 % (317/317)  | worst mean |
+- **GPU used by the benchmark process** — RTX 3090 24 GiB, `CUDA_VISIBLE_DEVICES=1`, SM 8.6.
+- **Physical host** — two RTX 3090s, Intel Core i7-11700, 62 GiB RAM, Ubuntu 24.04.4, kernel 6.17. GPU 0 was deliberately left to an Ollama instance; the benchmark process had one card to itself, the host did not, and no continuous utilisation trace was captured ([C4](ERRATA.md#c4-gpu-0-was-running-another-workload)).
+- **Driver** — NVIDIA 580.126.09. `nvidia-smi` reports driver support for CUDA 13.0; llama.cpp was built with the **CUDA 12.6** toolkit. These are different things.
+- **llama.cpp** — `97895129e5f2bde94d13dc01ca41ee79e9b629f2` (short `9789512`), authored 2026-04-20, post PR #19493.
+- **Target** — `Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf` (~21 GiB), from [`unsloth/Qwen3.6-35B-A3B-GGUF`](https://huggingface.co/unsloth/Qwen3.6-35B-A3B-GGUF).
+- **Classic draft model** — `Qwen3.5-0.8B-Q4_K_M.gguf` (~508 MiB), from [`unsloth/Qwen3.5-0.8B-GGUF`](https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF).
+- **Fixed server flags** — `-ngl 999 -c 16384 --jinja -fa on -ctk q8_0 -ctv q8_0 --no-webui`.
+- **Sampling** — greedy, `temperature=0`.
+- **Warm-up** — one 8-token completion before each config's prompt sequence. This is not a full-shape warm-up.
+- **Config execution** — server restarted between configs, so KV and prompt-cache state does not bleed across configs.
+- Full snapshot: [`BENCHMARK_ENV.md`](BENCHMARK_ENV.md).
 
-### Per-prompt heatmap
+Expected SHA-256 of the v1 model files:
 
-![per prompt](analysis/plot_per_prompt.png)
-
-The regression is entirely **bimodal by prompt class**: chat prompts (`short_greet`, `multi_turn_*`, `zh_cn`) where ngram cannot find hits stay at ~135 tok/s; structured prompts (`reasoning`, `code_small`, `long_explain`) where drafts do trigger collapse to 59–95 tok/s.
-
-### 100 % draft acceptance vs decode speed
-
-![accept vs speed](analysis/plot_accept_vs_speed.png)
-
-With `predicted_per_second` as the per-request decode rate reported by llama-server and every tested config returning **100 % acceptance**, the classical intuition "high acceptance → high speedup" fails here. This is not a measurement artifact; it is MoE expert-loading overhead on every drafted token.
-
-## Why — in one paragraph
-
-Qwen3.6-35B-A3B routes 8-of-256 experts per token (sparsity ρ ≈ 0.031). Per [MoESD](https://arxiv.org/html/2505.19645) the batch size needed to saturate the expert set is `T_thres = log_{1-ρ}(1 - 0.95) ≈ 94`. For any `K` draft tokens below that, each drafted token has high probability of pulling a fresh expert slice into compute, and the verification forward pass ends up loading the *union* of those per-token expert sets. At single-stream batch=1, K (1–32) ≪ T_thres, so this expert-union overhead is paid in full with no amortization vs autoregressive — exceeding the savings from skipping per-token forward passes, even at 100 % acceptance.
-
-**Scope correction (2026-04-26):** earlier versions of this paragraph claimed the mechanism is "engine-independent" / "hardware-class-independent" because the same negative direction was seen across 3090 (llama.cpp draft) and A100 NVLink (vLLM MTP, prefix-cache-ON) and Hopper H20-3e ([vllm #38182](https://github.com/vllm-project/vllm/issues/38182)). The v3 vLLM clean A/B retest with prefix-cache OFF on the same 3090 hardware ([sibling repo](https://github.com/thc1006/qwen3.6-vllm-2x3090)) flipped vLLM MTP k=1 to **+27.5 %**, so the engine-independence claim was wrong. The expert-saturation argument **does** still explain why **llama.cpp's draft-then-verify path** loses on consumer Ampere (the verify pass loads the union of K positions' expert sets at draft K=1–32 ≪ T_thres). What's different about vLLM MTP k=1 is the structurally smaller K (k=1 vs llama.cpp drafts of 5–64) and the lighter-weight verify path that reuses the target's hidden states without a separate draft-model forward pass. So: the mechanism is real and real-world relevant for **draft-model spec-decode**, but does not generalize to all spec-decode methods. Mixtral measurements in [arXiv 2506.20675](https://arxiv.org/pdf/2506.20675) match the draft-spec direction.
-
-Counter-example: the same `ngram-mod` machinery in [PR #20075](https://github.com/ggml-org/llama.cpp/pull/20075) shows Qwen3.5-**122B-A10B** (10 B active) gaining roughly **+15–45 %** on Apple M3 Max (PR author's bench, 0.8 B draft, acceptance 63–89 %), and **+31 %** to **+119 %** on AMD Strix Halo gfx1151 with the REAP-pruned variant ([@0xSero](https://github.com/0xSero)'s comment in the same PR). A10B has a 3.3× larger active footprint and a correspondingly lower `T_thres`, which is why it gains where A3B loses on consumer GPUs.
-
-## Practical recommendation
-
-For Qwen3.6-35B-A3B on a single RTX 3090 as of 2026-04-21:
-
-- **Do not** enable `--spec-type ngram-cache`, `--spec-type ngram-mod`, or classic `--model-draft` — every variant is net-negative.
-- **Do** use the baseline llama-server setup above; `135.7 tok/s` is the fastest current single-request decode.
-- If you previously ran Qwen3.6 via Ollama 0.20.x with `Q4_K_M` and saw ~107 tok/s, switching to llama-server with the `UD-Q4_K_XL` quant is itself a **+27 %** speedup before any speculation.
-
-Situations where this may not apply: (i) A10B-class and larger MoE variants, where active params cross the expert-saturation threshold; (ii) after the hybrid-SSM/MoE checkpoint situation settles — [PR #20075](https://github.com/ggml-org/llama.cpp/pull/20075) was open at v1 publication, with a comment on 2026-04-25 suggesting it can be closed because its functionality has been superseded elsewhere; future llama.cpp versions may behave differently; (iii) with a future smaller-bpw draft model distilled specifically for A3B that can sustain very large `K`; (iv) **batched multi-user serving** — speculative decoding's verification cost can amortise across concurrent requests, but I have not benched this path for llama.cpp + A3B; this study covers single-stream voice-dialog only. (v) **a different inference engine entirely** — the v3 vLLM clean A/B retest in the [sibling repo](https://github.com/thc1006/qwen3.6-vllm-2x3090) (matched flags + `--no-enable-prefix-caching`) flips MTP k=1 to **+27.5 % faster decode rate** on the same 3090 hardware, so the negative finding here is engine + spec-method specific to llama.cpp draft-then-verify, not a general property. (vi) **other speculative methods** — this bench tests `ngram-cache`, `ngram-mod`, and classic `--model-draft` in llama.cpp. **EAGLE-3** with CUDA graphs (vLLM Model Runner V2) is **not** evaluated here and may have different characteristics on A3B.
-
-## Reproduce
-
-```bash
-# 1. Build llama.cpp with CUDA for SM 8.6
-git clone --depth 1 https://github.com/ggml-org/llama.cpp ~/benchmarks/llama.cpp
-cd ~/benchmarks/llama.cpp
-CUDACXX=/usr/local/cuda-12.6/bin/nvcc cmake -B build \
-    -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=86 \
-    -DLLAMA_CURL=OFF -DBUILD_SHARED_LIBS=OFF
-cmake --build build --config Release -j --target llama-server llama-bench
-
-# 2. Pull target + draft GGUFs
-hf download unsloth/Qwen3.6-35B-A3B-GGUF Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf \
-    --local-dir ~/benchmarks/models/qwen3.6-ud-q4kxl
-hf download unsloth/Qwen3.5-0.8B-GGUF --include '*Q4_K_M*' \
-    --local-dir ~/benchmarks/models/qwen3.5-0.8b
-
-# 3. Run the matrix (expect ~30 minutes wall-clock on one 3090)
-bash run_matrix.sh           # 4 configs: baseline + ngcache + ngmod-n24 + draft-qwen3-0.6b
-bash run_p0_matrix.sh        # 13 configs: correct-vocab draft sweep + 1000tok + N sweep + kv-fp16
-
-# 4. Plot + summary
-python analysis/plot.py
+```
+707a55a8a4397ecde44de0c499d3e68c1ad1d240d1da65826b4949d1043f4450  Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf
+bd258782e35f7f458f8aced1adc053e6e92e89bc735ba3be89d38a06121dc517  Qwen3.5-0.8B-Q4_K_M.gguf
+ac2d97712095a558e31573f62f466a3f9d93990898b0ec79d7c974c1780d524a  Qwen3-0.6B-Q4_K_M.gguf
 ```
 
-Raw per-request timings for every run are in [`results/*.json`](results/) and [`results/verify/*.json`](results/verify/). Aggregated numbers are in [`analysis/summary.csv`](analysis/summary.csv) and [`analysis/summary_by_config.csv`](analysis/summary_by_config.csv).
+> [!WARNING]
+> **Equal vocabulary size is not vocabulary compatibility.** Both
+> Qwen3.6-35B-A3B and Qwen3.5-0.8B declare `vocab_size = 248320`, and this
+> repository previously called the pair "vocab-matched". llama.cpp disagreed:
+> `common_speculative_are_compatible` fails its **special-token** gate and
+> enables the token-translation fallback, so every classic-draft round
+> detokenised the context to a string and re-tokenised it for the draft model.
+> All classic-draft rows below were measured on that path.
+>
+> The cause is one missing GGUF key. `Qwen/Qwen3.5-0.8B` has no
+> `generation_config.json` upstream (HTTP 404), so the converter wrote no
+> `tokenizer.ggml.bos_token_id`, and llama.cpp substitutes the hard-coded
+> GPT-2 legacy default `11` against the target's `248044`. Both models declare
+> `add_bos_token = false`, so the gate compares a field neither model uses.
+>
+> **It was fixed and re-measured on 2026-08-25, and it does not explain the
+> slowdown:** `--override-kv tokenizer.ggml.bos_token_id=int:248044` flips the
+> gate, and `long_explain` moves from 48.4 tok/s to 50–51 tok/s against a
+> ~126 tok/s baseline. See
+> [A2](ERRATA.md#a2-the-draft-model-was-not-vocabulary-compatible-the-run-used-the-token-translation-fallback).
 
-## Methodology notes
+---
 
-- `predicted_per_second` as reported by llama-server is `predicted_n / predicted_ms * 1000`. Draft time and verification time are both included in the denominator. This is the user-visible metric.
-- Warmup of one completion before measurement; server is restarted between configs so KV cache / prefix-cache state never bleeds across configs.
-- Prompt set (10 prompts) spans short chat, reasoning, code, multi-turn, and 繁體中文 — deliberately chosen so that ngram-family draft triggers on some prompts and not others, exposing the bimodal behaviour.
-- Output capped at 300 tokens (and 1000 tokens in the `-1000tok` variants); all completions reach the cap, so `predicted_n` is constant across runs within a config.
-- Single-GPU single-request (`batch=1`) is the use case for an interactive desktop robot; results do not extrapolate to multi-tenant serving where concurrent-batching hides the MoE overhead.
+## Metric definitions
 
-## Limitations
+llama-server reports, per request,
+`predicted_per_second = 1000 × predicted_n / predicted_ms`. `predicted_ms`
+covers target decoding plus the speculative proposal, verification, and
+bookkeeping. It excludes prompt prefill, queueing, network transport, speech
+I/O, and application latency.
 
-- Single node, single 3090. NVLink or tensor-parallel across two 3090s is not evaluated; previous community benchmarks ([himeshp](http://himeshp.blogspot.com/2025/03/vllm-performance-benchmarks-4x-rtx-3090.html), [ure.us](https://ure.us/articles/best-local-llm-agentic-coding/)) find TP gives < 4 % speedup on A3B due to all-to-all scatter/gather.
-- Each config run once (10 prompts, 1 warmup); no formal n=3 replicates. Std columns in the table are over prompts, not over repeats. Observed run-to-run variance between `baseline` and `baseline-rerun` is 0.2 tok/s, which is well below any effect discussed.
-- llama.cpp is evolving fast — commit `9789512` on 2026-04-21 is what was tested. [PR #20075](https://github.com/ggml-org/llama.cpp/pull/20075) is open and may change these numbers.
-- Output was greedy. With `temperature > 0`, draft acceptance rates would drop and the regression may be slightly different in shape but not in direction (the bottleneck is expert loading, not draft quality).
+Three summaries are reported for every config:
 
-## Validation timeline (post-publication)
+- **Request-mean decode rate** — arithmetic mean of each request's
+  `predicted_per_second`. Every prompt weighs the same.
+- **Pooled decode throughput** — `1000 × Σ predicted_n / Σ predicted_ms`. Every
+  generated token weighs the same. For equal-length outputs this is the
+  harmonic mean of the per-request rates.
+- **Min–max across prompts** — workload heterogeneity. One measurement per
+  prompt/config, so it is **not** repeated-run uncertainty, a standard error,
+  or a confidence interval.
 
-Independent observations and academic work that have appeared since the v1 / v2 benches went public, and that broadly support the saturation-threshold framing above. Each row notes scope honestly — none of these are exact replicas of this bench.
+`draft_n` and `draft_n_accepted` need their own definition, because they do not
+mean what their names suggest — see the next section.
 
-| When | Source | Independent evidence |
-|---|---|---|
-| 2026-02-17 | [MoE-Spec (arXiv 2602.16052)](https://arxiv.org/abs/2602.16052) | Theoretical naming for the phenomenon: "expert budgeting" — large draft trees activate many unique experts, "the top 32 of 64 experts capture 93 % of aggregate routing probability"; proposes a training-free verification-time budget cap. No public code yet. |
-| 2026-02 | [Alloc-MoE (arXiv 2604.08133)](https://arxiv.org/abs/2604.08133) and [XShare (arXiv 2602.07265)](https://arxiv.org/pdf/2602.07265) | Concurrent papers framing the same expert-saturation pressure under speculative parallelism. |
-| 2026-02-26 | [vllm-project/vllm#35387](https://github.com/vllm-project/vllm/issues/35387) | **Adjacent**: 4× H100 80 GB FP8 + Qwen3-Next-**80B**-A3B-Instruct-FP8 with `method=qwen3_next_mtp` reports **−76.5 %** latency regression (not the same hardware/quant/arch as this bench, and the suspected root cause is `mamba_postprocess` CPU sync — different mechanism — but the same negative direction). |
-| 2026-03-26 → 2026-04-14 | [vllm-project/vllm#38182](https://github.com/vllm-project/vllm/issues/38182) | Independent reporter on **NVIDIA H20-3e (Hopper)** finds Qwen3.5-35B-A3B + MTP **drops prefix-cache hit rate from ≈92 % → ≈71 %**. @Angazenn pinpoints the cause to `vllm/v1/core/single_type_kv_cache_manager.py:L457` (last matched block force-dropped when MTP is on, combined with very large block sizes for Qwen3.5 MoE). @inaniloquentee volunteered a fix; no PR submitted as of 2026-04-25. |
-| 2026 | [vLLM Qwen3.5/3.6 Recipes — official doc](https://docs.vllm.ai/projects/recipes/en/latest/Qwen/Qwen3.5.html) | Now states up-front: "MTP-1 reduces per-token latency but **degrades text throughput under high concurrency** because speculative tokens consume KV cache capacity, reducing effective batch size." The single-stream / consumer-GPU regime of this bench is consistent with that disclosure. |
-| 2026-04-22 | [HF discussion #14 on `unsloth/Qwen3.6-35B-A3B-GGUF`](https://huggingface.co/unsloth/Qwen3.6-35B-A3B-GGUF/discussions/14) | Oleg-dM's question on `--draft-min` aggressiveness motivated the v2 follow-up bench. Same conclusion held across both `9789512` and current master `bcb5eeb64` commits. |
+---
 
-**Net interpretation (revised 2026-04-26).** The `Qwen3.x-35B-A3B + spec-decode` regression I observed on a single RTX 3090 is robust **for llama.cpp's draft-then-verify path** — confirmed on different commits (`9789512` and master `bcb5eeb64`), on N=3 standalone-3090 replication, and on a code/JSON workload variant (Exp 2 in v2.3, all configs −40 % to −52 %). The MoE-Spec / Utility-Driven SD theoretical framing applies here because llama.cpp's K=5–64 draft tokens cause the verify pass to load the union of K positions' expert sets at K ≪ T_thres ≈ 94. The narrative should be read as "**single-stream llama.cpp draft-spec for 3B-active MoE on consumer Ampere is a net loss across the configs tested**", **NOT** as engine-independent — the v3 vLLM clean A/B retest in the [sibling repo](https://github.com/thc1006/qwen3.6-vllm-2x3090) (matched flags + `--no-enable-prefix-caching`) flips MTP k=1 to **+27.5 % faster decode rate** on the same 3090 hardware, because vLLM MTP k=1 has structurally smaller K (k=1 vs llama.cpp 5–64) and a lighter-weight verify path that reuses target hidden states. Earlier corroborations on Hopper H100/H20-3e + FP8 + vLLM MTP that I cited may also be partly attributable to the [vllm #38182 prefix-cache × MTP interaction](https://github.com/vllm-project/vllm/issues/38182) (cache hit rate drops 92 % → 71 % under MTP) rather than an intrinsic MoE × MTP property; an A100/H100 v3-equivalent retest with prefix-cache OFF is the natural follow-up.
+## The "100 % acceptance" retraction
+
+**Earlier versions of this README said:** every tested configuration returned
+100 % draft acceptance, so "high acceptance → high speedup" fails, and "this is
+not a measurement artifact; it is MoE expert-loading overhead on every drafted
+token."
+
+**It is a measurement artefact.** On this model the ratio can only ever be 1.0.
+
+![What the 100 % acceptance number actually counts](analysis/plot_acceptance_accounting.png)
+
+Qwen3.6-35B-A3B is a hybrid Gated-DeltaNet / MoE model, so
+`common_context_can_seq_rm()` returns `COMMON_CONTEXT_SEQ_RM_TYPE_FULL` — the
+context cannot roll back part of a sequence. In `server-context.cpp` at the
+tested commit, a partially accepted draft therefore takes an early `continue`
+that restores a state checkpoint and skips **both** acceptance counters, then
+re-verifies the truncated, already-known-accepted prefix on the next pass. Only
+rounds accepted in full ever reach the counters.
+
+The drafter's own counters are printed on the next line of the same log and say
+something different:
+
+| counter | value | what it counts |
+|---|---:|---|
+| server `draft_n_accepted / draft_n` — the published number | **115 / 115 = 100.0 %** | tokens re-verified after truncation to the accepted prefix |
+| drafter `#acc tokens / #gen tokens` | **115 / 214 = 53.7 %** | true token-level acceptance |
+| drafter `#acc drafts / #gen drafts` | **33 / 81 = 40.7 %** | true draft-sequence acceptance |
+
+Over that run: 53 verification attempts, 33 fully accepted, **20 partially
+accepted and thrown away**. Rebuild the table yourself with
+`python analysis/verbose_accounting.py`.
+
+**Consequences for reading this repository's data.** In
+[`analysis/summary.csv`](analysis/summary.csv), `draft_n` means "draft tokens in
+verification rounds that were accepted in full", a quantity guaranteed to equal
+`draft_n_accepted`. `draft_n = 0` means "no fully accepted round was recorded",
+**not** "speculation did not run". The retracted
+`analysis/plot_accept_vs_speed.png` — every one of whose 140 points sat at
+exactly 100 % — has been deleted.
+
+**What the same log does support.** It contains a direct cost decomposition
+that nobody in the earlier write-ups used. For 200 tokens generated at
+63.2 tok/s (≈ 3165 ms):
+
+| term | measured |
+|---|---:|
+| drafter `generate()` time | **999.6 ms ≈ 31.6 % of the generation wall-clock** |
+| speculative checkpoints created | 33 × 62.8 MiB = 2.02 GiB written |
+| checkpoints restored after a partial accept | 20 = 1.23 GiB read back |
+| verification rounds discarded and redone | 20 of 53 (37.7 %) |
+
+About a third of generation time is the draft model alone, and about 38 % of
+verification rounds are paid for twice. That accounts for a slowdown of this
+size without any appeal to expert-union loading.
+
+---
+
+## v1 representative results
+
+Ten 300-token requests per config, one measurement each. Deltas are against the
+matched no-speculation reference. Descriptive only.
+
+| condition | request-mean | pooled | median | min | requests with a counted draft round |
+|---|---:|---:|---:|---:|---:|
+| baseline | 135.7 | 135.7 | 135.6 | 135.3 | 0 / 10 |
+| baseline-rerun | 135.5 (−0.1 %) | 135.5 (−0.1 %) | 135.4 | 135.1 | 0 / 10 |
+| draft-qwen3-0.6b *(vocab 151936, draft never attached)* | 135.3 (−0.3 %) | 135.3 (−0.3 %) | 135.3 | 135.0 | 0 / 10 |
+| ngmod-n32 | 133.7 (−1.5 %) | 133.7 (−1.5 %) | 133.6 | 133.5 | 0 / 10 |
+| ngram-mod-n24 | 131.1 (−3.4 %) | 131.1 (−3.4 %) | 130.0 | 129.6 | 8 / 10 |
+| ngmod-n20 / n16 / n8 / n12 | 129.6 – 130.1 (−4.2 to −4.5 %) | 129.5 – 130.0 (−4.2 to −4.6 %) | 129.1 – 132.0 | 119.8 – 128.8 | 7–9 / 10 |
+| ngcache-kv-fp16 *(one-sided control, see below)* | 121.3 (−10.6 %) | **113.7 (−16.2 %)** | 137.8 | 67.3 | 3 / 10 |
+| draft-q35-08b-max8 | 121.1 (−10.8 %) | **109.9 (−19.0 %)** | 135.6 | 59.2 | 2 / 10 |
+| draft-q35-08b-max16 | 121.0 (−10.9 %) | **110.3 (−18.7 %)** | 135.2 | 59.6 | 2 / 10 |
+| draft-q35-08b-max32 | 120.3 (−11.4 %) | **110.0 (−19.0 %)** | 134.1 | 59.5 | 2 / 10 |
+| ngram-cache | 119.1 (−12.2 %) | **111.3 (−18.0 %)** | 135.6 | 65.3 | 3 / 10 |
+| ngcache-rerun | 118.8 (−12.4 %) | **111.1 (−18.1 %)** | 135.0 | 65.6 | 3 / 10 |
+
+Long-output variants use their own reference, `baseline-1000tok` (request-mean
+133.2, pooled 133.1):
+
+| condition | request-mean | pooled | note |
+|---|---:|---:|---|
+| ngmod-n24-1000tok | 131.1 (−1.6 %) | 131.1 (−1.5 %) | |
+| draft-q35-08b-1000tok | 120.2 (−9.7 %) | **106.1 (−20.3 %)** | |
+| ngcache-1000tok | 115.9 (−13.0 %) | **98.9 (−25.7 %)** | worst pooled result in the matrix |
+
+Full per-request values: [`analysis/summary.csv`](analysis/summary.csv).
+Per-config aggregate with all four summaries and both references:
+[`analysis/summary_by_config.csv`](analysis/summary_by_config.csv).
+
+### Per-prompt structure
+
+![per-prompt decode rate, normalised to the matched baseline](analysis/plot_per_prompt.png)
+
+Black outlines mark requests that recorded at least one fully accepted draft
+round. The picture is not the "chat prompts never trigger, structured prompts
+collapse" taxonomy this README used to assert:
+
+- **ngram-mod** records draft rounds on the *chat* prompts — `short_q`,
+  `medium_chat`, `medium_rec`, `multi_turn_1`, `multi_turn_2`, `zh_hant` — and
+  **not** on `code_small` at n = 24. Its cost is a flat ~4 % everywhere.
+- **classic draft** records rounds only on `long_explain` and `code_small`, and
+  leaves `reasoning` at full baseline speed.
+- **ngram-cache** records rounds on `reasoning`, `long_explain`, `code_small`.
+
+Three configurations, three different prompt partitions. Ten hand-written
+prompts cannot establish a prompt taxonomy, and the earlier "entirely bimodal
+by prompt class" sentence was wrong ([B5](ERRATA.md#b5-the-regression-is-entirely-bimodal-by-prompt-class-is-false-for-the-ngram-mod-family)).
+
+The heatmap also exposes why `ngcache-kv-fp16` is a **one-sided control**: on
+the seven prompts with no draft round it runs at 101–102 % of the q8_0
+baseline, because fp16 KV is simply faster when speculation is idle. There is
+no no-speculation fp16-KV row in the matrix, so that condition cannot separate
+a speculation effect from a KV-precision effect, and the old reading — "fp16 KV
+does not rescue, so KV quant is not the cause" — does not follow.
+
+---
+
+## What the audit measured on 2026-08-25
+
+Three new measurements were taken on the original v2/v3 bench host. They are
+recorded here because two of them bear directly on how the archived data should
+be read.
+
+Full data and method: [`v4_audit_2026_08_25/`](v4_audit_2026_08_25/).
+
+**With acceptance measured properly, the anomaly disappears.** Upstream has
+since made the partial-accept path reachable, so the counter reports real
+ratios. On post-merge master `3737e4137` with `--spec-type draft-simple`,
+3 repeats, ABBA-ordered:
+
+| prompt | baseline | with draft | vs baseline | real acceptance |
+|---|---:|---:|---:|---:|
+| reasoning | 132.7 | 45.5 | −65.7 % | 52 % |
+| code_small | 132.7 | 45.5 | −65.7 % | 50 % |
+| medium_rec | 133.3 | 36.4 | −72.7 % | 35 % |
+| long_explain | 132.8 | 31.3 | −76.4 % | 28 % |
+| short_q | 133.3 | 27.8 | −79.1 % | 22 % |
+| multi_turn_1 | 132.6 | 27.1 | −79.6 % | 20 % |
+
+**Pearson r between real acceptance and decode rate = +0.998** across the ten
+prompts. Acceptance and speed are almost perfectly correlated, exactly as
+ordinary speculative-decoding economics predicts. **There is no anomaly left to
+explain, and no MoE-specific pathology is needed** — the slowdown on this
+hardware is low acceptance plus draft-path cost. That is the single most
+important correction in this audit.
+
+**The vocabulary defect is real but is not the cause.** Same binary, same draft
+file, same flags, only the BOS override differing:
+
+| binary | arm | request-mean | drafted / accepted |
+|---|---|---:|---|
+| `bcb5eeb64` | translation fallback, as published | 113.9 | 194 / 194 |
+| `bcb5eeb64` | matched via `--override-kv` | 113.5 | 194 / 194 |
+| master `3737e4137` | translation fallback | 33.6 | 16590 / 4926 |
+| master `3737e4137` | matched via `--override-kv` | 33.7 | 16590 / 4926 |
+
+The drafted and accepted totals are byte-identical across arms on both
+binaries, so the translation path was not changing what got drafted. The
+negative finding survives, now on a matched path.
+
+**`llama-server` plus a draft model aborts on this model at `bcb5eeb64`.**
+Reproducibly, 3 / 3 on the `code_small` prompt, in both arms, immediately after
+a partial-accept checkpoint restore:
+
+```
+CUDA error: an unsupported value or parameter was passed to the function
+  in function ggml_cuda_op_mul_mat_cublas
+  #14 server_context_impl::update_slots()
+```
+
+The no-speculation arm completes all ten prompts every time. This means v2's
+"cross-checked on master `bcb5eeb64`, identical results" is a `llama-cli`
+cross-check only — the `llama-server` path that produced every v1 number does
+not survive on that commit with a draft attached. It is **fixed on post-merge
+master**: all thirty requests complete on `3737e4137`. See
+[A6](ERRATA.md#a6-llama-server-plus-a-draft-model-aborts-on-this-model-at-bcb5eeb64).
+
+**Three quarters of v1's requests returned no answer.** `message.content` is
+empty for 144 of 190 v1 requests, and 19/19 for both `reasoning` and
+`code_small` — the 300-token cap was reached inside the thinking block, and
+`reasoning_content` was never captured. v1 measured decode throughput on
+truncated chain-of-thought, not on answers. See
+[A5](ERRATA.md#a5-three-quarters-of-v1s-requests-returned-no-answer-at-all--only-truncated-thinking).
+
+---
+
+## What the v1 data support
+
+- No tested condition that recorded speculative activity exceeded its matched
+  no-speculation reference in aggregate, on this setup.
+- The published acceptance ratio cannot be used to predict speedup, because it
+  is not an acceptance measurement.
+- Draft-side cost is large and directly measured: the drafter alone consumed
+  ~32 % of generation wall-clock in the one run with a verbose trace, and ~38 %
+  of verification rounds in that run were discarded and repeated.
+- Deep slow tails are real but config-specific and prompt-specific: 59–67 tok/s
+  for particular ngram-cache and classic-draft requests, while the whole
+  ngram-mod family stays within 12 % of baseline at its worst.
+
+## What the v1 data do not support
+
+- Any universal statement about Qwen3.6, A3B models, RTX 3090s, consumer
+  Ampere, or speculative decoding in general.
+- That every run label performed speculation. Five recorded no draft round at
+  all, including three baselines and an incompatible-draft control.
+- That expert loading, memory bandwidth, quantisation, or any single kernel is
+  the root cause. No expert-routing trace, HBM counter, kernel profile, or
+  dense / FP16 / cross-GPU factorial control was collected.
+- A clean classic-draft effect estimate, because those rows ran on the
+  cross-vocabulary translation fallback. Re-measuring with the gate fixed
+  recovers only 3–5 %, so the direction holds, but the archived absolute
+  numbers are not a matched-path measurement
+  ([A2](ERRATA.md#a2-the-draft-model-was-not-vocabulary-compatible-the-run-used-the-token-translation-fallback)).
+- A claim about the workload, because 76 % of the requests returned truncated
+  thinking rather than an answer, and no version of this benchmark ever
+  verified what was being generated
+  ([A5](ERRATA.md#a5-three-quarters-of-v1s-requests-returned-no-answer-at-all--only-truncated-thinking)).
+- A statement about a *working* speculative path for this model class, because
+  the fix for the hybrid-SSM partial-acceptance failure the runs actually hit —
+  llama.cpp PR #20075 — was closed without merge
+  ([A3](ERRATA.md#a3-the-tested-build-had-a-known-broken-speculative-path-for-this-model-class-and-the-fix-was-never-merged)).
+- A production voice-agent recommendation. This measures decode
+  microperformance, not streaming TTFT, audio latency, multi-turn cache reuse,
+  concurrency, or output quality.
+- Behaviour under non-greedy sampling, other seeds, current llama.cpp, or
+  untested speculation methods.
+
+---
+
+## Follow-up experiment caveats
+
+### v2 and Exp 2
+
+Different host, `llama-cli` instead of `llama-server`, `temperature=0.5`,
+200-token cap, and a different prompt set. Directional at best.
+
+More importantly, the scripts pass `-no-cnv` and append `/no_think`, and the
+committed logs show both are inert:
+
+```
+--no-conversation is not supported by llama-cli
+please use llama-completion instead
+```
+
+That line appears in 61 of 62 v2 logs and 30 of 33 v3 logs, and those same logs
+then contain `[Start thinking]` and a full reasoning trace. The measured
+workload is long chain-of-thought output, not the intended direct answer.
+
+Exp 2 committed only timing summaries — the per-request generated text, token
+IDs, and stop reasons were never saved — so its intended "structured,
+low-entropy, thinking-off code/JSON" distribution cannot be checked. **Exp 2
+therefore does not refute the workload-shape hypothesis.** It shows that the
+configurations, as actually executed, were slower for whatever the command
+really generated. A valid retest needs `llama-completion` or a verified
+chat-template thinking toggle, plus committed outputs.
+
+One thing Exp 2 does establish cleanly: the command is highly repeatable. The
+three trial means for the Oleg config are 66.54 / 66.54 / 66.64 tok/s,
+SD 0.06 — the published `± 7.57` is spread *between prompts*, not run-to-run
+noise.
+
+### v3 DFlash
+
+The historical v3 result was 77.0 tok/s for the best DFlash setting against
+138.9 tok/s for its recorded baseline. Treat it as an exploratory datapoint,
+not a DFlash effect estimate:
+
+- baseline and Oleg logs report build `b8889-bcb5eeb64`; DFlash logs report
+  `b8942-67cb0d507`. **Different binaries.**
+- one run per prompt/config;
+- the thinking control did not work;
+- outputs were not token-identical between conditions;
+- no target-precision, draft-precision, dense-model, profiler, or second-GPU
+  control.
+
+DFlash PR #22105 was merged upstream on 2026-06-28. Any current conclusion
+needs a new A/B on one pinned post-merge binary with DFlash off and on.
+
+### The vLLM sibling result
+
+[`thc1006/qwen3.6-vllm-2x3090`](https://github.com/thc1006/qwen3.6-vllm-2x3090)
+reports a positive vLLM MTP result on the same physical hardware. It is a
+useful counterexample to any engine-independent claim, and it is **not** a
+matched cross-engine control: two GPUs, tensor parallelism, a different engine,
+a different quantisation stack, built-in MTP heads, different flags, and a
+different protocol. Cite it as related evidence; do not use it to decompose the
+cause of the llama.cpp result.
+
+---
+
+## Candidate mechanism — largely settled, and it is not MoE-specific
+
+The audit's re-measurement ([A7](ERRATA.md#a7-with-acceptance-measured-properly-there-is-no-anomaly-left-to-explain))
+removes most of the mystery. Once acceptance is measured rather than assumed,
+decode rate tracks acceptance at r = +0.998 across the prompt set. What remains
+is ordinary: the drafter proposes tokens, most are rejected, and the run pays
+for all of them.
+
+The two candidate mechanisms below are kept because they quantify *how much*
+each term costs — not because the outcome still needs an exotic explanation.
+
+**1. Draft-path and state-management overhead.** This one is partly measured
+(see the retraction section above): drafter time is ~32 % of generation
+wall-clock, ~38 % of verification rounds are discarded and redone, and each
+discarded round pays a 62.8 MiB state checkpoint plus its restore. On this
+model that path is taken because the context cannot partially roll back a
+sequence, which is precisely the defect llama.cpp PR #20075 described and which
+was never merged. Nothing here isolates how much of the slowdown each term
+contributes.
+
+**2. MoE expert-union cost during multi-token verification — no longer needed,
+and never evidenced here.** Kept only so the arithmetic this repository used to
+publish can be checked. The official
+Qwen3.6-35B-A3B config has 256 routed experts, 8 routed experts per token, plus
+a shared expert. Under the i.i.d. uniform-routing approximation in
+[MoESD](https://arxiv.org/html/2505.19645):
+
+```
+rho  = k_e / n_experts = 8 / 256 = 0.03125
+T_95 = ceil( log(1 - 0.95) / log(1 - rho) ) = ceil(94.36) = 95 tokens
+```
+
+This is an expected-coverage heuristic under stated assumptions, not a
+performance threshold, and it does not by itself explain anything measured
+here. Use `γ` for draft length and `k_e = 8` for routed experts per token;
+the earlier text used `K` for both.
+
+Note that `Qwen3.5-122B-A10B` has the **same** 256 experts and top-8 routing,
+so this formula gives it the **same** threshold. The earlier claim that A10B
+has "a correspondingly lower `T_thres`" because of its larger active parameter
+count is wrong — those are different quantities. Positive A10B measurements are
+a genuine counterexample to any universal A3B-derived rule, but this repository
+cannot say which factor explains the sign difference, because model, hardware,
+backend, quantisation, draft configuration, and implementation all differ at
+once.
+
+**What would still be worth measuring** is the split *within* mechanism 1:
+target verify time, draft time, accepted length per verification step, and
+discarded-round count, across draft lengths. That is P3-1 in
+[`RETEST_TODO.md`](RETEST_TODO.md). Testing mechanism 2 would need expert-routing
+instrumentation that nobody here has built, and after A7 there is no result
+demanding it.
+
+---
+
+## Reproduction
+
+The historical scripts and raw files are all here, and every host-specific path
+is now an environment variable with a documented default. They remain audit
+artefacts rather than a one-command reproducer: the v1 warm-up is short, there
+is one run per cell, and [D5](ERRATA.md#d5-the-committed-v2-script-does-not-produce-the-committed-v2-directories)
+records a provenance gap in v2.
+
+Build the **exact** v1 revision — not current master:
+
+```bash
+git clone https://github.com/ggml-org/llama.cpp.git
+cd llama.cpp
+git checkout 97895129e5f2bde94d13dc01ca41ee79e9b629f2
+git submodule update --init --recursive
+
+CUDACXX=/usr/local/cuda-12.6/bin/nvcc cmake -S . -B build \
+    -DGGML_CUDA=ON \
+    -DCMAKE_CUDA_ARCHITECTURES=86 \
+    -DLLAMA_CURL=OFF \
+    -DBUILD_SHARED_LIBS=OFF \
+    -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel --target llama-server llama-bench
+```
+
+Fetch the artefacts and verify them before benchmarking:
+
+```bash
+hf download unsloth/Qwen3.6-35B-A3B-GGUF Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf --local-dir models
+hf download unsloth/Qwen3.5-0.8B-GGUF --include '*Q4_K_M*' --local-dir models
+sha256sum -c SHA256SUMS
+```
+
+Run the matrix and the analysis:
+
+```bash
+export LLAMA_SERVER_BIN=$PWD/llama.cpp/build/bin/llama-server
+export MODEL_TARGET=$PWD/models/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf
+export MODEL_DRAFT=$PWD/models/Qwen3.5-0.8B-Q4_K_M.gguf
+export BENCH_GPU=1                      # CUDA_VISIBLE_DEVICES for the server
+
+bash run_matrix.sh          # baseline + ngram-cache + ngram-mod n=24 + 0.6B control
+bash run_p0_matrix.sh       # classic-draft sweep + 1000-token variants + N sweep + kv-fp16
+
+pip install -r requirements.txt
+python analysis/plot.py
+python analysis/verbose_accounting.py
+```
+
+A corrected harness for *new*, controlled runs — one pinned binary for every
+arm, ABBA ordering, N repeats, a manifest that hashes the binary and both
+models, and per-request capture of the generated text, the reasoning channel,
+the stop reason, the full `timings` block, and token IDs via `logprobs` — is
+[`bench/retest_runner.py`](bench/retest_runner.py). It is what produced the
+audit measurements above. Note that llama.cpp renamed the speculative arguments
+after `bcb5eeb64` (`--draft-max` → `--spec-draft-n-max`) and that `--spec-type`
+now defaults to `none`, so `-md` alone loads a draft model and never
+speculates; the runner's `BENCH_FLAVOR` switch handles both spellings.
+
+---
+
+## Data map
+
+| Path | Contents |
+|---|---|
+| [`ERRATA.md`](ERRATA.md) | every corrected claim, with evidence |
+| [`results/`](results/), [`results/verify/`](results/verify/) | v1 raw per-request JSON, 19 run labels |
+| [`analysis/summary.csv`](analysis/summary.csv) | v1 flat per-request table |
+| [`analysis/summary_by_config.csv`](analysis/summary_by_config.csv) | v1 aggregate: request-mean, pooled, median, min–max, activation |
+| [`analysis/plot.py`](analysis/plot.py) | aggregation and charts |
+| [`analysis/verbose_accounting.py`](analysis/verbose_accounting.py) | reconstructs the acceptance-counter artefact from a `-v` log |
+| [`v2_3090_followup/SUMMARY.md`](v2_3090_followup/SUMMARY.md) | v2 methodology and tables |
+| [`v2_3090_followup/v2_*/`](v2_3090_followup/) | 62 v2 raw `llama-cli` logs + one `--verbose` trace |
+| [`v2_3090_followup/exp2_codejson_n3/`](v2_3090_followup/exp2_codejson_n3/) | Exp 2 aggregates and script |
+| [`v3_dflash_2026_05_07/`](v3_dflash_2026_05_07/) | DFlash logs, tables, script |
+| [`BENCHMARK_ENV.md`](BENCHMARK_ENV.md) | hardware, software, commits, hashes for v1/v2/v3 |
+| [`bench/retest_runner.py`](bench/retest_runner.py) | corrected protocol, never executed |
+
+---
+
+## Upstream status at the 2026-08-25 audit
+
+Checked against the GitHub API on 2026-08-25.
+
+| PR | Status |
+|---|---|
+| [#19493](https://github.com/ggml-org/llama.cpp/pull/19493) server: speculative checkpointing | merged 2026-04-19 |
+| [#22227](https://github.com/ggml-org/llama.cpp/pull/22227) speculative-simple: checkpoint support | merged 2026-04-22 |
+| [#20075](https://github.com/ggml-org/llama.cpp/pull/20075) fix: speculative decoding broken on hybrid SSM/MoE | **closed without merge 2026-04-25** |
+| [#22105](https://github.com/ggml-org/llama.cpp/pull/22105) DFlash support | merged 2026-06-28 |
+
+`bcb5eeb64` was master on 2026-04-22 and is described here as a dated snapshot,
+not as "current master". Future edits should keep using exact tested SHAs.
+
+---
 
 ## Related reading
 
-- **[thc1006/qwen3.6-vllm-2x3090](https://github.com/thc1006/qwen3.6-vllm-2x3090)** — sibling repo. Same model, 2× RTX 3090, vLLM 0.19.1 with `--speculative-config method=mtp num_speculative_tokens=1` (qwen3.6's built-in MTP heads). v1/v2 published −12 % throughput was a flag confound + prefix-cache interaction; **v3 clean A/B retest (2026-04-26) with matched flags + `--no-enable-prefix-caching` flips MTP to +27.5 % faster decode rate** — see [v3.0 release](https://github.com/thc1006/qwen3.6-vllm-2x3090/releases/tag/v3.0). So the negative finding here is engine-specific to llama.cpp draft-spec on consumer Ampere, not engine-independent as v2.2 of this repo claimed.
-- [llama.cpp PR #19493 — speculative checkpointing (MERGED 2026-04-19)](https://github.com/ggml-org/llama.cpp/pull/19493)
-- [llama.cpp PR #20075 — follow-up fix (OPEN)](https://github.com/ggml-org/llama.cpp/pull/20075)
-- [llama.cpp Issue #20039 — original feature request](https://github.com/ggml-org/llama.cpp/issues/20039)
-- [llama.cpp docs/speculative.md](https://github.com/ggml-org/llama.cpp/blob/master/docs/speculative.md)
-- [MoESD: Unveil Speculative Decoding's Potential for Sparse MoE (arXiv 2505.19645)](https://arxiv.org/html/2505.19645)
+- [MoESD: Unveil Speculative Decoding's Potential for Accelerating Sparse MoE (arXiv 2505.19645)](https://arxiv.org/html/2505.19645)
 - [Utility-Driven Speculative Decoding for Mixture-of-Experts (arXiv 2506.20675)](https://arxiv.org/pdf/2506.20675)
 - [MoE-SpeQ (arXiv 2511.14102)](https://arxiv.org/html/2511.14102v1)
-- [vLLM Issue #38182 — Qwen3.5-35B-A3B MTP + prefix cache regression](https://github.com/vllm-project/vllm/issues/38182)
-- [Qwen3.6-35B-A3B model card](https://huggingface.co/Qwen/Qwen3.6-35B-A3B) (vocab 248320)
-- [Qwen3.5-0.8B model card](https://huggingface.co/Qwen/Qwen3.5-0.8B) (vocab 248320)
+- [llama.cpp docs/speculative.md](https://github.com/ggml-org/llama.cpp/blob/master/docs/speculative.md)
+- [llama.cpp Issue #20039 — original feature request](https://github.com/ggml-org/llama.cpp/issues/20039)
+- [HF discussion #14 on `unsloth/Qwen3.6-35B-A3B-GGUF`](https://huggingface.co/unsloth/Qwen3.6-35B-A3B-GGUF/discussions/14) — the thread that prompted v2
+- [vLLM Issue #38182 — Qwen3.5-35B-A3B MTP × prefix-cache interaction](https://github.com/vllm-project/vllm/issues/38182)
+- [`thc1006/qwen3.6-vllm-2x3090`](https://github.com/thc1006/qwen3.6-vllm-2x3090) — sibling repository, different engine and hardware topology
 
-## Author / contact
+---
 
-Hsiu-Chi Tsai · `hctsai1006@cs.nctu.edu.tw` · GitHub [`thc1006`](https://github.com/thc1006)
+## Licence
 
-## License
+- **Code and documentation** — MIT, see [`LICENSE`](LICENSE).
+- **Benchmark data** — CC0-1.0, scoped by [`DATA_LICENSE`](DATA_LICENSE), full
+  text in [`LICENSES/CC0-1.0.txt`](LICENSES/CC0-1.0.txt).
 
-MIT — see [`LICENSE`](LICENSE). Results (CSV / JSON) released under CC-0.
+## Citation
+
+Machine-readable metadata is in [`CITATION.cff`](CITATION.cff). Cite the DOI
+above for the archived release, and state which version you are citing —
+pre-audit releases (v1.0 – v3.0) contain the claims retracted in
+[`ERRATA.md`](ERRATA.md).
+
+## Author
+
+Hsiu-Chi Tsai (`thc1006`) · `hctsai1006@cs.nctu.edu.tw` ·
+[github.com/thc1006](https://github.com/thc1006)
