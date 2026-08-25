@@ -144,9 +144,12 @@ _DRAFT_ARGS = ["-md", "{DRAFT}", "-ngld", "99", _NMAX, "8", _NMIN, "4"] + _SPEC_
 KV_FP16 = "--kv-fp16"
 
 
-def _draft(nmax, nmin=1, extra=()):
-    return (["-md", "{DRAFT}", "-ngld", "99", _NMAX, str(nmax), _NMIN, str(nmin)]
+def _draft(nmax, nmin=1, extra=(), p_min=None):
+    args = (["-md", "{DRAFT}", "-ngld", "99", _NMAX, str(nmax), _NMIN, str(nmin)]
             + _SPEC_TYPE + BOS_OVERRIDE + list(extra))
+    if p_min is not None:
+        args += ["--spec-draft-p-min", str(p_min)]
+    return args
 
 
 def _ngram(kind, extra=()):
@@ -188,6 +191,19 @@ ARMS: dict[str, list[str]] = {
                        "--spec-type", "draft-dflash"],
     "spec-dflash-n16": ["-md", "{DFLASH}", "-ngld", "99", _NMAX, "16", _NMIN, "1",
                         "--spec-type", "draft-dflash"],
+
+    # p_min truncates a draft once the drafter's confidence drops below it. The
+    # default CHANGED between the binaries this repository has used:
+    #   9789512 / bcb5eeb64 -> 0.75   (every archived v1/v2/v3 number)
+    #   master  3737e4137   -> 0.00   (the whole audit matrix, by default)
+    # So the matrix ran with draft truncation OFF while every historical figure
+    # ran with it on. These arms measure that difference instead of assuming it
+    # away.
+    "spec-draft-n8-pmin50":  _draft(8, p_min=0.50),
+    "spec-draft-n8-pmin75":  _draft(8, p_min=0.75),
+    "spec-draft-n8-pmin90":  _draft(8, p_min=0.90),
+    "spec-draft-n32-pmin75": _draft(32, p_min=0.75),
+    "spec-draft-n128-pmin75": _draft(128, p_min=0.75),
     # v1's actual classic-draft configuration, for comparability
     "spec-draft-v1cfg": _draft(8, 4),
 

@@ -403,6 +403,76 @@ tokens accepted (29.7 %)**. The counter reporting 29.7 % rather than 1.00000 is
 independent upstream confirmation of A1. Data:
 [`v4_audit_2026_08_25/`](v4_audit_2026_08_25/).
 
+### A8. The audit's own matrix has an uncontrolled difference from the archive: `p_min`
+
+Found by reading upstream rather than by reasoning, which is the point of
+checking.
+
+`--spec-draft-p-min` truncates a draft as soon as the drafter's confidence for
+the next position falls below it. **The default changed between the binaries
+this repository has used:**
+
+| build | `p_min` default | what ran on it |
+|---|---:|---|
+| `9789512` | 0.75 | the entire v1 matrix |
+| `bcb5eeb64` | 0.75 | v2, Exp 2, v3, and audit run A |
+| master `3737e4137` | **0.00** | **the whole audit matrix: runs B, C, D, E** |
+
+So every archived number was measured with draft truncation **on**, and every
+number the audit's own matrix produced was measured with it **off**, by default,
+without either being stated. That is exactly the class of silent
+configuration difference this file exists to catch, and it is in my own work.
+
+It matters most at long draft lengths. With `p_min = 0`, the drafter emits the
+full `n_max` every round regardless of confidence, which is why draft volume
+reaches 22 tokens per generated token at `n_max` 128 and acceptance falls to
+2.5 %. With `p_min = 0.75` the draft stops early when the drafter is unsure, so
+volume and acceptance both behave differently.
+
+Consequences:
+
+- **Cross-binary absolute comparisons are confounded** by this on top of the
+  binary change already noted. Within-matrix arm contrasts are unaffected —
+  every arm in a run shares the same `p_min`.
+- **The draft-length sweep in A7 measures "always draft `n_max`", not "draft
+  until unsure".** The single-regressor law and the absence of a coverage-
+  threshold step both stand, because they are within-matrix, but the sweep
+  should not be read as the best speculative decoding can do.
+- A `p_min` sweep is queued to measure the difference rather than argue about
+  it: `n_max` 8 at `p_min` ∈ {0, 0.5, 0.75, 0.9}, plus `n_max` 32 and 128 at
+  0.75.
+
+### A9. Upstream already documents two of the mechanisms this audit "found"
+
+Credit where it belongs. Reading llama.cpp PR #22105's description turns up
+both of the mechanisms this audit arrived at independently, stated by the
+implementer:
+
+> For MoE targets, DFlash speedup is generally smaller than for dense attention
+> targets because **more experts get activated during the parallel verification
+> step than during single-token autoregressive decoding** (same observation as
+> in #18039 for gpt-oss EAGLE3).
+
+That is the expert-union effect this repository's original write-up asserted.
+It is real enough that the implementer records it and cross-references a second
+PR observing it for EAGLE3. This audit's narrower finding stands — no
+*coverage-threshold* signature appears in the sweep, and a single regressor in
+draft volume accounts for 99.3 % of the cost — but "no MoE effect exists" was
+never the claim, and upstream evidence for a qualitative one predates this
+repository.
+
+> Speedup is intrinsically limited on hybrid target models … each rejected step
+> may require one extra target forward … A more fundamental future improvement
+> would be target-side deferred commit: verify would compute temporary
+> recurrent states, and only the accepted-prefix state would be committed.
+> **That would remove replay from the hybrid path.**
+
+That is the replay path behind A1's counter artefact and A6's abort. It is a
+known upstream limitation with a proposed fix, not a discovery of this audit.
+What this audit adds is the measurement: 1639 state checkpoints of 101.3 MiB
+for a single 300-token request, the counter being unreachable because of it,
+and the abort it caused at `bcb5eeb64`.
+
 ### A6. `llama-server` plus a draft model aborts on this model at `bcb5eeb64`
 
 An audit retest on 2026-08-25, on the v2/v3 host with the same binary v2 used,
