@@ -157,6 +157,104 @@ no MoE-specific pathology.
 `analysis/plot_accept_vs_speed.png` — every one of whose 140 points sat at
 exactly 100 %, making this relationship invisible — has been deleted.
 
+---
+
+## Runs C and D — the thirteen-arm matrix, and the workload the archive never controlled
+
+`data/C_master_matrix_think_on/` and `data/D_master_matrix_think_off/`, both on
+post-merge master `3737e4137`, 5 repeats, ABBA-ordered, one pinned binary.
+Continuous GPU telemetry for the whole 110 minutes is in
+`data/gpu_telemetry_20260825.csv`.
+
+Reproduce the tables with:
+
+```bash
+python analysis/matrix_report.py v4_audit_2026_08_25/data/C_master_matrix_think_on
+python analysis/matrix_report.py v4_audit_2026_08_25/data/D_master_matrix_think_off
+python analysis/thermal_report.py v4_audit_2026_08_25/data/gpu_telemetry_20260825.csv
+```
+
+### C — thinking on, thirteen arms
+
+| arm | pooled tok/s | vs baseline | acceptance | draft tokens per generated token | run-to-run SD |
+|---|---:|---:|---:|---:|---:|
+| `baseline-kvfp16` | 125.7 | **+1.9 %** | — | 0 | 0.37 |
+| `baseline` | 123.4 | — | — | 0 | 2.08 |
+| `ngram-simple` | 118.1 | −4.2 % | 4.3 % | 0.06 | 0.88 |
+| `ngram-mod` n=24 | 115.0 | −6.8 % | 4.8 % | 0.21 | 0.59 |
+| `ngram-cache` | 74.0 | −40.0 % | 1.8 % | 0.42 | 2.48 |
+| `ngram-cache-kvfp16` | 70.9 | −42.5 % | 2.0 % | 0.44 | 1.08 |
+| draft model n_max 4 | **35.6** | −71.1 % | 45.4 % | 1.12 | 0.08 |
+| draft model n_max 2 | 34.2 | −72.2 % | 60.3 % | 0.74 | 0.06 |
+| draft model, v1's config | 32.3 | −73.8 % | 29.7 % | 1.84 | 0.56 |
+| draft model n_max 8 | 32.1 | −74.0 % | 29.7 % | 1.85 | 0.54 |
+| draft model n_max 1 | 31.1 | −74.8 % | 68.7 % | 0.50 | 0.07 |
+| draft model n_max 16 | 23.7 | −80.8 % | 15.0 % | 3.58 | 0.86 |
+| draft model n_max 32 | 17.3 | −86.0 % | 8.0 % | 6.84 | 0.04 |
+
+The run-to-run SD column is the one honest `±` in this repository: the spread of
+five whole-prompt-set repeats, 0.04–2.48 tok/s. The historical `±27–31` was
+spread *between prompts*.
+
+Three things fall out.
+
+**The best draft length is 4, and it is still 71 % below baseline.** The sweep
+is not monotone — cost rises and acceptance falls as the window widens, and
+n_max 1 is worse than n_max 2 because a full drafter forward pass buys at most
+one token. The peak is real but shallow: per-repeat SD is 0.055 and 0.076 for
+n_max 2 and 4, against a 1.4 tok/s gap.
+
+**Drafting volume is not the whole cost.** An external drafter proposing 0.50
+tokens per generated token runs at 31.1 tok/s; `ngram-cache` proposing 0.42
+runs at 74.0. The per-round cost of the *method* is a third, independent term —
+a 0.8 B forward pass every round versus a table lookup.
+
+**The fp16-KV control the v1 matrix lacked.** fp16 KV is 1.9 % faster than
+q8_0 with no speculation running, and 4.2 % worse with `ngram-cache` on. See
+[`../ERRATA.md`](../ERRATA.md) B7.
+
+### D — the same arms with thinking verifiably off
+
+`thinking_suppressed` is recorded per request: 50/50 in D, 0/50 in C. Output
+lengths in D run 22–300 tokens because completions now finish naturally.
+
+| method | thinking on (C) | thinking off (D) | draft tokens per generated token |
+|---|---:|---:|---|
+| `ngram-mod` n=24 | −6.8 % | **−0.7 %** | 0.21 → **0.00** |
+| `ngram-cache` | −40.0 % | −32.6 % | 0.42 → 0.36 |
+| draft model n_max 8 | −74.0 % | −76.4 % | 1.85 → **2.14** |
+
+With thinking off `ngram-mod` never drafts at all — zero draft tokens across
+fifty requests — and its cost nearly disappears. A chain-of-thought trace is
+long and formulaic, which is what an n-gram lookup feeds on; a direct answer is
+not. For the draft model the effect runs the other way: acceptance falls from
+29.7 % to 23.0 %, so reasoning traces are *easier* for a 0.8 B drafter than
+real answers.
+
+This is the comparison Exp 2 believed it had made. Its conclusion was not
+merely unverifiable, it was backwards for the methods where shape matters most.
+And it means **every historical number in this repository was measured on the
+workload that favours speculation, and speculation still lost.**
+
+### Thermals and drift
+
+1317 telemetry samples over 110 minutes, 1272 under load:
+
+- `power.limit` = `power.default_limit` = `power.max_limit` = 350 W — **not overclocked**
+- 58–75 °C, mean 64.7, against a ~83 °C throttle point
+- 1800–1965 MHz of a 2100 MHz maximum, mean 1937
+- `hw_thermal_slowdown` and `hw_power_brake` essentially never active; the one
+  `sw_thermal` sample fires at 64 °C with the clock at its run maximum
+
+The baseline is repeated five times across the run, so drift is testable from
+the measurement itself: 126.6, 122.2, 122.6, 121.8, 121.6 tok/s. That is not
+progressive decline — it is a cold-start first repeat, +3.7 % against a tail
+that then varies by 0.89 %. Three other arms measured across the same repeats
+show no such step (+0.35 % to +0.47 %), because only the first arm of the first
+repeat starts on an idle, cool card.
+
+---
+
 ## Answer 3 — what still needs doing
 
 These runs settle the three questions above. They do **not** make this a
