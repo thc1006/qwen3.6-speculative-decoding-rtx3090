@@ -331,6 +331,77 @@ _rates = [st.mean([_b[r][t]["predicted_per_second"] for r in _b]) for t in _b[0]
 chk("A11 baseline spread across prompts (%)", round(100*(max(_rates)/min(_rates)-1),1), 0.8, 0.05)
 
 
+print("\n=== A11 generality: divergence rises with output length ===")
+def _streams(pat):
+    a = defaultdict(lambda: defaultdict(dict))
+    for f in glob.glob(f"v4_audit_2026_08_25/data/{pat}/*__rep*.json"):
+        r = json.load(open(f))
+        for x in r["rows"]:
+            a[r["arm"]][r["repeat"]][x["tag"]] = x
+    return a
+for name, pat, want in (("J", "matrix_J2_*", (6, 120)), ("K1", "matrix_K1_sweep_*", (0, 180)),
+                        ("L on", "matrix_L_thinkon_*", (0, 200)),
+                        ("L off", "matrix_L_thinkoff_*", (85, 200))):
+    a = _streams(pat); b = a["baseline"]
+    same = tot = 0
+    for arm in a:
+        if arm == "baseline":
+            continue
+        for rep in a[arm]:
+            for t, x in a[arm][rep].items():
+                y = b.get(rep, {}).get(t)
+                if y:
+                    tot += 1
+                    same += (x.get("tokens") or [1]) == (y.get("tokens") or [2])
+    chk(f"A11 {name}: streams identical to baseline", (same, tot), want)
+    # the determinism control has to hold in every run, or the contrast is empty
+    ok = tt = 0
+    for arm in a:
+        reps = sorted(a[arm])
+        for t in a[arm][reps[0]]:
+            vals = {(a[arm][r][t].get("content") or "") + (a[arm][r][t].get("reasoning_content") or "")
+                    for r in reps if t in a[arm][r]}
+            tt += 1; ok += (len(vals) == 1)
+    chk(f"A11 {name}: every arm reproduces itself", (ok, tt), (tt, tt))
+_a = _streams("matrix_L_thinkoff_*"); _b = _a["baseline"]
+_short = []; _long = []
+for arm in _a:
+    if arm == "baseline":
+        continue
+    for rep in _a[arm]:
+        for t, x in _a[arm][rep].items():
+            y = _b.get(rep, {}).get(t)
+            if y:
+                (_long if y["predicted_n"] >= 96 else _short).append(
+                    (x.get("tokens") or [1]) != (y.get("tokens") or [2]))
+chk("A11 think-off divergence, outputs < 96 tokens (%)",
+    round(100*sum(_short)/len(_short), 1), 37.5, 0.05)
+chk("A11 think-off divergence, outputs >= 96 tokens (%)",
+    round(100*sum(_long)/len(_long), 1), 70.8, 0.05)
+
+print("\n=== thermals: no run declined ===")
+import csv as _csv
+for name, pat, lo, hi, drift, swt in (("I+J", "gpu_telemetry_IJ_*.csv", 55, 73, None, 1),
+                                      ("K",   "gpu_telemetry_K_*.csv",  53, 74, 0.05, 0),
+                                      ("L",   "gpu_telemetry_L_*.csv",  50, 74, 0.24, 0)):
+    f = glob.glob(f"v4_audit_2026_08_25/data/{pat}")[0]
+    rs = [r for r in _csv.reader(open(f)) if len(r) == 9][1:]
+    ld = [r for r in rs if r[1].isdigit() and int(r[1]) > 50]
+    tp = [int(r[3]) for r in ld]
+    chk(f"thermal {name}: temperature range", (min(tp), max(tp)), (lo, hi))
+    # 0x8 HwSlowdown | 0x40 HwThermal | 0x80 HwPowerBrake. NOT 0x20, which is
+    # SwThermalSlowdown - a software flag, and the one that fires once in the
+    # I+J trace. An earlier mask of 0xE0 counted that as hardware and missed
+    # HwSlowdown altogether.
+    chk(f"thermal {name}: no hardware throttle flag",
+        all(int(r[8], 16) & 0xC8 == 0 for r in ld), True)
+    chk(f"thermal {name}: SwThermal (0x20) samples under load",
+        sum(1 for r in ld if int(r[8], 16) & 0x20), swt)
+    if drift is not None:
+        ck = [int(r[5]) for r in ld]; h = len(ck)//2
+        chk(f"thermal {name}: clock drift first->second half (%)",
+            round(abs(100*(st.mean(ck[h:])/st.mean(ck[:h])-1)), 2), drift, 0.005)
+
 print("\n=== theory (ERRATA E1/E2) ===")
 rho=8/256
 chk("rho", round(rho,5), 0.03125, 1e-9)
@@ -395,6 +466,10 @@ DOC_CLAIMS = [
     ("v4_audit_2026_08_25/README.md", "48.2 %",  "L break-even acceptance"),
     ("v4_audit_2026_08_25/README.md", "+52.2 pp", "L worst out-of-sample error"),
     ("README.md",   "48 % draft",  "README acceptance threshold"),
+    ("ERRATA.md",   "85 / 200",  "A11 think-off identical streams"),
+    ("ERRATA.md",   "70.8 %",    "A11 long-output divergence"),
+    ("v4_audit_2026_08_25/README.md", "-0.24 %", "L clock drift"),
+    ("RETEST_TODO.md", "785 plain BF16", "MTP weights are present"),
 ]
 root = pathlib.Path(__file__).resolve().parents[1]
 for f, needle, what in DOC_CLAIMS:

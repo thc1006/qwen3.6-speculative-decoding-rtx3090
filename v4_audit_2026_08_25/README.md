@@ -611,6 +611,35 @@ volume, which acceptance alone does not carry.
 
 ---
 
+## Thermals across the 2026-08-26 runs
+
+Every run carried its own continuous `nvidia-smi` trace, and each was checked
+rather than assumed, because a five-hour session on one card is exactly where a
+throttling artefact would hide.
+
+| run | loaded samples | temperature | SM clock | first half → second half |
+|---|---|---|---|---|
+| I + J | 539 | 55–73 °C (mean 63.4) | 1695–1965 MHz (mean 1939) | — |
+| K | 317 | 53–74 °C (mean 64.0) | 1695–1980 MHz (mean 1937) | −0.05 % |
+| L | 421 | 50–74 °C (mean 64.4) | 1695–1965 MHz (mean 1942) | −0.24 % |
+
+The card is never overclocked (350 W stock limit throughout) and never near its
+~83 °C throttle point. The dominant flag under load is `0x4`, `SwPowerCap` — the
+350 W board limit doing its job — in roughly half the loaded samples, identically
+across arms within a run. **One** sample in the I+J trace additionally carries
+`0x20`, `SwThermalSlowdown`; that is a software flag and a single sample of 539,
+the same transient behaviour ERRATA C4b recorded on 2026-08-25. No hardware
+throttle bit — `HwSlowdown`, `HwThermal`, `HwPowerBrake` — is ever set in any of
+the three traces. Clock drift between the first and second half of each run is
+within 0.25 %, so none of the deltas above can be a decline in the card.
+
+(The first version of this paragraph said `0x4` was the only flag that ever
+appears. The regression checker caught it, after its own throttle mask was
+corrected: `0xE0` counted `SwThermal` as hardware and missed `HwSlowdown`
+entirely. Hardware is `0x8 | 0x40 | 0x80`.)
+
+---
+
 ## Answer 3 — what still needs doing
 
 These runs settle the three questions above. They do **not** make this a

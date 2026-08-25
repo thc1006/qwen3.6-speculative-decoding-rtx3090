@@ -697,6 +697,26 @@ token at a time, floating-point addition is not associative, and a near-tie in
 the argmax resolves the other way. It is the same batch-invariance problem that
 makes batched inference non-reproducible in general.
 
+**That mechanism makes a prediction, and the prediction holds.** If divergence
+is per-token near-ties accumulating, its probability should rise with output
+length. Across every run of 2026-08-26:
+
+| run | output length | token streams identical to no speculation |
+|---|---|---|
+| J | 300 (capped) | 6 / 120 |
+| K1 | 300 (capped) | 0 / 180 |
+| L, thinking on | 300 (capped) | 0 / 200 |
+| L, thinking off | median 96 | **85 / 200** |
+
+and within run L's thinking-off half, split at its own median: outputs under 96
+tokens diverge 37.5 % of the time, outputs at or above it 70.8 %. The
+determinism control holds everywhere — 70/70 self-reproducible prompts in K1 and
+50/50 in each half of L, on top of J's original 50/50.
+
+So the effect is not a quirk of one run, and it is not constant: at a 300-token
+cap it is effectively certain, and at short answers it is a coin toss weighted by
+length.
+
 **What it changes here.** It does not invalidate run J's +18.7 %: every arm
 generates exactly 300 tokens, so the throughput comparison counts the same
 work, and the no-speculation arm's decode rate varies by only 0.8 % across ten

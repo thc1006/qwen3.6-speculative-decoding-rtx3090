@@ -153,8 +153,30 @@ requests. Any master comparison must pass `--spec-type` explicitly.
   a result here before: ngram-mod went from −6.8 % to −0.7 % between the
   think-on and think-off matrices and drafted zero tokens in the latter.
 - **Five repeats for the DFlash headline.** Run J has three.
-- `draft-eagle3` and `draft-mtp` are exposed by post-merge master and remain
-  unevaluated here; both need head weights this repository does not have.
+- **`draft-mtp` — the blocker is the converter, not the weights.** An earlier
+  version of this line said both `draft-eagle3` and `draft-mtp` "need head
+  weights this repository does not have". That is wrong for MTP and was written
+  without checking. `~/models/qwen36-awq` holds **785 plain BF16 `mtp.*`
+  tensors** for this exact target, and its `text_config` declares
+  `mtp_num_hidden_layers = 1`. `convert_hf_to_gguf.py` at `3737e4137` has an
+  explicit `--mtp` flag that exports the MTP head as a standalone draft GGUF,
+  and `gguf-py` carries the `{arch}.nextn_predict_layers` key and the NEXTN
+  tensor mappings. What is missing is one link: `_QwenMtpMixin`
+  (`conversion/qwen.py:277`), whose own docstring says it is "shared MTP wiring
+  for Qwen3-Next **and Qwen3.5/3.6 text variants**", is inherited only by
+  `Qwen3NextModel` (`:372`). The class registered for this checkpoint's
+  architecture — `Qwen3_5MoeForConditionalGeneration` at `:636` — does not mix
+  it in, so `--mtp` refuses with "not supported for this architecture". That is
+  a plausible upstream gap and a runnable local experiment; it is not a missing
+  artefact. The base weights being AWQ-packed does not block it, because `--mtp`
+  exports only the head and those tensors are unquantised.
+- `draft-eagle3` genuinely does need an artefact that is not here: the loader
+  rejects any drafter that is not an EAGLE3 model ("expected 3 extract layers",
+  `common/speculative.cpp:471`), and no EAGLE3 head for this target exists on
+  any of these hosts.
+- **MTP matters more than the other open items** because the vLLM sibling result
+  on this same physical hardware is an MTP result. Until it runs here, "llama.cpp
+  loses where vLLM wins" confounds the engine with the speculation method.
 
 ---
 
