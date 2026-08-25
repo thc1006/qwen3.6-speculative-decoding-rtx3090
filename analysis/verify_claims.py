@@ -130,6 +130,71 @@ mx,my=st.mean(xs),st.mean(ys)
 r_=sum((x-mx)*(y-my) for x,y in zip(xs,ys))/((sum((x-mx)**2 for x in xs)*sum((y-my)**2 for y in ys))**0.5)
 chk("Pearson r(acceptance, tok/s)", round(r_,3), 0.998, 0.001)
 
+print("\n=== runs I and J (2026-08-26) ===")
+def _arm(pat):
+    """(mean aggregate, SD, pooled, drafted, accepted) over the arm-runs matching pat."""
+    v=[json.load(open(f)) for f in sorted(glob.glob(pat))]
+    assert v, f"no data for {pat}"
+    aggs=[x["aggregate_tok_s"] for x in v]
+    n=sum(r["predicted_n"] for x in v for r in x["rows"])
+    ms=sum(r["predicted_ms"] for x in v for r in x["rows"])
+    dn=sum(r["draft_n"] for x in v for r in x["rows"])
+    da=sum(r["draft_n_accepted"] for x in v for r in x["rows"])
+    return (st.mean(aggs), st.stdev(aggs) if len(aggs)>1 else 0.0, 1000*n/ms, dn, da)
+
+I="v4_audit_2026_08_25/data/matrix_I2_conc%d_*/%s__rep*.json"
+J="v4_audit_2026_08_25/data/matrix_J2_*/%s__rep*.json"
+
+# The batch has to have actually formed, or run I measures nothing. This is the
+# check whose absence made the first attempt at run I a null experiment.
+for c in (1,4,8):
+    peaks=[json.load(open(f)).get("max_in_flight") for f in glob.glob(I % (c,"*"))]
+    chk(f"I c={c}: every arm-run reached {c} in flight", sorted(set(peaks)), [c])
+
+base={c:_arm(I % (c,"baseline")) for c in (1,4,8)}
+spec={c:_arm(I % (c,"spec-draft-n8")) for c in (1,4,8)}
+for c,want in ((1,109.7),(4,154.3),(8,180.0)):
+    chk(f"I c={c} baseline aggregate", round(base[c][0],1), want, 0.05)
+for c,want in ((1,30.6),(4,27.0),(8,28.1)):
+    chk(f"I c={c} spec-draft-n8 aggregate", round(spec[c][0],1), want, 0.05)
+chk("I baseline c=4 vs c=1", round(100*(base[4][0]/base[1][0]-1),1), 40.6, 0.05)
+chk("I baseline c=8 vs c=1", round(100*(base[8][0]/base[1][0]-1),1), 64.0, 0.05)
+chk("I spec c=8 vs c=1",     round(100*(spec[8][0]/spec[1][0]-1),1), -8.4, 0.05)
+for c,want in ((1,0.28),(4,0.18),(8,0.16)):
+    chk(f"I c={c} spec/baseline ratio", round(spec[c][0]/base[c][0],2), want, 0.005)
+# acceptance did not collapse under -np N (llama.cpp #27572)
+for c in (1,4,8):
+    dn,da = spec[c][3], spec[c][4]
+    chk(f"I c={c} counted acceptance in 28-30 %", 28.0 <= 100*da/dn <= 30.0, True)
+    zeros=sum(1 for f in glob.glob(I % (c,"spec-draft-n8"))
+                for r in json.load(open(f))["rows"] if r["draft_n"]==0)
+    chk(f"I c={c} requests with draft_n == 0", zeros, 0)
+
+jb=_arm(J % "baseline")
+chk("J baseline aggregate", round(jb[0],1), 109.7, 0.05)
+# the -fit on control: it must not handicap the arm DFlash is measured against
+chk("J vs I baseline (the -fit on control)", round(100*(jb[0]/base[1][0]-1),2), -0.01, 0.005)
+for arm,agg,pooled,delta in (("spec-dflash-n4",130.2,151.6, 18.7),
+                             ("spec-dflash-n8", 93.5,105.2,-14.8),
+                             ("spec-dflash-n16",57.7, 62.8,-47.4),
+                             ("spec-draft-n8",  30.5, 31.4,-72.2)):
+    a=_arm(J % arm)
+    chk(f"J {arm} aggregate", round(a[0],1), agg, 0.05)
+    chk(f"J {arm} pooled",    round(a[2],1), pooled, 0.05)
+    chk(f"J {arm} vs baseline %", round(100*(a[0]/jb[0]-1),1), delta, 0.05)
+for arm,want in (("spec-dflash-n4",55.8),("spec-dflash-n8",36.8),("spec-dflash-n16",21.4)):
+    a=_arm(J % arm)
+    chk(f"J {arm} acceptance %", round(100*a[4]/a[3],1), want, 0.05)
+# the headline is "wins on all ten", not "wins on average"
+per=defaultdict(dict)
+for f in glob.glob(J % "*"):
+    r=json.load(open(f))
+    for x in r["rows"]: per[x["tag"]].setdefault(r["arm"],[]).append(x["predicted_per_second"])
+wins=sum(1 for t,d in per.items()
+         if st.mean(d["spec-dflash-n4"]) > st.mean(d["baseline"]))
+chk("J dflash-n4 beats no speculation on every prompt", (wins, len(per)), (10, 10))
+
+
 print("\n=== theory (ERRATA E1/E2) ===")
 rho=8/256
 chk("rho", round(rho,5), 0.03125, 1e-9)
@@ -145,7 +210,8 @@ import pathlib
 # with an ASCII hyphen would fail against correct prose. Twice during this audit
 # a checker was wrong rather than the thing it checked - once over anchors
 # keeping underscores, once over this - so normalise both sides.
-_DASHES = {"\u2212": "-", "\u2013": "-", "\u2014": "-", "\u2011": "-"}
+_DASHES = {"\u2212": "-", "\u2013": "-", "\u2014": "-", "\u2011": "-",
+           "\u00d7": "x"}   # multiplication sign, as in "0.16x"
 
 
 def _norm(t: str) -> str:
@@ -170,6 +236,16 @@ DOC_CLAIMS = [
     ("README.md",   "-19.0 %",     "README pooled delta"),
     ("v4_audit_2026_08_25/README.md", "16590", "v4 drafted tokens"),
     ("v4_audit_2026_08_25/README.md", "4926",  "v4 accepted tokens"),
+    ("v4_audit_2026_08_25/README.md", "+40.6 %", "I baseline gain at c=4"),
+    ("v4_audit_2026_08_25/README.md", "+64.0 %", "I baseline gain at c=8"),
+    ("v4_audit_2026_08_25/README.md", "0.16x",   "I spec/baseline ratio at c=8"),
+    ("v4_audit_2026_08_25/README.md", "130.2",   "J dflash-n4 aggregate"),
+    ("v4_audit_2026_08_25/README.md", "-0.01 %", "J -fit on control"),
+    ("v4_audit_2026_08_25/README.md", "55.8 %",  "J dflash-n4 acceptance"),
+    ("README.md",   "+18.7 %",  "README DFlash headline"),
+    ("README.md",   "-47.4 %",  "README DFlash n16"),
+    ("ERRATA.md",   "+18.7 %",  "D4 resolution"),
+    ("ERRATA.md",   "+24.0 %",  "D4 pooled delta"),
 ]
 root = pathlib.Path(__file__).resolve().parents[1]
 for f, needle, what in DOC_CLAIMS:

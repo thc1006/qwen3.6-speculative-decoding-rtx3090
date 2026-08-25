@@ -105,8 +105,16 @@ CONCURRENCY = max(1, int(os.environ.get("BENCH_CONCURRENCY", "1")))
 FIT = os.environ.get("BENCH_FIT", "off").strip().lower() in ("on", "1", "true", "yes")
 
 # v1's fixed server flags, kept verbatim so the retest stays comparable.
+# Context is a run-level control, not a constant. With the BF16 DFlash drafter
+# resident at -c 16384 the card peaks at 23946 MiB of 24576 - 630 MiB spare, and
+# allocations of 120 MiB have still failed there. Lowering the context for EVERY
+# arm in a run, baseline included, buys headroom without making the arms
+# incomparable; it does make absolute rates incomparable ACROSS runs, so a run
+# that changes it needs its own baseline, which is why every matrix here carries
+# one.
+CTX = os.environ.get("BENCH_CTX", "16384").strip()
 COMMON_ARGS_PINNED = [
-    "-ngl", "999", "-c", "16384", "--jinja",
+    "-ngl", "999", "-c", CTX, "--jinja",
     "-fa", "on", "-ctk", "q8_0", "-ctv", "q8_0",
     "--no-webui", "-v",
 ]
@@ -311,7 +319,17 @@ def nvidia_smi() -> str:
         return f"unavailable: {e}"
 
 
-def wait_health(port: int, timeout: float = 300.0) -> float:
+def wait_health(port: int, timeout: float = 300.0,
+                proc: subprocess.Popen | None = None) -> float:
+    """Block until /health answers, the server exits, or the timeout expires.
+
+    Watching `proc` is the whole point of the second argument. Without it a
+    server that aborts during startup - a compute-buffer OOM, a rejected GGUF -
+    burns the full timeout doing nothing, and a matrix with a systematically
+    failing arm spends `arms x repeats x timeout` seconds discovering the same
+    failure over and over. Run K lost three minutes per dead arm to exactly
+    this before the check was added.
+    """
     t0 = time.perf_counter()
     url = f"http://127.0.0.1:{port}/health"
     while time.perf_counter() - t0 < timeout:
@@ -321,6 +339,10 @@ def wait_health(port: int, timeout: float = 300.0) -> float:
                     return time.perf_counter() - t0
         except Exception:  # noqa: BLE001
             pass
+        if proc is not None and proc.poll() is not None:
+            raise RuntimeError(
+                f"llama-server exited with code {proc.returncode} after "
+                f"{time.perf_counter() - t0:.1f}s without becoming healthy")
         time.sleep(0.5)
     raise RuntimeError(f"llama-server not ready after {timeout}s")
 
@@ -354,15 +376,48 @@ def start_server(extra: list[str], log_path: Path,
     return proc
 
 
-def stop_server(proc: subprocess.Popen) -> None:
+def gpu_mem_used_mib() -> int | None:
+    try:
+        out = subprocess.run(
+            ["nvidia-smi", "--query-gpu=memory.used", "--format=csv,noheader,nounits",
+             "-i", GPU],
+            capture_output=True, text=True, timeout=10).stdout.strip().splitlines()
+        return int(out[0].strip())
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def stop_server(proc: subprocess.Popen, settle_mib: int = 2048,
+                settle_timeout: float = 60.0) -> None:
+    """Kill the server AND wait for the driver to hand the memory back.
+
+    Reaping the process is not the same as the CUDA context being torn down.
+    The next arm's `-fit on` probe reads free device memory to choose its
+    parameters, so starting it against a stale reading picks parameters that do
+    not fit and the arm dies on its first decode. Run J's telemetry peaks at
+    23946 MiB of 24576 with the DFlash drafter resident - 630 MiB of headroom,
+    2.6 % of the card - and a 120 MiB allocation still failed in run K, so the
+    true transient peak is higher than 5-second sampling can see. At that margin
+    a late teardown is the difference between an arm running and an arm
+    crashing.
+    """
     try:
         os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
         proc.wait(timeout=30)
     except Exception:  # noqa: BLE001
         try:
             os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            proc.wait(timeout=15)
         except Exception:  # noqa: BLE001
             pass
+    t0 = time.perf_counter()
+    while time.perf_counter() - t0 < settle_timeout:
+        used = gpu_mem_used_mib()
+        if used is None or used <= settle_mib:
+            return
+        time.sleep(1.0)
+    print(f"    ! GPU still reports {gpu_mem_used_mib()} MiB in use "
+          f"{settle_timeout:.0f}s after the server was killed", flush=True)
 
 
 def chat(system: str, user: str) -> dict:
@@ -534,7 +589,7 @@ def run_arm(arm: str, rep: int) -> dict:
     proc = start_server(extra, log_path, args_of_arm=extra)
     try:
         try:
-            ready_s = wait_health(PORT)
+            ready_s = wait_health(PORT, proc=proc)
         except Exception as e:  # noqa: BLE001 - bad flags / OOM / model rejected
             return {"arm": arm, "repeat": rep, "ready_s": None,
                     "argv": proc._cmd,  # type: ignore[attr-defined]
@@ -626,7 +681,7 @@ def main() -> None:
         "arms": {a: ARMS[a] for a in arms},
         "repeats": REPEATS, "max_tokens": MAX_TOKENS,
         "temperature": 0.0, "seed": 42, "think": THINK, "think_env": _THINK_RAW,
-        "concurrency": CONCURRENCY, "fit": FIT,
+        "concurrency": CONCURRENCY, "fit": FIT, "ctx": CTX,
         "ordering": "ABBA: arm order is reversed on odd repeats",
         "gpu_fields": GPU_FIELDS,
         "nvidia_smi": nvidia_smi(),
