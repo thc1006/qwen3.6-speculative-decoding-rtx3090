@@ -52,16 +52,19 @@ def load(run_dir: Path):
     return arms, man
 
 
-def arm_stats(runs):
+def arm_stats(runs, n_prompts):
     rates, lens, rep_means = [], [], []
     n = ms = dn = da = 0
-    complete = think_off = requests = 0
+    complete = think_off = think_known = requests = 0
     for r in runs:
         rr = [x["predicted_per_second"] for x in r["rows"]]
-        if rr:
-            rep_means.append(st.mean(rr))
-        if len(r["rows"]) == 10:
+        # Only a repeat that ran the whole prompt set contributes to the
+        # run-to-run SD: a repeat cut short by a crash has a different prompt
+        # mix, so its mean is not comparable with a complete one.
+        if len(r["rows"]) == n_prompts:
             complete += 1
+            if rr:
+                rep_means.append(st.mean(rr))
         for x in r["rows"]:
             requests += 1
             rates.append(x["predicted_per_second"])
@@ -70,16 +73,24 @@ def arm_stats(runs):
             ms += x["predicted_ms"]
             dn += x["draft_n"]
             da += x["draft_n_accepted"]
-            think_off += 1 if x.get("thinking_suppressed") else 0
+            if "thinking_suppressed" in x:
+                think_known += 1
+                think_off += 1 if x["thinking_suppressed"] else 0
     return {
         "reps": len(runs), "requests": requests, "complete": complete,
+        "tokens": n, "think_known": think_known,
         "mean": st.mean(rates) if rates else float("nan"),
         "pooled": 1000 * n / ms if ms else float("nan"),
         "median": st.median(rates) if rates else float("nan"),
         "min": min(rates) if rates else float("nan"),
         "max": max(rates) if rates else float("nan"),
-        # the only quantity here that is genuinely repeated-run uncertainty
-        "rep_sd": st.stdev(rep_means) if len(rep_means) > 1 else 0.0,
+        # The only quantity here that is genuinely repeated-run uncertainty,
+        # and only over COMPLETE repeats. None rather than 0.0 when fewer than
+        # two are available: a zero would read as perfect reproducibility when
+        # it actually means "not measurable", which is the class of misleading
+        # figure this whole audit is about.
+        "rep_sd": st.stdev(rep_means) if len(rep_means) > 1 else None,
+        "rep_sd_n": len(rep_means),
         "drafted": dn, "accepted": da,
         "acc_pct": (100 * da / dn) if dn else None,
         "think_off": think_off,
@@ -102,29 +113,50 @@ def report(run_dir: Path) -> None:
         print(f"  gpu at start: {man.get('nvidia_smi','?')}")
     print("=" * 108)
 
-    stats = {a: arm_stats(r) for a, r in arms.items()}
+    n_prompts = max((len(r["rows"]) for runs in arms.values() for r in runs), default=0)
+    print(f"  prompt set size inferred from the data: {n_prompts}")
+    stats = {a: arm_stats(r, n_prompts) for a, r in arms.items()}
     base = stats.get("baseline")
     hdr = (f"{'arm':22s} {'reps':>4s} {'req-mean':>9s} {'pooled':>8s} {'vs base':>8s} "
            f"{'median':>7s} {'min':>7s} {'repSD':>6s} {'drafted':>8s} {'acc%':>6s} "
            f"{'think-off':>9s} {'len':>9s} {'ok':>5s}")
     print(hdr)
     print("-" * len(hdr))
+    # repSD is over complete repeats; "n/a" means fewer than two were available
     for a in sorted(stats, key=lambda k: -stats[k]["pooled"]):
         s = stats[a]
         vs = (f"{100 * (s['pooled'] / base['pooled'] - 1):+7.1f}%"
               if base and base["pooled"] == base["pooled"] else "      -")
         acc = f"{s['acc_pct']:5.1f}" if s["acc_pct"] is not None else "    -"
+        think = (f"{s['think_off']:4d}/{s['think_known']:<4d}"
+                 if s["think_known"] else "   n/a   ")
+        rsd = f"{s['rep_sd']:6.2f}" if s["rep_sd"] is not None else "   n/a"
         print(f"{a:22s} {s['reps']:4d} {s['mean']:9.1f} {s['pooled']:8.1f} {vs:>8s} "
-              f"{s['median']:7.1f} {s['min']:7.1f} {s['rep_sd']:6.2f} {s['drafted']:8d} "
-              f"{acc:>6s} {s['think_off']:4d}/{s['requests']:<4d} "
+              f"{s['median']:7.1f} {s['min']:7.1f} {rsd:>6s} {s['drafted']:8d} "
+              f"{acc:>6s} {think:>9s} "
               f"{s['len_min']:4d}-{s['len_max']:<4d} {s['complete']}/{s['reps']}")
         for c in s["crashes"]:
             print(f"{'':24s}! died on {c['tag']}: {c['error'][:60]}")
 
+    exact100 = [a for a, s in stats.items()
+                if s["drafted"] and s["acc_pct"] is not None and abs(s["acc_pct"] - 100.0) < 1e-9]
+    if exact100:
+        print(f"\n  WARNING: {len(exact100)} arm(s) report EXACTLY 100 % acceptance "
+              f"({', '.join(exact100)}).")
+        print("    On a COMMON_CONTEXT_SEQ_RM_TYPE_FULL context that ratio is 1.0 by "
+              "construction,")
+        print("    not a measurement - partially accepted rounds skip both counters. "
+              "See ERRATA A1.")
+
+    tot = sum(s["tokens"] for s in stats.values())
+    print(f"\n  pooled throughput weights tokens equally; {tot} generated tokens in total")
+
     # ---- drift: does the baseline move across the run? ----------------------
     if base and base["reps"] > 1:
+        # complete repeats only, so the comparison is like-for-like
         bm = [st.mean([x["predicted_per_second"] for x in r["rows"]])
-              for r in sorted(arms["baseline"], key=lambda r: r["repeat"]) if r["rows"]]
+              for r in sorted(arms["baseline"], key=lambda r: r["repeat"])
+              if len(r["rows"]) == n_prompts]
         print(f"\n  drift check - baseline per repeat: "
               f"{', '.join(f'{v:.1f}' for v in bm)} tok/s")
         if len(bm) > 1:
@@ -150,8 +182,8 @@ def report(run_dir: Path) -> None:
         print(f"    {'n_max':>6s} {'pooled':>8s} {'vs base':>8s} {'drafted':>8s} {'acc%':>6s}")
         for nmax, s in sweep:
             vs = f"{100 * (s['pooled'] / base['pooled'] - 1):+7.1f}%" if base else "      -"
-            print(f"    {nmax:6d} {s['pooled']:8.1f} {vs:>8s} {s['drafted']:8d} "
-                  f"{s['acc_pct']:5.1f}" if s["acc_pct"] is not None else "")
+            acc = f"{s['acc_pct']:5.1f}" if s["acc_pct"] is not None else "    -"
+            print(f"    {nmax:6d} {s['pooled']:8.1f} {vs:>8s} {s['drafted']:8d} {acc:>6s}")
     print()
 
 

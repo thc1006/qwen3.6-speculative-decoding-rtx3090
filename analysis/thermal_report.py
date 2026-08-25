@@ -10,6 +10,11 @@ This turns the continuous trace into the three statements that matter:
               its maximum has no performance consequence
   drift       first half vs second half of the run, for clock and temperature.
               If the second half is not slower, thermal bias did not occur.
+              Computed over LOADED samples only: a trace spanning gaps between
+              arms would otherwise be diluted by idle-clock samples, and how
+              many gaps land in each half is arbitrary. The script reports how
+              many samples it excluded so that filtering is visible rather than
+              silent.
 
 Run: python analysis/thermal_report.py <telemetry.csv> [...]
 """
@@ -30,21 +35,45 @@ def num(s: str) -> float:
         return float("nan")
 
 
+IDLE_UTIL_PCT = 50.0   # below this a sample is treated as a gap between arms
+
+
 def report(path: Path) -> None:
     rows = list(csv.DictReader(path.open(encoding="utf-8")))
     if not rows:
         print(f"  {path}: empty")
         return
     g = lambda r, k: (r.get(k) or "").strip()  # noqa: E731
-    temps = [num(g(r, "temp_c")) for r in rows]
-    gfx = [num(g(r, "gfx_mhz")) for r in rows]
-    temps = [t for t in temps if t == t]
-    gfx = [c for c in gfx if c == c]
+
+    # Loaded samples only. `thr_gpu_idle` is authoritative when present;
+    # utilisation is the fallback for traces that lack the column.
+    def loaded(r) -> bool:
+        if g(r, "thr_gpu_idle") == "Active":
+            return False
+        u = num(g(r, "util_pct"))
+        return not (u == u and u < IDLE_UTIL_PCT)
+
+    busy = [r for r in rows if loaded(r)]
+    dropped = len(rows) - len(busy)
+    if not busy:
+        print(f"  {path.name}: no loaded samples")
+        return
+
+    temps = [t for t in (num(g(r, "temp_c")) for r in busy) if t == t]
+    gfx = [c for c in (num(g(r, "gfx_mhz")) for r in busy) if c == c]
+    if not temps or not gfx:
+        print(f"  {path.name}: no usable clock/temperature values")
+        return
 
     print("=" * 78)
-    print(f"{path.name}  -  {len(rows)} samples")
+    print(f"{path.name}  -  {len(rows)} samples, {len(busy)} under load "
+          f"({dropped} idle/low-utilisation samples excluded)")
+    span = [g(r, "wall_iso") for r in rows if g(r, "wall_iso")]
+    if len(span) > 1:
+        print(f"  trace span: {span[0]}  ->  {span[-1]}")
     print("=" * 78)
-    lim, dflt, mx = (g(rows[0], k) for k in ("power_limit_w", "power_default_w", "gfx_max_mhz"))
+    first = next((r for r in busy if g(r, "power_limit_w")), busy[0])
+    lim, dflt, mx = (g(first, k) for k in ("power_limit_w", "power_default_w", "gfx_max_mhz"))
     print(f"  power limit / default : {lim} / {dflt}"
           f"   {'-> NOT overclocked' if lim == dflt else '-> LIMIT DIFFERS FROM DEFAULT, check for OC'}")
     print(f"  temperature           : {min(temps):.0f}-{max(temps):.0f} C, "
@@ -71,8 +100,10 @@ def report(path: Path) -> None:
     print(f"  drift, first half -> second half:")
     print(f"    clock       {g1:.0f} -> {g2:.0f} MHz  ({100*(g2/g1-1):+.2f} %)")
     print(f"    temperature {t1:.1f} -> {t2:.1f} C   ({t2-t1:+.1f} C)")
-    verdict = ("no thermal bias: the second half is not slower"
-               if g2 >= g1 * 0.995 else "SECOND HALF SLOWER - investigate thermal bias")
+    # 0.5 % is the tolerance: boost clocks jitter by more than that between
+    # consecutive samples, so anything smaller is not a trend.
+    verdict = ("no thermal bias: the second half is not slower by more than 0.5 %"
+               if g2 >= g1 * 0.995 else "SECOND HALF SLOWER BY >0.5 % - investigate")
     print(f"    verdict: {verdict}")
     print()
 
