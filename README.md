@@ -69,6 +69,14 @@ The one lever upstream names as the fix — batching — was also tested, and do
 not help: no speculation gains +64 % at concurrency 8 while the matched-vocabulary
 drafter moves −8 %, so the gap widens rather than closing
 ([run I](v4_audit_2026_08_25/README.md#run-i--batching-the-lever-upstream-names)).
+It does not rescue the winner either. A sweep down to `n_max 1` puts DFlash on a
+plateau — +17.1 %, +17.6 %, +17.3 % at 2, 3 and 4, separated by less than the
+baseline's own run-to-run SD — and a cliff between 4 and 6; batching then erases
+the plateau at four concurrent requests (+0.4 %) and collapses it at eight
+(−74.1 %), with draft volume and acceptance barely moving, so it is the draft
+*cost* that fails to amortise
+([run K](v4_audit_2026_08_25/README.md#run-k--where-the-optimum-is-and-what-batching-does-to-it)).
+On this card, speculation pays for one stream at a time or not at all.
 
 ![v1 300-token matrix: request-mean vs pooled throughput](analysis/plot_mean_by_config.png)
 

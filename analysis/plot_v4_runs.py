@@ -149,14 +149,18 @@ def plot_dflash_sweep() -> None:
 
     fig, (ax, ax2) = plt.subplots(2, 1, figsize=(9.2, 7.4), sharex=True,
                                   gridspec_kw={"height_ratios": [2.1, 1]})
-    for label, pts, colour, b in series:
+    # The two runs land almost on top of each other at n_max 4 and 8 - which is
+    # the replication, and also a label collision. Push each series' labels to a
+    # different distance rather than letting them overprint.
+    for k, (label, pts, colour, b) in enumerate(series):
         ax.plot([p[0] for p in pts], [p[1] for p in pts], marker="o", lw=2.0,
                 color=colour, label=f"{label}   (its baseline: {b:.1f} tok/s)")
         ax2.plot([p[0] for p in pts], [p[2] for p in pts], marker="o", lw=1.8,
                  color=colour)
+        up, down = (24, -31) if k == 0 else (10, -17)
         for n, d, _ in pts:
             ax.annotate(f"{d:+.1f}%", (n, d), textcoords="offset points",
-                        xytext=(0, 10 if d > 0 else -17), ha="center",
+                        xytext=(0, up if d > 0 else down), ha="center",
                         fontsize=8.6, color=colour,
                         bbox=dict(boxstyle="round,pad=0.15", fc="white",
                                   ec="none", alpha=0.85))
@@ -169,10 +173,11 @@ def plot_dflash_sweep() -> None:
             bbox=dict(boxstyle="round,pad=0.15", fc="white", ec="none", alpha=0.9))
     ys = [d for _, pp, _, _ in series for _, d, _ in pp] + [0.0]
     pad = max(6.0, 0.12 * (max(ys) - min(ys)))
-    ax.set_ylim(min(ys) - pad, max(ys) + pad)
+    ax.set_ylim(min(ys) - 1.9 * pad, max(ys) + 1.6 * pad)
     ax.set_ylabel("change in aggregate throughput\nagainst the same run's baseline (%)")
-    ax.set_title("DFlash self-speculation: the sign flips between draft length 4 and 8\n"
-                 "one binary, one placement policy, three repeats per point",
+    ax.set_title("DFlash self-speculation: a plateau at draft length 2-4, then a cliff\n"
+                 "one binary, one placement policy, three repeats per point; "
+                 "two runs, independently",
                  fontsize=11.5)
     ax.legend(loc="lower left", fontsize=8.8, frameon=False)
     ax.grid(color="#dcdcdc", lw=0.6)

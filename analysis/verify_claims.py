@@ -195,6 +195,44 @@ wins=sum(1 for t,d in per.items()
 chk("J dflash-n4 beats no speculation on every prompt", (wins, len(per)), (10, 10))
 
 
+print("\n=== run K (2026-08-26): the DFlash sweep and its batching arms ===")
+K1 = "v4_audit_2026_08_25/data/matrix_K1_sweep_*/%s__rep*.json"
+kb = _arm(K1 % "baseline")
+chk("K1 baseline aggregate", round(kb[0], 1), 110.6, 0.05)
+for n, agg_, delta, acc in ((1, 120.2,  8.7, 82.0), (2, 129.5, 17.1, 72.8),
+                            (3, 130.0, 17.6, 63.6), (4, 129.8, 17.3, 55.6),
+                            (6, 100.8, -8.9, 43.0), (8,  93.2,-15.8, 37.2)):
+    a = _arm(K1 % f"spec-dflash-n{n}")
+    chk(f"K1 n_max {n} aggregate",    round(a[0], 1), agg_, 0.05)
+    chk(f"K1 n_max {n} vs baseline",  round(100*(a[0]/kb[0]-1), 1), delta, 0.05)
+    chk(f"K1 n_max {n} acceptance %", round(100*a[4]/a[3], 1), acc, 0.05)
+# the plateau claim: 2, 3 and 4 within the baseline's own run-to-run SD
+_p = [_arm(K1 % f"spec-dflash-n{n}")[0] for n in (2, 3, 4)]
+chk("K1 n_max 2-4 spread below the baseline SD", (max(_p)-min(_p)) < kb[1], True)
+# batching: the winner does not survive it
+for c, base_, arm_, delta in ((4, 154.1, 154.7, 0.4), (8, 153.2, 39.6, -74.1)):
+    KC = f"v4_audit_2026_08_25/data/matrix_K_conc{c}_*/%s__rep*.json"
+    b_, a_ = _arm(KC % "baseline"), _arm(KC % "spec-dflash-n4")
+    chk(f"K c={c} baseline aggregate", round(b_[0], 1), base_, 0.05)
+    chk(f"K c={c} dflash-n4 aggregate", round(a_[0], 1), arm_, 0.05)
+    chk(f"K c={c} dflash-n4 vs baseline", round(100*(a_[0]/b_[0]-1), 1), delta, 0.05)
+    peaks = sorted({json.load(open(f)).get("max_in_flight") for f in glob.glob(KC % "*")})
+    chk(f"K c={c} batch actually formed", peaks, [c])
+# it is cost, not draft quality: volume and acceptance stay put while the clock moves
+for label, pat, vol, acc in (("c=1", K1 % "spec-dflash-n4", 1.234, 55.6),
+                             ("c=4", "v4_audit_2026_08_25/data/matrix_K_conc4_*/spec-dflash-n4__rep*.json", 1.243, 55.0),
+                             ("c=8", "v4_audit_2026_08_25/data/matrix_K_conc8_*/spec-dflash-n4__rep*.json", 1.305, 51.2)):
+    rs = [json.load(open(f)) for f in glob.glob(pat)]
+    n_ = sum(x["predicted_n"] for r in rs for x in r["rows"])
+    dn_ = sum(x["draft_n"] for r in rs for x in r["rows"])
+    da_ = sum(x["draft_n_accepted"] for r in rs for x in r["rows"])
+    chk(f"K {label} drafted per generated token", round(dn_/n_, 3), vol, 0.0005)
+    chk(f"K {label} acceptance %", round(100*da_/dn_, 1), acc, 0.05)
+# run K replicates run J at the two draft lengths they share
+for n, want in ((4, 17.3), (8, -15.8)):
+    chk(f"K replicates J at n_max {n}",
+        round(100*(_arm(K1 % f"spec-dflash-n{n}")[0]/kb[0]-1), 1), want, 0.05)
+
 print("\n=== ERRATA A11: output preservation, and the determinism control ===")
 _J = "v4_audit_2026_08_25/data/matrix_J2_*/*__rep*.json"
 _arms = defaultdict(lambda: defaultdict(dict))
@@ -274,6 +312,10 @@ DOC_CLAIMS = [
     ("ERRATA.md",   "3 / 30",   "A11 dflash-n4 identical streams"),
     ("ERRATA.md",   "0.8 %",    "A11 baseline content spread"),
     ("ERRATA.md",   "110-126",  "A11 median divergence index"),
+    ("v4_audit_2026_08_25/README.md", "+17.6 %", "K1 plateau top"),
+    ("v4_audit_2026_08_25/README.md", "-74.1 %", "K c=8 collapse"),
+    ("v4_audit_2026_08_25/README.md", "1.305",   "K c=8 draft volume"),
+    ("v4_audit_2026_08_25/README.md", "153.2",   "K c=8 baseline"),
 ]
 root = pathlib.Path(__file__).resolve().parents[1]
 for f, needle, what in DOC_CLAIMS:

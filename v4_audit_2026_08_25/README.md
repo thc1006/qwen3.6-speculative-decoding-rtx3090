@@ -440,6 +440,82 @@ K, because three points that straddle a peak cannot say where the peak is.
 
 ---
 
+## Run K — where the optimum is, and what batching does to it
+
+Run J put `n_max 4` at +18.7 % and `n_max 8` at −14.8 %, which locates the peak
+at or below 4 and says nothing about where. Run K brackets it from 1, and then
+asks of the winning arm the question run I asked of the matched-vocabulary one.
+
+Everything here is at `-c 8192` with `--fit-target 2048`, applied to every arm
+including the baseline, for the reason in the previous section: at the fitter's
+default margin the DFlash configuration does not start reliably. Absolute rates
+are therefore not comparable with run J's; the deltas against each run's own
+baseline are.
+
+| `n_max` | aggregate | run-to-run SD | pooled | vs no speculation | acceptance |
+|---|---|---|---|---|---|
+| — (no speculation) | 110.6 | 2.10 | 123.3 | — | — |
+| 1 | 120.2 | 1.97 | 135.2 | +8.7 % | 82.0 % |
+| 2 | 129.5 | 0.13 | 149.0 | +17.1 % | 72.8 % |
+| **3** | **130.0** | 1.49 | 149.9 | **+17.6 %** | 63.6 % |
+| 4 | 129.8 | 0.51 | 149.8 | +17.3 % | 55.6 % |
+| 6 | 100.8 | 0.63 | 114.5 | −8.9 % | 43.0 % |
+| 8 | 93.2 | 0.63 | 104.6 | −15.8 % | 37.2 % |
+
+**There is no peak, there is a plateau and then a cliff.** `n_max` 2, 3 and 4
+land at 129.5, 130.0 and 129.8 — separated by less than the run-to-run SD of the
+baseline, so calling any one of them "the optimum" would be reading noise. What
+the sweep does establish is the shape: one token of draft is not enough
+(+8.7 %), two to four are worth about +17 %, and by six the arm is already
+losing. The sign change sits between 4 and 6, not between 4 and 8 as run J's
+coarser grid suggested.
+
+Run K also **replicates run J** at the two draft lengths they share, from a
+different context and a different fitter margin:
+
+| `n_max` | run J | run K |
+|---|---|---|
+| 4 | +18.7 % | +17.3 % |
+| 8 | −14.8 % | −15.8 % |
+
+### Batching destroys it
+
+| | no speculation | `spec-dflash-n4` | vs baseline |
+|---|---|---|---|
+| 1 request in flight | 110.6 | 129.8 | **+17.3 %** |
+| 4 in flight | 154.1 ± 0.48 | 154.7 ± 3.35 | +0.4 % |
+| 8 in flight | 153.2 ± 0.61 | 39.6 ± 1.47 | **−74.1 %** |
+
+The advantage is gone at four concurrent requests and the arm collapses at
+eight, reproducibly — SD 1.47 on 39.6 across three repeats.
+
+**It is not that the drafts get worse.** Draft volume per generated token and
+acceptance barely move across the three levels; only the clock does:
+
+| level | drafted per generated token | acceptance | aggregate |
+|---|---|---|---|
+| 1 in flight | 1.234 | 55.6 % | 129.8 |
+| 4 in flight | 1.243 | 55.0 % | 154.7 |
+| 8 in flight | 1.305 | 51.2 % | 39.6 |
+
+The draft work is not being shared across the batch, so its cost scales with the
+batch while the target's per-token cost falls. That is the same shape run I
+found for the matched-vocabulary drafter, reached by a different method.
+
+Two things checked rather than assumed before reading that −74.1 %:
+
+- **Not context exhaustion.** `-c 8192` across eight slots is 1024 tokens each,
+  and the requests report `n_tokens = 328` at release. The speculative
+  checkpoint machinery never fired: zero checkpoints created, zero restored. The
+  only log warnings are `truncating draft to N tokens`, which is ordinary `p_min`
+  truncation, and the `discard` count is identical in both arms.
+- **The baseline itself is constrained at this context**, and that is stated
+  rather than hidden: run K's c=8 baseline plateaus at 153.2 where run I's, at
+  `-c 16384`, reached 180.0. That is a cross-run difference in absolute rate. The
+  −74.1 % is a within-run contrast against the 153.2 measured beside it.
+
+---
+
 ## Answer 3 — what still needs doing
 
 These runs settle the three questions above. They do **not** make this a
