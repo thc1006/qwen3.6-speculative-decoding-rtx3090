@@ -953,6 +953,20 @@ speculation method together, at one run per prompt/config, with the thinking
 control inert. It is a negative observation for that run, not a DFlash effect
 estimate. A clean A/B needs one pinned post-merge binary with DFlash off and on.
 
+**Closed by measurement on 2026-08-26, and it reverses the sign.** Run J ran
+DFlash off and on against one binary (`b6a5c490…`), one placement policy and
+one drafter re-converted by post-merge master, three repeats per arm. At
+`--spec-draft-n-max 4`, DFlash is **+18.7 %** against no speculation on
+aggregate throughput (130.2 against 109.7 tok/s) and **+24.0 %** pooled (151.6
+against 122.3), and it is faster on all ten prompts, not on average across
+them. The archived v3 direction — DFlash slower — reappears only at longer
+draft windows: −14.8 % at n_max 8 and −47.4 % at n_max 16.
+
+So v3's number was not merely unattributable, it pointed the wrong way about
+the method. What v3 measured at n_max 4 was a binary change, and what it read
+as a DFlash penalty is, on one binary, the largest speedup in this repository.
+See [`v4_audit_2026_08_25/README.md`](v4_audit_2026_08_25/README.md#run-j--the-first-configuration-that-is-actually-faster).
+
 Note also that `BENCHMARK_ENV.md` recorded `llama-cli --version` as
 `8889 (bcb5eeb64) -- inherited from master at fork point`, while the run logs
 report `b8942-67cb0d507`. The logs are authoritative; `--version` was captured

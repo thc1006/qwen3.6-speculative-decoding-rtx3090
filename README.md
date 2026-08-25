@@ -36,12 +36,28 @@ every tested condition that recorded speculative activity had lower
 request-mean **and** lower pooled decode throughput than its matched
 no-speculation reference.
 
-The direction holds. The *explanation* published alongside it does not. Re-run
-on a binary where llama.cpp counts acceptance correctly, real acceptance and
-decode rate correlate at **r = +0.998** across the ten prompts — the slowdown
-tracks low acceptance and draft-path cost, which is ordinary speculative-decoding
-economics. The "100 % acceptance yet slower, therefore an MoE pathology"
-anomaly this repository was built around does not exist.
+The direction holds *for the conditions v1 tested*. The *explanation* published
+alongside it does not. Re-run on a binary where llama.cpp counts acceptance
+correctly, real acceptance and decode rate correlate at **r = +0.998** across
+the ten prompts — the slowdown tracks low acceptance and draft-path cost, which
+is ordinary speculative-decoding economics. The "100 % acceptance yet slower,
+therefore an MoE pathology" anomaly this repository was built around does not
+exist.
+
+**And the direction is not universal.** On 2026-08-26, on the same card and
+prompt set with post-merge master, DFlash self-speculation at
+`--spec-draft-n-max 4` runs at **+18.7 %** aggregate throughput against a
+matched no-speculation control (130.2 against 109.7 tok/s), winning on all ten
+prompts. v1 never tested that method, and the archived v3 attempt at it compared
+two different binaries. The sign flips with the draft window — +18.7 % at 4,
+−14.8 % at 8, −47.4 % at 16 — so "speculative decoding loses here" was a
+statement about draft-window regimes that this repository had not yet separated.
+See [`v4_audit_2026_08_25/README.md`](v4_audit_2026_08_25/README.md#run-j--the-first-configuration-that-is-actually-faster).
+
+The one lever upstream names as the fix — batching — was also tested, and does
+not help: no speculation gains +64 % at concurrency 8 while the matched-vocabulary
+drafter moves −8 %, so the gap widens rather than closing
+([run I](v4_audit_2026_08_25/README.md#run-i--batching-the-lever-upstream-names)).
 
 ![v1 300-token matrix: request-mean vs pooled throughput](analysis/plot_mean_by_config.png)
 
@@ -479,8 +495,13 @@ not a DFlash effect estimate:
 - no target-precision, draft-precision, dense-model, profiler, or second-GPU
   control.
 
-DFlash PR #22105 was merged upstream on 2026-06-28. Any current conclusion
-needs a new A/B on one pinned post-merge binary with DFlash off and on.
+DFlash PR #22105 was merged upstream on 2026-06-28. That A/B was run on
+2026-08-26, and it reverses the sign at short draft windows: on one binary with
+a control matching to −0.01 %, `--spec-draft-n-max 4` is **+18.7 %** against no
+speculation, while 8 and 16 are −14.8 % and −47.4 %. The archived v3 figure is
+what the method looks like at the long windows, measured across a binary change.
+Details and controls in
+[`v4_audit_2026_08_25/README.md`](v4_audit_2026_08_25/README.md#run-j--the-first-configuration-that-is-actually-faster).
 
 ### The vLLM sibling result
 

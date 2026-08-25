@@ -262,6 +262,152 @@ repeat starts on an idle, cool card.
 
 ---
 
+## Run I — batching, the lever upstream names
+
+Upstream's standing answer to "speculative decoding loses on a MoE target" is
+that the regime is wrong: the win is supposed to appear when the GPU is not
+already saturated by a single stream, i.e. under batching (ERRATA A9). Run I
+tests that directly on this host, with the matched-vocabulary drafter at
+`--spec-draft-n-max 8` — the arm closest to what v1 ran.
+
+**First, the harness had to be fixed.** The first attempt at this run measured
+nothing. `BENCH_CONCURRENCY` passed `--parallel N -cb` to the server, which
+allocated N slots, and then the client issued the ten prompts one at a time, so
+N−1 slots sat idle. The tell was in the data before any code was read: the c=4
+arm-runs took 44 s and 118 s against c=1's 44 s and 116 s. Four times the
+nominal batch width at identical wall-clock is a batch size of one. That
+attempt is discarded, not reported.
+
+The runner now dispatches through a thread pool **and reads the achieved width
+back out of the request timestamps**, because `--parallel` on the server and N
+worker threads in the client are each necessary and neither is sufficient. Every
+arm-run below records `max_in_flight`, and it equals the configured level in all
+eighteen:
+
+| level | requested | observed `max_in_flight` |
+|---|---|---|
+| c=1 | 1 | 1, 1, 1, 1, 1, 1 |
+| c=4 | 4 | 4, 4, 4, 4, 4, 4 |
+| c=8 | 8 | 8, 8, 8, 8, 8, 8 |
+
+Aggregate throughput — 3000 generated tokens divided by wall-clock over the
+ten-prompt set, mean of three repeats:
+
+| concurrency | no speculation | `spec-draft-n8` | speculation ÷ baseline |
+|---|---|---|---|
+| 1 | 109.7 ± 0.57 | 30.6 ± 0.14 | 0.28× |
+| 4 | 154.3 ± 0.27 | 27.0 ± 0.73 | 0.18× |
+| 8 | 180.0 ± 15.21 | 28.1 ± 0.66 | 0.16× |
+
+**Batching helps the target and does nothing for the drafter.** No speculation
+gains +40.6 % at c=4 and +64.0 % at c=8. Speculation moves −11.7 % and −8.4 %
+over the same range. The gap therefore widens with batching rather than
+closing: 0.28× → 0.18× → 0.16×.
+
+On this host, at this model and draft window, batching is not the missing
+regime. That is a negative result about one arm on one card, not a refutation
+of the upstream argument in general — but it is the specific configuration this
+repository has been reporting, measured in the regime it was told to measure it
+in.
+
+Two caveats, both against the strength of the result:
+
+- ± is the run-to-run SD of three repeats. At c=8 it is 15.21 because one
+  baseline repeat came in at 197.5 against 171.2 twice. Ten prompts over eight
+  slots is one full wave plus a wave of two, so wall-clock there is sensitive to
+  which prompts land in the short tail; c=4, at 2.5 waves, is the cleaner
+  measurement. The conclusion survives either way — the *slowest* c=8 baseline
+  repeat is still +56 % over c=1, and speculation never moves at all.
+- The prompt set is fixed at ten. A batching benchmark would normally hold the
+  arrival rate, not the request count, constant.
+
+### The failure mode that did not happen
+
+llama.cpp issue #27572 reports draft acceptance silently collapsing to 0 under
+`-np N`. It did not occur here, and that was checked rather than assumed:
+
+| level | drafted | accepted | counted ratio | requests with `draft_n = 0` |
+|---|---|---|---|---|
+| c=1 | 5547 / rep | 1646 | 29.7 % | 0 / 10 |
+| c=4 | 5572–5691 | 1608–1641 | 28.3–29.5 % | 0 / 10 |
+| c=8 | 5656–5687 | 1607–1625 | 28.3–28.7 % | 0 / 10 |
+
+Acceptance is flat across concurrency. Speculation is losing under batching
+because the target's own batched decode gets much cheaper while the draft cost
+does not, not because the drafter stopped working.
+
+---
+
+## Run J — the first configuration that is actually faster
+
+This is the DFlash A/B that ERRATA D4 says v3 never had: one binary
+(`b6a5c490…`), one placement policy, one drafter, three repeats per arm, DFlash
+off and on.
+
+Two things had to be true first. The archived v3 drafter GGUF is rejected by
+post-merge master for lacking `target_layers`; the re-converted file carries it
+(`dflash.target_layers = [2, 11, 20, 29, 38]`). And the BF16 drafter only loads
+with `-ngl` unset, because pinning it makes `common_fit_params` abort instead of
+adjusting the parameters the caller left unset — so `BENCH_FIT=on` applies to
+**every** arm in the run, the baseline included, and placement policy stays
+constant across the comparison.
+
+That last decision is a confound if `-fit on` quietly handicaps the control, so
+it is checked directly:
+
+| control | aggregate |
+|---|---|
+| baseline, `-ngl 999` pinned (run I, c=1) | 109.72 ± 0.57 |
+| baseline, `-fit on` (run J) | 109.70 ± 0.18 |
+| difference | **−0.01 %** |
+
+Both load `41/41` target layers to GPU; the DFlash arm additionally loads `9/9`
+drafter layers. The control is not being handicapped.
+
+| arm | pooled | aggregate | vs no speculation | drafted | acceptance |
+|---|---|---|---|---|---|
+| **`spec-dflash-n4`** | **151.6** | **130.2 ± 1.21** | **+18.7 %** | 11 070 | 55.8 % |
+| no speculation | 122.3 | 109.7 ± 0.18 | — | 0 | — |
+| `spec-dflash-n8` | 105.2 | 93.5 ± 0.56 | −14.8 % | 18 114 | 36.8 % |
+| `spec-dflash-n16` | 62.8 | 57.7 ± 0.19 | −47.4 % | 31 728 | 21.4 % |
+| `spec-draft-n8` (matched vocab) | 31.4 | 30.5 ± 0.18 | −72.2 % | 16 641 | 29.7 % |
+
+**DFlash at `n_max 4` is +18.7 % on aggregate throughput and +24.0 % pooled.**
+It is the first configuration in this repository that beats not speculating,
+and it is not an average that hides losers — it wins on all ten prompts
+individually:
+
+| prompt | no speculation | `dflash-n4` | `dflash-n8` | `dflash-n16` |
+|---|---|---|---|---|
+| `short_greet` | 122.4 | 156.2 | 108.5 | 60.6 |
+| `short_q` | 122.3 | 150.9 | 87.2 | 52.4 |
+| `medium_chat` | 121.8 | 141.1 | 93.2 | 53.9 |
+| `medium_rec` | 121.8 | 160.9 | 125.7 | 83.7 |
+| `reasoning` | 121.8 | 178.4 | 128.9 | 94.7 |
+| `long_explain` | 122.0 | 140.8 | 95.5 | 52.7 |
+| `code_small` | 121.8 | 189.4 | 170.8 | 96.7 |
+| `multi_turn_1` | 121.7 | 141.3 | 96.2 | 58.7 |
+| `multi_turn_2` | 121.9 | 132.0 | 87.5 | 53.9 |
+| `zh_hant` | 121.4 | 138.4 | 99.5 | 55.2 |
+
+(per-request decode rate, mean of three repeats)
+
+The sign flips with draft length, and it flips fast: +18.7 % at 4, −14.8 % at 8,
+−47.4 % at 16, with acceptance falling 55.8 % → 36.8 % → 21.4 % as the window
+grows. The archived v3 result — DFlash slower — is what this looks like at
+`n_max 8` and 16. v3 measured n_max 4 as well, but across a binary change, and
+read the difference as a DFlash effect.
+
+**What this does and does not establish.** It establishes that on this host,
+this target, this drafter and this prompt set, a self-speculative method at a
+short draft window beats no speculation by roughly a fifth, with a matched
+control and three repeats. It does not establish that the number transfers: the
+window is one draft length on one card, thinking is on throughout, and ten
+prompts is ten prompts. The draft-length optimum is bracketed from below in run
+K, because three points that straddle a peak cannot say where the peak is.
+
+---
+
 ## Answer 3 — what still needs doing
 
 These runs settle the three questions above. They do **not** make this a
