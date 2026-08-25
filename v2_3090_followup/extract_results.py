@@ -190,6 +190,15 @@ def build():
 def main():
     data = build()
     out = HERE / "results_v2.json"
+    # Preserve the 2026-08-25 audit block. Re-running this extractor must not
+    # silently drop the corrections, the same failure mode extract_exp2.py had.
+    try:
+        prev = json.loads(out.read_text(encoding="utf-8"))
+        for k in ("audit_2026_08_25",):
+            if k in prev:
+                data[k] = prev[k]
+    except (FileNotFoundError, ValueError):
+        pass
     out.write_text(
         json.dumps(data, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",

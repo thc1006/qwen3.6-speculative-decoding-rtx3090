@@ -1,5 +1,16 @@
 """Generate plot_v2_configs.png from results_v2.json.
 
+Audited 2026-08-25 (see ../ERRATA.md). Two label corrections:
+
+  * every non-baseline arm here is an EXTERNAL DRAFT MODEL run (`-md`), so the
+    labels now say so. The old "srogmann-style" tag conflated this with v1's
+    `--spec-type ngram-mod`, which is a different mechanism and which v2 could
+    not run at all: `--spec-type` is registered for llama-server only, and v2
+    used llama-cli (ERRATA D6).
+  * the footer now states the two facts that decide how these bars may be read:
+    one measurement per prompt per config, and a thinking control that did not
+    work.
+
 Horizontal bar chart — configs ranked descending by mean gen tok/s.
 Design aims:
   - number labels placed past the error-bar max (no collisions)
@@ -41,10 +52,10 @@ ORDER = [
 ]
 LABELS = {
     "baseline":             "baseline  · no spec-decode",
-    "srogmann_min48_max64": "--draft-min 48  --draft-max 64  · srogmann-style",
-    "oleg_draft_2_16":      "--draft-min 2   --draft-max 16",
-    "oleg_draft_2_32":      "--draft-min 2   --draft-max 32  · Oleg-dM suggestion",
-    "oleg_draft_2_64":      "--draft-min 2   --draft-max 64",
+    "srogmann_min48_max64": "-md  --draft-min 48  --draft-max 64",
+    "oleg_draft_2_16":      "-md  --draft-min 2   --draft-max 16",
+    "oleg_draft_2_32":      "-md  --draft-min 2   --draft-max 32",
+    "oleg_draft_2_64":      "-md  --draft-min 2   --draft-max 64",
     "default_draft_max8":   "default --draft-min=5  --draft-max 8",
     "bare_md":              "bare -md  · all defaults",
     "default_draft_max16":  "default --draft-min=5  --draft-max 16",
@@ -130,7 +141,7 @@ ax.set_title(
 ax.text(
     0.0, 1.02,
     "llama.cpp 97895129e (post PR #19493)   ·   single 3090 @ stock clocks   ·   "
-    "mean of 5 prompts   ·   error bars = min–max range",
+    "mean of 5 prompts, one run each   ·   error bars = min–max across prompts",
     transform=ax.transAxes, ha="left", va="bottom",
     fontsize=9.5, color=MUTED,
 )
@@ -181,10 +192,18 @@ fig.text(
     family="monospace",
 )
 fig.text(
-    0.995, 0.012,
-    "github.com/thc1006/qwen3.6-speculative-decoding-rtx3090   ·   v2.2",
+    0.5, 0.012,
+    "audited 2026-08-25 · one run per prompt per config, so bars are not repeat means · "
+    "-no-cnv was rejected and /no_think did not disable thinking, so the measured "
+    "workload is long chain-of-thought · see ERRATA.md",
+    ha="center", va="bottom",
+    fontsize=7.8, color="#8a3d3d", family="monospace",
+)
+fig.text(
+    0.995, -0.012,
+    "github.com/thc1006/qwen3.6-speculative-decoding-rtx3090   ·   audited v4",
     ha="right", va="bottom",
-    fontsize=7.5, color="#9a9a9a", family="monospace",
+    fontsize=7.2, color="#9a9a9a", family="monospace",
 )
 
 plt.tight_layout(rect=[0.0, 0.10, 1, 1.0])

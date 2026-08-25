@@ -1,5 +1,44 @@
 # v2 follow-up bench (2026-04-22)
 
+> [!WARNING]
+> **Rescoped by the 2026-08-25 audit.** The measurements below are archived and
+> every aggregate was re-derived from the raw logs and reproduced exactly. Three
+> of the conclusions did not survive:
+>
+> 1. **"100 % draft acceptance is genuine" is wrong.** The ratio is 1.0 by
+>    construction. On this hybrid Gated-DeltaNet target the context reports
+>    `COMMON_CONTEXT_SEQ_RM_TYPE_FULL`, so a partially accepted round takes an
+>    early `continue` in `server-context.cpp` that skips both acceptance
+>    counters and re-verifies the truncated prefix. Only fully accepted rounds
+>    reach the counter. The drafter's own counters, printed one line below the
+>    quoted `1.00000 (115 accepted / 115 generated)` in the same
+>    `verbose.log`, say **115 of 214 generated draft tokens were accepted —
+>    53.7 %**, and 33 of 81 drafts — 40.7 %. See [`../ERRATA.md`](../ERRATA.md) A1.
+> 2. **The draft model was not vocabulary-matched.** The same log shows
+>    `common_speculative_are_compatible` failing and llama.cpp falling back to
+>    token translation. Cause: `Qwen/Qwen3.5-0.8B` has no
+>    `generation_config.json` upstream, so its GGUF carries no
+>    `tokenizer.ggml.bos_token_id` and llama.cpp substitutes the hard-coded
+>    GPT-2 legacy default `11` against the target's `248044`. Both models set
+>    `add_bos_token = false`, so the field that gates speculation is one
+>    neither model uses. See [`../ERRATA.md`](../ERRATA.md) A2.
+> 3. **`/no_think` did not disable thinking and `-no-cnv` was rejected.**
+>    61 of 62 logs in this directory contain
+>    `--no-conversation is not supported by llama-cli` followed by
+>    `[Start thinking]` and a full reasoning trace. The measured workload is
+>    long chain-of-thought output. The real switches on this build are
+>    `-rea off` / `--reasoning-budget 0`. See [`../ERRATA.md`](../ERRATA.md) D1/D2.
+>
+> A further provenance gap: the committed `bench_3090_oleg.sh` writes config
+> directories named `02_srogmann_ngmod_n24` / `03_oleg_draft_2_32` /
+> `04_oleg_draft_2_16`, while the committed data is `02_oleg_draft_2_32` /
+> `03_oleg_draft_2_16` / `04_draft_2_64`. The script is therefore not the one
+> that produced the logs, no script is committed for `v2_controls/` or
+> `v2_master_cross_check/`, and no log records its own argv. See
+> [`../ERRATA.md`](../ERRATA.md) D5.
+
+
+
 Response to [Oleg-dM's comment on HF discussion #14](https://huggingface.co/unsloth/Qwen3.6-35B-A3B-GGUF/discussions/14).
 Fresh bench on a single RTX 3090 covering the commenter's suggested
 `--draft-min 2 --draft-max 32`, a control sweep of `--draft-min=5`
@@ -22,15 +61,18 @@ Cross-check on master `bcb5eeb64`: identical within ±0.3 % noise.
 
 ## Why it still loses
 
-1. **100 % draft acceptance is genuine** — `common/speculative.cpp`
-   increments `n_acc_tokens += n_accepted` post-verify; a `--verbose`
-   run confirms `draft acceptance rate = 1.00000 (115 / 115)`. The
-   0.8 B vocab-matched draft genuinely matches the 35 B target on
-   low-entropy prompts. Accept rate is not the bottleneck.
-2. **Verify + KV-management overhead exceeds the savings.** On a
-   consumer 3090 bound by memory bandwidth, the union of expert
-   slices touched during verification ate the per-token forward-pass
-   win even at 100 % acceptance.
+1. ~~**100 % draft acceptance is genuine**~~ — **RETRACTED.** The ratio is
+   a counter artefact (see the banner above): 1.0 by construction on this
+   model. True acceptance in that run is 115 / 214 = 53.7 % of generated
+   draft tokens. The draft was also *not* vocab-matched — llama.cpp ran it
+   through the token-translation fallback. Acceptance was never measured, so
+   it cannot be ruled in or out as the bottleneck.
+2. **Draft-path and state-management overhead is large and measured.** In
+   the one run with a verbose trace, the drafter's `generate()` alone took
+   999.6 ms of a ~3165 ms generation wall-clock (31.6 %), 20 of 53
+   verification rounds were discarded and redone, and each discarded round
+   paid a 62.8 MiB state checkpoint plus its restore. The expert-union story
+   is a hypothesis; nothing here measures expert routing.
 3. **Counter-intuitive finding:** larger draft windows (48 / 64) lose
    *less* than shorter ones, because they amortise the verify cost
    across more speculated tokens. The opposite of the "wasted
@@ -66,8 +108,9 @@ Environment snapshot for this bench is appended to the top-level
 
 ## Conclusion
 
-**No speculative decoding configuration on a consumer RTX 3090 is a
-net win for Qwen3.6-35B-A3B at Q4_K_M**, regardless of commit,
+**No speculative decoding configuration tested here was a net win for
+`Qwen3.6-35B-A3B-UD-Q4_K_XL` on this RTX 3090** — note the target is
+UD-Q4_K_XL; `Q4_K_M` is the 0.8 B *draft* model. This holds regardless of commit,
 regardless of `--draft-min` / `--draft-max`, regardless of whether
 you're measuring the "always-active" regime (this v2 bench, 55–85
 tok/s) or the "active-plus-skipped mixture" regime (v1 bench, mean

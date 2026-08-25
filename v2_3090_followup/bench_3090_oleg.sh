@@ -1,14 +1,33 @@
 #!/usr/bin/env bash
+# ---------------------------------------------------------------------------
+# HISTORICAL SCRIPT - kept as evidence, corrected only for portability.
+#
+# Audited 2026-08-25. See ../ERRATA.md (or ERRATA.md at the repo root).
+# The measurement flags below are UNCHANGED so this file still documents what
+# was actually executed. Two of them did not do what the comments claim:
+#
+#   -no-cnv     REJECTED by llama-cli on these builds. The committed logs show
+#               "--no-conversation is not supported by llama-cli / please use
+#               llama-completion instead". (ERRATA D1)
+#   /no_think   Did NOT disable thinking. The same logs contain "[Start
+#               thinking]" and a full reasoning trace. The working switches on
+#               these builds are `-rea off` and `--reasoning-budget 0`.
+#               (ERRATA D2)
+#
+# Do not use this script for new measurements. Use bench/retest_runner.py.
+# Host-specific paths are now environment variables with the original values
+# as defaults.
+# ---------------------------------------------------------------------------
 # Re-bench Qwen3.6-35B-A3B on 3090 host in response to Oleg-dM HF comment.
 # Runs 4 configs × 5 prompts + 1 verbose single-run.
 set -euo pipefail
 
-MAIN="$HOME/models/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf"
-DRAFT="$HOME/models/Qwen3.5-0.8B-Q4_K_M.gguf"
-BIN="$HOME/bench/llama.cpp/build/bin"
+MAIN="${MODEL_TARGET:-$HOME/models/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf}"
+DRAFT="${MODEL_DRAFT:-$HOME/models/Qwen3.5-0.8B-Q4_K_M.gguf}"
+BIN="${LLAMA_BIN_DIR:-$HOME/bench/llama.cpp/build/bin}"
 CLI="$BIN/llama-cli"
 
-OUTDIR="$HOME/bench/out_$(date +%Y%m%d_%H%M%S)"
+OUTDIR="${BENCH_OUT:-$HOME/bench/out_$(date +%Y%m%d_%H%M%S)}"
 mkdir -p "$OUTDIR"
 
 {
