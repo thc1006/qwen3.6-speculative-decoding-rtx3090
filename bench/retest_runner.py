@@ -38,6 +38,14 @@ Everything is configured through the environment:
     BENCH_MAX_TOKENS   max_tokens per completion               (default 300)
     BENCH_ARMS         comma-separated arm names to run        (default: all)
     BENCH_FLAVOR       legacy | master  - speculative flag spelling (default legacy)
+    BENCH_CTX          N  - context passed as -c, applied to every arm in the
+                       run (default 16384). Lower it to buy headroom, but note
+                       that with BENCH_FIT=on the fitter will reclaim what you
+                       free unless BENCH_FIT_TARGET is raised too.
+    BENCH_FIT_TARGET   MiB - passed as --fit-target when BENCH_FIT=on. The
+                       margin the fitter leaves free per device; upstream default
+                       is 1024, which is not enough room for a BF16 draft model
+                       and its compute buffer.
     BENCH_FIT          on | off - drop the -ngl 999 pin so llama.cpp's memory
                        fitter can adjust unset parameters. Applied to every arm
                        in the run so placement policy stays constant.
@@ -113,6 +121,14 @@ FIT = os.environ.get("BENCH_FIT", "off").strip().lower() in ("on", "1", "true", 
 # that changes it needs its own baseline, which is why every matrix here carries
 # one.
 CTX = os.environ.get("BENCH_CTX", "16384").strip()
+# --fit-target is the margin the fitter leaves free per device, default 1024 MiB.
+# That default is why DFlash arms die at the edge: the fitter sizes the TARGET to
+# leave 1024 MiB, and then the drafter has to live inside that margin - a BF16
+# DFlash drafter plus its compute buffer does not fit in 1 GiB, so the run peaks
+# at 23.9 GiB of 24 GiB and whether an arm survives is decided by whether the
+# previous arm's memory came back in time. Lowering -c does not help, because the
+# fitter simply takes the freed memory back; raising the margin does.
+FIT_TARGET = os.environ.get("BENCH_FIT_TARGET", "").strip()
 COMMON_ARGS_PINNED = [
     "-ngl", "999", "-c", CTX, "--jinja",
     "-fa", "on", "-ctk", "q8_0", "-ctv", "q8_0",
@@ -360,6 +376,8 @@ def start_server(extra: list[str], log_path: Path,
             i = common.index(f)
             del common[i:i + 2]
     cmd = [SERVER, "-m", TARGET, "--host", "127.0.0.1", "--port", str(PORT)]
+    if FIT and FIT_TARGET:
+        cmd += ["--fit-target", FIT_TARGET]
     if CONCURRENCY > 1:
         # Total -c is held at 16384 rather than scaled by N, so VRAM and model
         # placement stay identical across concurrency levels; llama.cpp splits
@@ -682,6 +700,7 @@ def main() -> None:
         "repeats": REPEATS, "max_tokens": MAX_TOKENS,
         "temperature": 0.0, "seed": 42, "think": THINK, "think_env": _THINK_RAW,
         "concurrency": CONCURRENCY, "fit": FIT, "ctx": CTX,
+        "fit_target": FIT_TARGET or None,
         "ordering": "ABBA: arm order is reversed on odd repeats",
         "gpu_fields": GPU_FIELDS,
         "nvidia_smi": nvidia_smi(),
