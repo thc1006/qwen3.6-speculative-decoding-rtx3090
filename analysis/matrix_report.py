@@ -162,8 +162,27 @@ def report(run_dir: Path) -> None:
         if len(bm) > 1:
             swing = 100 * (max(bm) - min(bm)) / st.mean(bm)
             print(f"    first-to-last {100 * (bm[-1] / bm[0] - 1):+.2f} %, "
-                  f"full swing {swing:.2f} % of the mean"
-                  f"{'  <- negligible' if swing < 1.5 else '  <- INVESTIGATE'}")
+                  f"full swing {swing:.2f} % of the mean")
+            # Distinguish a cold-start first repeat from progressive drift. The
+            # first arm of the first repeat runs on an idle, cool GPU; every
+            # later arm starts warm. A single high rep0 followed by a flat tail
+            # is warm-up, not thermal decline, and the two call for different
+            # responses - discard the warm-up, or investigate the cooling.
+            if len(bm) > 2:
+                tail = bm[1:]
+                tail_swing = 100 * (max(tail) - min(tail)) / st.mean(tail)
+                rep0 = 100 * (bm[0] / st.mean(tail) - 1)
+                print(f"    rep0 vs the rest {rep0:+.2f} %, "
+                      f"swing excluding rep0 {tail_swing:.2f} %")
+                if abs(rep0) > 1.5 and tail_swing < 1.5:
+                    print("    -> cold-start warm-up in rep0, flat afterwards; "
+                          "treat rep0 as warm-up rather than drift")
+                elif tail_swing >= 1.5:
+                    print("    -> the tail itself is moving; INVESTIGATE drift")
+                else:
+                    print("    -> negligible")
+            elif swing >= 1.5:
+                print("    -> INVESTIGATE")
 
     # ---- acceptance vs speed, the relationship the retracted chart hid ------
     pts = [(s["acc_pct"], s["pooled"]) for a, s in stats.items()
