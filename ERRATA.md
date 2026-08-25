@@ -376,6 +376,14 @@ per speculated position against a measured 7.87 ms no-speculation decode step,
 about half a target step per drafted token, which is what an autoregressive
 0.8 B drafter plus its share of the verify pass should cost.
 
+> [!IMPORTANT]
+> **Read this law inside its scope.** Every arm of the sweep ran at
+> `p_min = 0`, post-merge master's default, which means the drafter emitted the
+> full `n_max` every round regardless of confidence. Every archived number in
+> this repository ran at `p_min = 0.75` instead ([A8](#a8-the-audits-own-matrix-has-an-uncontrolled-difference-from-the-archive-p_min)).
+> The law is fitted, and holds, only in the first regime. Tested out of sample
+> in the second it fails — see [A10](#a10-the-single-regressor-law-is-falsified-out-of-sample-and-p_min-is-the-lever-that-matters).
+
 **The step in the residuals at the 95.3 % coverage point is −0.39 percentage
 points**: −0.27 % mean below it, −0.67 % at or above. There is no knee, no
 break, and nothing left for a coverage threshold to explain on this hardware.
