@@ -469,10 +469,42 @@ it produces the cleanest version of this repository's original claim.
 
 **The law fails.** `ms/tok = 27.00 + 4.040 × draft/gen`, fitted at `p_min = 0`,
 over-predicts cost by a mean of **19.4 %** on every arm with `p_min > 0`, all in
-the same direction. Draft volume is therefore **not** a sufficient statistic:
-truncating a draft on low confidence is cheaper than removing the same number of
-tokens by shortening `n_max`. A7's law holds in the regime it was fitted in and
-nowhere else, which is now stated there.
+the same direction. A7's law holds in the regime it was fitted in and nowhere
+else, which is now stated there.
+
+The cleanest demonstration needs no regression at all. Two configurations draft
+almost exactly the same number of tokens per generated token and cost wildly
+different amounts:
+
+| configuration | draft/gen | rounds/gen | ms/token |
+|---|---:|---:|---:|
+| `n_max` 1, `p_min` 0 | 0.50 | 0.55 | 32.09 |
+| `n_max` 8, `p_min` 0.90 | 0.46 | **0.19** | **23.62** |
+
+Volume differs by 9 %, cost by **36 %**, and rounds by **186 %**. Whatever is
+driving the cost, it is not the number of drafted tokens. `n_max` 1 pays a
+drafter forward pass for every single token it proposes; `p_min` 0.90 proposes
+several per round and stops early when unsure.
+
+**And this partly rehabilitates the term A7 discarded.** The two-term model —
+rounds and volume — was demoted because rounds earned only 0.096 percentage
+points of R² on the `p_min = 0` sweep. That sweep could not separate them:
+rounds per generated token sat at 0.25–0.26 across almost its whole range. The
+`p_min` sweep varies rounds independently, and refitting across both families,
+14 configurations spanning `p_min` 0–0.90 and `n_max` 1–128:
+
+| model | bias on `p_min > 0` arms | bias on `p_min = 0` arms | separation |
+|---|---:|---:|---:|
+| volume only | −10.1 % | +4.6 % | **14.7 pp** |
+| rounds + volume | −4.5 % | +1.2 % | **5.7 pp** |
+
+R² is useless for this — volume alone still reaches 0.988 because `ms/token`
+spans 23 to 112 and a 36 % error at the low end barely registers. The family
+separation is the metric that matters: a model that captured the physics would
+show none. Adding rounds cuts it by 61 % and does not remove it, so **neither
+model is right**, and the coefficients of either should be read as descriptive
+rather than physical. Both fits use the rep-0 server logs, which are where the
+checkpoint counts that stand in for round counts live.
 
 **`p_min` is the dominant knob, not `n_max`.** Going from 0 to 0.75 at fixed
 `n_max` 8 halves draft volume, raises real acceptance from 29.7 % to 80.2 %, and
