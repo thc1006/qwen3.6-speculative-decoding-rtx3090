@@ -288,10 +288,20 @@ drafting method is a third, independent term.
 **The slowdown is the per-round cost of drafting, times how much is drafted,
 divided by how much is accepted.** That is ordinary speculative-decoding
 economics. There is no anomaly left, and **no MoE-specific pathology is needed**
-— this repository never had evidence for one. The sweep peaks at n_max = 4 and
-worsens in both directions; it stops at 32 and so cannot reach the ~95-token
-regime MoESD's coverage argument is about, which means it neither confirms nor
-refutes that argument. Full detail:
+— this repository never had evidence for one, and the sweep was extended past
+the threshold to check rather than assert. Across `n_max` 1 → 128, spanning
+**3.1 % to 98.3 % expected routed-expert coverage**, a single regressor accounts
+for the cost:
+
+```
+ms per generated token = 27.00 + 4.040 × (draft tokens per generated token)
+R² = 0.99303
+```
+
+**The step in the residuals at the 95.3 % coverage point is −0.39 percentage
+points.** No knee, no break, nothing for a coverage threshold to explain.
+Throughput peaks at `n_max` 4 and declines monotonically straight through.
+Full detail:
 [A7](ERRATA.md#a7-with-acceptance-measured-properly-there-is-no-anomaly-left-to-explain).
 
 **The vocabulary defect is real but is not the cause.** Same binary, same draft

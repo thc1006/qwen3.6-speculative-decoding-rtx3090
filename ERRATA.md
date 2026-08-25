@@ -350,13 +350,47 @@ There is an optimum, at n_max = 4 — and it is still 71 % below the
 no-speculation baseline. The peak is real but shallow: per-repeat SD is 0.055
 for n_max 2 and 0.076 for n_max 4, against a 1.4 tok/s gap between them.
 
-**This sweep cannot test the MoESD prediction, and saying otherwise would be
-the same kind of overreach this file exists to correct.** MoESD's
-expected-coverage argument concerns draft lengths approaching ~95 tokens; the
-sweep stops at 32 and never enters that regime. What it shows is narrower: over
-the range actually reachable here, cost grows and acceptance falls
-monotonically as the window widens, with no sign of the amortisation turning
-around. Extending the sweep past 95 is the experiment that would settle it.
+**The sweep was extended past the threshold, so this is now answered by
+measurement.** Run E adds `n_max` 64, 96 and 128 on the same pinned binary,
+three repeats each, run-to-run SD 0.03–0.17 tok/s. The sweep now spans
+**3.1 % to 98.3 % expected routed-expert coverage** and crosses the 95-token
+point MoESD's argument is about.
+
+| `n_max` | coverage | acceptance | draft/gen | pooled tok/s |
+|---:|---:|---:|---:|---:|
+| 32 | 63.8 % | 8.0 % | 6.84 | 17.3 |
+| 64 | 86.9 % | 4.3 % | 12.74 | 12.4 |
+| **96** | **95.3 %** | 3.1 % | 17.80 | 10.0 |
+| 128 | 98.3 % | 2.5 % | 22.04 | 8.9 |
+
+Throughput declines monotonically straight through the threshold. More usefully,
+one regressor accounts for the whole sweep:
+
+```
+ms per generated token = 27.00 + 4.040 × (draft tokens per generated token)
+R² = 0.99303,  n_max = 1 … 128
+```
+
+No expert term, 99.3 % of the variance, and the slope reads sensibly — 4.04 ms
+per speculated position against a measured 7.87 ms no-speculation decode step,
+about half a target step per drafted token, which is what an autoregressive
+0.8 B drafter plus its share of the verify pass should cost.
+
+**The step in the residuals at the 95.3 % coverage point is −0.39 percentage
+points**: −0.27 % mean below it, −0.67 % at or above. There is no knee, no
+break, and nothing left for a coverage threshold to explain on this hardware.
+
+Two tempting wrong answers were eliminated getting here, and both are recorded
+in [`v4_audit_2026_08_25/PREREGISTERED_PREDICTION.md`](v4_audit_2026_08_25/PREREGISTERED_PREDICTION.md):
+that per-drafted-token cost amortises past the threshold (an artefact of fitting
+only the sub-threshold points, which are dominated by `n_max` 1–4), and that
+speculative state checkpointing dominates (refuted by its own test — checkpoint
+traffic per generated token *falls* as cost *rises*, correlation −0.52).
+
+The model's predictions for 64/96/128 were registered in git **before** those
+measurements existed. They held to −7.5 %, −5.7 % and 0.0 % — though the
+agreement is partly two errors cancelling, which that file states rather than
+claims as a clean win.
 
 **Conclusion. No MoE-specific pathology is needed to explain any of this**, and
 this repository never had evidence for one. The slowdown is the per-round cost
