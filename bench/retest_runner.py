@@ -188,6 +188,18 @@ def _ngram(kind, extra=()):
     return ["--spec-type", kind] + list(extra)
 
 
+def _dflash(nmax: int, nmin: int = 1) -> list[str]:
+    """A DFlash arm at draft length nmax.
+
+    No BOS override: that fix is specific to the Qwen3.5-0.8B matched-vocabulary
+    drafter, which shipped without tokenizer.ggml.bos_token_id (ERRATA A2).
+    DFlash reuses the target's own vocabulary, so the special-token gate in
+    common_speculative_are_compatible() is not in play.
+    """
+    return ["-md", "{DFLASH}", "-ngld", "99", _NMAX, str(nmax), _NMIN, str(nmin),
+            "--spec-type", "draft-dflash"]
+
+
 ARMS: dict[str, list[str]] = {
     # --- P0-1: the decisive vocabulary A/B, kept for continuity ---------------
     "baseline":             [],
@@ -215,12 +227,17 @@ ARMS: dict[str, list[str]] = {
     # effect (ERRATA D4). Needs a drafter re-converted by post-merge master:
     # the archived GGUF lacks `target_layers` and the merged loader rejects it.
     # No BOS override here - that fix is specific to the Qwen3.5-0.8B drafter.
-    "spec-dflash-n8": ["-md", "{DFLASH}", "-ngld", "99", _NMAX, "8", _NMIN, "1",
-                       "--spec-type", "draft-dflash"],
-    "spec-dflash-n4": ["-md", "{DFLASH}", "-ngld", "99", _NMAX, "4", _NMIN, "1",
-                       "--spec-type", "draft-dflash"],
-    "spec-dflash-n16": ["-md", "{DFLASH}", "-ngld", "99", _NMAX, "16", _NMIN, "1",
-                        "--spec-type", "draft-dflash"],
+    # Run J found n4 at +18.7 % aggregate and n8 already negative, so the
+    # optimum is at or below 4 and the sweep has to reach down to 1 to bracket
+    # it. A three-point sweep that happens to straddle the peak cannot say
+    # where the peak is.
+    "spec-dflash-n1":  _dflash(1),
+    "spec-dflash-n2":  _dflash(2),
+    "spec-dflash-n3":  _dflash(3),
+    "spec-dflash-n4":  _dflash(4),
+    "spec-dflash-n6":  _dflash(6),
+    "spec-dflash-n8":  _dflash(8),
+    "spec-dflash-n16": _dflash(16),
 
     # p_min truncates a draft once the drafter's confidence drops below it. The
     # default CHANGED between the binaries this repository has used:
