@@ -663,6 +663,43 @@ NVFP4 idea) is **REFUTED** for this hardware/engine." That has been replaced
 with a neutral status. Exp 2 shows the executed command was slower; it does not
 test the hypothesis it was designed to test.
 
+### D3b. Workload shape does matter — and Exp 2 pointed the wrong way
+
+Exp 2 concluded that the workload-shape hypothesis was "REFUTED". D3 shows it
+could not have tested that, because its thinking control never engaged. The
+audit ran the test it was trying to run: the same five arms with thinking
+verifiably on and verifiably off, 5 repeats each, on post-merge master
+`3737e4137`, with `thinking_suppressed` recorded per request (50/50 in the
+off run, 0/50 in the on run).
+
+| method | thinking on | thinking off | draft tokens per generated token |
+|---|---:|---:|---|
+| `ngram-mod` n=24 | −6.8 % | **−0.7 %** | 0.21 → **0.00** |
+| `ngram-cache` | −40.0 % | −32.6 % | 0.42 → 0.36 |
+| draft model, n_max 8 | −74.0 % | −76.4 % | 1.85 → **2.14** |
+
+**Workload shape changes the ngram result almost completely.** With thinking
+off, `ngram-mod` stops drafting altogether — zero draft tokens across all 50
+requests — and its deficit collapses from −6.8 % to −0.7 %. A chain-of-thought
+trace is long and formulaic, which is exactly the repetitive text an n-gram
+lookup feeds on; a direct answer is short and is not.
+
+For the draft model the effect runs the other way. Acceptance falls from 29.7 %
+to 23.0 % and drafted tokens per generated token rise from 1.85 to 2.14, so
+turning thinking off makes it slightly *worse*. Reasoning traces are easier for
+a 0.8 B drafter to predict than real answers.
+
+Two consequences.
+
+First, Exp 2's conclusion is not merely unverifiable, it is backwards for the
+family of methods where workload shape matters most.
+
+Second, and more useful: **every historical number in this repository was
+measured on the workload that favours speculation** — 76 % of v1's requests
+were truncated thinking (A5), and v2, v3 and Exp 2 all believed they had turned
+thinking off and had not (D1, D2). Speculation still lost. That makes the
+negative direction more robust than when it was published, not less.
+
 ### D4. v3 DFlash compares two different binaries
 
 The build banner in the committed v3 logs:

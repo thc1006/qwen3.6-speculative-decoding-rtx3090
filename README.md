@@ -325,6 +325,26 @@ not survive on that commit with a draft attached. It is **fixed on post-merge
 master**: all thirty requests complete on `3737e4137`. See
 [A6](ERRATA.md#a6-llama-server-plus-a-draft-model-aborts-on-this-model-at-bcb5eeb64).
 
+**Workload shape matters, and it was never controlled.** The audit ran the
+comparison Exp 2 was trying to run — the same arms with thinking verifiably on
+and verifiably off, 5 repeats each, `thinking_suppressed` recorded per request:
+
+| method | thinking on | thinking off | draft tokens per generated token |
+|---|---:|---:|---|
+| `ngram-mod` n=24 | −6.8 % | **−0.7 %** | 0.21 → **0.00** |
+| `ngram-cache` | −40.0 % | −32.6 % | 0.42 → 0.36 |
+| draft model, n_max 8 | −74.0 % | −76.4 % | 1.85 → **2.14** |
+
+With thinking off `ngram-mod` stops drafting entirely and its cost nearly
+vanishes; a chain-of-thought trace is the repetitive text an n-gram lookup
+feeds on, a direct answer is not. For the draft model the effect reverses —
+acceptance falls from 29.7 % to 23.0 %, so reasoning traces are *easier* for a
+0.8 B drafter than real answers.
+
+So every historical number here was measured on the workload that favours
+speculation, and speculation still lost. See
+[D3b](ERRATA.md#d3b-workload-shape-does-matter--and-exp-2-pointed-the-wrong-way).
+
 **Three quarters of v1's requests returned no answer.** `message.content` is
 empty for 144 of 190 v1 requests, and 19/19 for both `reasoning` and
 `code_small` — the 300-token cap was reached inside the thinking block, and

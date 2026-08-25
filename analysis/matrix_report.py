@@ -185,12 +185,24 @@ def report(run_dir: Path) -> None:
                 print("    -> INVESTIGATE")
 
     # ---- acceptance vs speed, the relationship the retracted chart hid ------
+    # Across ARMS this is a weak statistic and needs enough of them: three
+    # monotone points fit a line almost perfectly whatever the mechanism, so
+    # reporting r = -1.000 from three arms would be exactly the kind of
+    # impressive-looking number this audit exists to remove. The strong version
+    # of this relationship is WITHIN one arm across prompts, which is a
+    # different contrast - see ERRATA A7.
+    MIN_ARMS = 5
     pts = [(s["acc_pct"], s["pooled"]) for a, s in stats.items()
            if s["acc_pct"] is not None]
-    if len(pts) >= 3:
+    if len(pts) >= MIN_ARMS:
         r = pearson([p[0] for p in pts], [p[1] for p in pts])
         print(f"\n  acceptance vs pooled throughput across {len(pts)} speculative arms: "
               f"Pearson r = {r:+.3f}")
+        print("    (across-arm contrast; the within-arm, across-prompt one is "
+              "the strong relationship - ERRATA A7)")
+    elif pts:
+        print(f"\n  acceptance vs pooled throughput: only {len(pts)} speculative arm(s), "
+              f"fewer than {MIN_ARMS} - not reporting a correlation")
 
     # ---- draft-length sweep -------------------------------------------------
     sweep = sorted(((int(a.rsplit("n", 1)[1]), stats[a]) for a in stats
