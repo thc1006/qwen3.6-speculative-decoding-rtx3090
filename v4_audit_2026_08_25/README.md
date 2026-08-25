@@ -430,6 +430,30 @@ The harness now fails fast on this: `wait_health` watches the process instead
 of polling for its full 300-second timeout, so a dead arm costs ~20 seconds to
 discover rather than five minutes per repeat.
 
+### Every measurement of the same quantity, with its power
+
+The number this repository headlines should not be the one with the fewest
+repeats behind it. All six measurements of the DFlash plateau:
+
+| run | arm | repeats | Δ aggregate | Δ pooled | configuration |
+|---|---|---|---|---|---|
+| J | `n_max 4` | 3 | **+18.7 %** | +23.9 % | `-c 16384`, fitter default margin |
+| K1 | `n_max 2` | 3 | +17.1 % | +20.9 % | `-c 8192`, `--fit-target 2048` |
+| K1 | `n_max 3` | 3 | +17.6 % | +21.6 % | `-c 8192`, `--fit-target 2048` |
+| K1 | `n_max 4` | 3 | +17.3 % | +21.5 % | `-c 8192`, `--fit-target 2048` |
+| L, thinking on | `n_max 2` | **5** | +16.7 % | **+21.1 %** | `-c 8192`, `--fit-target 2048` |
+| L, thinking on | `n_max 4` | **5** | +16.1 % | +20.9 % | `-c 8192`, `--fit-target 2048` |
+
+Aggregate spans +16.1 % to +18.7 %; pooled spans +20.9 % to +23.9 %. The two
+metrics differ by about 4 pp throughout because aggregate divides by wall-clock,
+which includes prompt processing and HTTP overhead that speculation does not
+touch; pooled divides by decode time and does not.
+
+Run J's +18.7 % is the top of the aggregate range and has the fewest repeats
+behind it. It is reported because it is where the effect was first isolated
+under a matched control, not because it is the best estimate. The best estimate
+is the five-repeat row.
+
 **What this does and does not establish.** It establishes that on this host,
 this target, this drafter and this prompt set, a self-speculative method at a
 short draft window beats no speculation by roughly a fifth, with a matched

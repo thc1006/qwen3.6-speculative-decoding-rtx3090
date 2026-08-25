@@ -91,6 +91,10 @@ SERVER = os.environ.get("LLAMA_SERVER_BIN", "")
 TARGET = os.environ.get("MODEL_TARGET", "")
 DRAFT = os.environ.get("MODEL_DRAFT", "")
 DFLASH = os.environ.get("MODEL_DFLASH", "")
+# Qwen3.5/3.6 ship a multi-token-prediction head. `--mtp` on master's converter
+# exports it as a standalone draft GGUF; nothing about that needed patching,
+# it had simply never been run here. See RETEST_TODO.
+MTP = os.environ.get("MODEL_MTP", "")
 GPU = os.environ.get("BENCH_GPU", "0")
 PORT = int(os.environ.get("BENCH_PORT", "18131"))
 OUT = Path(os.environ.get("BENCH_OUT", "retest_out"))
@@ -212,6 +216,12 @@ def _ngram(kind, extra=()):
     return ["--spec-type", kind] + list(extra)
 
 
+def _mtp(nmax: int, nmin: int = 1) -> list[str]:
+    """An MTP arm at draft length nmax, using the target's own MTP head."""
+    return ["-md", "{MTP}", "-ngld", "99", _NMAX, str(nmax), _NMIN, str(nmin),
+            "--spec-type", "draft-mtp"]
+
+
 def _dflash(nmax: int, nmin: int = 1) -> list[str]:
     """A DFlash arm at draft length nmax.
 
@@ -251,6 +261,17 @@ ARMS: dict[str, list[str]] = {
     # effect (ERRATA D4). Needs a drafter re-converted by post-merge master:
     # the archived GGUF lacks `target_layers` and the merged loader rejects it.
     # No BOS override here - that fix is specific to the Qwen3.5-0.8B drafter.
+    # MTP: the target's own multi-token-prediction head, exported as a drafter.
+    # This is the method the vLLM sibling result on this same hardware uses, so
+    # until it runs here "llama.cpp loses where vLLM wins" confounds engine with
+    # method. The drafter reuses the target's vocabulary, so no BOS override.
+    "spec-mtp-n1":  _mtp(1),
+    "spec-mtp-n2":  _mtp(2),
+    "spec-mtp-n3":  _mtp(3),
+    "spec-mtp-n4":  _mtp(4),
+    "spec-mtp-n6":  _mtp(6),
+    "spec-mtp-n8":  _mtp(8),
+
     # Run J found n4 at +18.7 % aggregate and n8 already negative, so the
     # optimum is at or below 4 and the sweep has to reach down to 1 to bracket
     # it. A three-point sweep that happens to straddle the peak cannot say
@@ -386,6 +407,7 @@ def start_server(extra: list[str], log_path: Path,
         # the memory footprint constant is the control that matters here.
         cmd += ["--parallel", str(CONCURRENCY), "-cb"]
     cmd += common + [a.replace("{DRAFT}", DRAFT).replace("{DFLASH}", DFLASH)
+                     .replace("{MTP}", MTP)
                      for a in extra]
     log_path.parent.mkdir(parents=True, exist_ok=True)
     proc = subprocess.Popen(cmd, env=env, stdout=log_path.open("w"),
@@ -679,6 +701,8 @@ def main() -> None:
             sys.exit(f"unknown arm {a!r}; known: {', '.join(ARMS)}")
     if any("{DRAFT}" in x for a in arms for x in ARMS[a]) and not DRAFT:
         sys.exit("set MODEL_DRAFT for the draft arms")
+    if any("{MTP}" in x for a in arms for x in ARMS[a]) and not MTP:
+        sys.exit("set MODEL_MTP for the MTP arms")
     if any("{DFLASH}" in x for a in arms for x in ARMS[a]) and not DFLASH:
         sys.exit("set MODEL_DFLASH for the DFlash arms")
 
@@ -693,7 +717,9 @@ def main() -> None:
         "draft": DRAFT or None,
         "draft_sha256": sha256(DRAFT) if DRAFT else None,
         "dflash": DFLASH or None,
+        "mtp": MTP or None,
         "dflash_sha256": sha256(DFLASH) if DFLASH else None,
+        "mtp_sha256": sha256(MTP) if MTP else None,
         "common_args": COMMON_ARGS,
         "flavor": FLAVOR,
         "arms": {a: ARMS[a] for a in arms},

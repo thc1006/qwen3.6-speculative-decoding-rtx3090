@@ -153,23 +153,29 @@ requests. Any master comparison must pass `--spec-type` explicitly.
   a result here before: ngram-mod went from −6.8 % to −0.7 % between the
   think-on and think-off matrices and drafted zero tokens in the latter.
 - **Five repeats for the DFlash headline.** Run J has three.
-- **`draft-mtp` — the blocker is the converter, not the weights.** An earlier
-  version of this line said both `draft-eagle3` and `draft-mtp` "need head
-  weights this repository does not have". That is wrong for MTP and was written
-  without checking. `~/models/qwen36-awq` holds **785 plain BF16 `mtp.*`
-  tensors** for this exact target, and its `text_config` declares
-  `mtp_num_hidden_layers = 1`. `convert_hf_to_gguf.py` at `3737e4137` has an
-  explicit `--mtp` flag that exports the MTP head as a standalone draft GGUF,
-  and `gguf-py` carries the `{arch}.nextn_predict_layers` key and the NEXTN
-  tensor mappings. What is missing is one link: `_QwenMtpMixin`
-  (`conversion/qwen.py:277`), whose own docstring says it is "shared MTP wiring
-  for Qwen3-Next **and Qwen3.5/3.6 text variants**", is inherited only by
-  `Qwen3NextModel` (`:372`). The class registered for this checkpoint's
-  architecture — `Qwen3_5MoeForConditionalGeneration` at `:636` — does not mix
-  it in, so `--mtp` refuses with "not supported for this architecture". That is
-  a plausible upstream gap and a runnable local experiment; it is not a missing
-  artefact. The base weights being AWQ-packed does not block it, because `--mtp`
-  exports only the head and those tensors are unquantised.
+- **`draft-mtp` — nothing was blocking it. It had simply never been tried.**
+  This line has now been wrong twice. It first said both `draft-eagle3` and
+  `draft-mtp` "need head weights this repository does not have"; that was written
+  without checking, and `~/models/qwen36-awq` holds **785 plain BF16 `mtp.*`
+  tensors** for this exact target with `text_config.mtp_num_hidden_layers = 1`.
+  It was then rewritten to say the blocker was a converter gap — that
+  `_QwenMtpMixin` (`conversion/qwen.py:277`) is inherited by `Qwen3NextModel`
+  (`:372`) but not by the class registered for this checkpoint's architecture
+  (`:636`). **That was also wrong**, and it was wrong in a way that a patch
+  attempt exposed immediately: adding the mixin raised
+  `TypeError: Cannot create a consistent MRO`, because the class already has it.
+  The real chain is
+  `Qwen3_5MoeTextModel → _Qwen35MRopeMixin → _LinearAttentionVReorderBase →
+  Qwen3NextModel → _QwenMtpMixin → Qwen2MoeModel → TextModel`, and
+  `supports_mtp_export` reads `True` on the **stock** converter. The runtime side
+  was never in doubt either: `LLM_ARCH_QWEN35MOE` declares 17 `NEXTN` tensor
+  entries in `src/llama-arch.cpp`, the same count as `LLM_ARCH_QWEN3NEXT`.
+
+  So `--mtp` works with an unmodified llama.cpp, on both the converter and the
+  runtime, and the only reason this arm was missing is that nobody ran it. The
+  llama.cpp working tree was restored to stock after the failed patch; no
+  modification of that repository is involved in any measurement here.
+
 - `draft-eagle3` genuinely does need an artefact that is not here: the loader
   rejects any drafter that is not an EAGLE3 model ("expected 3 extract layers",
   `common/speculative.cpp:471`), and no EAGLE3 head for this target exists on

@@ -396,3 +396,57 @@ Two facts established by execution rather than by reading:
    `vocab_cmpt` from `0` to `1`, which also proves the two token arrays are
    byte-identical - the per-token text comparison from id 5 to 248320 passes.
    See ERRATA A2.
+
+---
+
+# v4 controlled runs — environment snapshot (2026-08-25/26)
+
+Runs A–L. Unlike v1–v3, every artefact below is hashed in each run's
+`manifest.json`, so a claim about which binary or which model produced a number
+is checkable from the committed data rather than from this document.
+
+## Binaries and models
+
+| artefact | sha256 |
+|---|---|
+| `llama-server` (`3737e4137`) | `b6a5c490bb932ffa9bf8a0d887f15eb0aade1d00a5e29b177a27249a2c539903` |
+| `Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf` (target) | `707a55a8a4397ecde44de0c499d3e68c1ad1d240d1da65826b4949d1043f4450` |
+| `Qwen3.5-0.8B-Q4_K_M.gguf` (matched-vocabulary drafter) | `bd258782e35f7f458f8aced1adc053e6e92e89bc735ba3be89d38a06121dc517` |
+| `qwen36-dflash-master.gguf` (DFlash drafter, re-converted) | `0e6d95c6a2ef7a3aaa4f7d54c6307d8bea50b86621823ea90f5bf8b5d8446e30` |
+
+Runs A and B additionally used `bcb5eeb64`; the abort evidence in
+`v4_audit_2026_08_25/data/abort_evidence_bcb5eeb64.txt` names it.
+
+## Memory policy, which is a variable here and not a constant
+
+| runs | `-ngl` | `-c` | `--fit-target` | why |
+|---|---|---|---|---|
+| A–I | pinned `999` | 16384 | — | placement fixed by hand |
+| J | unset (`-fit on`) | 16384 | default 1024 | the BF16 DFlash drafter only loads with `-ngl` unset; `common_fit_params` aborts when it is pinned |
+| K, L | unset (`-fit on`) | 8192 | 2048 | the default 1024 MiB margin is where the drafter has to live, and it does not fit — see the run K section |
+
+`-fit on` is applied to **every arm within a run**, baseline included, so
+placement policy never differs between an arm and its control. Absolute rates
+are therefore comparable within a run and not across runs that differ in this
+table; every matrix carries its own baseline for that reason.
+
+## Instrumentation
+
+- continuous `nvidia-smi` trace at 5 s, including
+  `clocks_event_reasons.active`, for the whole of every session
+  (`gpu_telemetry_IJ_*.csv`, `gpu_telemetry_K_*.csv`, `gpu_telemetry_L_*.csv`)
+- per-request JSON with full `content` and `reasoning_content`, token ids via
+  `logprobs`, `timings`, and a `thinking_suppressed` flag measured from the
+  reasoning channel rather than assumed from the request flag
+- request start/end timestamps, from which the achieved batch width
+  (`max_in_flight`) is derived instead of taken from `--parallel`
+- `-v` server logs per arm-run (kept on the bench host; not committed, they are
+  ~100 MB per matrix)
+
+## Harness
+
+`bench/retest_runner.py`, driven by `BENCH_*` environment variables recorded in
+each `manifest.json`: `BENCH_ARMS`, `BENCH_REPEATS`, `BENCH_MAX_TOKENS`,
+`BENCH_THINK`, `BENCH_FIT`, `BENCH_FIT_TARGET`, `BENCH_CTX`,
+`BENCH_CONCURRENCY`, `BENCH_FLAVOR`.
+

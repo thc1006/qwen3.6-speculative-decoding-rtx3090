@@ -45,10 +45,14 @@ therefore an MoE pathology" anomaly this repository was built around does not
 exist.
 
 **And the direction is not universal.** On 2026-08-26, on the same card and
-prompt set with post-merge master, DFlash self-speculation at
-`--spec-draft-n-max 4` runs at **+18.7 %** aggregate throughput against a
-matched no-speculation control (130.2 against 109.7 tok/s), winning on all ten
-prompts. v1 never tested that method, and the archived v3 attempt at it compared
+prompt set with post-merge master, DFlash self-speculation at a short draft
+window beats a matched no-speculation control, winning on all ten prompts.
+Measured six times across three runs and two memory configurations, the gain is
+**+16 % to +19 % on aggregate throughput and +21 % to +24 % pooled**. The
+single best-powered measurement — five repeats rather than three — is +21.1 %
+pooled at `--spec-draft-n-max 2`; the largest, and the one an unfriendly reader
+should attack first, is +18.7 % aggregate at `n_max 4` in run J, which has three
+repeats and sits at the top of the range. v1 never tested that method, and the archived v3 attempt at it compared
 two different binaries. The sign flips with the draft window — +18.7 % at 4,
 −14.8 % at 8, −47.4 % at 16 — so "speculative decoding loses here" was a
 statement about draft-window regimes that this repository had not yet separated.
@@ -111,6 +115,21 @@ are not a cumulative body of evidence for one hypothesis and must not be pooled.
 | **v2 follow-up** | 2026-04-22 | different single-3090 host; `llama-cli`; commits `9789512` and `bcb5eeb64` | 5 prompts; `temperature=0.5`; 200-token cap; different runner and host | Directional check, not a controlled replication of v1 absolute rates. Thinking control did not work ([D1/D2](ERRATA.md#d1--d2--no-cnv-was-rejected-and-no_think-did-not-disable-thinking)). |
 | **Exp 2 code/JSON** | 2026-04-25/26 | v2 host; `llama-cli` at `bcb5eeb64` | 5 prompts × 3 trials × 3 configs | Exploratory only. Intended workload unverified and per-request outputs not committed ([D3](ERRATA.md#d3-exp-2-cannot-be-audited-so-it-cannot-refute-anything)). |
 | **v3 DFlash** | 2026-05-07 | v2 host; `llama-cli` | 5 prompts × 1 run × 3 draft-max settings | Exploratory only. Baseline and treatment used **different binaries** ([D4](ERRATA.md#d4-v3-dflash-compares-two-different-binaries)). |
+
+| **v4 audit** | 2026-08-25/26 | one RTX 3090 (`3090` host); `llama-server` at `bcb5eeb64` and `3737e4137` | runs A–L; ABBA arm order, 3–5 repeats per arm, per-request JSON with full text and token ids, continuous GPU telemetry, pre-registered predictions | The controlled tier. Each run carries its own matched no-speculation baseline. |
+
+The v4 runs, and what each one is for:
+
+| run | question | design |
+|---|---|---|
+| A / B | does the archive reproduce, and does the abort persist? | `bcb5eeb64` vs post-merge `3737e4137`, 30 requests each |
+| C / D | thirteen arms, thinking on and verifiably off | 13 arms × 10 prompts × 3 repeats, twice |
+| E | is there anything past MoESD's 95-token coverage threshold? | `n_max` 64 / 96 / 128 |
+| H | is `p_min` the lever, not draft length? | `p_min` 0 / 0.50 / 0.75 / 0.90 sweep |
+| I | does batching rescue speculation, as upstream says it should? | concurrency 1 / 4 / 8, batch width verified from timestamps |
+| J | DFlash off vs on, one binary — the A/B v3 never had | 5 arms × 3 repeats, `-fit on` on every arm |
+| K | where is the draft-length optimum, and does it survive batching? | `n_max` 1–8 sweep, then the winner at concurrency 4 / 8 |
+| L | does the win survive the workload changing? | same 5 arms twice, thinking on and off, 5 repeats |
 
 The v2 / Exp 2 / v3 files remain valuable archival evidence. Their absolute
 rates and their causal interpretations must be read inside those limits.
