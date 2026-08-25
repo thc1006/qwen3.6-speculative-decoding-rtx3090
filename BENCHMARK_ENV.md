@@ -1,5 +1,14 @@
 # Benchmark environment snapshot
 
+> [!WARNING]
+> **Corrected 2026-08-25.** Three descriptions in this file were wrong; they are
+> marked inline below. Summary: (1) `llama-cli -st -no-cnv` is **not**
+> "single-turn non-conversational" - `-no-cnv` is rejected by `llama-cli` on
+> these builds; (2) `nvidia-smi`'s "CUDA Version: 13.0" is driver support, not
+> the build toolkit, which was CUDA 12.6 for v1; (3) the v3 `llama-cli
+> --version` string does not match the binary that produced the v3 logs. See
+> [`ERRATA.md`](ERRATA.md) items D1, D2, D4, F5.
+
 _v1 (original 19-config bench) collected at 2026-04-21T08:00:30+08:00 on
 the s1 dual-3090 host. A v2 environment snapshot appears below for the
 follow-up bench in `v2_3090_followup/` on the single-3090 `3090` host._
@@ -46,6 +55,12 @@ VERSION_CODENAME=noble
 ```
 
 ## CUDA / driver
+`nvidia-smi`'s "CUDA Version" field reports the **maximum CUDA runtime the
+driver supports**, not the toolkit llama.cpp was built with. v1 was built with
+**CUDA 12.6** (`CUDACXX=/usr/local/cuda-12.6/bin/nvcc`, see "Build flags"
+below). `nvcc` was not on `PATH` when `collect_env.sh` ran, which is why the
+toolkit version is absent from this capture.
+
 ```
 collect_env.sh: line 35: nvcc: command not found
 
@@ -146,7 +161,8 @@ OC within ~±20 %; absolute numbers would scale with memory-bandwidth OC.
 ## OS / toolchain
 - Ubuntu 24.04
 - gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0
-- CUDA 12.0.140 (system-installed via apt)
+- CUDA 12.0.140 (system-installed via apt) - note this differs from v1's
+  CUDA 12.6 build toolkit; v1 and v2 binaries are not the same build
 - python 3.12.3
 
 ## llama.cpp commits tested
@@ -173,12 +189,24 @@ SHA-256 matches v1 (see `v2_3090_followup/v2_oleg_suggestions/01_baseline/p1.log
 header for the `general.architecture` / `tokenizer.ggml.tokens` fields).
 
 ## Bench tool
-v2 uses `llama-cli -st -no-cnv` (single-turn non-conversational) rather
-than v1's `llama-server` + Python client. Both report the same
-`[Prompt: X t/s | Generation: Y t/s]` metrics at end-of-run; differences
-in observed means between v1 and v2 are due to prompt-set selection
-(v1 covered both "spec-decode skipped" and "spec-decode active" regimes,
-v2 isolates the "spec-decode active" regime).
+
+> [!CAUTION]
+> **This section was wrong.** It read: "v2 uses `llama-cli -st -no-cnv`
+> (single-turn non-conversational)". `-no-cnv` is **not supported by
+> `llama-cli`** on this build. 61 of the 62 committed v2 logs contain
+> `--no-conversation is not supported by llama-cli / please use
+> llama-completion instead`, and the same logs then show `[Start thinking]`
+> and a full reasoning trace despite the `/no_think` suffix. The measured v2
+> workload is long chain-of-thought output in llama-cli's default mode. The
+> working thinking switches on this build are `-rea off` and
+> `--reasoning-budget 0`; the working non-conversational tool is
+> `llama-completion`.
+
+v2 uses `llama-cli` with `-st` rather than v1's `llama-server` + Python client.
+Both report `[Prompt: X t/s | Generation: Y t/s]` at end-of-run. Differences in
+observed means between v1 and v2 come from a different host, a different
+prompt set, a different sampling temperature, and a different output cap - not
+from one controlled variable.
 
 ## Script
 `v2_3090_followup/bench_3090_oleg.sh` reproduces the v2 run on any
@@ -251,6 +279,14 @@ $ ./bin/llama-cli --version | head -1
 version: 8889 (bcb5eeb64) -- inherited from master at fork point, plus DFlash patch on top.
 ```
 
+> [!CAUTION]
+> **Do not trust this `--version` string.** The v3 run logs themselves report
+> `build : b8942-67cb0d507` for the DFlash configs and `build : b8889-bcb5eeb64`
+> for the baseline and Oleg configs. The `--version` above was captured before
+> the DFlash rebuild. The logs are authoritative, and they show the v3
+> comparison used **two different binaries** (ERRATA D4). A run manifest must
+> record `git rev-parse HEAD` and the binary's `sha256sum`, not `--version`.
+
 CUDA backend built with `-DGGML_CUDA=ON`, `CMAKE_CUDA_ARCHITECTURES=86`,
 `-DGGML_CCACHE=ON`. ccache cache reused from prior master build, so the
 DFlash branch incremental rebuild took ~5 min (vs ~30+ min cold).
@@ -260,7 +296,9 @@ DFlash branch incremental rebuild took ~5 min (vs ~30+ min cold).
 ```
 $ ls -la ~/models/
 -rw-r--r--  1  21G  Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf       # target (same as v1/v2)
--rw-r--r--  1 508M  Qwen3.5-0.8B-Q4_K_M.gguf              # vocab-matched draft (same as v1/v2)
+-rw-r--r--  1 508M  Qwen3.5-0.8B-Q4_K_M.gguf              # draft (same as v1/v2); vocab SIZE
+                                                        # matches but llama.cpp's gate REJECTS the
+                                                        # pair - see ERRATA A2
 drwxr-xr-x  ...    qwen36-dflash/                         # DFlash drafter (HF safetensors)
 -rw-r--r--  1 905M  qwen36-dflash.gguf                    # DFlash drafter, BF16 GGUF (converted)
 drwxr-xr-x  ...    qwen36-target-meta/                    # tokenizer + config from Qwen/Qwen3.6-35B-A3B
@@ -320,3 +358,41 @@ common_memory_breakdown_print: |   - CUDA0 (RTX 3090) | 24115 = 761 + (21445 = 2
 GPU memory: ~20.8 GB model weights + ~1.9 GB CUDA workspace, fits comfortably in 24 GB.
 
 ---
+
+
+---
+
+## Audit addendum, 2026-08-25
+
+State of the v2/v3 bench host (`3090`, Tailscale `100.112.135.98`) when the
+audit re-probed it, read-only:
+
+```
+GPU        : 1 x NVIDIA GeForce RTX 3090, 24576 MiB, 82 MiB used, 0 % util
+driver     : 580.173.02   (was 580.126.09 at v2/v3 bench time)
+disk free  : 262 GiB
+models     : Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf  707a55a8...f4450
+             Qwen3.5-0.8B-Q4_K_M.gguf         bd258782...dc517
+             qwen36-dflash.gguf               (959 MiB, BF16)
+llama.cpp  : ~/bench/llama.cpp @ bcb5eeb64, branch pr-22105 present
+toolchain  : nvcc, gcc, cmake, ninja present; upstream fetch works
+```
+
+Two facts established by execution rather than by reading:
+
+1. `--spec-type` is registered `.set_examples({LLAMA_EXAMPLE_SERVER})` at both
+   `97895129e` and `bcb5eeb64`. `llama-server --help` lists it;
+   `llama-completion --help` does not. v3's "not in master, fail-fast" note was
+   wrong (ERRATA D6).
+
+2. The draft model's incompatibility is a single missing GGUF key.
+   `Qwen/Qwen3.5-0.8B` has **no `generation_config.json`** upstream (HTTP 404),
+   so `convert_hf_to_gguf.py` wrote no `tokenizer.ggml.bos_token_id`, and
+   `llama-vocab.cpp:1838` substitutes the hard-coded GPT-2 legacy default `11`
+   against the target's `248044`. Both models declare
+   `add_bos_token = false`, so the field that gates speculation is one neither
+   model uses when tokenising. Adding
+   `--override-kv tokenizer.ggml.bos_token_id=int:248044` flips
+   `vocab_cmpt` from `0` to `1`, which also proves the two token arrays are
+   byte-identical - the per-token text comparison from id 5 to 248320 passes.
+   See ERRATA A2.

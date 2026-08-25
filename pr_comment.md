@@ -1,5 +1,37 @@
 # Draft comment for llama.cpp PR #19493 / Issue #20039
 
+> [!CAUTION]
+> **DO NOT POST. Retracted 2026-08-25.** This draft was never posted upstream,
+> and it must not be posted in this form. The audit found that several of its
+> central claims are wrong. Kept only as a record of what was almost said.
+>
+> | claim in this draft | status |
+> |---|---|
+> | "despite **100 % draft acceptance**" | **False.** The ratio is 1.0 by construction on this model — a partially accepted round takes an early `continue` that skips both counters. The drafter's own counters in the same log say 115 of 214 generated draft tokens were accepted (53.7 %). ERRATA A1. |
+> | "the **correct-vocab** `Qwen3.5-0.8B` (vocab 248320 matching target)" | **False.** llama.cpp rejected the pair on its special-token gate and ran the token-translation fallback, because the 0.8B GGUF carries no `tokenizer.ggml.bos_token_id`. ERRATA A2. |
+> | "Every variant lands at 116–133 tok/s mean and hits a **bimodal tail of 59–67**" | **False.** The whole ngram-mod family bottoms out at 119.8–129.6. ERRATA B4. |
+> | "Stretching output from 300 → 1000 tokens leaves **every ratio unchanged**" | **False.** Pooled throughput for `ngcache-1000tok` is −25.7 % against `baseline-1000tok`, versus −18.0 % for the 300-token `ngram-cache`. Nor did all completions reach the cap. ERRATA B1, B3. |
+> | "**srogmann's own benchmark** on Qwen3.5-122B-A10B in PR #20075" | **Misattributed.** PR #20075 is by **eauchs**, and it uses an external 0.8B draft model plus an SSM checkpoint/restore fix, not ngram-mod. The +15–45 % figure itself is right. ERRATA E3. |
+> | "the expert-saturation threshold `T_thres ≈ 94`" | Should be `ceil(94.36) = 95`, and it is an expected-coverage heuristic, not a performance threshold. ERRATA E1. |
+> | "each drafted token brings in a fresh expert slice … Verification then pays for the union" | **Unsupported.** No expert-routing trace, HBM counter, or kernel profile was ever collected. ERRATA A4. |
+> | "once #20075 lands" | #20075 was **closed without merge** on 2026-04-25. ERRATA F1. |
+> | v3 block: "the MoE-expert-routing × consumer-Ampere bandwidth pathology from v2 **generalises**" | **Unsupported.** The v3 comparison changed binary and method together (`b8889-bcb5eeb64` vs `b8942-67cb0d507`), one run per cell, thinking control inert. Two things being slow is not evidence they are slow for the same reason. ERRATA D4. |
+> | v3 block: "vLLM MTP … remains **the only positive-yield** speculative decoding path on this hardware" | **Unsupported.** Few methods were tested, and the vLLM comparison uses a different engine, two GPUs, tensor parallelism, a different quantisation stack and a different protocol. ERRATA F3. |
+> | v3 block: "**First public** RTX 3090 + DFlash + Q4 datapoint" | Removed. No novelty search was performed. ERRATA F3. |
+>
+> A rewritten version would also have to mention that 76 % of the v1 requests
+> returned an empty `message.content` — the 300-token cap was reached inside
+> the thinking block, so v1 measured truncated chain-of-thought, not answers
+> (ERRATA A5) — and that `llama-server` plus a draft model aborts with a CUDA
+> error on this model at `bcb5eeb64` (ERRATA A6).
+>
+> If anything from this repository is ever reported upstream, the defensible
+> subjects are the two reproducible mechanical findings — the acceptance
+> counter being unreachable on a `COMMON_CONTEXT_SEQ_RM_TYPE_FULL` context,
+> and the `cublasSgemm_v2` abort after a partial-accept checkpoint restore —
+> not the MoE narrative.
+
+
 _Target URL: https://github.com/ggml-org/llama.cpp/pull/19493 (or as a fresh comment on Issue #20039 linking to repo)_
 
 > **UPDATE 2026-05-07 — v3 DFlash via llama.cpp PR #22105.** First public
