@@ -30,6 +30,7 @@ Everything is configured through the environment:
     LLAMA_SERVER_BIN   path to llama-server                    (required)
     MODEL_TARGET       target .gguf                            (required)
     MODEL_DRAFT        draft .gguf                             (optional)
+    MODEL_DFLASH       DFlash drafter .gguf                    (optional)
     BENCH_GPU          CUDA_VISIBLE_DEVICES value              (default 0)
     BENCH_PORT         server port                             (default 18131)
     BENCH_OUT          output directory                        (default ./retest_out)
@@ -63,6 +64,7 @@ from pathlib import Path
 SERVER = os.environ.get("LLAMA_SERVER_BIN", "")
 TARGET = os.environ.get("MODEL_TARGET", "")
 DRAFT = os.environ.get("MODEL_DRAFT", "")
+DFLASH = os.environ.get("MODEL_DFLASH", "")
 GPU = os.environ.get("BENCH_GPU", "0")
 PORT = int(os.environ.get("BENCH_PORT", "18131"))
 OUT = Path(os.environ.get("BENCH_OUT", "retest_out"))
@@ -174,6 +176,18 @@ ARMS: dict[str, list[str]] = {
     "spec-draft-n64": _draft(64),
     "spec-draft-n96": _draft(96),
     "spec-draft-n128": _draft(128),
+
+    # P2-2: DFlash against the SAME binary, which the archived v3 comparison
+    # never had - it read a bcb5eeb64-vs-67cb0d507 difference as a DFlash
+    # effect (ERRATA D4). Needs a drafter re-converted by post-merge master:
+    # the archived GGUF lacks `target_layers` and the merged loader rejects it.
+    # No BOS override here - that fix is specific to the Qwen3.5-0.8B drafter.
+    "spec-dflash-n8": ["-md", "{DFLASH}", "-ngld", "99", _NMAX, "8", _NMIN, "1",
+                       "--spec-type", "draft-dflash"],
+    "spec-dflash-n4": ["-md", "{DFLASH}", "-ngld", "99", _NMAX, "4", _NMIN, "1",
+                       "--spec-type", "draft-dflash"],
+    "spec-dflash-n16": ["-md", "{DFLASH}", "-ngld", "99", _NMAX, "16", _NMIN, "1",
+                        "--spec-type", "draft-dflash"],
     # v1's actual classic-draft configuration, for comparability
     "spec-draft-v1cfg": _draft(8, 4),
 
@@ -261,7 +275,8 @@ def start_server(extra: list[str], log_path: Path,
             i = common.index(f)
             del common[i:i + 2]
     cmd = [SERVER, "-m", TARGET, "--host", "127.0.0.1", "--port", str(PORT)]
-    cmd += common + [a.replace("{DRAFT}", DRAFT) for a in extra]
+    cmd += common + [a.replace("{DRAFT}", DRAFT).replace("{DFLASH}", DFLASH)
+                     for a in extra]
     log_path.parent.mkdir(parents=True, exist_ok=True)
     proc = subprocess.Popen(cmd, env=env, stdout=log_path.open("w"),
                             stderr=subprocess.STDOUT, preexec_fn=os.setsid)
@@ -411,6 +426,8 @@ def main() -> None:
             sys.exit(f"unknown arm {a!r}; known: {', '.join(ARMS)}")
     if any("{DRAFT}" in x for a in arms for x in ARMS[a]) and not DRAFT:
         sys.exit("set MODEL_DRAFT for the draft arms")
+    if any("{DFLASH}" in x for a in arms for x in ARMS[a]) and not DFLASH:
+        sys.exit("set MODEL_DFLASH for the DFlash arms")
 
     OUT.mkdir(parents=True, exist_ok=True)
     manifest = {
@@ -422,6 +439,8 @@ def main() -> None:
         "target": TARGET, "target_sha256": sha256(TARGET),
         "draft": DRAFT or None,
         "draft_sha256": sha256(DRAFT) if DRAFT else None,
+        "dflash": DFLASH or None,
+        "dflash_sha256": sha256(DFLASH) if DFLASH else None,
         "common_args": COMMON_ARGS,
         "flavor": FLAVOR,
         "arms": {a: ARMS[a] for a in arms},
