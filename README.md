@@ -341,8 +341,14 @@ feeds on, a direct answer is not. For the draft model the effect reverses —
 acceptance falls from 29.7 % to 23.0 %, so reasoning traces are *easier* for a
 0.8 B drafter than real answers.
 
-So every historical number here was measured on the workload that favours
-speculation, and speculation still lost. See
+What that implies splits by family, so it cannot be said in one sentence.
+Draft-model speculation was measured on its *favourable* workload — thinking
+traces are easier to predict and give a better net result — and still lost, so
+that finding is more robust than when it was published. ngram methods were
+measured on their *unfavourable* one: thinking gives an n-gram lookup much more
+to fire on, and firing costs more than it returns, so the historical ngram
+figures **overstate** the cost a real-answer workload would produce. Neither
+becomes a net win. See
 [D3b](ERRATA.md#d3b-workload-shape-does-matter--and-exp-2-pointed-the-wrong-way).
 
 **Three quarters of v1's requests returned no answer.** `message.content` is

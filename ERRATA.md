@@ -694,11 +694,26 @@ Two consequences.
 First, Exp 2's conclusion is not merely unverifiable, it is backwards for the
 family of methods where workload shape matters most.
 
-Second, and more useful: **every historical number in this repository was
-measured on the workload that favours speculation** — 76 % of v1's requests
-were truncated thinking (A5), and v2, v3 and Exp 2 all believed they had turned
-thinking off and had not (D1, D2). Speculation still lost. That makes the
-negative direction more robust than when it was published, not less.
+Second — and this needs stating per family, because a single sentence about it
+would be wrong for half the methods. Every historical number here was taken on
+the thinking workload: 76 % of v1's requests were truncated reasoning (A5), and
+v2, v3 and Exp 2 all believed they had disabled it and had not (D1, D2). What
+that means depends on the method:
+
+- **Draft-model speculation was measured on its favourable workload.** Thinking
+  traces are easier for a 0.8 B drafter to predict — 29.7 % acceptance against
+  23.1 % on real answers — and the net result is better too, −74.0 % against
+  −76.4 %. It still lost. For this family the negative direction is more robust
+  than when it was published.
+- **ngram methods were measured on their *unfavourable* workload.** Thinking
+  traces give an n-gram lookup far more to fire on, and firing costs more than
+  it returns here: `ngram-mod` goes from −6.8 % to −0.7 % once thinking is off,
+  and `ngram-cache` from −40.0 % to −32.6 %. So the historical ngram figures
+  **overstate** the cost on a real-answer workload. v1's `ngram-mod` −3.4 % is
+  plausibly much closer to zero on the workload a user would actually run.
+
+Neither family becomes a net win, but only one of them was being judged
+generously.
 
 ### D4. v3 DFlash compares two different binaries
 

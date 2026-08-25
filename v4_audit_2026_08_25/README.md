@@ -192,9 +192,16 @@ python analysis/thermal_report.py v4_audit_2026_08_25/data/gpu_telemetry_2026082
 | draft model n_max 16 | 23.7 | −80.8 % | 15.0 % | 3.58 | 0.86 |
 | draft model n_max 32 | 17.3 | −86.0 % | 8.0 % | 6.84 | 0.04 |
 
-The run-to-run SD column is the one honest `±` in this repository: the spread of
-five whole-prompt-set repeats, 0.04–2.48 tok/s. The historical `±27–31` was
+The run-to-run SD column is the one honest `±` in this repository: the spread
+of five whole-prompt-set repeats, 0.04–2.48 tok/s. The historical `±27–31` was
 spread *between prompts*.
+
+Two entries in that column need reading carefully. `baseline`'s 2.08 is almost
+entirely its cold-start first repeat — excluding it the SD is 0.47. But
+`ngram-cache`'s is not: 77.9, 74.7, 75.8, 72.3, 72.0 tok/s, still 1.86 after
+dropping rep 0, and drifting downward. It is the least reproducible arm in the
+matrix by a wide margin, and this audit does not have an explanation for it.
+Every other arm sits between 0.03 and 0.48 once the cold start is removed.
 
 Three things fall out.
 
