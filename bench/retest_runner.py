@@ -38,6 +38,15 @@ Everything is configured through the environment:
     BENCH_MAX_TOKENS   max_tokens per completion               (default 300)
     BENCH_ARMS         comma-separated arm names to run        (default: all)
     BENCH_FLAVOR       legacy | master  - speculative flag spelling (default legacy)
+    BENCH_CONCURRENCY  N  - send N prompts at once and add --parallel N to the
+                       server (default 1). Above 1 the honest metric changes:
+                       per-request predicted_per_second is no longer system
+                       throughput, so the runner also records the wall-clock
+                       aggregate over the concurrent window. Upstream names
+                       batching, not draft length, as the lever that could make
+                       speculative decoding pay on a MoE target (ERRATA A9), and
+                       this repository never tested it - the original README
+                       listed it as an untested caveat.
     BENCH_THINK        on | off  - request-level thinking control (default on)
                        `off` sends chat_template_kwargs {"enable_thinking": false}.
                        Whether it took effect is VERIFIED per request and recorded
@@ -77,6 +86,7 @@ MAX_TOKENS = int(os.environ.get("BENCH_MAX_TOKENS", "300"))
 _THINK_RAW = os.environ.get("BENCH_THINK", "on").strip().lower()
 THINK = "off" if _THINK_RAW in ("off", "0", "false", "no", "think_off",
                                 "disabled", "none") else "on"
+CONCURRENCY = max(1, int(os.environ.get("BENCH_CONCURRENCY", "1")))
 
 # v1's fixed server flags, kept verbatim so the retest stays comparable.
 COMMON_ARGS = [
@@ -291,6 +301,8 @@ def start_server(extra: list[str], log_path: Path,
             i = common.index(f)
             del common[i:i + 2]
     cmd = [SERVER, "-m", TARGET, "--host", "127.0.0.1", "--port", str(PORT)]
+    if CONCURRENCY > 1:
+        cmd += ["--parallel", str(CONCURRENCY), "-cb"]
     cmd += common + [a.replace("{DRAFT}", DRAFT).replace("{DFLASH}", DFLASH)
                      for a in extra]
     log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -462,6 +474,7 @@ def main() -> None:
         "arms": {a: ARMS[a] for a in arms},
         "repeats": REPEATS, "max_tokens": MAX_TOKENS,
         "temperature": 0.0, "seed": 42, "think": THINK, "think_env": _THINK_RAW,
+        "concurrency": CONCURRENCY,
         "ordering": "ABBA: arm order is reversed on odd repeats",
         "gpu_fields": GPU_FIELDS,
         "nvidia_smi": nvidia_smi(),
