@@ -41,11 +41,16 @@ Everything is configured through the environment:
     BENCH_FIT          on | off - drop the -ngl 999 pin so llama.cpp's memory
                        fitter can adjust unset parameters. Applied to every arm
                        in the run so placement policy stays constant.
-    BENCH_CONCURRENCY  N  - send N prompts at once and add --parallel N to the
-                       server (default 1). Above 1 the honest metric changes:
-                       per-request predicted_per_second is no longer system
-                       throughput, so the runner also records the wall-clock
-                       aggregate over the concurrent window. Upstream names
+    BENCH_CONCURRENCY  N  - keep N prompts in flight at once and add
+                       --parallel N -cb to the server (default 1). BOTH halves
+                       are needed: --parallel only ALLOCATES N slots, so a
+                       client that waits for each reply before sending the next
+                       leaves N-1 of them idle and measures nothing about
+                       batching. Above 1 the honest metric changes: per-request
+                       predicted_per_second is no longer system throughput, so
+                       the runner records wall_s and aggregate_tok_s over the
+                       whole prompt set - at every level, c=1 included, so the
+                       two are comparable on one denominator. Upstream names
                        batching, not draft length, as the lever that could make
                        speculative decoding pay on a MoE target (ERRATA A9), and
                        this repository never tested it - the original README
@@ -61,6 +66,7 @@ Run: python bench/retest_runner.py
 from __future__ import annotations
 
 import hashlib
+import concurrent.futures as cf
 import json
 import os
 import signal
@@ -316,6 +322,11 @@ def start_server(extra: list[str], log_path: Path,
             del common[i:i + 2]
     cmd = [SERVER, "-m", TARGET, "--host", "127.0.0.1", "--port", str(PORT)]
     if CONCURRENCY > 1:
+        # Total -c is held at 16384 rather than scaled by N, so VRAM and model
+        # placement stay identical across concurrency levels; llama.cpp splits
+        # it into N slots, and 16384/8 = 2048 per slot is still far more than
+        # this workload uses (longest prompt + 300 generated tokens). Holding
+        # the memory footprint constant is the control that matters here.
         cmd += ["--parallel", str(CONCURRENCY), "-cb"]
     cmd += common + [a.replace("{DRAFT}", DRAFT).replace("{DFLASH}", DFLASH)
                      for a in extra]
@@ -367,6 +378,11 @@ def chat(system: str, user: str) -> dict:
     content = msg.get("content", "") or ""
     return {
         "wall_ms": wall_ms,
+        # the request's own window on the process clock. Two requests overlap
+        # iff their windows do, which is how max_in_flight below is derived
+        # instead of trusted.
+        "t_start": t0,
+        "t_end": t0 + wall_ms / 1000.0,
         "finish_reason": ch.get("finish_reason"),
         "usage": data.get("usage", {}),
         "timings": t,
@@ -389,6 +405,105 @@ def chat(system: str, user: str) -> dict:
 
 
 # ----------------------------------------------------------------- main ----
+
+def _report(arm: str, rep: int, r: dict) -> None:
+    acc = (f"  counted-draft {r['draft_n_accepted']}/{r['draft_n']}"
+           if r["draft_n"] else "")
+    think = "" if r["thinking_suppressed"] else "  THINKING"
+    print(f"    [{arm} rep{rep} {r['tag']:13s}] {r['predicted_n']:>4d}tok "
+          f"@ {r['predicted_per_second']:6.1f} tok/s{acc}{think}", flush=True)
+
+
+def run_prompt_set(arm: str, rep: int,
+                   proc: subprocess.Popen) -> tuple[list[dict], dict | None, float]:
+    """Issue the prompt set and return (rows, crashed, wall_s).
+
+    CONCURRENCY is the number of requests in flight, and that is the entire
+    point of the concurrency arm. An earlier revision of this file documented
+    concurrent dispatch in its env block but issued the prompts one at a time,
+    so `--parallel 4` allocated four slots and three of them sat idle. The
+    signature was unmistakable once measured: the c=4 arm-runs took 44 s and
+    118 s against c=1's 44 s and 116 s. Identical wall-clock at four times the
+    nominal batch width is what a batch size of one looks like.
+
+    wall_s is measured at every level, c=1 included, so a batched arm and a
+    sequential one can be compared on the same denominator instead of the
+    analysis having to reconstruct one from sum(wall_ms).
+    """
+    rows: list[dict] = []
+    crashed: dict | None = None
+    t0 = time.perf_counter()
+
+    if CONCURRENCY == 1:
+        for tag, sysmsg, usermsg in PROMPTS:
+            try:
+                r = chat(sysmsg, usermsg)
+            except Exception as e:  # noqa: BLE001
+                # A server death is a finding, not a harness failure: record
+                # where it happened and move on to the next arm.
+                crashed = {"tag": tag, "error": f"{type(e).__name__}: {e}",
+                           "returncode": proc.poll()}
+                print(f"    [{arm} rep{rep} {tag:13s}] SERVER DIED: "
+                      f"{type(e).__name__}", flush=True)
+                break
+            r["tag"] = tag
+            rows.append(r)
+            _report(arm, rep, r)
+        return rows, crashed, time.perf_counter() - t0
+
+    # Every prompt is submitted up front; the pool holds CONCURRENCY of them in
+    # flight. Results are re-ordered to the prompt list afterwards so row order
+    # matches the sequential path and repeats stay comparable.
+    got: dict[str, dict] = {}
+    with cf.ThreadPoolExecutor(max_workers=CONCURRENCY) as pool:
+        fut = {pool.submit(chat, sysmsg, usermsg): tag
+               for tag, sysmsg, usermsg in PROMPTS}
+        for f in cf.as_completed(fut):
+            tag = fut[f]
+            try:
+                r = f.result()
+            except Exception as e:  # noqa: BLE001
+                # Keep the FIRST failure: once the server is gone the rest of
+                # the batch fails for the same reason and would bury it.
+                if crashed is None:
+                    crashed = {"tag": tag, "error": f"{type(e).__name__}: {e}",
+                               "returncode": proc.poll()}
+                print(f"    [{arm} rep{rep} {tag:13s}] REQUEST FAILED: "
+                      f"{type(e).__name__}", flush=True)
+                continue
+            r["tag"] = tag
+            got[tag] = r
+            _report(arm, rep, r)
+    wall_s = time.perf_counter() - t0
+    rows = [got[tag] for tag, _, _ in PROMPTS if tag in got]
+    return rows, crashed, wall_s
+
+
+def max_in_flight(rows: list[dict]) -> int:
+    """Largest number of requests whose windows overlapped at any instant.
+
+    This is the check the previous revision lacked. `--parallel N` on the
+    server and N worker threads in the client are both necessary and neither is
+    sufficient - the server can serialise the slots, or a single busy slot can
+    starve the rest - so the batch width is read back out of the timestamps
+    rather than assumed from the configuration.
+    """
+    events = []
+    for r in rows:
+        if "t_start" in r and "t_end" in r:
+            events.append((r["t_start"], 1))
+            events.append((r["t_end"], -1))
+    if not events:
+        return 0
+    # ends before starts at an identical timestamp, so a handover is not
+    # miscounted as an overlap
+    events.sort(key=lambda e: (e[0], e[1]))
+    cur = peak = 0
+    for _, d in events:
+        cur += d
+        peak = max(peak, cur)
+    return peak
+
 
 def run_arm(arm: str, rep: int) -> dict:
     extra = ARMS[arm]
@@ -416,7 +531,17 @@ def run_arm(arm: str, rep: int) -> dict:
         # first measured prompt is not paying graph/alloc costs (v1 warmed up
         # with a single 8-token completion)
         try:
-            chat("You are concise.", "Warm up with a few sentences about the weather.")
+            # Warm up at the SAME batch width as the measurement: the first
+            # batched decode otherwise pays graph and allocation costs that a
+            # single warm-up request never triggers, and that cost would land
+            # inside the measured window.
+            _wu = ("You are concise.", "Warm up with a few sentences about the weather.")
+            if CONCURRENCY == 1:
+                chat(*_wu)
+            else:
+                with cf.ThreadPoolExecutor(max_workers=CONCURRENCY) as pool:
+                    for f in [pool.submit(chat, *_wu) for _ in range(CONCURRENCY)]:
+                        f.result()
         except Exception as e:  # noqa: BLE001
             return {"arm": arm, "repeat": rep, "ready_s": ready_s,
                     "argv": proc._cmd,  # type: ignore[attr-defined]
@@ -425,28 +550,24 @@ def run_arm(arm: str, rep: int) -> dict:
                     "crashed": {"tag": "__warmup__", "error": f"{type(e).__name__}: {e}",
                                 "returncode": proc.poll()},
                     "rows": []}
-        rows = []
-        for tag, sysmsg, usermsg in PROMPTS:
-            try:
-                r = chat(sysmsg, usermsg)
-            except Exception as e:  # noqa: BLE001
-                # A server death is a finding, not a harness failure: record
-                # where it happened and move on to the next arm.
-                crashed = {"tag": tag, "error": f"{type(e).__name__}: {e}",
-                           "returncode": proc.poll()}
-                print(f"    [{arm} rep{rep} {tag:13s}] SERVER DIED: {type(e).__name__}",
-                      flush=True)
-                break
-            r["tag"] = tag
-            rows.append(r)
-            acc = ""
-            if r["draft_n"]:
-                acc = f"  counted-draft {r['draft_n_accepted']}/{r['draft_n']}"
-            think = "" if r["thinking_suppressed"] else "  THINKING"
-            print(f"    [{arm} rep{rep} {tag:13s}] {r['predicted_n']:>4d}tok "
-                  f"@ {r['predicted_per_second']:6.1f} tok/s{acc}{think}", flush=True)
+        rows, crashed, wall_s = run_prompt_set(arm, rep, proc)
+        n_tok = sum(r["predicted_n"] for r in rows)
+        agg = n_tok / wall_s if wall_s > 0 else float("nan")
+        peak = max_in_flight(rows)
+        print(f"    [{arm} rep{rep} {'AGGREGATE':13s}] {n_tok:>4d}tok in "
+              f"{wall_s:6.1f}s = {agg:6.1f} tok/s aggregate  "
+              f"(c={CONCURRENCY}, peak in flight {peak})", flush=True)
+        if peak < CONCURRENCY:
+            print(f"    [{arm} rep{rep}] WARNING: asked for {CONCURRENCY} in "
+                  f"flight, only ever observed {peak}. This arm-run does NOT "
+                  f"measure batching.", flush=True)
         return {
             "arm": arm, "repeat": rep, "ready_s": ready_s,
+            # system-level metric, valid at every concurrency level
+            "concurrency": CONCURRENCY,
+            "wall_s": wall_s,
+            "aggregate_tok_s": agg,
+            "max_in_flight": peak,
             "argv": proc._cmd,  # type: ignore[attr-defined]
             "gpu_before": gpu_before, "gpu_after": nvidia_smi(),
             "server_log": str(log_path.relative_to(OUT)),
