@@ -1,0 +1,14 @@
+# Model artefacts tested by this repository.
+#
+# These files are NOT in the repository - they are ~22 GiB of GGUF weights.
+# Download them, put them in one directory, and verify before benchmarking:
+#
+#     sha256sum -c SHA256SUMS
+#
+# A quantisation recipe is a treatment dimension, not a detail: `Q4_K_M` in
+# this repo always refers to the 0.8B DRAFT model, never to the target.
+# The target is UD-Q4_K_XL. See ERRATA.md item C1.
+
+707a55a8a4397ecde44de0c499d3e68c1ad1d240d1da65826b4949d1043f4450  Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf
+bd258782e35f7f458f8aced1adc053e6e92e89bc735ba3be89d38a06121dc517  Qwen3.5-0.8B-Q4_K_M.gguf
+ac2d97712095a558e31573f62f466a3f9d93990898b0ec79d7c974c1780d524a  Qwen3-0.6B-Q4_K_M.gguf

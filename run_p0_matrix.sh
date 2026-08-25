@@ -1,4 +1,23 @@
 #!/usr/bin/env bash
+# ---------------------------------------------------------------------------
+# HISTORICAL SCRIPT - kept as evidence, corrected only for portability.
+#
+# Audited 2026-08-25. See ../ERRATA.md (or ERRATA.md at the repo root).
+# The measurement flags below are UNCHANGED so this file still documents what
+# was actually executed. Two of them did not do what the comments claim:
+#
+#   -no-cnv     REJECTED by llama-cli on these builds. The committed logs show
+#               "--no-conversation is not supported by llama-cli / please use
+#               llama-completion instead". (ERRATA D1)
+#   /no_think   Did NOT disable thinking. The same logs contain "[Start
+#               thinking]" and a full reasoning trace. The working switches on
+#               these builds are `-rea off` and `--reasoning-budget 0`.
+#               (ERRATA D2)
+#
+# Do not use this script for new measurements. Use bench/retest_runner.py.
+# Host-specific paths are now environment variables with the original values
+# as defaults.
+# ---------------------------------------------------------------------------
 # P0 verification matrix — research-guided, publish-ready.
 # Based on 2026-04-21 follow-up deep research:
 #   - MoESD arXiv 2505.19645 / Utility-Driven SD 2506.20675 / MoE-SpeQ 2511.14102 confirm
@@ -19,8 +38,8 @@ set -uo pipefail  # dropped -e so partial failures don't kill the whole matrix
 
 OUT=${OUT:-"$(dirname "$0")/results/verify"}
 RUNNER="$(dirname "$0")/bench_runner.py"
-PY=${PY:-/home/reachym/dev/reachy-agent/robot/.venv/bin/python}
-DRAFT="$HOME/benchmarks/models/qwen3.5-0.8b/Qwen3.5-0.8B-Q4_K_M.gguf"
+PY=${PY:-python3}   # was a host-specific venv path
+DRAFT="${MODEL_DRAFT:-$HOME/benchmarks/models/qwen3.5-0.8b/Qwen3.5-0.8B-Q4_K_M.gguf}"
 mkdir -p "$OUT"
 
 run() {
