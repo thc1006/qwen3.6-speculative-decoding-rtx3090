@@ -1500,6 +1500,99 @@ chk("C4b quotes the temperature range and mean",
     "58-75 C, mean 64.7" in _norm(_c4b_report), True)
 
 
+print("\n=== every quoted throughput belongs to some measured arm-run ===")
+# The three headline tables are bound cell by cell above. The rest - the v4
+# audit README alone has dozens - are not, and planting wrong numbers in them
+# passed every check. This is the general net, and it is deliberately narrow:
+# for a table whose header names a throughput column, the value in that column
+# of each arm row must equal SOME throughput derivable for that arm. It cannot
+# tell which run a figure belongs to, so it catches a typo or a stale number
+# and not a figure attributed to the wrong run. A wider version of this, which
+# swept every number in the row, produced 150 false positives from percentage
+# and acceptance columns; a check that needs that many exemptions is worse than
+# none.
+_TPUT: dict = {}
+for _d in sorted(glob.glob("v4_audit_2026_08_25/data/*")):
+    if not os.path.isfile(os.path.join(_d, "manifest.json")):
+        continue
+    _per: dict = {}
+    for _f in glob.glob(f"{_d}/*__rep*.json"):
+        _r = json.load(open(_f))
+        if not _r.get("rows"):
+            continue
+        _p = _per.setdefault(_r["arm"], {"n": 0, "ms": 0, "rates": [],
+                                         "agg": [], "rp": []})
+        _p["n"] += sum(x["predicted_n"] for x in _r["rows"])
+        _p["ms"] += sum(x["predicted_ms"] for x in _r["rows"])
+        _p["rates"] += [x["predicted_per_second"] for x in _r["rows"]]
+        if _r.get("aggregate_tok_s"):
+            _p["agg"].append(_r["aggregate_tok_s"])
+        _p["rp"].append(1000 * sum(x["predicted_n"] for x in _r["rows"])
+                        / sum(x["predicted_ms"] for x in _r["rows"]))
+    for _arm, _q in _per.items():
+        _vals = []
+        if _q["ms"]:
+            _vals.append(1000 * _q["n"] / _q["ms"])
+        if _q["rates"]:
+            _vals += [st.mean(_q["rates"]), st.median(_q["rates"]), min(_q["rates"])]
+        if _q["agg"]:
+            _vals += _q["agg"] + [st.mean(_q["agg"])]
+        if _q["rp"]:
+            _vals += _q["rp"] + [st.mean(_q["rp"])]
+        _TPUT.setdefault(_arm, set()).update(round(v, 1) for v in _vals)
+# the v1 tier lives in analysis/summary.csv and uses its own arm names
+for _c, _v in by.items():
+    _rates = [x["tok_s"] for x in _v]
+    _n = sum(x["predicted_n"] for x in _v)
+    _ms = sum(x["predicted_ms"] for x in _v)
+    _TPUT.setdefault(_c, set()).update(
+        round(x, 1) for x in
+        ([1000 * _n / _ms] if _ms else []) +
+        [st.mean(_rates), st.median(_rates), min(_rates), max(_rates)])
+
+# A throughput cell is a bare decimal, optionally bold and optionally with a
+# +/- SD. A percentage cell carries %, a count is an integer. Keying on the cell
+# shape rather than on the column header covers tables headed "pooled", "req-mean"
+# and "aggregate" alike, and the two-row headers in the run L section.
+_ROW = re.compile(r"^\|\s*\**`?([a-z0-9-]+)`?[^|]*\|")
+_CELL = re.compile(r"^\**\s*(\d{2,3}\.\d)\s*(?:±\s*\d+\.\d+\s*)?\**$")
+# Cells that look like a throughput and are not one. Named exactly, so the
+# exemption cannot widen by accident.
+_NOT_A_THROUGHPUT = {
+    ("ERRATA.md", "spec-draft-n8", 97.2),   # A12's table: seconds of decode
+    ("v2_3090_followup/README.md", "baseline", 139.9),   # the v2 tier's own
+    ("v2_3090_followup/SUMMARY.md", "baseline", 139.9),  # numbers, from
+    ("v2_3090_followup/SUMMARY.md", "baseline", 140.0),  # results_v2.json
+    ("v2_3090_followup/SUMMARY.md", "baseline", 139.7),
+    ("v2_3090_followup/SUMMARY.md", "baseline", 139.5),
+}
+_bad_t = []
+for _f in sorted(glob.glob("*.md") + glob.glob("*/*.md")):
+    for _i, _raw in enumerate(open(_f, encoding="utf-8"), 1):
+        _line = _norm(_raw.strip())
+        if not _line.startswith("|"):
+            continue
+        _m = _ROW.match(_line)
+        if not _m:
+            continue
+        _arm = _m.group(1)
+        if _arm not in _TPUT:
+            continue
+        for _cell in [c.strip() for c in _line.strip("|").split("|")][1:]:
+            _c = _CELL.match(_norm(_cell))
+            if not _c:
+                continue
+            _v = float(_c.group(1))
+            if (_f, _arm, _v) in _NOT_A_THROUGHPUT:
+                continue
+            # 0.051: the documents quote one decimal, so anything further than
+            # half a display unit away is a different number, not a rounding.
+            if not any(abs(_v - x) <= 0.051 for x in _TPUT[_arm]):
+                _bad_t.append(f"{_f}:{_i} {_arm} = {_v}")
+chk("arms with a derivable throughput", len(_TPUT) >= 30, True)
+chk("every quoted throughput is one of them", _bad_t, [])
+
+
 print("\n=== withdrawn figures must not reappear ===")
 # Every number this repository retracted, and the one place each is allowed to
 # be mentioned: inside the entry that retracts it. A13's 101.3 MiB survived in
