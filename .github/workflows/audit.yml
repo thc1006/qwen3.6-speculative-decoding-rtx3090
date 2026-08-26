@@ -45,6 +45,8 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: mutation check - the suite must fail on the broken versions
         run: python tests/mutate.py
+      - name: data mutation - perturbing a measurement must fail the claim checker
+        run: python tests/data_mutate.py
 
   audit-data-integrity:
     name: data integrity

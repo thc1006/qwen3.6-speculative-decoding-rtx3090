@@ -933,6 +933,20 @@ chk("A12 DFlash performs no checkpoint operations",
     sorted({r["checkpoint_total_s"] for r in _tm["spec-dflash-n2"]}), [0.0])
 chk("A12 the baseline performs none either",
     sorted({r["checkpoint_total_s"] for r in _tm["baseline"]}), [0.0])
+# Zero seconds is not zero events: a create that took no measurable time would
+# satisfy the two checks above. The claim is that the controls take NO
+# checkpoints, so the counts are what has to be zero, in every repeat of both.
+for _ctrl in ("baseline", "spec-dflash-n2"):
+    chk(f"A12 {_ctrl} creates, every repeat",
+        sorted({r["creates"] for r in _tm[_ctrl]}), [0])
+    chk(f"A12 {_ctrl} restores, every repeat",
+        sorted({r["restores"] for r in _tm[_ctrl]}), [0])
+    chk(f"A12 {_ctrl} update_tgt seconds, every repeat",
+        sorted({r["update_tgt_s"] for r in _tm[_ctrl]}), [0.0])
+    chk(f"A12 {_ctrl} load_tgt seconds, every repeat",
+        sorted({r["load_tgt_s"] for r in _tm[_ctrl]}), [0.0])
+    chk(f"A12 {_ctrl} load_dft seconds, every repeat",
+        sorted({r["load_dft_s"] for r in _tm[_ctrl]}), [0.0])
 
 # the accounting, from run T's own decode times
 _T = glob.glob("v4_audit_2026_08_25/data/matrix_T_timers_*")[0]
