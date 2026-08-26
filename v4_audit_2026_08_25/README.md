@@ -1136,6 +1136,11 @@ This table listed two of the run directories and the harness. There are 41.
 | `../bench/collect_evidence.sh` | builds the SHA-256 manifest and archive for the ~3 GB of server logs, which are too large to commit |
 | `../analysis/` | the checkers: `verify_claims.py`, `check_data_integrity.py`, `paired_blocks.py`, `matrix_report.py`, `plot_v4_runs.py` |
 
-The server logs themselves are **not** committed — 3.1 GB across 37 run
-directories. Each attested run records `server_log_sha256` per arm-run, so a
-published archive can be tied back to these files byte for byte.
+The server logs themselves are **not** committed — **4071 MB across 702 files**.
+[`EVIDENCE_MANIFEST.sha256`](EVIDENCE_MANIFEST.sha256) holds the SHA-256 of every
+one of them and of the 19 telemetry traces, and each attested run additionally
+records `server_log_sha256` per arm-run, so a single log can be checked without
+the manifest. `bash bench/collect_evidence.sh ~/bench` regenerates both and
+builds `raw_logs.tar.zst`, **271 028 599 bytes**, sha256
+`29c2401f100390268bbd52e43b5c2da9a61440bad3dabe502ca1684478771fd6`. That archive
+is not published: distributing it is the repository owner's decision.

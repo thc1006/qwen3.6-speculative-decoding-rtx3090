@@ -1691,6 +1691,53 @@ chk("and Exp 2 says its treatment was never verified",
     "EXPLORATORY - the intended treatment was not verified")
 
 
+print("\n=== the raw-evidence manifest ===")
+_man = pathlib.Path(__file__).resolve().parents[1] / "v4_audit_2026_08_25" / "EVIDENCE_MANIFEST.sha256"
+_mlines = [l for l in _man.read_text(encoding="utf-8").splitlines()
+           if l and not l.startswith("#")]
+chk("manifest entries", len(_mlines), 721)
+chk("every entry is a sha256 and a path",
+    sorted({bool(re.fullmatch(r"[0-9a-f]{64}  \S.*", l)) for l in _mlines}), [True])
+chk("logs in the manifest", sum(1 for l in _mlines if l.endswith(".log")), 702)
+chk("telemetry traces in the manifest",
+    sum(1 for l in _mlines if l.endswith(".csv")), 19)
+chk("no duplicate paths", len({l.split("  ", 1)[1] for l in _mlines}), len(_mlines))
+_v4r = pathlib.Path(__file__).resolve().parents[1] / "v4_audit_2026_08_25" / "README.md"
+chk("the archive hash is recorded in both places",
+    all("29c2401f100390268bbd52e43b5c2da9a61440bad3dabe502ca1684478771fd6" in t
+        for t in (_man.read_text(encoding="utf-8"), _v4r.read_text(encoding="utf-8"))), True)
+chk("and both say it is not published",
+    all("not published" in t for t in
+        (_man.read_text(encoding="utf-8"), _v4r.read_text(encoding="utf-8"))), True)
+# Every committed run's logs should appear in the manifest. Four of the earliest
+# were renamed when they were archived, so the committed directory and the one
+# the logs live in differ; the mapping is written out rather than exempted,
+# because "not in the manifest" and "in the manifest under another name" are
+# different facts and the first version of this check could not tell them apart.
+_ARCHIVED_AS = {
+    "C_master_matrix_think_on": "matrix_C_20260825_204529",
+    "D_master_matrix_think_off": "matrix_D_20260825_204529",
+    "E_past_threshold": "matrix_E_threshold_20260825_224802",
+    "H_pmin_sweep": "matrix_H_pmin_20260826_005716",
+}
+# Runs A and B predate log retention on the host; their arm-run JSON survives
+# and their logs do not.
+_NO_LOGS_RETAINED = {"A_bcb5eeb64_legacy", "B_master_3737e4137"}
+_runs_in_manifest = {l.split("  ", 1)[1].split("/")[0] for l in _mlines if l.endswith(".log")}
+_committed = {d.name for d in (pathlib.Path(__file__).resolve().parents[1]
+                               / "v4_audit_2026_08_25" / "data").iterdir()
+              if d.is_dir() and list(d.glob("*__rep*.json"))}
+chk("every committed run's logs are in the manifest, under its own name or its archived one",
+    sorted(r for r in _committed - _NO_LOGS_RETAINED
+           if _ARCHIVED_AS.get(r, r) not in _runs_in_manifest), [])
+chk("the renamed ones really are in it under the other name",
+    sorted(k for k, v in _ARCHIVED_AS.items() if v not in _runs_in_manifest), [])
+chk("and the two without logs have arm-runs anyway",
+    sorted(r for r in _NO_LOGS_RETAINED
+           if not list((pathlib.Path(__file__).resolve().parents[1]
+                        / "v4_audit_2026_08_25" / "data" / r).glob("*__rep*.json"))), [])
+
+
 print("\n=== the historical scripts still document what was run ===")
 # Six driver scripts are kept as evidence and carry a header saying the
 # measurement flags are UNCHANGED and only paths were parameterised. That is a
