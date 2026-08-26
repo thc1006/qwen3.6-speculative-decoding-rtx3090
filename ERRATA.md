@@ -731,6 +731,74 @@ run (D4). It is a property of speculation on this build, and it reproduces.
 
 ---
 
+### A12. The mechanism, measured: it is state checkpointing, and only the external-drafter path pays it
+
+This repository retracted "MoE expert loading" as its mechanism (A1, A4) and
+replaced it with something honest but thin: the drafter proposes tokens, most
+are rejected, and the run pays for all of them. The 2026-08-26 runs make it
+specific, and the specific answer is not about acceptance at all.
+
+`llama-server -v` reports, per arm-run of the ten prompts:
+
+| arm | drafts | draft tokens gen / acc | drafter `generate()` | checkpoints created | restored |
+|---|---|---|---|---|---|
+| `spec-draft-n8` — external 0.8 B drafter | 772 | 6092 / 2515 = 41.3 % | **17.24 s** | **772** | **709** |
+| `spec-dflash-n2` — self-speculative | 1337 | 2671 / 1950 = 73.0 % | 3.43 s | **0** | **0** |
+| `spec-mtp-n2` — self-speculative | 1279 | 2553 / 2006 = 78.6 % | 2.73 s | **0** | **0** |
+
+Each checkpoint line reads
+`created speculative checkpoint (… size = 82.079 MiB, draft = 19.266 MiB)`, and
+each restore moves 86 066 360 bytes. So one `spec-draft-n8` arm-run writes
+772 × 101.3 MiB and reads back 709 × 82.08 MiB — **about 133 GiB of recurrent
+state moved to produce 3000 tokens.**
+
+**It costs about a fifth of the run.** The log timestamps every line. Taking the
+wall time that elapses immediately after each of the 1481 checkpoint lines and
+subtracting the median gap after any other line gives **24.2 s of a 123.9 s
+arm-run, 19.5 %**. The same statistic is undefined for the other two arms
+because they emit no such lines. (The first attempt at this parsed the
+timestamps as `hours.minutes.seconds.ms` and made a 124-second arm-run look like
+two hours; the format is `minutes.seconds.ms.µs`.)
+
+**It is the drafter architecture, not the draft length.** That distinction
+matters, because "long drafts trigger checkpoints" would have been a much weaker
+claim, and the target context reports `rs_seq = 8`, so a rollback longer than
+eight *should* force one. It does not:
+
+| arm | `n_max` | checkpoints created / restored |
+|---|---|---|
+| `spec-dflash-n1` … `n16` | 1, 2, 4, 6, 8, 16 | 0 / 0 at every one |
+| `spec-mtp-n1` … `n8` | 1, 2, 8 | 0 / 0 at every one |
+| `spec-draft-n8` | 8 | 772 / 709 |
+
+The checkpoint saves *two* contexts — 82.079 MiB of target state plus
+19.266 MiB of draft state. A method that drafts from the target's own layers has
+no second context to save, and pays none of this at any draft length.
+
+**This is what breaks the acceptance threshold across families.** The ~48 %
+break-even fitted in run L holds 12 / 12 within DFlash, because every arm in
+that family pays the same near-zero fixed cost per round and only the volume
+term varies. It fails on the external drafter exactly where it should be most
+informative: at `n_max 1` that drafter reaches **68.7 % acceptance and is still
+74.8 % slower**, and at `n_max 2`, 60.3 % acceptance and 72.2 % slower. No
+acceptance rate rescues a round that costs 101 MiB of state to roll back and a
+0.8 B dense forward pass to produce, against a target that only activates ~3 B
+parameters per token.
+
+That last ratio is the second half of the story and is worth stating plainly:
+this target is a 35 B model with roughly 3 B active per token, so a 0.8 B
+*dense* drafter is not the 1–2 % of target cost that speculative decoding
+normally assumes. It is closer to a quarter of it — before any state
+management — which is why the drafter's own `generate()` accounts for 17.24 s
+against 2.73–3.43 s for a head that reuses the target's layers.
+
+**Scope.** One target, one host, one binary, one drafter of each kind. The
+counts and the volumes are exact; the 19.5 % is a log-timestamp attribution and
+should be read as an estimate of that path's share, not a profile. Nothing here
+measures expert routing, and nothing here needs to.
+
+---
+
 ## B — statistics that were reported incorrectly
 
 ### B1. `mean tok/s` was the request-mean only; pooled throughput is materially worse

@@ -614,11 +614,25 @@ fit that looked excellent in sample was falsified out of it. So this one was
 pushed at runs J and K, which it never saw and which used a different context
 and a different fitter margin:
 
-| | result |
+| family | sign predicted correctly |
 |---|---|
-| sign predicted correctly | **10 / 10** |
-| mean magnitude error | +8.1 pp |
-| worst magnitude error | **+52.2 pp** |
+| self-speculative (DFlash) | **12 / 12** |
+| drafter-free (ngram) | 3 / 3 |
+| **external 0.8 B drafter** | **6 / 8** |
+| all | 21 / 23 |
+
+Mean magnitude error +8.1 pp, worst **+52.2 pp**.
+
+**The two failures are the informative ones**, and they were only found because
+the first version of this test drew its out-of-sample set from runs J and K,
+which contain the external drafter only at 29.7 % acceptance — below the
+threshold, where it agreed. Run C swept that drafter down to `n_max 1`:
+
+| arm | acceptance | measured | threshold says |
+|---|---|---|---|
+| `spec-draft-n1` | **68.7 %** | **−74.8 %** | faster — **wrong** |
+| `spec-draft-n2` | 60.3 % | −72.2 % | faster — **wrong** |
+| `spec-draft-n4` | 45.4 % | −71.1 % | slower — ok |
 
 **The threshold transfers; the slope does not.** At `n_max 1` the line predicts
 +40.5 % from 82 % acceptance and the arm delivers +9.7 %, because one drafted
@@ -628,10 +642,15 @@ pass per drafted token where DFlash reuses the target's own layers, so its cost
 per unit of acceptance is not the same quantity at all. Even there the sign was
 right.
 
-So the usable statement is the conservative one: **on this target, a DFlash
-configuration is worth running when it clears roughly 48 % draft acceptance and
-is a net loss when it does not.** How *much* it is worth also depends on draft
-volume, which acceptance alone does not carry.
+So the usable statement is narrower than it first looked: **within a
+self-speculative family on this target, a configuration is worth running when it
+clears roughly 48 % draft acceptance.** It is not a statement about acceptance in
+general. An external 0.8 B drafter is 75 % slower at 68.7 % acceptance, because
+it pays a fixed per-round cost that no acceptance rate can amortise — 101 MiB of
+recurrent state checkpointed and restored, plus a dense forward pass against a
+target that activates only ~3 B parameters. That cost is measured in
+[ERRATA A12](../ERRATA.md#a12-the-mechanism-measured-it-is-state-checkpointing-and-only-the-external-drafter-path-pays-it),
+and it is why the threshold holds inside one family and not across them.
 
 ---
 

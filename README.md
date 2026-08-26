@@ -106,12 +106,23 @@ planning prose, which is exactly what a drafter predicts well
 ([run L](v4_audit_2026_08_25/README.md#run-l--the-win-is-a-property-of-the-workload-not-of-the-method)).
 
 Across run L's 60 points acceptance and speed-up correlate at **r = +0.946** and
-the line crosses zero near **48 % acceptance**. Pushed out of sample at runs J
-and K it calls the **sign 10 times out of 10** and the magnitude badly wrong —
-worst error +52.2 pp — so the defensible form is the conservative one: a
-configuration here is worth running when it clears roughly 48 % draft
-acceptance, and how much it is worth also depends on draft volume, which
-acceptance alone does not carry.
+the line crosses zero near **48 % acceptance**. Pushed out of sample it calls the
+sign **12 / 12 within the DFlash family** — and **fails on the external
+drafter**, at exactly the points that would matter: at `n_max 1` that drafter
+reaches **68.7 % acceptance and is still 74.8 % slower**, at `n_max 2` it is
+60.3 % and −72.2 %. Overall 21 / 23.
+
+So the threshold is not a law about acceptance; it is a property of the drafter.
+The reason is measured rather than argued: a separate draft context forces the
+hybrid target to checkpoint and restore ~101 MiB of recurrent state on every
+partially accepted round — **772 saves and 709 restores in one ten-prompt
+arm-run, about 133 GiB of state traffic and ~19.5 % of its wall clock** — while
+DFlash and MTP do it **zero times at every draft length from 1 to 16**. And the
+external drafter is 0.8 B *dense* against a target that activates only ~3 B
+parameters per token, so drafting costs a quarter of a target step before any
+state management: 17.24 s in `generate()` against 1.89–3.43 s for a head that
+reuses the target's own layers
+([ERRATA A12](ERRATA.md#a12-the-mechanism-measured-it-is-state-checkpointing-and-only-the-external-drafter-path-pays-it)).
 
 ![v1 300-token matrix: request-mean vs pooled throughput](analysis/plot_mean_by_config.png)
 
@@ -584,13 +595,32 @@ cause of the llama.cpp result.
 
 ---
 
-## Candidate mechanism — largely settled, and it is not MoE-specific
+## Mechanism — measured, and it is not MoE-specific
 
 The audit's re-measurement ([A7](ERRATA.md#a7-with-acceptance-measured-properly-there-is-no-anomaly-left-to-explain))
-removes most of the mystery. Once acceptance is measured rather than assumed,
-decode rate tracks acceptance at r = +0.998 across the prompt set. What remains
-is ordinary: the drafter proposes tokens, most are rejected, and the run pays
-for all of them.
+removed the mystery: once acceptance is measured rather than assumed, decode
+rate tracks acceptance at r = +0.998 across the prompt set. The 2026-08-26 runs
+then made the cost specific, and it is **not** "most drafts are rejected".
+
+| per ten-prompt arm-run | external 0.8 B drafter | DFlash | MTP |
+|---|---|---|---|
+| draft-token acceptance | 41.3 % | 73.0 % | 78.6 % |
+| drafter `generate()` | **17.24 s** | 3.43 s | 2.73 s |
+| speculative checkpoints created / restored | **772 / 709** | **0 / 0** | **0 / 0** |
+| recurrent state moved | **≈ 133 GiB** | none | none |
+| share of wall clock in that path | **≈ 19.5 %** | — | — |
+
+A separate draft context makes the hybrid Gated-DeltaNet target save and restore
+82.079 MiB of target state plus 19.266 MiB of draft state on every partially
+accepted round. Methods that draft from the target's *own* layers have no second
+context and pay none of it — at **every** draft length from 1 to 16, so this is
+the drafter's architecture and not the draft window. Full derivation, with the
+counts pulled out of the `-v` logs into committed data, is
+[ERRATA A12](ERRATA.md#a12-the-mechanism-measured-it-is-state-checkpointing-and-only-the-external-drafter-path-pays-it).
+
+The second term is arithmetic: this is a 35 B model with roughly 3 B active per
+token, so a 0.8 B **dense** drafter is not the 1–2 % of target cost that
+speculative decoding usually assumes. It is nearer a quarter.
 
 The two candidate mechanisms below are kept because they quantify *how much*
 each term costs — not because the outcome still needs an exotic explanation.

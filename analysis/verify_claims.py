@@ -434,6 +434,81 @@ for name, pat, lo, hi, drift, swt in (("I+J", "gpu_telemetry_IJ_*.csv", 55, 73, 
         chk(f"thermal {name}: clock drift first->second half (%)",
             round(abs(100*(st.mean(ck[h:])/st.mean(ck[:h])-1)), 2), drift, 0.005)
 
+print("\n=== ERRATA A12: the measured mechanism ===")
+_sa = {(r["arm"], r["run"]): r for r in
+       json.load(open("v4_audit_2026_08_25/data/spec_accounting_20260826.json"))}
+_by_arm = defaultdict(list)
+for (a, _run), r in _sa.items():
+    _by_arm[a].append(r)
+
+_ext = [r for rs in _by_arm.values() for r in rs if r.get("spec_type") == "draft-simple"]
+chk("A12 external-drafter arm-runs extracted", len(_ext) >= 1, True)
+_e = _ext[0]
+chk("A12 external drafter: checkpoints created", _e["checkpoints_created"], 772)
+chk("A12 external drafter: checkpoints restored", _e["checkpoints_restored"], 709)
+chk("A12 external drafter: target state per checkpoint (MiB)",
+    round(_e["checkpoint_target_mib"], 3), 82.079, 0.0005)
+chk("A12 external drafter: draft state per checkpoint (MiB)",
+    round(_e["checkpoint_draft_mib"], 3), 19.266, 0.0005)
+chk("A12 external drafter: state written (GiB)", _e["state_written_gib"], 76.4, 0.05)
+chk("A12 external drafter: state read back (GiB)", _e["state_read_back_gib"], 56.83, 0.005)
+chk("A12 external drafter: total state moved (GiB)",
+    round(_e["state_written_gib"] + _e["state_read_back_gib"], 1), 133.2, 0.05)
+chk("A12 external drafter: share of wall clock (%)", _e["checkpoint_share_pct"], 19.5, 0.05)
+chk("A12 external drafter: generate() seconds", _e["drafter_generate_s"], 17.24, 0.005)
+
+# the categorical claim: zero at EVERY draft length, for both self-speculative families
+_self = [r for rs in _by_arm.values() for r in rs
+         if r.get("spec_type") in ("draft-dflash", "draft-mtp")]
+chk("A12 self-speculative arm-runs extracted", len(_self) >= 8, True)
+chk("A12 self-speculative: checkpoints created, all arms",
+    sorted({r["checkpoints_created"] for r in _self}), [0])
+chk("A12 self-speculative: checkpoints restored, all arms",
+    sorted({r["checkpoints_restored"] for r in _self}), [0])
+chk("A12 self-speculative: draft lengths covered",
+    sorted({int(r["arm"].rsplit("n", 1)[1]) for r in _self}), [1, 2, 4, 6, 8, 16])
+chk("A12 self-speculative: slowest generate() is still under the external one",
+    max(r["drafter_generate_s"] for r in _self) < _e["drafter_generate_s"], True)
+
+print("\n=== the acceptance threshold, tested per drafter family ===")
+def _pa(pat, arm):
+    rs = [json.load(open(f)) for f in glob.glob(f"v4_audit_2026_08_25/data/{pat}/{arm}__rep*.json")]
+    if not rs: return None
+    n = sum(x["predicted_n"] for r in rs for x in r["rows"])
+    ms = sum(x["predicted_ms"] for r in rs for x in r["rows"])
+    dn = sum(x["draft_n"] for r in rs for x in r["rows"])
+    da = sum(x["draft_n_accepted"] for r in rs for x in r["rows"])
+    return (1000*n/ms, (100*da/dn) if dn else None)
+BREAK = 48.2
+_fam = defaultdict(lambda: [0, 0])
+def _score(fam, pat, arms):
+    b = _pa(pat, "baseline")
+    for a in arms:
+        v = _pa(pat, a)
+        if not v or v[1] is None: continue
+        d = 100*(v[0]/b[0]-1)
+        _fam[fam][0] += ((v[1] >= BREAK) == (d > 0)); _fam[fam][1] += 1
+_score("external", "C_master_matrix_think_on",
+       [f"spec-draft-n{n}" for n in (1, 2, 4, 8, 16, 32)])
+_score("external", "matrix_J2_*", ["spec-draft-n8"])
+_score("external", "matrix_L_thinkon_*", ["spec-draft-n8"])
+_score("dflash", "matrix_K1_sweep_*", [f"spec-dflash-n{n}" for n in (1, 2, 3, 4, 6, 8)])
+_score("dflash", "matrix_J2_*", ["spec-dflash-n4", "spec-dflash-n8", "spec-dflash-n16"])
+_score("dflash", "matrix_L_thinkon_*", ["spec-dflash-n2", "spec-dflash-n4", "spec-dflash-n6"])
+_score("ngram", "C_master_matrix_think_on", ["ngram-cache", "ngram-mod-n24", "ngram-simple"])
+chk("threshold: sign correct within DFlash", tuple(_fam["dflash"]), (12, 12))
+chk("threshold: sign correct on drafter-free ngram", tuple(_fam["ngram"]), (3, 3))
+chk("threshold: sign correct on the external drafter", tuple(_fam["external"]), (6, 8))
+chk("threshold: sign correct overall",
+    (sum(v[0] for v in _fam.values()), sum(v[1] for v in _fam.values())), (21, 23))
+# the two failures, named
+_b = _pa("C_master_matrix_think_on", "baseline")
+for n, acc, delta in ((1, 68.7, -74.8), (2, 60.3, -72.2)):
+    v = _pa("C_master_matrix_think_on", f"spec-draft-n{n}")
+    chk(f"threshold failure: spec-draft-n{n} acceptance (%)", round(v[1], 1), acc, 0.05)
+    chk(f"threshold failure: spec-draft-n{n} vs baseline (%)",
+        round(100*(v[0]/_b[0]-1), 1), delta, 0.05)
+
 print("\n=== theory (ERRATA E1/E2) ===")
 rho=8/256
 chk("rho", round(rho,5), 0.03125, 1e-9)
@@ -497,11 +572,18 @@ DOC_CLAIMS = [
     ("v4_audit_2026_08_25/README.md", "+0.946",  "L acceptance correlation"),
     ("v4_audit_2026_08_25/README.md", "48.2 %",  "L break-even acceptance"),
     ("v4_audit_2026_08_25/README.md", "+52.2 pp", "L worst out-of-sample error"),
-    ("README.md",   "48 % draft",  "README acceptance threshold"),
+    ("README.md",   "48 % acceptance", "README acceptance threshold"),
     ("ERRATA.md",   "85 / 200",  "A11 think-off identical streams"),
     ("ERRATA.md",   "70.8 %",    "A11 long-output divergence"),
     ("v4_audit_2026_08_25/README.md", "-0.24 %", "L clock drift"),
     ("RETEST_TODO.md", "785 plain BF16", "MTP weights are present"),
+    ("ERRATA.md",   "772",       "A12 checkpoints created"),
+    ("ERRATA.md",   "82.079 MiB","A12 target state per checkpoint"),
+    ("ERRATA.md",   "133 GiB",   "A12 total state moved"),
+    ("ERRATA.md",   "19.5 %",    "A12 share of wall clock"),
+    ("ERRATA.md",   "68.7 %",    "A12 threshold failure point"),
+    ("README.md",   "17.24 s",   "README drafter generate time"),
+    ("README.md",   "12 / 12",   "README threshold within DFlash"),
 ]
 root = pathlib.Path(__file__).resolve().parents[1]
 for f, needle, what in DOC_CLAIMS:
