@@ -1395,6 +1395,29 @@ chk("T's manifest nonetheless recorded `latin`",
     json.load(open(f"{_T}/manifest.json")).get("order_mode"), "latin")
 
 
+# The A12 volume table gives two runs. Run J's row is checked above; run T's is
+# the one that matches the timing table beside it, and it was added only after a
+# review pointed out that the section quoted one run's counts in one table and
+# the other's in the next without saying so.
+_SZ = 82.079
+_t_creates, _t_restores = 785, 728
+chk("A12 run T nominal volume written (GiB)",
+    round(_t_creates * _SZ / 1024, 2), 62.92, 0.005)
+chk("A12 run T nominal volume read back (GiB)",
+    round(_t_restores * _SZ / 1024, 2), 58.35, 0.005)
+chk("A12 run T nominal volume combined (GiB)",
+    round((_t_creates + _t_restores) * _SZ / 1024, 2), 121.27, 0.005)
+chk("A12 run T's counts are the ones the timing table used",
+    sorted({(r["creates"], r["restores"]) for r in _tmr if r["arm"] == "spec-draft-n8"}),
+    [(_t_creates, _t_restores)])
+_er = " ".join(_norm(pathlib.Path(__file__).resolve().parents[1]
+                     .joinpath("ERRATA.md").read_text(encoding="utf-8")).split())
+chk("ERRATA gives both runs' volumes side by side",
+    "121.27" in _er and "118.71" in _er, True)
+chk("ERRATA says which run each timing table belongs to",
+    "come from the same twelve logs" in _er, True)
+
+
 print("\n=== A16: run T against run T3 ===")
 
 
