@@ -153,7 +153,7 @@ requests. Any master comparison must pass `--spec-type` explicitly.
   because the symptom is silent.
 - **Checkpoint invalidation on hybrid targets.**
   [#24055](https://github.com/ggml-org/llama.cpp/issues/24055). The audit
-  measured 1639 checkpoints of 101.3 MiB for one 300-token request; whether
+  measured 1639 checkpoints at a server-reported 82.079 MiB for one 300-token request; whether
   that is the same bug is untested here.
 
 ### Still running / next

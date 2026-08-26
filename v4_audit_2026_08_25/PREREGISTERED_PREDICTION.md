@@ -132,7 +132,7 @@ marginal cost is 6–10× the asymptote, and it drags the intercept up. Fit all
 nine points and the effect goes away.
 
 **Speculative state checkpointing dominates the cost.** The server logs make
-this tempting — 1639 checkpoints at 101.3 MiB each for a single 300-token
+this tempting — 1639 checkpoints at a server-reported 82.079 MiB each for a single 300-token
 request at `n_max` 1, and `the context does not support partial sequence
 removal` still printed on post-merge master. But checkpoint traffic per
 generated token *falls* from 55.4 MiB at `n_max` 1 to 24.9 at 128 while cost
