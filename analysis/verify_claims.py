@@ -1091,6 +1091,26 @@ for f, needle, what in DOC_CLAIMS:
 
 _T = "v4_audit_2026_08_25/data/matrix_T_timers_20260826_182639"
 _T3 = "v4_audit_2026_08_25/data/matrix_T3_timers_20260826_203251"
+print("\n=== the memory-policy table names every run ===")
+# The table in BENCHMARK_ENV.md exists to say which runs are comparable, and it
+# stopped at run L while most of the repository - the headline included - ran
+# under a policy it did not mention.
+_env = " ".join(_norm(pathlib.Path(__file__).resolve().parents[1]
+                      .joinpath("BENCHMARK_ENV.md").read_text(encoding="utf-8")).split())
+_policy: dict = {}
+for _mp in sorted(glob.glob("v4_audit_2026_08_25/data/*/manifest.json")):
+    _m = json.load(open(_mp))
+    _n = os.path.basename(os.path.dirname(_mp))
+    _tag = _n.split("_")[1] if _n.startswith(("matrix_", "smoke_")) else _n.split("_")[0]
+    _policy.setdefault(str(_m.get("fit_target") or "-"), set()).add(_tag)
+chk("BENCHMARK_ENV names the fit-target values that were used",
+    sorted(k for k in _policy if k != "-" and k not in _env), [])
+chk("the headline run's policy is in the table",
+    "3072" in _env and "O2" in _env, True)
+chk("every fit-target 3072 run tag appears in the table",
+    sorted(t for t in _policy.get("3072", set()) if t not in _env), [])
+
+
 print("\n=== the harness that ran each run is recoverable ===")
 # `harness_tree_sha` is what the caller declared and is labelled as such; the
 # field that pins the harness exactly is `runner_sha256`, the hash of

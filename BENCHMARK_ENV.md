@@ -419,11 +419,20 @@ Runs A and B additionally used `bcb5eeb64`; the abort evidence in
 
 ## Memory policy, which is a variable here and not a constant
 
+Derived from the committed manifests, not maintained by hand — the earlier
+version of this table stopped at run L and did not name the policy that most of
+the repository's runs, including every run behind the headline, actually used.
+
 | runs | `-ngl` | `-c` | `--fit-target` | why |
 |---|---|---|---|---|
-| A–I | pinned `999` | 16384 | — | placement fixed by hand |
-| J | unset (`-fit on`) | 16384 | default 1024 | the BF16 DFlash drafter only loads with `-ngl` unset; `common_fit_params` aborts when it is pinned |
-| K, L | unset (`-fit on`) | 8192 | 2048 | the default 1024 MiB margin is where the drafter has to live, and it does not fit — see the run K section |
+| A, B, C, D, E, H, I2 | pinned `999` | 16384 | — | placement fixed by hand |
+| J, J2 | unset (`-fit on`) | 16384 | default 1024 | the BF16 DFlash drafter only loads with `-ngl` unset; `common_fit_params` aborts when it is pinned |
+| K, K1, L | unset (`-fit on`) | 8192 | 2048 | the default 1024 MiB margin is where the drafter has to live, and it does not fit — see the run K section |
+| M1, M2, M3, M4, N, O, **O2**, P, Q, R, T, T3 | unset (`-fit on`) | 8192 | 3072 | 2048 still leaves the DFlash arm inside 630 MiB of headroom; 3072 is where every arm of the nine-method matrix starts reliably |
+
+That last row is why runs K1 and L are excluded from cross-run comparisons of
+`spec-dflash-n2`: they read about +21 % at `--fit-target 2048` where the 3072
+runs read +25 to +27 %. Same binary, same drafter, different memory policy.
 
 `-fit on` is applied to **every arm within a run**, baseline included, so
 placement policy never differs between an arm and its control. Absolute rates
@@ -432,9 +441,9 @@ table; every matrix carries its own baseline for that reason.
 
 ## Instrumentation
 
-- continuous `nvidia-smi` trace at 5 s, including
-  `clocks_event_reasons.active`, for the whole of every session
-  (`gpu_telemetry_IJ_*.csv`, `gpu_telemetry_K_*.csv`, `gpu_telemetry_L_*.csv`)
+- continuous `nvidia-smi` trace including `clocks_event_reasons.active` for the
+  whole of every session — **5 s** for the sessions up to run O2, **1 s** for
+  runs T3 and O3 onward (`gpu_telemetry_*.csv`, one per session)
 - per-request JSON with full `content` and `reasoning_content`, token ids via
   `logprobs`, `timings`, and a `thinking_suppressed` flag measured from the
   reasoning channel rather than assumed from the request flag
