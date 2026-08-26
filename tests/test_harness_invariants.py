@@ -653,6 +653,39 @@ class ArmsMustGenerateTheSameAmountOfWork(unittest.TestCase):
             self.assertFalse(man["ignore_eos"])
 
 
+class AnEmptyRunIsNotACompleteRun(unittest.TestCase):
+    """`range(0)` is empty, so the arm loop never runs and the completeness
+    validation has nothing to object to. The directory then carries a
+    RUN_COMPLETE.json attesting to zero arm-runs, which every consumer reads as
+    a whole run."""
+
+    def test_zero_repeats_is_refused(self):
+        with tempfile.TemporaryDirectory() as t:
+            out = Path(t) / "zero"
+            r = run_runner({"BENCH_REPEATS": "0"}, out)
+            self.assertNotEqual(r.returncode, 0)
+            self.assertIn("no arm-runs at all", r.stdout + r.stderr)
+            self.assertFalse((out / "RUN_COMPLETE.json").exists())
+
+    def test_negative_repeats_is_refused(self):
+        with tempfile.TemporaryDirectory() as t:
+            out = Path(t) / "neg"
+            r = run_runner({"BENCH_REPEATS": "-1"}, out)
+            self.assertNotEqual(r.returncode, 0)
+            self.assertFalse((out / "RUN_COMPLETE.json").exists())
+
+    def test_a_repeated_arm_is_refused_before_the_gpu_is_touched(self):
+        """Two entries write the same `<arm>__rep<n>.json`; the second
+        overwrites the first and half the run is thrown away. `validate_run`
+        catches it afterwards, which costs the whole run."""
+        with tempfile.TemporaryDirectory() as t:
+            out = Path(t) / "dup"
+            r = run_runner({"BENCH_ARMS": "baseline,baseline"}, out)
+            self.assertNotEqual(r.returncode, 0)
+            self.assertIn("each arm may appear once", r.stdout + r.stderr)
+            self.assertFalse(out.exists() and any(out.glob("*__rep*.json")))
+
+
 class StagingMustNotDestroyItsSource(unittest.TestCase):
     def test_stage_equal_to_source_is_rejected_and_nothing_is_removed(self):
         with tempfile.TemporaryDirectory() as t:

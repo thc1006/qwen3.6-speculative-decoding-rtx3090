@@ -1183,11 +1183,22 @@ def main() -> None:
         sys.exit(f"BENCH_OUT={OUT} already contains {len(stale)} arm-run files "
                  f"(e.g. {stale[0].name}). Refusing to write into it: the analysis "
                  f"cannot tell the two runs apart. Use a fresh directory.")
+    if REPEATS < 1:
+        # `range(REPEATS)` is empty, the arm loop never runs, and the directory
+        # gets a RUN_COMPLETE.json attesting to nothing. An empty run is not a
+        # complete one.
+        sys.exit(f"BENCH_REPEATS={REPEATS} would run no arm-runs at all")
     wanted = os.environ.get("BENCH_ARMS")
     arms = [a.strip() for a in wanted.split(",")] if wanted else list(ARMS)
     for a in arms:
         if a not in ARMS:
             sys.exit(f"unknown arm {a!r}; known: {', '.join(ARMS)}")
+    dupes = sorted({a for a in arms if arms.count(a) > 1})
+    if dupes:
+        # Two entries write the same `<arm>__rep<n>.json`, so the second
+        # silently overwrites the first and half the GPU time is discarded.
+        # validate_run catches it after the fact; this catches it before.
+        sys.exit(f"BENCH_ARMS repeats {', '.join(dupes)}; each arm may appear once")
     if any("{DRAFT}" in x for a in arms for x in ARMS[a]) and not DRAFT:
         sys.exit("set MODEL_DRAFT for the draft arms")
     if any("{MTP}" in x for a in arms for x in ARMS[a]) and not MTP:
