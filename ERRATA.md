@@ -692,7 +692,15 @@ engine reproduces itself, and it does, exactly:
 - every arm is byte-identical across its own three repeats — 10 / 10 prompts for
   all five arms;
 - the no-speculation baseline is byte-identical across two *different runs* with
-  different `-fit` settings — 30 / 30.
+  different `-fit` settings — 30 / 30;
+- and the control extends much further than run J could show. Runs T and T3 are
+  two hours apart, with the llama.cpp tree reverted to stock and rebuilt twice
+  in between, and all three of their arms — no speculation, an external drafter
+  and DFlash — reproduce **10 / 10 prompts byte-identically**, token ids,
+  `content` and `reasoning_content` alike. Determinism for a fixed configuration
+  is not a within-run property here; it survives a rebuild.
+  ([A16](#a16-two-runs-identical-in-every-recorded-respect-and-byte-identical-in-output-differ-by-34--on-one-arm)
+  is what those two runs do *not* reproduce: the time.)
 
 So the engine is deterministic for a fixed configuration, and turning
 speculation on is what changes the output. The divergence is not early noise

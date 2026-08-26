@@ -190,6 +190,31 @@ def report(run_dir: Path) -> None:
     tot = sum(s["tokens"] for s in stats.values())
     print(f"\n  pooled throughput weights tokens equally; {tot} generated tokens in total")
 
+    # Pooled removes the wall-clock dependence on output length. It does not
+    # make two arms comparable when they generated different numbers of tokens:
+    # decode rate falls as the KV cache grows, so an arm that stopped at 187
+    # tokens is being scored on cheaper tokens than one that ran to 300. This is
+    # invisible in the table above, where every arm shows the same min-max.
+    per_tag: dict = {}
+    for arm, runs in arms.items():
+        for r in runs:
+            for x in r["rows"]:
+                per_tag.setdefault(x["tag"], {}).setdefault(arm, set()).add(x["predicted_n"])
+    diverging = [(t, d) for t, d in per_tag.items()
+                 if len(arms) > 1 and len(d) == len(arms)
+                 and len({n for v in d.values() for n in v}) > 1]
+    if diverging:
+        worst = max(diverging, key=lambda td: max(n for v in td[1].values() for n in v)
+                    - min(n for v in td[1].values() for n in v))
+        lo = min(n for v in worst[1].values() for n in v)
+        hi = max(n for v in worst[1].values() for n in v)
+        print(f"  ! {len(diverging)} of {len(per_tag)} prompts have the arms generating "
+              f"DIFFERENT numbers of tokens, worst `{worst[0]}` {lo}-{hi} "
+              f"({100 * (hi - lo) / lo:.0f} %). The `vs base` column then compares "
+              f"arms that did different amounts of work - see ERRATA A17 and "
+              f"analysis/length_matching.py. `BENCH_IGNORE_EOS=on` forces the "
+              f"hard cap.")
+
     # ---- drift: does the baseline move across the run? ----------------------
     if base and base["reps"] > 1:
         # complete repeats only, so the comparison is like-for-like
