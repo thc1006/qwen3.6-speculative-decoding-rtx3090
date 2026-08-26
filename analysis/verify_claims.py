@@ -1601,12 +1601,15 @@ print("\n=== the historical scripts still document what was run ===")
 # rejected, and `/no_think`, which did not disable thinking - so a well-meaning
 # "fix" to either would delete the evidence for a published retraction.
 _HISTORICAL = {
-    "run_matrix.sh": (1, 1, 2),
-    "run_p0_matrix.sh": (1, 1, 5),
-    "run_verify_matrix.sh": (1, 1, 1),
-    "v2_3090_followup/bench_3090_oleg.sh": (2, 7, 4),
+    # occurrences, not lines: `--draft-max 16 --draft-min 4` is one line and
+    # two occurrences, and the first version of this table was filled in from
+    # `grep -c`, which counts lines
+    "run_matrix.sh": (1, 1, 4),
+    "run_p0_matrix.sh": (1, 1, 9),
+    "run_verify_matrix.sh": (1, 1, 2),
+    "v2_3090_followup/bench_3090_oleg.sh": (2, 7, 8),
     "v3_dflash_2026_05_07/bench/bench_dflash.sh": (2, 6, 4),
-    "v2_3090_followup/exp2_codejson_n3/run_n3_codejson.sh": (2, 6, 2),
+    "v2_3090_followup/exp2_codejson_n3/run_n3_codejson.sh": (2, 6, 4),
 }
 for _f, (_ncnv, _nthink, _ndraft) in _HISTORICAL.items():
     _t = pathlib.Path(__file__).resolve().parents[1].joinpath(_f) \
