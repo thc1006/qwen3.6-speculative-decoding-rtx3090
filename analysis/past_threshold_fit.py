@@ -29,11 +29,20 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 AUDIT = os.path.join(ROOT, "v4_audit_2026_08_25")
 C_DIR = os.path.join(AUDIT, "data", "C_master_matrix_think_on")
 E_DIR = os.path.join(AUDIT, "data", "E_past_threshold")
+H_DIR = os.path.join(AUDIT, "data", "H_pmin_sweep")
 COUNTERS = os.path.join(AUDIT, "data", "acceptance_counter_comparison.json")
 
-# the runs the two directories came from, as recorded in the counter dump
+# the runs the three directories came from, as recorded in the counter dump
 C_RUN = "matrix_C_20260825_204529"
 E_RUN = "matrix_E_threshold_20260825_224802"
+H_RUN = "matrix_H_pmin_20260826_005716"
+
+# run H varies `p_min`, the lever ERRATA A10 shows matters. Its arms are the
+# out-of-sample test of the law fitted on run C and E, which all ran at
+# `p_min = 0`.
+PMIN_ARMS = (("spec-draft-n8-pmin75", 0.75), ("spec-draft-n8-pmin90", 0.90),
+             ("spec-draft-n128-pmin75", 0.75), ("spec-draft-n32-pmin75", 0.75),
+             ("spec-draft-n8-pmin50", 0.50), ("spec-draft-n8", 0.0))
 
 # server-reported common_prompt_checkpoint::size(), ERRATA A12. NOT 101.345:
 # that is this number plus the draft component it already contains.
@@ -122,6 +131,20 @@ def pearson(xs, ys):
     return (sum((a - mx) * (b - my) for a, b in zip(xs, ys))
             / math.sqrt(sum((a - mx) ** 2 for a in xs)
                         * sum((b - my) ** 2 for b in ys)))
+
+
+def drafter_rounds(run, name, generated_per_run):
+    """Rounds per generated token, MEASURED, not modelled.
+
+    The three-parameter model uses 1 / (acceptance x n_max + 1); A10 uses the
+    drafter's own count of drafts issued. They agree at `p_min = 0` and cannot
+    agree once early stopping is on, which is the whole point of A10.
+    """
+    counts = [r["drafter_drafts"] for r in json.load(open(COUNTERS, encoding="utf-8"))
+              if r["run"] == run and r["arm"] == name]
+    if not counts:
+        raise SystemExit(f"no drafter counters for {name} in {run}")
+    return st.mean(counts) / generated_per_run
 
 
 def checkpoints_per_arm_run():
@@ -266,8 +289,72 @@ def build():
             [arms[n]["ms_per_token"] for n in sorted(traffic)]),
     }
 
+    # ---- run H: the out-of-sample test, and what separates the families ----
+    h_base = arm(H_DIR, "baseline")
+    law_ms = lambda d: ca[0] * d + ca[1]
+    pmin = {}
+    for name, pv in PMIN_ARMS:
+        a = arm(H_DIR, name)
+        a["p_min"] = pv
+        a["rounds_per_gen"] = drafter_rounds(H_RUN, name, a["generated"] / a["repeats"])
+        a["vs_baseline_pct"] = (a["decode_tok_s"] / h_base["decode_tok_s"] - 1) * 100.0
+        a["law_residual_pct"] = ((a["ms_per_token"] - law_ms(a["draft_per_gen"]))
+                                 / law_ms(a["draft_per_gen"]) * 100.0)
+        a["repeat_sd_tok_s"] = st.stdev(a["per_repeat_decode_tok_s"])
+        pmin[name] = a
+    positive = [a for a in pmin.values() if a["p_min"] > 0]
+    h = {
+        "baseline": h_base, "arms": pmin,
+        "mean_abs_residual_on_p_min_positive_pct":
+            sum(abs(a["law_residual_pct"]) for a in positive) / len(positive),
+        "repeat_sd_tok_s": {n: a["repeat_sd_tok_s"] for n, a in pmin.items()},
+        "baseline_repeat_sd_tok_s": st.stdev(h_base["per_repeat_decode_tok_s"]),
+    }
+
+    # the comparison that needs no regression: same draft volume, different cost
+    lo, hi = arms[1], pmin["spec-draft-n8-pmin90"]
+    lo_rounds = drafter_rounds(C_RUN, "spec-draft-n1", lo["generated"] / lo["repeats"])
+    h["two_configurations"] = {
+        "n_max 1, p_min 0": {"draft_per_gen": lo["draft_per_gen"],
+                             "rounds_per_gen": lo_rounds,
+                             "ms_per_token": lo["ms_per_token"]},
+        "n_max 8, p_min 0.90": {"draft_per_gen": hi["draft_per_gen"],
+                                "rounds_per_gen": hi["rounds_per_gen"],
+                                "ms_per_token": hi["ms_per_token"]},
+        "volume_differs_pct": (lo["draft_per_gen"] / hi["draft_per_gen"] - 1) * 100.0,
+        "cost_differs_pct": (lo["ms_per_token"] / hi["ms_per_token"] - 1) * 100.0,
+        "rounds_differ_pct": (lo_rounds / hi["rounds_per_gen"] - 1) * 100.0,
+    }
+
+    # refit across both families: nine at p_min 0, five with early stopping on
+    cfg = []
+    for n in order:
+        cfg.append({"p_min": 0.0, "dpg": arms[n]["draft_per_gen"],
+                    "ms": arms[n]["ms_per_token"],
+                    "rounds": drafter_rounds(C_RUN if n in SUB else E_RUN,
+                                             f"spec-draft-n{n}",
+                                             arms[n]["generated"] / arms[n]["repeats"])})
+    for a in positive:
+        cfg.append({"p_min": a["p_min"], "dpg": a["draft_per_gen"],
+                    "ms": a["ms_per_token"], "rounds": a["rounds_per_gen"]})
+    yc = [c["ms"] for c in cfg]
+    models = {}
+    for label, X in (("volume only", [[c["dpg"], 1.0] for c in cfg]),
+                     ("rounds + volume", [[c["rounds"], c["dpg"], 1.0] for c in cfg])):
+        co_ = ols(X, yc)
+        yh_ = [sum(k * x for k, x in zip(co_, row)) for row in X]
+        bias = lambda sel: (sum((v - hh) / hh * 100.0 for c, hh, v in zip(cfg, yh_, yc)
+                                if sel(c)) / sum(1 for c in cfg if sel(c)))
+        b_pos, b_zero = bias(lambda c: c["p_min"] > 0), bias(lambda c: c["p_min"] == 0)
+        models[label] = {"bias_p_min_positive_pct": b_pos,
+                         "bias_p_min_zero_pct": b_zero,
+                         "separation_pp": abs(b_zero - b_pos),
+                         "r2": r_squared(yc, yh_)}
+    h["refit"] = {"configurations": len(cfg), "models": models}
+
     return {
         "arms": arms,
+        "pmin": h,
         "baseline": {"C_pooled_ms_per_token": base_c["ms_per_token"],
                      "C_repeat0_ms_per_token":
                          1000.0 / base_c["per_repeat_decode_tok_s"][0],

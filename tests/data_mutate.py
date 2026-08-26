@@ -144,6 +144,7 @@ def edit_doc(rel: str, old: str, new: str):
 
 
 E = "v4_audit_2026_08_25/data/E_past_threshold"
+H = "v4_audit_2026_08_25/data/H_pmin_sweep"
 C = "v4_audit_2026_08_25/data/C_master_matrix_think_on"
 PRE = "v4_audit_2026_08_25/PREREGISTERED_PREDICTION.md"
 O2 = "v4_audit_2026_08_25/data/matrix_O2_latin_20260826_153711"
@@ -270,6 +271,30 @@ MUTATIONS = [
      edit_doc(PRE, "against a **110.8** baseline", "against a **123.4** baseline")),
     ("1639 checkpoints go back to being one request",
      edit_doc(PRE, "in one\n`n_max` 1 arm-run", "for a single 300-token request in an\n`n_max` 1 arm-run")),
+
+    # --- A7's sweep and A10's falsification, parsed since 2026-08-27 --------
+    ("run H p_min decode time on one request +5 %",
+     scale_row(f"{H}/spec-draft-n8-pmin75__rep1.json", "predicted_ms", 1.05)),
+    ("run H p_min draft volume on one request doubled",
+     scale_row(f"{H}/spec-draft-n8-pmin90__rep0.json", "draft_n", 2)),
+    ("the A7 sweep drafted total is nudged",
+     edit_doc("ERRATA.md", "| 8 | 32.1 | \u221274.0 % | 27 735 | 29.7 % |",
+              "| 8 | 32.1 | \u221274.0 % | 27 335 | 29.7 % |")),
+    ("the A7 coverage table gains a point of coverage",
+     edit_doc("ERRATA.md", "| **96** | **95.3 %** | 3.1 % | 17.80 | 10.0 |",
+              "| **96** | **96.3 %** | 3.1 % | 17.80 | 10.0 |")),
+    ("an A10 law residual is softened",
+     edit_doc("ERRATA.md", "| `n_max` 8, `p_min` 0.50 | 0.94 | 58.8 % | 39.6 | \u221268.0 % | \u221217.9 % |",
+              "| `n_max` 8, `p_min` 0.50 | 0.94 | 58.8 % | 39.6 | \u221268.0 % | \u22127.9 % |")),
+    ("the A10 family separation is exaggerated",
+     edit_doc("ERRATA.md", "| rounds + volume | \u22125.2 % | +1.6 % | **6.9 pp** |",
+              "| rounds + volume | \u22125.2 % | +1.6 % | **2.9 pp** |")),
+    ("the two-configuration cost gap reverts to the rep-0 value",
+     edit_doc("ERRATA.md", "| `n_max` 8, `p_min` 0.90 | 0.46 | **0.19** | **23.51** |",
+              "| `n_max` 8, `p_min` 0.90 | 0.46 | **0.19** | **23.62** |")),
+    ("the README and A10 p_min tables disagree",
+     edit_doc("README.md", "| `n_max` 8, `p_min` 0.90 | **88.2 %** | 42.5 | \u221265.6 % |",
+              "| `n_max` 8, `p_min` 0.90 | **88.2 %** | 43.5 | \u221265.6 % |")),
 
 ]
 

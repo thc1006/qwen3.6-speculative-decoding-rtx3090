@@ -1983,6 +1983,146 @@ chk("prereg run-to-run SD (tok/s)",
 chk("prereg document quotes the SDs it measured",
     "0.05, 0.16 and 0.11 tok/s" in _PRE_FLAT, True)
 
+# --- the tables A7 and A10 publish, parsed cell by cell -------------------
+# A10 falsifies A7's law, and until 2026-08-27 its second half was fitted on
+# repeat 0 - which it disclosed, giving a reason that had stopped being true
+# when the counter dump was rebuilt over every repeat earlier the same week.
+def _pnum2(x):
+    """Parse one table cell. Markup and thousands separators both vary here."""
+    t = _norm(x).replace("%", "").replace("pp", "").replace("*", "").replace("`", "")
+    for _spc in (" ", "\u00a0", "\u2009", "\u202f"):
+        t = t.replace(_spc, "")
+    return float(t)
+
+
+_sweep = {int(_pnum2(r[0])): r[1:] for r in
+          _md_table("| n_max | pooled tok/s | vs baseline | drafted | acceptance |")}
+chk("A7 sweep table rows", sorted(_sweep), [1, 2, 4, 8, 16, 32])
+_base_c = _PT["baseline"]["C_decode_tok_s"]
+for _n, _row in _sweep.items():
+    _a = _PT["arms"][_n]
+    chk(f"A7 sweep n{_n} pooled tok/s", round(_a["decode_tok_s"], 1), _pnum2(_row[0]), 0.05)
+    chk(f"A7 sweep n{_n} vs baseline (%)",
+        round((_a["decode_tok_s"] / _base_c - 1) * 100, 1), _pnum2(_row[1]), 0.05)
+    chk(f"A7 sweep n{_n} drafted total",
+        round(_a["draft_per_gen"] * _a["generated"]), int(_pnum2(_row[2])))
+    chk(f"A7 sweep n{_n} acceptance (%)", round(100 * _a["acceptance"], 1), _pnum2(_row[3]), 0.05)
+
+_covt = {int(_pnum2(r[0])): r[1:] for r in
+         _md_table("| `n_max` | coverage | acceptance | draft/gen | pooled tok/s |")}
+chk("A7 coverage table rows", sorted(_covt), [32, 64, 96, 128])
+for _n, _row in _covt.items():
+    _a = _PT["arms"][_n]
+    chk(f"A7 coverage n{_n} (%)", round(_PT["coverage_pct"][_n], 1), _pnum2(_row[0]), 0.05)
+    chk(f"A7 coverage n{_n} acceptance (%)", round(100 * _a["acceptance"], 1), _pnum2(_row[1]), 0.05)
+    chk(f"A7 coverage n{_n} draft/gen", round(_a["draft_per_gen"], 2), _pnum2(_row[2]), 0.005)
+    chk(f"A7 coverage n{_n} pooled tok/s", round(_a["decode_tok_s"], 1), _pnum2(_row[3]), 0.05)
+
+_H = _PT["pmin"]
+_ER_TXT = _norm(pathlib.Path(__file__).resolve().parents[1]
+                  .joinpath("ERRATA.md").read_text(encoding="utf-8"))
+_ER_FLAT = re.sub(r"\s+", " ", _ER_TXT)
+_lbl = lambda x: re.sub(r"\s+", " ", x.replace("*", "").replace("`", "")).strip()
+_A10 = {_lbl(r[0]): r[1:] for r in _md_table(
+    "| arm | draft/gen | real acceptance | pooled tok/s | vs baseline | law residual |")}
+chk("A10 table rows", len(_A10), 7)
+chk("A10 baseline row", _pnum2(_A10["baseline"][2]),
+    round(_H["baseline"]["decode_tok_s"], 1), 0.05)
+_A10_KEY = {"n_max 8, p_min 0.75": "spec-draft-n8-pmin75",
+            "n_max 8, p_min 0.90": "spec-draft-n8-pmin90",
+            "n_max 128, p_min 0.75": "spec-draft-n128-pmin75",
+            "n_max 32, p_min 0.75": "spec-draft-n32-pmin75",
+            "n_max 8, p_min 0.50": "spec-draft-n8-pmin50",
+            "n_max 8, p_min 0 (the whole audit matrix)": "spec-draft-n8"}
+for _label, _arm in _A10_KEY.items():
+    _row = _A10[_label]
+    _a = _H["arms"][_arm]
+    chk(f"A10 {_arm} draft/gen", round(_a["draft_per_gen"], 2), _pnum2(_row[0]), 0.005)
+    chk(f"A10 {_arm} acceptance (%)", round(100 * _a["acceptance"], 1), _pnum2(_row[1]), 0.05)
+    chk(f"A10 {_arm} pooled tok/s", round(_a["decode_tok_s"], 1), _pnum2(_row[2]), 0.05)
+    chk(f"A10 {_arm} vs baseline (%)", round(_a["vs_baseline_pct"], 1), _pnum2(_row[3]), 0.05)
+    chk(f"A10 {_arm} law residual (%)", round(_a["law_residual_pct"], 1), _pnum2(_row[4]), 0.05)
+    chk(f"A10 {_arm} over-predicted by the law", _a["law_residual_pct"] < 0, True)
+chk("A10 mean |residual| where p_min > 0 (%)",
+    round(_H["mean_abs_residual_on_p_min_positive_pct"], 1), 19.4, 0.05)
+chk("A10 quotes that mean", "mean of **19.4 %**" in _ER_FLAT, True)
+_sd = [v for k, v in _H["repeat_sd_tok_s"].items()]
+chk("A10 run-to-run SD over the speculative arms",
+    [round(min(_sd), 2), round(max(_sd), 2)], [0.13, 0.36])
+chk("A10 quotes the SD range it measured", "0.13 to 0.36 tok/s" in _ER_FLAT, True)
+chk("A10 no-speculation scatter", round(_H["baseline_repeat_sd_tok_s"], 2), 3.16, 0.005)
+chk("A10 says why the baseline scatters more", "3.16 tok/s on a mean" in _ER_FLAT, True)
+
+_two = {_lbl(r[0]): r[1:] for r in _md_table("| configuration | draft/gen | rounds/gen | ms/token |")}
+_TC = _H["two_configurations"]
+for _label, _key in (("n_max 1, p_min 0", "n_max 1, p_min 0"),
+                     ("n_max 8, p_min 0.90", "n_max 8, p_min 0.90")):
+    _row = _two[_label]
+    chk(f"A10 two-config {_key} draft/gen",
+        round(_TC[_key]["draft_per_gen"], 2), _pnum2(_row[0]), 0.005)
+    chk(f"A10 two-config {_key} rounds/gen",
+        round(_TC[_key]["rounds_per_gen"], 2), _pnum2(_row[1]), 0.005)
+    chk(f"A10 two-config {_key} ms/token",
+        round(_TC[_key]["ms_per_token"], 2), _pnum2(_row[2]), 0.005)
+chk("A10 two-config: volume differs (%)", round(_TC["volume_differs_pct"]), 9, 0.5)
+chk("A10 two-config: cost differs (%)", round(_TC["cost_differs_pct"]), 37, 0.5)
+chk("A10 two-config: rounds differ (%)", round(_TC["rounds_differ_pct"]), 186, 0.5)
+chk("A10 quotes the corrected cost gap", "cost by **37 %**" in _ER_FLAT, True)
+
+_refit = {_lbl(r[0]): r[1:] for r in _md_table(
+    "| model | bias on `p_min > 0` arms | bias on `p_min = 0` arms | separation |")}
+chk("A10 refit configurations", _H["refit"]["configurations"], 14)
+for _label in ("volume only", "rounds + volume"):
+    _m = _H["refit"]["models"][_label]
+    _row = _refit[_label]
+    chk(f"A10 refit {_label}: bias where p_min > 0 (%)",
+        round(_m["bias_p_min_positive_pct"], 1), _pnum2(_row[0]), 0.05)
+    chk(f"A10 refit {_label}: bias where p_min = 0 (%)",
+        round(_m["bias_p_min_zero_pct"], 1), _pnum2(_row[1]), 0.05)
+    chk(f"A10 refit {_label}: family separation (pp)",
+        round(_m["separation_pp"], 1), _pnum2(_row[2]), 0.05)
+chk("A10 refit: rounds shrink the separation but do not remove it",
+    _H["refit"]["models"]["rounds + volume"]["separation_pp"]
+    < _H["refit"]["models"]["volume only"]["separation_pp"] / 2 > 0, True)
+_cut = (1 - _H["refit"]["models"]["rounds + volume"]["separation_pp"]
+        / _H["refit"]["models"]["volume only"]["separation_pp"]) * 100
+chk("A10 refit: how much of it rounds remove (%)", round(_cut), 56, 0.5)
+chk("A10 quotes that", "cuts it by 56 %" in _ER_FLAT, True)
+chk("A10 refit: volume alone still reaches this R2",
+    round(_H["refit"]["models"]["volume only"]["r2"], 3), 0.988, 0.0005)
+chk("A10 records that the rep-0 basis was lifted",
+    "computed from repeat 0 alone until 2026-08-27" in _ER_FLAT, True)
+
+# the same p_min table, in the README
+_RMD_LINES = pathlib.Path(__file__).resolve().parents[1] \
+    .joinpath("README.md").read_text(encoding="utf-8").splitlines()
+_i = next(i for i, l in enumerate(_RMD_LINES)
+          if l.startswith("| configuration | real acceptance | pooled tok/s | vs baseline |"))
+_rp = {}
+for _l in _RMD_LINES[_i + 2:]:
+    if not _l.startswith("|"):
+        break
+    _c = [x.strip() for x in _norm(_l).strip("|").split("|")]
+    _rp[_lbl(_c[0])] = _c[1:]
+chk("README p_min table rows", len(_rp), 4)
+chk("README p_min: the no-speculation row",
+    _pnum2(_rp["no speculation"][1]), round(_H["baseline"]["decode_tok_s"], 1), 0.05)
+for _label, _arm in (("n_max 8, p_min 0.75", "spec-draft-n8-pmin75"),
+                     ("n_max 8, p_min 0.90", "spec-draft-n8-pmin90"),
+                     ("n_max 8, p_min 0", "spec-draft-n8")):
+    _a = _H["arms"][_arm]
+    _row = _rp[_label]
+    chk(f"README p_min {_arm} acceptance (%)",
+        round(100 * _a["acceptance"], 1), _pnum2(_row[0]), 0.05)
+    chk(f"README p_min {_arm} pooled tok/s",
+        round(_a["decode_tok_s"], 1), _pnum2(_row[1]), 0.05)
+    chk(f"README p_min {_arm} vs baseline (%)",
+        round(_a["vs_baseline_pct"], 1), _pnum2(_row[2]), 0.05)
+chk("README and A10 agree on the p_min rows",
+    [_pnum2(_rp[k][1]) for k in ("n_max 8, p_min 0.75", "n_max 8, p_min 0.90", "n_max 8, p_min 0")],
+    [_pnum2(_A10[k][2]) for k in ("n_max 8, p_min 0.75", "n_max 8, p_min 0.90",
+                                  "n_max 8, p_min 0 (the whole audit matrix)")])
+
 # --- and the thing that makes it a pre-registration at all ---------------
 if _HAS_GIT:
     def _git(*a):

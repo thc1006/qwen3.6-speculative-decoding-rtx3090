@@ -492,9 +492,13 @@ Consequences:
 ### A10. The single-regressor law is falsified out of sample, and `p_min` is the lever that matters
 
 A7's law was fitted entirely at `p_min = 0`. A8 flagged that as a confound. The
-sweep that measures it is now done — 7 arms, 3 repeats, run-to-run SD
-0.13–0.39 tok/s — and it does two things at once: it **falsifies the law** and
-it produces the cleanest version of this repository's original claim.
+sweep that measures it is now done — 7 arms, 3 repeats, run-to-run SD 0.13 to
+0.36 tok/s across the six speculative arms — and it does two things at once: it
+**falsifies the law** and it produces the cleanest version of this repository's
+original claim. The no-speculation arm scatters far more, 3.16 tok/s on a mean
+of 123.8, because it is four times faster and the same absolute jitter buys a
+larger share; every figure below is pooled over all three repeats and is
+recomputed by `analysis/past_threshold_fit.py`.
 
 | arm | draft/gen | real acceptance | pooled tok/s | vs baseline | law residual |
 |---|---:|---:|---:|---:|---:|
@@ -502,9 +506,9 @@ it produces the cleanest version of this repository's original claim.
 | `n_max` 8, **`p_min` 0.75** | 0.61 | **80.2 %** | **42.8** | **−65.5 %** | −20.7 % |
 | `n_max` 8, `p_min` 0.90 | 0.46 | **88.2 %** | 42.5 | −65.6 % | −18.5 % |
 | `n_max` 128, `p_min` 0.75 | 0.68 | 70.9 % | 42.0 | −66.1 % | −20.0 % |
-| `n_max` 32, `p_min` 0.75 | 0.68 | 70.9 % | 42.0 | −66.1 % | −19.9 % |
+| `n_max` 32, `p_min` 0.75 | 0.68 | 70.9 % | 42.0 | −66.1 % | −20.0 % |
 | `n_max` 8, `p_min` 0.50 | 0.94 | 58.8 % | 39.6 | −68.0 % | −17.9 % |
-| `n_max` 8, `p_min` 0 (the whole audit matrix) | 1.85 | 29.7 % | 32.7 | −73.6 % | −11.3 % |
+| `n_max` 8, `p_min` 0 (the whole audit matrix) | 1.85 | 29.7 % | 32.7 | −73.6 % | −11.4 % |
 
 **The law fails.** `ms/tok = 27.00 + 4.040 × draft/gen`, fitted at `p_min = 0`,
 over-predicts cost by a mean of **19.4 %** on every arm with `p_min > 0`, all in
@@ -517,16 +521,16 @@ different amounts:
 
 | configuration | draft/gen | rounds/gen | ms/token |
 |---|---:|---:|---:|
-| `n_max` 1, `p_min` 0 | 0.50 | 0.55 | 32.09 |
-| `n_max` 8, `p_min` 0.90 | 0.46 | **0.19** | **23.62** |
+| `n_max` 1, `p_min` 0 | 0.50 | 0.55 | 32.16 |
+| `n_max` 8, `p_min` 0.90 | 0.46 | **0.19** | **23.51** |
 
-Volume differs by 9 %, cost by **36 %**, and rounds by **186 %**. Whatever is
+Volume differs by 9 %, cost by **37 %**, and rounds by **186 %**. Whatever is
 driving the cost, it is not the number of drafted tokens. `n_max` 1 pays a
 drafter forward pass for every single token it proposes; `p_min` 0.90 proposes
 several per round and stops early when unsure.
 
 **And this partly rehabilitates the term A7 discarded.** The two-term model —
-rounds and volume — was demoted because rounds earned only 0.096 percentage
+rounds and volume — was demoted because rounds earned only 0.064 percentage
 points of R² on the `p_min = 0` sweep. That sweep could not separate them:
 rounds per generated token sat at 0.25–0.26 across almost its whole range. The
 `p_min` sweep varies rounds independently, and refitting across both families,
@@ -534,16 +538,28 @@ rounds per generated token sat at 0.25–0.26 across almost its whole range. The
 
 | model | bias on `p_min > 0` arms | bias on `p_min = 0` arms | separation |
 |---|---:|---:|---:|
-| volume only | −10.1 % | +4.6 % | **14.7 pp** |
-| rounds + volume | −4.5 % | +1.2 % | **5.7 pp** |
+| volume only | −10.8 % | +5.0 % | **15.7 pp** |
+| rounds + volume | −5.2 % | +1.6 % | **6.9 pp** |
 
 R² is useless for this — volume alone still reaches 0.988 because `ms/token`
 spans 23 to 112 and a 36 % error at the low end barely registers. The family
 separation is the metric that matters: a model that captured the physics would
-show none. Adding rounds cuts it by 61 % and does not remove it, so **neither
+show none. Adding rounds cuts it by 56 % and does not remove it, so **neither
 model is right**, and the coefficients of either should be read as descriptive
-rather than physical. Both fits use the rep-0 server logs, which are where the
-checkpoint counts that stand in for round counts live.
+rather than physical.
+
+> [!NOTE]
+> **This table, the two-configuration comparison above it and the 0.064
+> percentage points were computed from repeat 0 alone until 2026-08-27**, and
+> said so: the drafter's round counts were only extracted from the rep-0 server
+> logs. That constraint was removed when `analysis/compare_acceptance_counters.py`
+> was corrected to read every repeat — the dump went from 73 arm-runs to 517 —
+> and this entry was not revisited. Pooled, the separation is 15.7 pp and
+> 6.9 pp rather than 14.7 and 5.7, the R² the rounds term earns on the
+> `p_min = 0` sweep is 0.064 points rather than 0.096, and the two
+> configurations cost 32.16 and 23.51 ms per token rather than 32.09 and 23.62.
+> Every conclusion is unchanged; the round counts themselves are identical
+> across repeats, because the drafter is deterministic.
 
 **`p_min` is the dominant knob, not `n_max`.** Going from 0 to 0.75 at fixed
 `n_max` 8 halves draft volume, raises real acceptance from 29.7 % to 80.2 %, and
