@@ -529,7 +529,10 @@ def server_identity(log_path: Path) -> dict:
         text = log_path.read_text(errors="replace")[:400_000]
     except Exception:  # noqa: BLE001
         return out
-    if m := re.search(r"build\s*[:=]\s*(\d+)\s*\(([0-9a-f]+)\)", text):
+    # `common_params_print_info: build 10622 (3737e4137) with GNU ...` - no colon
+    # after `build`. The first version of this required one and silently matched
+    # nothing, so all 81 arm-runs of run O2 recorded an empty identity.
+    if m := re.search(r"\bbuild\s+(\d+)\s+\(([0-9a-f]{7,40})\)", text):
         out["build"] = m.group(1)
         out["commit"] = m.group(2)
     for key, pat in (("model_path", r"llama_model_loader: loaded meta data from ([^\s]+)"),

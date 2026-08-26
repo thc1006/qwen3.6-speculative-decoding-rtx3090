@@ -57,26 +57,34 @@ is ordinary speculative-decoding economics. The "100 % acceptance yet slower,
 therefore an MoE pathology" anomaly this repository was built around does not
 exist.
 
-**And the direction is not universal.** On 2026-08-26, nine of master's eleven
-`--spec-type` methods were measured on this card against one baseline, in one
-matrix, under one memory policy — pooled decode throughput, three repeats,
-thinking on:
+**And the direction is not universal.** On 2026-08-26, eight speculative
+configurations and a no-speculation baseline were measured on this card in one
+matrix under one memory policy, as a **balanced Latin square**: nine blocks, each
+arm appearing exactly once per block and visiting every position exactly once —
+verified from the execution log, not from the design. Each change below is
+paired against the baseline measured **inside the same block**, and the interval
+is over blocks, which is the unit of randomisation:
 
-| arm | pooled tok/s | Δ pooled | aggregate tok/s | Δ aggregate | acceptance † | draft tokens |
-|---|---:|---:|---:|---:|---:|---:|
-| **`spec-dflash-n2`** — self-speculative | **145.8** | **+24.6 %** | 126.6 | +21.1 % | 72.3 % | 7 323 |
-| `spec-mtp-n2` — the target's own MTP head | 142.5 | +21.8 % | 122.8 | +17.5 % | 78.4 % | 6 972 |
-| `spec-dflash-n4` | 138.1 | +18.0 % | 119.6 | +14.5 % | 55.2 % | 11 163 |
-| **no speculation** | **117.0** | — | **104.5** | — | — | 0 |
-| `ngram-map-k4v-m8` | 116.1 | −0.8 % | 103.8 | −0.7 % | 50.0 % | 72 |
-| `ngram-mod-n24` | 103.4 | −11.7 % | 93.5 | −10.5 % | 5.0 % | 1 728 |
-| `ngram-cache` | 93.9 | −19.7 % | 85.9 | −17.8 % | 5.2 % | 1 566 |
-| `spec-draft-n8` — external 0.8 B drafter | 30.8 | −73.7 % | 29.8 | −71.5 % | 29.5 % | 16 704 |
-| `spec-draft-n1` — same drafter, one token | 29.1 | **−75.1 %** | 28.2 | −73.0 % | **69.7 %** | 4 470 |
+| arm | pooled tok/s | change | 95 % CI | acceptance † |
+|---|---:|---:|---:|---:|
+| **`spec-dflash-n2`** | **146.2** | **+26.3 %** | [+25.5 %, +27.1 %] | 72.3 % |
+| `spec-mtp-n2` | 141.9 | +22.7 % | [+22.1 %, +23.3 %] | 78.4 % |
+| `spec-dflash-n4` | 137.9 | +19.2 % | [+18.5 %, +19.9 %] | 55.2 % |
+| **no speculation** | **115.7** | — | — | — |
+| `ngram-map-k4v-m8` | 115.4 | −0.3 % | [−0.6 %, +0.0 %] | 50.0 % |
+| `ngram-mod-n24` | 103.1 | −10.9 % | [−11.4 %, −10.5 %] | 5.0 % |
+| `ngram-cache` | 93.7 | −19.0 % | [−19.4 %, −18.6 %] | 5.2 % |
+| `spec-draft-n8` | 30.9 | −73.3 % | [−73.5 %, −73.2 %] | 29.5 % |
+| `spec-draft-n1` | 29.2 | **−74.8 %** | [−74.9 %, −74.7 %] | **69.7 %** |
 
 ![Nine methods, one baseline, one matrix](analysis/plot_head_to_head.png)
 
-† This table is run O. The same configuration was measured again in run M1 and
+The design matters and the numbers show it: run O measured the same arms at
+three repeats with the arm list merely reversed on odd repeats, which leaves
+position confounded with time. Its point estimates were 0.3–1.7 pp away from
+these, and for `spec-mtp-n2` its +21.8 % falls **outside** the interval above.
+
+† This table is run O2. The same configuration was measured again in run M1 and
 `spec-dflash-n2` read **+26.7 %** there against +24.6 % here — a 2.1 pp
 between-run spread, the second largest in the dataset. The lower of the two is
 quoted. What a three-repeat delta is actually worth is measured in

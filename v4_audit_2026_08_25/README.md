@@ -839,6 +839,70 @@ the coverage question, but it contributes nothing to the volume argument.
 
 ---
 
+## Run O2 — the same matrix as a balanced Latin square
+
+Run O below was three repeats with the arm list reversed on odd repeats. That is
+forward/reverse/forward: the first arm sits at position 1 on two of the three, so
+**arm position stays confounded with time**, and the run-to-run SD printed beside
+each figure came from repeats that shared a position. An external review was
+right that this cannot be called an estimator precision, and
+[A14](../ERRATA.md#a14-within-run-repeats-are-not-an-error-bar) had already
+measured one arm whose between-run spread was 8.5 pp against a within-run SD of
+0.53.
+
+O2 is the same nine arms over **nine blocks**, rotated by block index so every
+arm occupies every position exactly once. That was checked before the run from
+the schedule and after it **from the execution log**, which records the order
+each block actually ran in:
+
+```
+block 0: baseline        spec-draft-n1 … ngram-map-k4v-m8
+block 1: spec-draft-n1   spec-draft-n8 … baseline
+…
+block 8: ngram-map-k4v-m8 baseline     … ngram-mod-n24
+```
+
+Each figure is paired against the baseline measured **inside the same block**,
+and the interval is a bootstrap and a t interval over blocks, the unit of
+randomisation:
+
+| arm | pooled tok/s | change | 95 % CI | acceptance † | draft tokens |
+|---|---:|---:|---:|---:|---:|
+| **`spec-dflash-n2`** | **146.2** | **+26.3 %** | [+25.5 %, +27.1 %] | 72.3 % | 21 969 |
+| `spec-mtp-n2` | 141.9 | +22.7 % | [+22.1 %, +23.3 %] | 78.4 % | 20 916 |
+| `spec-dflash-n4` | 137.9 | +19.2 % | [+18.5 %, +19.9 %] | 55.2 % | 33 489 |
+| **no speculation** | **115.7** | — | — | — | 0 |
+| `ngram-map-k4v-m8` | 115.4 | −0.3 % | [−0.6 %, +0.0 %] | 50.0 % | 216 |
+| `ngram-mod-n24` | 103.1 | −10.9 % | [−11.4 %, −10.5 %] | 5.0 % | 5 184 |
+| `ngram-cache` | 93.7 | −19.0 % | [−19.4 %, −18.6 %] | 5.2 % | 4 698 |
+| `spec-draft-n8` | 30.9 | −73.3 % | [−73.5 %, −73.2 %] | 29.5 % | 50 112 |
+| `spec-draft-n1` | 29.2 | **−74.8 %** | [−74.9 %, −74.7 %] | **69.7 %** | 13 410 |
+
+**Balancing moved every estimate.** Against run O: +1.7 pp for `spec-dflash-n2`,
++0.9 for `spec-mtp-n2`, +1.2 for `spec-dflash-n4`, and smaller shifts elsewhere.
+For `spec-mtp-n2` run O's +21.8 % falls **outside** the interval above. The
+ordering of the arms is unchanged, and the conclusions that rest on the ordering
+are unaffected — but the numbers themselves were carrying a position effect.
+
+**This is also the first run produced by the repaired harness**, and it is the
+first directory the integrity checker calls *attested* rather than *legacy*: the
+port was verified free before the server was spawned, liveness is checked before
+a health response is accepted, the manifest records the ordering mode and the
+exact prompt tag set, `RUN_COMPLETE.json` was written last, and every one of the
+81 arm-runs records the PID and the build read back out of that server's own
+startup log — a single identity, `build 10622 (3737e4137)`, across all of them.
+`matrix_report --strict` accepts it.
+
+† Server-side acceptance counter; see the note under run O.
+
+---
+
+## Run O — the same matrix at three repeats, superseded by O2
+
+Kept because it was published and because the difference between the two is the
+point. Its design and its numbers are below; where they disagree with O2, O2 is
+the one to cite.
+
 ## Run O — every method, one baseline, one policy
 
 Runs C through N each answer one question well and sit at different contexts and

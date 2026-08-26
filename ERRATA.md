@@ -699,11 +699,23 @@ speculation on is what changes the output. The divergence is not early noise
 either: the first differing token sits at index 40 at the earliest, median
 110–126 of 300.
 
-The likely mechanism is ordinary and not a llama.cpp defect: verifying a drafted
-block computes the target's logits at a different batch shape than decoding one
-token at a time, floating-point addition is not associative, and a near-tie in
-the argmax resolves the other way. It is the same batch-invariance problem that
-makes batched inference non-reproducible in general.
+**The cause was not isolated, and an earlier version of this item overstated
+it.** It said the mechanism was "ordinary and not a llama.cpp defect" — batched
+verification computing the target's logits at a different shape, floating-point
+addition not being associative, a near-tie in the argmax resolving the other way.
+That remains the most likely explanation and it is consistent with what follows,
+but it is a hypothesis, and calling it "not a defect" is stronger than this data
+supports. The same upstream area has produced real correctness bugs: PR #20075
+described a soft rollback that restored position without restoring SSM tensor
+state, and issue #27705 landed a regression test for a token-row/output-row
+permutation mismatch after the commit tested here. Nothing here rules those out;
+nothing here implicates them either.
+
+What this measures is that the configurations are **not token-stream
+equivalent**. The benchmark therefore compares end-to-end throughput at equal
+generated-token counts, not acceleration of an identical token trajectory — once
+the streams diverge the arms are decoding different text, with different context,
+different draft candidates and potentially different expert routing.
 
 **That mechanism makes a prediction, and the prediction holds.** If divergence
 is per-token near-ties accumulating, its probability should rise with output
@@ -858,11 +870,19 @@ branch still return before the numerator, so on any path where that branch fires
 the server counter is an under-count, and the size of the under-count is the
 size of that branch.
 
-**And the drafter's counter is not the answer either.** `spec-draft-n1` reports
-**100.0 % — 1639 of 1639 —** on an arm that runs at a quarter of the
-no-speculation baseline. A ratio of exactly 1.0 on an arm that slow is not a
-measurement; it is the same signature A1 identified, relocated. Neither counter
-survives contact with that row.
+**Which counter is right is not settled here.** `spec-draft-n1` reports
+**100.0 % — 1639 of 1639 —** from the drafter and 68.7 % from the server. An
+earlier version of this item argued that 100 % cannot be real on an arm running
+at a quarter of the baseline. **That inference does not hold**: a drafter can
+have every proposal accepted and still be slower than not drafting at all,
+because producing the proposal and verifying it both cost time. Throughput is
+not a validity test for an acceptance counter.
+
+What the data does establish is a **path-dependent difference in accounting
+semantics** between the two counters — they agree where no full checkpoint is
+taken and diverge where one is. Deciding which is ground truth needs
+instrumentation at the verification step: the proposed prefix and the accepted
+prefix, per round. That is not in these logs.
 
 **What this changes, and what it does not.**
 

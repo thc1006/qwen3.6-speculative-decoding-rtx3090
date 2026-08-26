@@ -1,0 +1,18 @@
+{
+  "completed_at": "2026-08-26T17:03:28+0800",
+  "arms": [
+    "baseline",
+    "spec-draft-n1",
+    "spec-draft-n8",
+    "spec-dflash-n2",
+    "spec-dflash-n4",
+    "spec-mtp-n2",
+    "ngram-cache",
+    "ngram-mod-n24",
+    "ngram-map-k4v-m8"
+  ],
+  "repeats": 9,
+  "prompt_set": "v1",
+  "n_prompts": 10,
+  "expected_arm_runs": 81
+}

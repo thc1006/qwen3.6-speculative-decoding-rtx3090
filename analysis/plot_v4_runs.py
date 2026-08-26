@@ -314,10 +314,30 @@ def plot_head_to_head() -> None:
     that is the finding: the winners and losers separate by drafter
     architecture and not by acceptance, draft length, or n-gram versus model.
     """
-    arms = load("matrix_O_headtohead_*/*__rep*.json")
-    if "baseline" not in arms:
-        print("  no run O data - skipping head-to-head chart")
+    # Prefer run O2, the balanced Latin square, and draw its block-level
+    # intervals. Run O is the same arms at three repeats with the list merely
+    # reversed on odd repeats, which leaves arm position confounded with time.
+    src = sorted(glob.glob(str(DATA / "matrix_O2_latin_*")))
+    tag = "O2"
+    if not src:
+        src = sorted(glob.glob(str(DATA / "matrix_O_headtohead_*")))
+        tag = "O"
+    if not src:
+        print("  no head-to-head data - skipping chart")
         return
+    run = Path(src[-1])
+    arms = load(f"{run.name}/*__rep*.json")
+    if "baseline" not in arms:
+        print("  no baseline in the head-to-head run - skipping chart")
+        return
+    ci = {}
+    pbj = run / "paired_blocks.json"
+    if pbj.exists():
+        d = json.loads(pbj.read_text(encoding="utf-8"))
+        ci = {a["arm"]: a for a in d["arms"]}
+        n_blocks = d["blocks"]
+    else:
+        n_blocks = None
     base = pooled(arms["baseline"])
     # Grouped by what the draft path IS, not by a causal claim: all three load a
     # separate drafter GGUF through -md.
@@ -346,19 +366,33 @@ def plot_head_to_head() -> None:
         ax.barh(i, p_, height=0.66, color=FAMILY[f][1], alpha=0.92,
                 edgecolor="white", linewidth=0.6)
         d = 100*(p_/base - 1)
-        lbl = f"{p_:.1f}   {d:+.1f} %" + (f"   acc {acc:.1f} %" if acc is not None else "")
-        ax.text(p_ + 2.0, i, lbl, va="center", ha="left", fontsize=8.8, color="#1f1f24")
+        c = ci.get(a)
+        if c:
+            lo, hi = c["ci95_t_pct"]
+            # the interval, drawn on the bar, in the same pooled units
+            x_lo, x_hi = base * (1 + lo/100), base * (1 + hi/100)
+            ax.plot([x_lo, x_hi], [i, i], color="#2f2f2f", lw=1.1, alpha=0.85,
+                    solid_capstyle="butt", zorder=3)
+            for x in (x_lo, x_hi):
+                ax.plot([x, x], [i - 0.16, i + 0.16], color="#2f2f2f", lw=1.1,
+                        alpha=0.85, zorder=3)
+            dtxt = f"{c['point_pct']:+.1f} % [{lo:+.1f}, {hi:+.1f}]"
+        else:
+            dtxt = f"{d:+.1f} %"
+        lbl = f"{p_:.1f}   {dtxt}" + (f"   acc {acc:.1f} %" if acc is not None else "")
+        ax.text(max(p_, x_hi if c else p_) + 2.0, i, lbl, va="center", ha="left",
+                fontsize=8.4, color="#1f1f24")
     ax.set_yticks(list(y))
     ax.set_yticklabels([r[0] for r in rows], fontsize=9)
     ax.axvline(base, color=C_REF, ls="--", lw=1.2)
     ax.text(base, len(rows)-0.35, f" no speculation, {base:.1f}", color=C_REF,
             fontsize=8.8, va="top", ha="left")
-    ax.set_xlim(0, max(r[1] for r in rows) * 1.34)
+    ax.set_xlim(0, max(r[1] for r in rows) * 1.46)
     ax.set_xlabel("pooled decode throughput (tokens / second)  -  higher is faster")
-    ax.set_title("Eight speculative configurations and one baseline, "
-                 "one matrix, one memory policy\n"
-                 "an observational ranking: these arms differ in several ways at once, "
-                 "so no single cause is isolated",
+    ax.set_title(f"Eight speculative configurations and one baseline, "
+                 f"balanced Latin square, {n_blocks or '?'} blocks\n"
+                 f"an observational ranking: these arms differ in several ways at once, "
+                 f"so no single cause is isolated",
                  fontsize=11.5)
     handles = [plt.Rectangle((0, 0), 1, 1, color=v[1], label=v[0])
                for v in FAMILY.values()]
@@ -366,8 +400,19 @@ def plot_head_to_head() -> None:
     ax.grid(axis="x", color="#dcdcdc", lw=0.6)
     ax.set_axisbelow(True)
     plt.tight_layout(rect=[0, 0.06, 1, 1])
-    _footer(fig, " spec-draft-n1 accepts 69.7 % of its drafts and is 73 % slower: "
-                 "acceptance does not decide this.")
+    # This figure is nine Latin-square blocks, not the three repeats the shared
+    # footer describes, and spec-draft-n1's figure moved when it was re-measured.
+    _footer(fig,
+            base=f"2026-08-26, llama.cpp 3737e4137, one RTX 3090, "
+                 f"Qwen3.6-35B-A3B-UD-Q4_K_XL, greedy, thinking on, ten prompts. "
+                 f"Run O2: {n_blocks} balanced Latin-square blocks, every arm at every "
+                 f"position exactly once. Controls and caveats: ERRATA.md, "
+                 f"v4_audit_2026_08_25/README.md.",
+            extra=" Bars are pooled decode rate; the interval is a 95 % paired block "
+                  "interval against the baseline measured in the same block. Acceptance "
+                  "is the server-side counter, which under-reports on the checkpointing "
+                  "rows (ERRATA A13): spec-draft-n1 reads 69.7 % here and 100.0 % from "
+                  "the drafter, and is 74.8 % slower either way.")
     plt.savefig(OUT / "plot_head_to_head.png", dpi=150, bbox_inches="tight")
     plt.close()
     print(f"  wrote {(OUT / 'plot_head_to_head.png').relative_to(ROOT)}")

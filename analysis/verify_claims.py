@@ -22,7 +22,7 @@ Run: python analysis/verify_claims.py   (from the repo root; exits non-zero on
 any mismatch)
 """
 import sys
-import csv, json, glob, math, re, statistics as st
+import csv, json, glob, math, os, re, statistics as st
 from collections import defaultdict
 
 FAIL=[]
@@ -953,6 +953,64 @@ _st = _pl3.Path("bench/stage_mtp_source.py").read_text(encoding="utf-8")
 chk("staging: refuses to stage onto or inside the source",
     "must be outside MTP_SRC" in _st, True)
 
+print("\n=== run O2: the balanced Latin square that replaces run O ===")
+_o2 = glob.glob("v4_audit_2026_08_25/data/matrix_O2_latin_*")
+chk("O2 exists", len(_o2), 1)
+_o2 = _o2[0]
+_o2m = json.load(open(f"{_o2}/manifest.json"))
+chk("O2 ordering is the balanced one", _o2m.get("order_mode"), "latin")
+chk("O2 blocks", _o2m.get("repeats"), 9)
+chk("O2 is attested by the runner", os.path.exists(f"{_o2}/RUN_COMPLETE.json"), True)
+chk("O2 records the prompt tag set", len(_o2m.get("prompt_tags") or []), 10)
+# the design, verified from the execution log rather than asserted
+import re as _re4
+_ordtxt = open("v4_audit_2026_08_25/data/matrix_O2.log", errors="replace").read()
+_orders = _re4.findall(r"=== repeat (\d+)\s+order: (.+?) ===", _ordtxt)
+chk("O2 blocks recorded in the execution log", len(_orders), 9)
+_pos = defaultdict(list)
+for _rep, _line in _orders:
+    for _i, _a in enumerate([x.strip() for x in _line.split("->")]):
+        _pos[_a].append(_i + 1)
+chk("O2 arms in the log", len(_pos), 9)
+chk("O2 every arm visited every position exactly once",
+    all(sorted(v) == list(range(1, 10)) for v in _pos.values()), True)
+# every request answered by the intended binary
+_ids = set()
+for _f in glob.glob(f"{_o2}/*__rep*.json"):
+    _si = json.load(open(_f)).get("server_identity") or {}
+    _ids.add((_si.get("build"), _si.get("commit")))
+chk("O2 a single server identity across all arm-runs", sorted(_ids), [("10622", "3737e4137")])
+chk("O2 arm-runs", len(glob.glob(f"{_o2}/*__rep*.json")), 81)
+# the published table
+_pbj = json.load(open(f"{_o2}/paired_blocks.json"))
+chk("O2 paired against a within-block baseline over nine blocks", _pbj["blocks"], 9)
+_pb = {a["arm"]: a for a in _pbj["arms"]}
+for arm, point, lo, hi, acc in (
+        ("spec-dflash-n2",    26.3,  25.5,  27.1, 72.3),
+        ("spec-mtp-n2",       22.7,  22.1,  23.3, 78.4),
+        ("spec-dflash-n4",    19.2,  18.5,  19.9, 55.2),
+        ("ngram-map-k4v-m8",  -0.3,  -0.6,   0.0, 50.0),
+        ("ngram-mod-n24",    -10.9, -11.4, -10.5,  5.0),
+        ("ngram-cache",      -19.0, -19.4, -18.6,  5.2),
+        ("spec-draft-n8",    -73.3, -73.5, -73.2, 29.5),
+        ("spec-draft-n1",    -74.8, -74.9, -74.7, 69.7)):
+    chk(f"O2 {arm} point estimate (%)", round(_pb[arm]["point_pct"], 1), point, 0.05)
+    chk(f"O2 {arm} 95% t interval", [round(x, 1) for x in _pb[arm]["ci95_t_pct"]], [lo, hi])
+    _rs = [json.load(open(f)) for f in glob.glob(f"{_o2}/{arm}__rep*.json")]
+    _dn = sum(x["draft_n"] for r in _rs for x in r["rows"])
+    _da = sum(x["draft_n_accepted"] for r in _rs for x in r["rows"])
+    chk(f"O2 {arm} acceptance %", round(100*_da/_dn, 1), acc, 0.05)
+# the balanced design moved the estimates, and one old one falls outside
+_opb = {a["arm"]: a for a in json.load(open(
+    "v4_audit_2026_08_25/data/matrix_O_headtohead_20260826_081806/paired_blocks.json"))["arms"]}
+chk("O2: run O's spec-mtp-n2 estimate falls outside the new interval",
+    not (_pb["spec-mtp-n2"]["ci95_t_pct"][0] <= _opb["spec-mtp-n2"]["point_pct"]
+         <= _pb["spec-mtp-n2"]["ci95_t_pct"][1]), True)
+chk("O2: the ordering of the arms is unchanged from run O",
+    [a["arm"] for a in _pbj["arms"]],
+    [a["arm"] for a in json.load(open(
+        "v4_audit_2026_08_25/data/matrix_O_headtohead_20260826_081806/paired_blocks.json"))["arms"]])
+
 print("\n=== theory (ERRATA E1/E2) ===")
 rho=8/256
 chk("rho", round(rho,5), 0.03125, 1e-9)
@@ -1047,9 +1105,14 @@ DOC_CLAIMS = [
     ("v4_audit_2026_08_25/README.md", "292.1 s", "P pooled includes the draft cost"),
     ("v4_audit_2026_08_25/README.md", "72.8 %",  "P acceptance not inflated"),
     ("README.md",   "17.24 s",   "README drafter generate time"),
-    ("README.md",   "145.8",     "README head-to-head winner"),
-    ("README.md",   "-75.1 %",   "README head-to-head worst row, pooled"),
     ("README.md",   "69.7 %",    "README the falsifying acceptance"),
+    ("README.md",   "146.2",     "README O2 winner"),
+    ("README.md",   "+26.3 %",   "README O2 headline"),
+    ("README.md",   "[+25.5 %, +27.1 %]", "README O2 interval"),
+    ("README.md",   "-74.8 %",   "README O2 worst row"),
+    ("ERRATA.md",   "not token-stream", "A11 corrected framing"),
+    ("ERRATA.md",   "not a validity test", "A13 corrected inference"),
+    ("v4_audit_2026_08_25/README.md", "Latin", "the balanced design is described"),
     ("v4_audit_2026_08_25/README.md", "+23.2 %", "M1 DFlash n2"),
     ("v4_audit_2026_08_25/README.md", "+18.6 %", "M1 MTP n2"),
     ("v4_audit_2026_08_25/README.md", "+22.3 %", "M4 Q4_K_M is faster"),
