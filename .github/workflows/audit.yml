@@ -1,0 +1,63 @@
+name: audit
+
+# Four required jobs. This repository publishes numbers, and every one of them
+# has to be re-derivable from the committed data by a machine that was not the
+# one that produced it. Several of the checks below exist because the claim they
+# guard was published wrong first.
+on:
+  pull_request:
+  push:
+    branches: [master, "audit-*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit-static:
+    name: static
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: byte-compile everything
+        run: python -m compileall -q analysis bench tests
+      - name: relative links and heading anchors
+        run: python analysis/check_links.py
+      - name: shellcheck
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          shellcheck --severity=warning bench/*.sh
+
+  audit-unit:
+    name: unit and mutation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: regression tests for defects this repository shipped
+        run: python -m unittest discover -s tests -v
+      - name: mutation check - the suite must fail on the broken versions
+        run: python tests/mutate.py
+
+  audit-data-integrity:
+    name: data integrity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: structure of every committed run directory
+        run: python analysis/check_data_integrity.py
+
+  audit-claims:
+    name: claims
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: re-derive every quoted figure and grep the documents for it
+        run: python analysis/verify_claims.py
