@@ -476,6 +476,26 @@ ARMS: dict[str, list[str]] = {
 
 # ---------------------------------------------------------------- utils ----
 
+def _server_lib_hashes() -> dict:
+    """Hash every shared object beside the server binary, de-duplicated by the
+    file the symlink resolves to. Both `libfoo.so` and `libfoo.so.0` are present
+    for most of them and they are the same file."""
+    if not SERVER:
+        return {}
+    seen: dict[str, str] = {}
+    by_target: dict[str, str] = {}
+    for p in sorted(Path(SERVER).parent.glob("*.so*")):
+        try:
+            real = str(p.resolve())
+        except OSError:
+            continue
+        if real in by_target:
+            continue
+        by_target[real] = p.name
+        seen[p.name] = sha256(real)
+    return seen
+
+
 def sha256(path: str) -> str:
     h = hashlib.sha256()
     with open(path, "rb") as fh:
@@ -940,6 +960,12 @@ def main() -> None:
         "gpu_env": GPU,
         "server_bin": SERVER,
         "server_sha256": sha256(SERVER),
+        # `llama-server` is a ~18 kB launcher; the server logic lives in the
+        # shared objects beside it, and the launcher is byte-identical between a
+        # stock build and one with instrumentation compiled in. Hashing only the
+        # launcher records nothing about the code that answered the requests, so
+        # every shared object in the same directory is hashed too.
+        "server_lib_sha256": _server_lib_hashes(),
         "target": TARGET, "target_sha256": sha256(TARGET),
         "draft": DRAFT or None,
         "draft_sha256": sha256(DRAFT) if DRAFT else None,

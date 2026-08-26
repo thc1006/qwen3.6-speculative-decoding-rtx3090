@@ -1011,6 +1011,33 @@ chk("O2: the ordering of the arms is unchanged from run O",
     [a["arm"] for a in json.load(open(
         "v4_audit_2026_08_25/data/matrix_O_headtohead_20260826_081806/paired_blocks.json"))["arms"]])
 
+print("\n=== A15: the manifest hashed a launcher ===")
+_manifests = sorted(glob.glob("v4_audit_2026_08_25/data/matrix_*/manifest.json"))
+_srv = {json.load(open(f)).get("server_sha256") for f in _manifests}
+_srv.discard(None)
+chk("A15 every post-merge run recorded the same server_sha256", len(_srv), 1)
+chk("A15 and it is the launcher hash the patch README names",
+    sorted(_srv)[0].startswith("b6a5c490bb932ffa"), True)
+# the fix exists in the harness, whether or not a run has used it yet
+_rsrc = open("bench/retest_runner.py").read()
+chk("A15 the runner records every shared object beside the binary",
+    '"server_lib_sha256": _server_lib_hashes(),' in _rsrc, True)
+chk("A15 and de-duplicates them by resolved target",
+    "by_target[real] = p.name" in _rsrc, True)
+# and where a run has used it, the property must hold
+_withlibs = [f for f in _manifests if json.load(open(f)).get("server_lib_sha256")]
+print(f"  (runs carrying server_lib_sha256: {len(_withlibs)})")
+if _withlibs:
+    _libs = json.load(open(sorted(_withlibs)[-1]))["server_lib_sha256"]
+    chk("A15 the server implementation library is among them",
+        any("server-impl" in k for k in _libs), True)
+    chk("A15 the launcher hash differs from the implementation hash",
+        _libs[[k for k in _libs if "server-impl" in k][0]] != sorted(_srv)[0], True)
+_patch = "v4_audit_2026_08_25/patches/checkpoint_timers.patch"
+chk("A15 the instrumentation patch is archived", os.path.exists(_patch), True)
+chk("A15 the patch touches one file and no control flow",
+    open(_patch).read().count("+++ b/") , 1)
+
 print("\n=== theory (ERRATA E1/E2) ===")
 rho=8/256
 chk("rho", round(rho,5), 0.03125, 1e-9)
@@ -1112,6 +1139,8 @@ DOC_CLAIMS = [
     ("README.md",   "-74.8 %",   "README O2 worst row"),
     ("ERRATA.md",   "not token-stream", "A11 corrected framing"),
     ("ERRATA.md",   "not a validity test", "A13 corrected inference"),
+    ("ERRATA.md",   "b6a5c490bb932ffa", "A15 the launcher hash"),
+    ("ERRATA.md",   "ce94855f4f2d82ba", "A15 the instrumented library"),
     ("v4_audit_2026_08_25/README.md", "Latin", "the balanced design is described"),
     ("v4_audit_2026_08_25/README.md", "+23.2 %", "M1 DFlash n2"),
     ("v4_audit_2026_08_25/README.md", "+18.6 %", "M1 MTP n2"),

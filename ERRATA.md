@@ -965,6 +965,59 @@ the reproducibility table is recomputed from them by `analysis/verify_claims.py`
 
 ---
 
+### A15. The recorded `server_sha256` was a launcher, not the code that ran
+
+Every run directory in this repository carries a manifest with
+
+```
+"server_sha256": "b6a5c490bb932ffa9bf8a0d887f15eb0aade1d00a5e29b177a27249a2c539903"
+```
+
+and that field exists to pin the binary that produced the numbers. It does not.
+`build/bin/llama-server` is an **~18 kB launcher**; the server implementation
+compiles into `build/bin/libllama-server-impl.so`, which is 6.8 MB. The launcher
+does not change when the server does.
+
+This was found by accident, and demonstrated deliberately. Building the
+instrumented tree for run T, then reverting `server-context.cpp` and rebuilding:
+
+| | sha256 |
+|---|---|
+| `libllama-server-impl.so`, **instrumented** | `ce94855f4f2d82ba…` |
+| `libllama-server-impl.so`, **stock** | `a0cbe4d04bcda3f8…` |
+| `llama-server`, **both** | `b6a5c490bb932ffa…` |
+
+Two builds whose server logic differs, and the field that was supposed to tell
+them apart is byte-identical across them. `strings` finds the instrumentation
+marker in the shared object and not in the launcher, so this is not a build-order
+artefact.
+
+**What it does not mean.** No run here used a binary other than the one
+intended. There is one checkout, it sat at `3737e4137` throughout — checkable
+with `git -C llama-retest rev-parse HEAD` — and run O2 additionally reads the
+build and commit back out of *each server's own startup log*, recording a single
+identity, `build 10622 (3737e4137)`, across all 81 arm-runs. That is a real
+identity check and it passes.
+
+**What it does mean.** The manifest field could never have *detected* a rebuild,
+which is the entire reason to record a hash. For runs A through O the only
+evidence that the binary was what the manifest says is the checkout state and
+the absence of any rebuild between them — an argument from circumstance rather
+than from a recorded fact. Run O2 onward carry the real evidence.
+
+**Fixed.** The runner now records `server_lib_sha256`: every shared object beside
+the binary, de-duplicated by the file each symlink resolves to, since `libfoo.so`
+and `libfoo.so.0` are the same file. That is the field that distinguishes the two
+builds above.
+
+The instrumentation itself is archived at
+[`v4_audit_2026_08_25/patches/checkpoint_timers.patch`](v4_audit_2026_08_25/patches/checkpoint_timers.patch)
+with the reasoning in that directory's README. The llama.cpp working tree is
+restored to stock afterwards; nothing is committed, pushed or proposed upstream
+from here.
+
+---
+
 ## B — statistics that were reported incorrectly
 
 ### B1. `mean tok/s` was the request-mean only; pooled throughput is materially worse
