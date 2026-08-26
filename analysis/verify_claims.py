@@ -1357,6 +1357,33 @@ chk("no run directory carries a failure marker",
     sorted(d.name for d in _dirs if (d / "RUN_FAILED.json").is_file()), [])
 
 
+print("\n=== the headline draft/gen column ===")
+# Acceptance without draft volume reads as success for an arm that never fires:
+# ngram-map-k4v-m8 shows 50.0 % from 216 draft tokens over 27 000 generated.
+_dg = {}
+for _arm in json.load(open(f"{_O2}/manifest.json"))["arms"]:
+    _dn = _da = _n = 0
+    for _f in glob.glob(f"{_O2}/{_arm}__rep*.json"):
+        for _x in json.load(open(_f))["rows"]:
+            _dn += _x["draft_n"]
+            _da += _x["draft_n_accepted"]
+            _n += _x["predicted_n"]
+    _dg[_arm] = (_dn, _da, _n)
+_rmd = " ".join(_norm(pathlib.Path(__file__).resolve().parents[1]
+                      .joinpath("README.md").read_text(encoding="utf-8")).split())
+for _arm, _want in (("spec-dflash-n2", 0.81), ("spec-mtp-n2", 0.77),
+                    ("spec-dflash-n4", 1.24), ("ngram-map-k4v-m8", 0.01),
+                    ("ngram-mod-n24", 0.19), ("ngram-cache", 0.17),
+                    ("spec-draft-n8", 1.86), ("spec-draft-n1", 0.50)):
+    _dn, _da, _n = _dg[_arm]
+    chk(f"draft/gen for {_arm}", round(_dn / _n, 2), _want, 0.005)
+chk("ngram-map-k4v-m8 drafted this many tokens", _dg["ngram-map-k4v-m8"][0], 216)
+chk("of which this many were accepted", _dg["ngram-map-k4v-m8"][1], 108)
+chk("out of this many generated", _dg["ngram-map-k4v-m8"][2], 27000)
+chk("README says how little it drafts", "216 tokens across 27 000" in _rmd, True)
+chk("the baseline drafts nothing", _dg["baseline"][0], 0)
+
+
 print("\n=== the headline interval column is the t interval, and says so ===")
 # The table quoted the Student-t interval while the prose above it described a
 # block bootstrap. Both are computed; only one is published, and which one is

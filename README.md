@@ -76,17 +76,25 @@ bootstrap can only ever resample the nine values it has, so at this block count
 it under-covers, and quoting the narrower one would be the wrong direction to
 err in. Both are in each run's `paired_blocks.json`.
 
-| arm | pooled tok/s | change | 95 % CI (t, over blocks) | acceptance † |
-|---|---:|---:|---:|---:|
-| **`spec-dflash-n2`** | **146.2** | **+26.3 %** | [+25.5 %, +27.1 %] | 72.3 % |
-| `spec-mtp-n2` | 141.9 | +22.7 % | [+22.1 %, +23.3 %] | 78.4 % |
-| `spec-dflash-n4` | 137.9 | +19.2 % | [+18.5 %, +19.9 %] | 55.2 % |
-| **no speculation** | **115.7** | — | — | — |
-| `ngram-map-k4v-m8` | 115.4 | −0.3 % | [−0.6 %, +0.0 %] | 50.0 % |
-| `ngram-mod-n24` | 103.1 | −10.9 % | [−11.4 %, −10.5 %] | 5.0 % |
-| `ngram-cache` | 93.7 | −19.0 % | [−19.4 %, −18.6 %] | 5.2 % |
-| `spec-draft-n8` | 30.9 | −73.3 % | [−73.5 %, −73.2 %] | 29.5 % |
-| `spec-draft-n1` | 29.2 | **−74.8 %** | [−74.9 %, −74.7 %] | **69.7 %** |
+| arm | pooled tok/s | change | 95 % CI (t, over blocks) | draft/gen ‡ | acceptance † |
+|---|---:|---:|---:|---:|---:|
+| **`spec-dflash-n2`** | **146.2** | **+26.3 %** | [+25.5 %, +27.1 %] | 0.81 | 72.3 % |
+| `spec-mtp-n2` | 141.9 | +22.7 % | [+22.1 %, +23.3 %] | 0.77 | 78.4 % |
+| `spec-dflash-n4` | 137.9 | +19.2 % | [+18.5 %, +19.9 %] | 1.24 | 55.2 % |
+| **no speculation** | **115.7** | — | — | 0.00 | — |
+| `ngram-map-k4v-m8` | 115.4 | −0.3 % | [−0.6 %, +0.0 %] | **0.01** | 50.0 % |
+| `ngram-mod-n24` | 103.1 | −10.9 % | [−11.4 %, −10.5 %] | 0.19 | 5.0 % |
+| `ngram-cache` | 93.7 | −19.0 % | [−19.4 %, −18.6 %] | 0.17 | 5.2 % |
+| `spec-draft-n8` | 30.9 | −73.3 % | [−73.5 %, −73.2 %] | 1.86 | 29.5 % |
+| `spec-draft-n1` | 29.2 | **−74.8 %** | [−74.9 %, −74.7 %] | 0.50 | **69.7 %** |
+
+‡ Draft tokens proposed per token generated. It is the column that makes the
+acceptance column readable, and it is why `ngram-map-k4v-m8` is not the
+half-accepted success its 50.0 % suggests: it drafted **216 tokens across 27 000
+generated**, one per 125, so its acceptance rate is 108 of 216 and it neither
+helps nor hurts because it almost never fires. `ngram-mod-n24` and `ngram-cache`
+are the opposite — they draft on a fifth of tokens and have almost all of it
+rejected, which is what a 10–19 % loss is made of.
 
 ![Nine methods, one baseline, one matrix](analysis/plot_head_to_head.png)
 
