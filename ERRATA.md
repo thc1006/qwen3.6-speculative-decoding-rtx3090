@@ -739,71 +739,88 @@ run (D4). It is a property of speculation on this build, and it reproduces.
 
 ---
 
-### A12. The mechanism, measured: it is state checkpointing, and only the external-drafter path pays it
+### A12. Full-checkpoint activity on the external-drafter path
 
-This repository retracted "MoE expert loading" as its mechanism (A1, A4) and
-replaced it with something honest but thin: the drafter proposes tokens, most
-are rejected, and the run pays for all of them. The 2026-08-26 runs make it
-specific, and the specific answer is not about acceptance at all.
+This repository retracted "MoE expert loading" as its mechanism (A1, A4). Two
+earlier versions of *this* item then over-reached in turn, and both are corrected
+here.
 
-`llama-server -v` reports, per arm-run of the ten prompts:
+**What the logs actually record.** Per arm-run of the ten prompts,
+`llama-server -v`:
 
-| arm | drafts | draft tokens gen / acc | drafter `generate()` | checkpoints created | restored |
+| arm | drafts | draft tokens gen / acc | drafter `generate()` | checkpoint creates | restores |
 |---|---|---|---|---|---|
 | `spec-draft-n8` — external 0.8 B drafter | 772 | 6092 / 2515 = 41.3 % | **17.24 s** | **772** | **709** |
-| `spec-dflash-n2` — self-speculative | 1337 | 2671 / 1950 = 73.0 % | 3.43 s | **0** | **0** |
-| `spec-mtp-n2` — self-speculative | 1279 | 2553 / 2006 = 78.6 % | 2.73 s | **0** | **0** |
+| `spec-dflash-n2` — separate DFlash GGUF | 1337 | 2671 / 1950 = 73.0 % | 3.43 s | **0** | **0** |
+| `spec-mtp-n2` — separate MTP GGUF | 1279 | 2553 / 2006 = 78.6 % | 2.73 s | **0** | **0** |
 
-Each checkpoint line reads
-`created speculative checkpoint (… size = 82.079 MiB, draft = 19.266 MiB)`, and
-each restore moves 86 066 360 bytes. So one `spec-draft-n8` arm-run writes
-772 × 101.3 MiB and reads back 709 × 82.08 MiB — **about 133 GiB of recurrent
-state moved to produce 3000 tokens.**
+Each create logs `size = 82.079 MiB, draft = 19.266 MiB`. **`size` is already the
+total**: `common_prompt_checkpoint::size()` returns
+`data_tgt.size() + data_dft.size() + data_spec.size()` (`common/common.cpp:2254`),
+and the `draft` field is a component of it, printed for visibility. Multiplying
+the event counts by the reported total:
 
-**It costs about a fifth of the run.** The log timestamps every line. Taking the
-wall time that elapses immediately after each of the 1481 checkpoint lines and
-subtracting the median gap after any other line gives **24.2 s of a 123.9 s
-arm-run, 19.5 %**. The same statistic is undefined for the other two arms
-because they emit no such lines. (The first attempt at this parsed the
-timestamps as `hours.minutes.seconds.ms` and made a 124-second arm-run look like
-two hours; the format is `minutes.seconds.ms.µs`.)
+| | GiB |
+|---|---|
+| creates, 772 × 82.079 MiB | **61.88** |
+| restores, 709 × 82.08 MiB | **56.83** |
+| **combined nominal state volume** | **118.71** |
 
-**It is the drafter architecture, not the draft length.** That distinction
-matters, because "long drafts trigger checkpoints" would have been a much weaker
-claim, and the target context reports `rs_seq = 8`, so a rollback longer than
-eight *should* force one. It does not:
+> **Correction.** An earlier version of this item named the first log field
+> `checkpoint_target_mib` and added the 19.266 MiB draft component to it on every
+> create, double-counting it. That gave 76.4 GiB of writes and 133.2 GiB
+> combined. Both figures were wrong, and they appeared in this file, in
+> `README.md` and in the pull-request description.
 
-| arm | `n_max` | checkpoints created / restored |
+**This is an event-count × reported-size estimate, not measured traffic.** No
+profiler, memory-controller counter or backend trace was read. It bounds the
+state the server says it copied; it does not establish what crossed DRAM, PCIe
+or VRAM.
+
+**No wall-clock share is claimed, and the previous one is withdrawn.** Earlier
+versions of this item reported "≈ 19.5 % of the arm-run" from the interval
+between each checkpoint log line and the next line in the log. That estimator is
+invalid, because the two messages sit on opposite sides of the work they name:
+
+| | order in `tools/server/server-context.cpp` |
+|---|---|
+| create | `ckpt.update_tgt()` at `:2965`, **then** the "created" message at `:2970` — the interval after the log misses the create copy |
+| restore | the "restoring" message at `:3822`, **then** `load_tgt()` at `:3824` and `load_dft()` at `:3827` — the interval after the log does contain the restore |
+
+So the same rule measures one direction and not the other, and the number it
+produced cannot be called save-plus-restore time. It is removed from the data,
+the documents and the checker. Timing this needs the timers upstream already
+left commented out at `:2963` and `:2967-2968`, which is queued in
+[`RETEST_TODO.md`](RETEST_TODO.md) and not attempted here.
+
+**What is left of the accounting, honestly.** One ten-prompt arm-run of run J,
+decode time only:
+
+| | seconds | share of the excess |
 |---|---|---|
-| `spec-dflash-n1` … `n16` | 1, 2, 4, 6, 8, 16 | 0 / 0 at every one |
-| `spec-mtp-n1` … `n8` | 1, 2, 8 | 0 / 0 at every one |
-| `spec-draft-n8` | 8 | 772 / 709 |
+| no speculation, decode | 24.5 | — |
+| `spec-draft-n8`, decode | 96.1 | — |
+| **excess to account for** | **71.6** | **100 %** |
+| drafter `generate()`, measured by llama.cpp's own counter | 17.2 | **24 %** |
+| **unattributed** | **54.4** | **76 %** |
 
-The checkpoint saves *two* contexts — 82.079 MiB of target state plus
-19.266 MiB of draft state. A method that drafts from the target's own layers has
-no second context to save, and pays none of this at any draft length.
+The unattributed three quarters contains at least the checkpoint save and
+restore work and the verification of drafted tokens that are then discarded, and
+**this data cannot separate them**. Anyone wanting that split needs source-level
+timers, not log timestamps.
 
-**This is what breaks the acceptance threshold across families.** The ~48 %
-break-even fitted in run L holds 12 / 12 within DFlash, because every arm in
-that family pays the same near-zero fixed cost per round and only the volume
-term varies. It fails on the external drafter exactly where it should be most
-informative: at `n_max 1` that drafter reaches **68.7 % acceptance and is still
-74.8 % slower**, and at `n_max 2`, 60.3 % acceptance and 72.2 % slower. No
-acceptance rate rescues a round that costs 101 MiB of state to roll back and a
-0.8 B dense forward pass to produce, against a target that only activates ~3 B
-parameters per token.
+**The categorical observation does survive, and it is the useful part.** The
+external drafter logs 772 creates and 709 restores; DFlash logs none at `n_max`
+1, 2, 4, 6, 8 and 16, and MTP none at 1, 2 and 8. That is an absence of *this
+full-checkpoint logging event*, not proof that those paths do no
+state-management work at all — a recurrent rollback that stays within
+`llama_n_rs_seq` copies state without emitting this message. And at the same
+draft position DFlash finishes **4.6 s faster than no speculation at all** on the
+same ten prompts while the external drafter is 71.6 s slower.
 
-That last ratio is the second half of the story and is worth stating plainly:
-this target is a 35 B model with roughly 3 B active per token, so a 0.8 B
-*dense* drafter is not the 1–2 % of target cost that speculative decoding
-normally assumes. It is closer to a quarter of it — before any state
-management — which is why the drafter's own `generate()` accounts for 17.24 s
-against 2.73–3.43 s for a head that reuses the target's layers.
-
-**Scope.** One target, one host, one binary, one drafter of each kind. The
-counts and the volumes are exact; the 19.5 % is a log-timestamp attribution and
-should be read as an estimate of that path's share, not a profile. Nothing here
-measures expert routing, and nothing here needs to.
+**Scope.** One target, one host, one binary, one drafter of each kind, one
+arm-run per row. The counts are exact. The volume is an estimate with a stated
+formula. The wall-clock split is not established.
 
 ---
 

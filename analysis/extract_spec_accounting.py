@@ -14,7 +14,17 @@ What it reads, per arm-run:
     `restoring speculative checkpoint (... size = N)` — the recurrent-state
     save/restore traffic that only the external-drafter path incurs
   - the wall time that elapses immediately after each checkpoint line, against
-    the median gap after any other line, as an estimate of that path's share
+    the median gap after any other line. **This is NOT the cost of a checkpoint
+    save plus restore, and must not be reported as one.** On the tested source
+    the two log lines sit on opposite sides of the work they name:
+    `ckpt.update_tgt()` runs *before* the "created" message
+    (`server-context.cpp:2965` then `:2970`), so the interval after that line
+    misses the create copy entirely, while the "restoring" message is emitted
+    *before* `load_tgt()` / `load_dft()` (`:3822` then `:3824`), so the interval
+    after that one does contain the restore. The field is retained only as a
+    diagnostic and is deliberately not aggregated into any published figure.
+    Timing this properly needs the timers upstream already left commented out at
+    `server-context.cpp:2963` and `:2967`.
 
 Timestamps are `minutes.seconds.milliseconds.microseconds`. Parsing them as
 hours.minutes.seconds.ms makes a 124-second arm-run look like two hours.
@@ -61,13 +71,28 @@ def analyse(path: str) -> dict:
     out["checkpoints_created"] = len(created)
     out["checkpoints_restored"] = len(restored)
     if created:
-        out["checkpoint_target_mib"] = float(created[0][0])
-        out["checkpoint_draft_mib"] = float(created[0][1]) if created[0][1] else None
-        out["state_written_gib"] = round(
-            sum(float(a) + (float(b) if b else 0.0) for a, b in created) / 1024, 2)
+        # `common_prompt_checkpoint::size()` returns
+        #     data_tgt.size() + data_dft.size() + data_spec.size()
+        # so the `size =` field in the log is ALREADY the total, and the
+        # separately logged `draft =` is a component of it, printed for
+        # visibility. An earlier version of this file named the first field
+        # `checkpoint_target_mib` and added the draft component to it, which
+        # double-counted 19.266 MiB on every create and inflated the write side
+        # from 61.88 GiB to 76.4 GiB.
+        out["checkpoint_total_mib"] = float(created[0][0])
+        out["checkpoint_draft_component_mib"] = float(created[0][1]) if created[0][1] else None
+        out["nominal_state_written_gib"] = round(
+            sum(float(a) for a, _ in created) / 1024, 2)
     if restored:
         out["restore_bytes_each"] = restored[0]
-        out["state_read_back_gib"] = round(sum(restored) / 2 ** 30, 2)
+        out["nominal_state_read_back_gib"] = round(sum(restored) / 2 ** 30, 2)
+    if created or restored:
+        out["nominal_state_total_gib"] = round(
+            out.get("nominal_state_written_gib", 0.0)
+            + out.get("nominal_state_read_back_gib", 0.0), 2)
+        out["nominal_state_note"] = (
+            "event count x reported checkpoint size. This is not measured DRAM, "
+            "PCIe or VRAM traffic; no profiler or memory-controller counter was read.")
 
     if (m := RE_STATS.search(text[::1]) or None) is None:
         ms_ = list(RE_STATS.finditer(text))
@@ -101,8 +126,6 @@ def analyse(path: str) -> dict:
         if ck and other:
             excess = sum(ck) - len(ck) * st.median(other)
             out["checkpoint_lines"] = len(ck)
-            out["checkpoint_excess_s"] = round(excess, 2)
-            out["checkpoint_share_pct"] = round(100 * excess / span, 1)
     return out
 
 

@@ -95,7 +95,7 @@ more than every winning arm but one — and is 75 % slower, because a separate
 draft context makes this hybrid target checkpoint and restore ~101 MiB of
 recurrent state on every partially accepted round, 772 times per arm-run, which
 DFlash and MTP do zero times at every draft length from 1 to 16
-([ERRATA A12](ERRATA.md#a12-the-mechanism-measured-it-is-state-checkpointing-and-only-the-external-drafter-path-pays-it)).
+([ERRATA A12](ERRATA.md#a12-full-checkpoint-activity-on-the-external-drafter-path)).
 
 **The three methods v1 benchmarked are the bottom three rows.** The original
 negative finding was right about what it measured. It measured the losing third
@@ -169,7 +169,7 @@ external drafter is 0.8 B *dense* against a target that activates only ~3 B
 parameters per token, so drafting costs a quarter of a target step before any
 state management: 17.24 s in `generate()` against 1.89–3.43 s for a head that
 reuses the target's own layers
-([ERRATA A12](ERRATA.md#a12-the-mechanism-measured-it-is-state-checkpointing-and-only-the-external-drafter-path-pays-it)).
+([ERRATA A12](ERRATA.md#a12-full-checkpoint-activity-on-the-external-drafter-path)).
 
 ![v1 300-token matrix: request-mean vs pooled throughput](analysis/plot_mean_by_config.png)
 
@@ -649,79 +649,42 @@ quantisation stack, and none of those is measured here.
 
 ---
 
-## Mechanism — measured, and it is not MoE-specific
+## Where the time goes — partly measured, and not MoE-specific
 
 The audit's re-measurement ([A7](ERRATA.md#a7-with-acceptance-measured-properly-there-is-no-anomaly-left-to-explain))
 removed the mystery: once acceptance is measured rather than assumed, decode
-rate tracks acceptance at r = +0.998 across the prompt set. The 2026-08-26 runs
-then made the cost specific, and it is **not** "most drafts are rejected".
+rate tracks acceptance at r = +0.998 across the prompt set. What the 2026-08-26
+runs add is a partial cost accounting — and the emphasis is on *partial*.
 
 | per ten-prompt arm-run | external 0.8 B drafter | DFlash | MTP |
 |---|---|---|---|
 | draft-token acceptance | 41.3 % | 73.0 % | 78.6 % |
 | drafter `generate()` | **17.24 s** | 3.43 s | 2.73 s |
-| speculative checkpoints created / restored | **772 / 709** | **0 / 0** | **0 / 0** |
-| recurrent state moved | **≈ 133 GiB** | none | none |
-| share of wall clock in that path | **≈ 19.5 %** | — | — |
+| full-checkpoint creates / restores logged | **772 / 709** | **0 / 0** | **0 / 0** |
+| nominal state volume (event count × logged size) | **≈ 118.7 GiB** | none logged | none logged |
 
-A separate draft context makes the hybrid Gated-DeltaNet target save and restore
-82.079 MiB of target state plus 19.266 MiB of draft state on every partially
-accepted round. Methods that draft from the target's *own* layers have no second
-context and pay none of it — at **every** draft length from 1 to 16, so this is
-the drafter's architecture and not the draft window. Full derivation, with the
-counts pulled out of the `-v` logs into committed data, is
-[ERRATA A12](ERRATA.md#a12-the-mechanism-measured-it-is-state-checkpointing-and-only-the-external-drafter-path-pays-it).
+The external-drafter arm spends 71.6 s more in decode than no speculation does.
+Of that, **24 % is the drafter's own forward passes**, measured by llama.cpp's
+counter. The other **76 % is unattributed**: it contains the checkpoint save and
+restore work and the verification of drafted tokens that are then thrown away,
+and this data cannot separate them. An earlier version of this section put a
+19.5 % wall-clock figure on the checkpoint path; that estimator was invalid and
+is withdrawn — the create and restore messages sit on opposite sides of the work
+they name, so the same rule missed one direction and captured the other
+([ERRATA A12](ERRATA.md#a12-full-checkpoint-activity-on-the-external-drafter-path)).
 
-The second term is arithmetic: this is a 35 B model with roughly 3 B active per
-token, so a 0.8 B **dense** drafter is not the 1–2 % of target cost that
-speculative decoding usually assumes. It is nearer a quarter.
+What is solid is the categorical difference and its size. DFlash and MTP log
+**zero** of these checkpoint events at every draft length tested — 1 to 16 for
+DFlash, 1 to 8 for MTP — and DFlash finishes **4.6 s faster than no speculation
+at all** on the same prompts where the external drafter is 71.6 s slower. Note
+that this is the absence of *this logging event*, not proof of zero
+state-management cost: a rollback that stays inside `llama_n_rs_seq` copies
+state without emitting it.
 
-The two candidate mechanisms below are kept because they quantify *how much*
-each term costs — not because the outcome still needs an exotic explanation.
-
-**1. Draft-path and state-management overhead.** This one is partly measured
-(see the retraction section above): drafter time is ~32 % of generation
-wall-clock, ~38 % of verification rounds are discarded and redone, and each
-discarded round pays a 62.8 MiB state checkpoint plus its restore. On this
-model that path is taken because the context cannot partially roll back a
-sequence, which is precisely the defect llama.cpp PR #20075 described and which
-was never merged. Nothing here isolates how much of the slowdown each term
-contributes.
-
-**2. MoE expert-union cost during multi-token verification — no longer needed,
-and never evidenced here.** Kept only so the arithmetic this repository used to
-publish can be checked. The official
-Qwen3.6-35B-A3B config has 256 routed experts, 8 routed experts per token, plus
-a shared expert. Under the i.i.d. uniform-routing approximation in
-[MoESD](https://arxiv.org/html/2505.19645):
-
-```
-rho  = k_e / n_experts = 8 / 256 = 0.03125
-T_95 = ceil( log(1 - 0.95) / log(1 - rho) ) = ceil(94.36) = 95 tokens
-```
-
-This is an expected-coverage heuristic under stated assumptions, not a
-performance threshold, and it does not by itself explain anything measured
-here. Use `γ` for draft length and `k_e = 8` for routed experts per token;
-the earlier text used `K` for both.
-
-Note that `Qwen3.5-122B-A10B` has the **same** 256 experts and top-8 routing,
-so this formula gives it the **same** threshold. The earlier claim that A10B
-has "a correspondingly lower `T_thres`" because of its larger active parameter
-count is wrong — those are different quantities. Positive A10B measurements are
-a genuine counterexample to any universal A3B-derived rule, but this repository
-cannot say which factor explains the sign difference, because model, hardware,
-backend, quantisation, draft configuration, and implementation all differ at
-once.
-
-**What would still be worth measuring** is the split *within* mechanism 1:
-target verify time, draft time, accepted length per verification step, and
-discarded-round count, across draft lengths. That is P3-1 in
-[`RETEST_TODO.md`](RETEST_TODO.md). Testing mechanism 2 would need expert-routing
-instrumentation that nobody here has built, and after A7 there is no result
-demanding it.
-
----
+The second term is arithmetic and does not need instrumentation: this is a 35 B
+model with roughly 3 B active per token, so a 0.8 B **dense** drafter is not the
+1–2 % of target cost that speculative decoding usually assumes. It is nearer a
+quarter.
 
 ## Reproduction
 

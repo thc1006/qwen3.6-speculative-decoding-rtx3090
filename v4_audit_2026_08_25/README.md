@@ -675,7 +675,7 @@ general. An external 0.8 B drafter is 75 % slower at 68.7 % acceptance, because
 it pays a fixed per-round cost that no acceptance rate can amortise — 101 MiB of
 recurrent state checkpointed and restored, plus a dense forward pass against a
 target that activates only ~3 B parameters. That cost is measured in
-[ERRATA A12](../ERRATA.md#a12-the-mechanism-measured-it-is-state-checkpointing-and-only-the-external-drafter-path-pays-it),
+[ERRATA A12](../ERRATA.md#a12-full-checkpoint-activity-on-the-external-drafter-path),
 and it is why the threshold holds inside one family and not across them.
 
 ---
@@ -871,7 +871,7 @@ distinction. It is whether the drafter is a second model.
 except `spec-mtp-n2`, and is **75 % slower** on pooled decode rate, 73 % on aggregate. No reading of acceptance alone
 survives that row. What separates it from `spec-dflash-n2` at 72.3 % is the
 772 checkpoint saves and 709 restores it pays and DFlash does not
-([A12](../ERRATA.md#a12-the-mechanism-measured-it-is-state-checkpointing-and-only-the-external-drafter-path-pays-it)).
+([A12](../ERRATA.md#a12-full-checkpoint-activity-on-the-external-drafter-path)).
 
 **v1's methods are the three worst rows.** `ngram-cache`, `ngram-mod-n24` and
 the external drafter are what this repository originally benchmarked, and they

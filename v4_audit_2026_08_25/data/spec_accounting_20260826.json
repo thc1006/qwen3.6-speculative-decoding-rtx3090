@@ -5,11 +5,13 @@
     "run": "matrix_J2_20260826_014750",
     "checkpoints_created": 772,
     "checkpoints_restored": 709,
-    "checkpoint_target_mib": 82.079,
-    "checkpoint_draft_mib": 19.266,
-    "state_written_gib": 76.4,
+    "checkpoint_total_mib": 82.079,
+    "checkpoint_draft_component_mib": 19.266,
+    "nominal_state_written_gib": 61.88,
     "restore_bytes_each": 86066360,
-    "state_read_back_gib": 56.83,
+    "nominal_state_read_back_gib": 56.83,
+    "nominal_state_total_gib": 118.71,
+    "nominal_state_note": "event count x reported checkpoint size. This is not measured DRAM, PCIe or VRAM traffic; no profiler or memory-controller counter was read.",
     "spec_type": "draft-simple",
     "drafts_generated": 772,
     "draft_tokens_generated": 6092,
@@ -28,9 +30,7 @@
     ],
     "drafter_generate_s": 17.24,
     "log_span_s": 123.9,
-    "checkpoint_lines": 1481,
-    "checkpoint_excess_s": 24.16,
-    "checkpoint_share_pct": 19.5
+    "checkpoint_lines": 1481
   },
   {
     "log": "spec-dflash-n4__rep0.log",

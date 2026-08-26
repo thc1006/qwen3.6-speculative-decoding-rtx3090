@@ -545,41 +545,45 @@ chk("O: v1's three methods are the three worst rows",
             ("ngram-cache", _agg("matrix_O_headtohead_*","ngram-cache")["pooled"])],
            key=lambda t: t[1])[0][0], "spec-draft-n1")
 
-print("\n=== ERRATA A12: the measured mechanism ===")
+print("\n=== ERRATA A12: checkpoint activity, corrected ===")
 _sa = {(r["arm"], r["run"]): r for r in
        json.load(open("v4_audit_2026_08_25/data/spec_accounting_20260826.json"))}
 _by_arm = defaultdict(list)
 for (a, _run), r in _sa.items():
     _by_arm[a].append(r)
-
 _ext = [r for rs in _by_arm.values() for r in rs if r.get("spec_type") == "draft-simple"]
 chk("A12 external-drafter arm-runs extracted", len(_ext) >= 1, True)
 _e = _ext[0]
 chk("A12 external drafter: checkpoints created", _e["checkpoints_created"], 772)
 chk("A12 external drafter: checkpoints restored", _e["checkpoints_restored"], 709)
-chk("A12 external drafter: target state per checkpoint (MiB)",
-    round(_e["checkpoint_target_mib"], 3), 82.079, 0.0005)
-chk("A12 external drafter: draft state per checkpoint (MiB)",
-    round(_e["checkpoint_draft_mib"], 3), 19.266, 0.0005)
-chk("A12 external drafter: state written (GiB)", _e["state_written_gib"], 76.4, 0.05)
-chk("A12 external drafter: state read back (GiB)", _e["state_read_back_gib"], 56.83, 0.005)
-chk("A12 external drafter: total state moved (GiB)",
-    round(_e["state_written_gib"] + _e["state_read_back_gib"], 1), 133.2, 0.05)
-chk("A12 external drafter: share of wall clock (%)", _e["checkpoint_share_pct"], 19.5, 0.05)
+# size() is data_tgt + data_dft + data_spec, so the logged size is the TOTAL and
+# the logged draft figure is a component of it. Adding them double-counts.
+chk("A12 logged checkpoint total (MiB)", round(_e["checkpoint_total_mib"], 3), 82.079, 0.0005)
+chk("A12 the draft component is part of that total (MiB)",
+    round(_e["checkpoint_draft_component_mib"], 3), 19.266, 0.0005)
+chk("A12 the draft component is smaller than the total",
+    _e["checkpoint_draft_component_mib"] < _e["checkpoint_total_mib"], True)
+chk("A12 nominal volume written (GiB)", _e["nominal_state_written_gib"], 61.88, 0.005)
+chk("A12 nominal volume read back (GiB)", _e["nominal_state_read_back_gib"], 56.83, 0.005)
+chk("A12 nominal volume combined (GiB)", _e["nominal_state_total_gib"], 118.71, 0.005)
+chk("A12 writes equal count x LOGGED TOTAL, with no draft added again (GiB)",
+    round(_e["checkpoints_created"] * _e["checkpoint_total_mib"] / 1024, 2), 61.88, 0.005)
+chk("A12 the invalid wall-clock share is gone from the data",
+    "checkpoint_share_pct" in _e, False)
 chk("A12 external drafter: generate() seconds", _e["drafter_generate_s"], 17.24, 0.005)
-
-# the categorical claim: zero at EVERY draft length, for both self-speculative families
 _self = [r for rs in _by_arm.values() for r in rs
          if r.get("spec_type") in ("draft-dflash", "draft-mtp")]
 chk("A12 self-speculative arm-runs extracted", len(_self) >= 8, True)
-chk("A12 self-speculative: checkpoints created, all arms",
-    sorted({r["checkpoints_created"] for r in _self}), [0])
-chk("A12 self-speculative: checkpoints restored, all arms",
-    sorted({r["checkpoints_restored"] for r in _self}), [0])
-chk("A12 self-speculative: draft lengths covered",
-    sorted({int(r["arm"].rsplit("n", 1)[1]) for r in _self}), [1, 2, 4, 6, 8, 16])
-chk("A12 self-speculative: slowest generate() is still under the external one",
-    max(r["drafter_generate_s"] for r in _self) < _e["drafter_generate_s"], True)
+chk("A12 self-speculative: checkpoint events logged, all arms",
+    sorted({r["checkpoints_created"] for r in _self} | {r["checkpoints_restored"] for r in _self}), [0])
+# per family, not the union of the two - the union hid that MTP covers only 1/2/8
+_fam = defaultdict(set)
+for r in _self:
+    _fam[r["spec_type"]].add(int(r["arm"].rsplit("n", 1)[1]))
+chk("A12 DFlash draft lengths with zero checkpoint events",
+    sorted(_fam["draft-dflash"]), [1, 2, 4, 6, 8, 16])
+chk("A12 MTP draft lengths with zero checkpoint events",
+    sorted(_fam["draft-mtp"]), [1, 2, 8])
 
 print("\n=== the acceptance threshold, tested per drafter family ===")
 def _pa(pat, arm):
@@ -893,6 +897,24 @@ chk("C4b the thermal flags carried no meaningful downclock",
 chk("C4b power limit is stock and constant",
     sorted({int(_n(r, "power_limit_w")) for r in _c4l}), [350])
 
+print("\n=== A12: what the accounting can and cannot say ===")
+def _dec(arm):
+    f = glob.glob(f"v4_audit_2026_08_25/data/matrix_J2_*/{arm}__rep0.json")
+    r = json.load(open(f[0]))
+    return (sum(x["predicted_ms"] for x in r["rows"])/1000,
+            sum(x["predicted_n"] for x in r["rows"]))
+_db, _nb = _dec("baseline"); _ds, _ns = _dec("spec-draft-n8"); _dd, _ = _dec("spec-dflash-n4")
+_exc = _ds - _db
+chk("A12 baseline decode seconds", round(_db, 1), 24.5, 0.05)
+chk("A12 spec-draft-n8 decode seconds", round(_ds, 1), 96.1, 0.05)
+chk("A12 excess to account for (s)", round(_exc, 1), 71.6, 0.05)
+_gen = _ext[0]["drafter_generate_s"]
+chk("A12 drafter generate() share of the excess (%)", round(100*_gen/_exc), 24, 0.5)
+chk("A12 unattributed share of the excess (%)", round(100*(_exc-_gen)/_exc), 76, 0.5)
+chk("A12 most of the excess is NOT attributed", (_exc-_gen)/_exc > 0.5, True)
+chk("A12 DFlash is faster than no speculation on the same prompts (s)",
+    round(_dd - _db, 1), -4.6, 0.05)
+
 print("\n=== theory (ERRATA E1/E2) ===")
 rho=8/256
 chk("rho", round(rho,5), 0.03125, 1e-9)
@@ -962,9 +984,10 @@ DOC_CLAIMS = [
     ("v4_audit_2026_08_25/README.md", "-0.24 %", "L clock drift"),
     ("RETEST_TODO.md", "785 plain BF16", "MTP weights are present"),
     ("ERRATA.md",   "772",       "A12 checkpoints created"),
-    ("ERRATA.md",   "82.079 MiB","A12 target state per checkpoint"),
-    ("ERRATA.md",   "133 GiB",   "A12 total state moved"),
-    ("ERRATA.md",   "19.5 %",    "A12 share of wall clock"),
+    ("ERRATA.md",   "118.71",    "A12 corrected nominal volume"),
+    ("ERRATA.md",   "61.88",     "A12 corrected write side"),
+    ("README.md",   "118.7 GiB", "README corrected nominal volume"),
+    ("README.md",   "76 % is unattributed", "README states the limit"),
     ("ERRATA.md",   "68.7 %",    "A12 threshold failure point"),
     ("ERRATA.md",   "0.5 pp",    "A13 no-checkpoint agreement"),
     ("ERRATA.md",   "636 of 1272", "C4b sw_power_cap, corrected"),
