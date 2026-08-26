@@ -1794,9 +1794,18 @@ host-specific path.
 
 ## What the audit did **not** change
 
-- No raw measurement file was edited. `results/`, `results/verify/`,
-  `v2_3090_followup/v2_*/`, `exp2_codejson_n3/master.log`, and
-  `v3_dflash_2026_05_07/data/` are byte-identical to the published releases.
+- **No measurement was edited**, and three files are not byte-identical to the
+  published release, which is not the same statement. `results/`,
+  `results/verify/`, `v2_3090_followup/v2_*/`, `exp2_codejson_n3/master.log` and
+  `v3_dflash_2026_05_07/data/` are byte-identical. `results_v2.json`,
+  `n3_results_20260426.json` and `exp2_codejson_n3/results.json` each gained an
+  `audit_2026_08_25` block and had their `draft_model` and `interpretation`
+  strings corrected — the first described a drafter as vocabulary-matched, which
+  [A2](#a2-the-draft-model-was-not-vocabulary-compatible-the-run-used-the-token-translation-fallback)
+  refutes. Every number outside the new block is unchanged: 241, 149 and 215
+  values, fingerprinted in `analysis/verify_claims.py` against what master
+  holds, so the "measurements unchanged" each file claims is checked rather than
+  asserted.
 - Every v1, v2, v3, and Exp 2 aggregate was re-derived from the raw files
   during the audit and reproduced exactly. The arithmetic was never the problem.
 - The narrow negative observation survives **inside its own scope**: under the

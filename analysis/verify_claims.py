@@ -1606,6 +1606,58 @@ chk("arms with a derivable throughput", len(_TPUT) >= 30, True)
 chk("every quoted throughput is one of them", _bad_t, [])
 
 
+print("\n=== the v2 result files carry corrected metadata and unchanged numbers ===")
+# Three v2 JSONs are not byte-identical to the published release: each gained an
+# `audit_2026_08_25` block and had `draft_model` and `interpretation` corrected.
+# Each says "measurements unchanged", which was true and unverifiable. The
+# fingerprint below is every number in the file OUTSIDE that block, sorted -
+# taken while master was still reachable and checked against it there.
+_V2_NUMBERS = {
+    "v2_3090_followup/results_v2.json":
+        ("4910e6a311a1d7da7d6e206385b6861d0fd9a70e3f85c972751694f513a6a3bb", 241),
+    "v2_3090_followup/n3_results_20260426.json":
+        ("09e7e614050e3b15a7724db22ac45293109f4f55dcedbd699b6a34666ac6430e", 149),
+    "v2_3090_followup/exp2_codejson_n3/results.json":
+        ("5a84cb9ead5f4f5ac5610d09aeb8c80bdc56e3b5e3c8c246674d8e5a0737bbc4", 215),
+}
+
+
+def _measurement_numbers(o, out):
+    if isinstance(o, dict):
+        for k, v in o.items():
+            if k == "audit_2026_08_25":
+                continue
+            _measurement_numbers(v, out)
+    elif isinstance(o, list):
+        for v in o:
+            _measurement_numbers(v, out)
+    elif isinstance(o, (int, float)) and not isinstance(o, bool):
+        out.append(float(o))
+    return out
+
+
+for _f, (_want, _n) in _V2_NUMBERS.items():
+    _d = json.load(open(pathlib.Path(__file__).resolve().parents[1] / _f))
+    _v = sorted(_measurement_numbers(_d, []))
+    chk(f"{_f}: measurement values unchanged",
+        hashlib.sha256(repr(_v).encode()).hexdigest(), _want)
+    chk(f"{_f}: how many there are", len(_v), _n)
+    chk(f"{_f}: carries an audit block that says what it did",
+        bool((_d.get("audit_2026_08_25") or {}).get("status")), True)
+chk("the two whose metadata was corrected say so",
+    sorted(f for f in _V2_NUMBERS
+           if (json.load(open(pathlib.Path(__file__).resolve().parents[1] / f))
+               .get("audit_2026_08_25") or {}).get("status")
+           == "corrected metadata; measurements unchanged"),
+    ["v2_3090_followup/n3_results_20260426.json",
+     "v2_3090_followup/results_v2.json"])
+chk("and Exp 2 says its treatment was never verified",
+    (json.load(open(pathlib.Path(__file__).resolve().parents[1]
+                    / "v2_3090_followup/exp2_codejson_n3/results.json"))
+     .get("audit_2026_08_25") or {}).get("status"),
+    "EXPLORATORY - the intended treatment was not verified")
+
+
 print("\n=== the historical scripts still document what was run ===")
 # Six driver scripts are kept as evidence and carry a header saying the
 # measurement flags are UNCHANGED and only paths were parameterised. That is a
