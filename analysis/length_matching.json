@@ -1030,6 +1030,102 @@
           "acceptance_length_matched": 72.35
         }
       }
+    },
+    {
+      "run": "matrix_U1_dflashvar_20260826_210153",
+      "think": "on",
+      "ignore_eos": false,
+      "prompts": 10,
+      "length_matched_prompts": 10,
+      "arms": {
+        "spec-dflash-n2": {
+          "all_prompts_pct": 22.34,
+          "acceptance_all_prompts": 72.35,
+          "length_matched_pct": 22.34,
+          "shift_pp": 0.0,
+          "acceptance_length_matched": 72.35
+        }
+      }
+    },
+    {
+      "run": "matrix_U2_dflashvar_20260826_210153",
+      "think": "on",
+      "ignore_eos": false,
+      "prompts": 10,
+      "length_matched_prompts": 10,
+      "arms": {
+        "spec-dflash-n2": {
+          "all_prompts_pct": 24.17,
+          "acceptance_all_prompts": 72.35,
+          "length_matched_pct": 24.17,
+          "shift_pp": 0.0,
+          "acceptance_length_matched": 72.35
+        }
+      }
+    },
+    {
+      "run": "matrix_U3_dflashvar_20260826_210153",
+      "think": "on",
+      "ignore_eos": false,
+      "prompts": 10,
+      "length_matched_prompts": 10,
+      "arms": {
+        "spec-dflash-n2": {
+          "all_prompts_pct": 17.3,
+          "acceptance_all_prompts": 72.35,
+          "length_matched_pct": 17.3,
+          "shift_pp": 0.0,
+          "acceptance_length_matched": 72.35
+        }
+      }
+    },
+    {
+      "run": "matrix_U4_dflashvar_20260826_210153",
+      "think": "on",
+      "ignore_eos": false,
+      "prompts": 10,
+      "length_matched_prompts": 10,
+      "arms": {
+        "spec-dflash-n2": {
+          "all_prompts_pct": 19.88,
+          "acceptance_all_prompts": 72.35,
+          "length_matched_pct": 19.88,
+          "shift_pp": 0.0,
+          "acceptance_length_matched": 72.35
+        }
+      }
+    },
+    {
+      "run": "matrix_U5_dflashvar_20260826_210153",
+      "think": "on",
+      "ignore_eos": false,
+      "prompts": 10,
+      "length_matched_prompts": 10,
+      "arms": {
+        "spec-dflash-n2": {
+          "all_prompts_pct": 25.62,
+          "acceptance_all_prompts": 72.35,
+          "length_matched_pct": 25.62,
+          "shift_pp": 0.0,
+          "acceptance_length_matched": 72.35
+        }
+      }
+    },
+    {
+      "run": "matrix_U6_dflashvar_20260826_210153",
+      "think": "on",
+      "ignore_eos": false,
+      "prompts": 10,
+      "length_matched_prompts": 10,
+      "arms": {
+        "spec-dflash-n2": {
+          "all_prompts_pct": 24.32,
+          "acceptance_all_prompts": 72.35,
+          "length_matched_pct": 24.32,
+          "shift_pp": 0.0,
+          "acceptance_length_matched": 72.35
+        }
+      }
     }
   ]
 }

@@ -19,7 +19,9 @@
 > assumed, concurrent client requests verified from request timestamps, full per-request text
 > and token ids, and continuous GPU telemetry. Its findings are the ones to
 > cite about current llama.cpp, with two limits stated up front rather than
-> buried: the same configuration measured six times spans **6.0 pp**
+> buried: the same configuration measured **twelve times in one day spans
+> 9.4 pp**, and six consecutive invocations fifteen minutes apart span 8.3 of
+> that
 > ([A16](ERRATA.md#a16-two-runs-identical-in-every-recorded-respect-and-byte-identical-in-output-differ-by-34--on-one-arm)),
 > so quote the range and not the interval; and **every thinking-off comparison
 > here is confounded by output length**
@@ -44,9 +46,12 @@
 > batching widens the gap rather than closing it. With the target's *own* layers
 > as the drafter — DFlash, and the model's built-in multi-token-prediction head
 > — it wins, by a fifth to a quarter, at short draft windows and one request at
-> a time. The width of that band is not rounding: the same DFlash configuration
-> measured six times spans +20.7 % to +26.7 %, and two pairs of those runs used
-> the same binary and produced byte-identical output
+> a time. The width of that band is not rounding. The same DFlash configuration
+> was measured **twelve times** on 2026-08-26 and spans **+17.3 % to +26.7 %**,
+> on byte-identical output, while the no-speculation reference beside it holds
+> to a CV of 0.42 %. Six of the twelve are consecutive invocations of one
+> script, minutes apart, and they alone span 8.3 pp — so it is the *invocation*
+> that varies, not the day
 > ([ERRATA A16](ERRATA.md#a16-two-runs-identical-in-every-recorded-respect-and-byte-identical-in-output-differ-by-34--on-one-arm)).
 > "Speculative decoding loses on this hardware" was a statement about a regime
 > this repository had not separated.
@@ -135,21 +140,30 @@ position confounded with time. Its point estimates were 0.3–1.7 pp away from
 these, and for `spec-mtp-n2` its +21.8 % falls **outside** the interval above.
 
 † This table is run O2, and **the intervals in it describe run O2, not the
-configuration.** `spec-dflash-n2` was measured six times under this memory
-policy on 2026-08-26 — M1 **+26.7 %** (07:59), O **+24.6 %** (09:00), O2
-**+26.3 %** (15:37), T **+25.9 %** (18:26), T3 **+20.7 %** (20:32), O3
-**+23.4 %** (20:44) — a 6.0 pp spread, the second largest in the dataset after
-`spec-mtp-n4` (8.6 pp). The paired-block interval above is 1.6 pp wide; the
-between-run range is nearly four times that. Two **pairs** among those six ran the same
-binary on the same models and produced **byte-identical output**: T against T3,
-5.2 pp apart, and O2 against O3, 2.9 pp apart on 810 of 810 identical
-request-pairs. That is
-[ERRATA A16](ERRATA.md#a16-two-runs-identical-in-every-recorded-respect-and-byte-identical-in-output-differ-by-34--on-one-arm);
-its cause is not isolated. Treat +20.7 % to +26.7 % as what this configuration
-delivers and the interval as within-run precision only.
+configuration.** `spec-dflash-n2` was measured **twelve times** on 2026-08-26
+under this memory policy, on the same target, drafter and prompts, thinking on,
+one request at a time:
+
+| | | | | | |
+|---|---|---|---|---|---|
+| M1 **+26.7 %** 07:59 | O **+24.6 %** 09:00 | O2 **+26.3 %** 15:37 | T **+25.9 %** 18:26 | T3 **+20.7 %** 20:32 | O3 **+23.4 %** 20:44 |
+| U1 **+22.3 %** 22:12 | U2 **+24.2 %** 22:15 | U3 **+17.3 %** 22:18 | U4 **+19.9 %** 22:21 | U5 **+25.6 %** 22:24 | U6 **+24.3 %** 22:27 |
+
+**Range 9.4 pp, SD 2.9.** The no-speculation baseline over the same twelve runs
+holds 115.72–117.25 tok/s, a CV of **0.42 %** — the reference is steady and the
+arm under test is not. The last six are run U, six consecutive invocations of
+one script fifteen minutes apart, and they alone span 8.3 pp: this is not drift
+across the day. Within an invocation the blocks agree to an SD of **0.55 pp**;
+between invocations the means scatter with an SD of **3.15 pp**, a variance
+ratio of **33×**. Every one of the twelve produced byte-identical output.
+
+The paired-block interval above is 1.6 pp wide and it is measuring the wrong
+variance component. Read the configuration as **+17 % to +27 %**, and the
+interval as within-invocation precision only:
+[ERRATA A16](ERRATA.md#a16-two-runs-identical-in-every-recorded-respect-and-byte-identical-in-output-differ-by-34--on-one-arm).
 
 O2 is quoted because the documents are built on it and because run O3 replicates
-it arm for arm; it is not the lowest — run T3 is. Runs K1 and L read about +21 % for the same arm and are
+it arm for arm; it is not the lowest — run U3 is, at +17.3 %. Runs K1 and L read about +21 % for the same arm and are
 excluded from the comparison above: they ran at `--fit-target 2048`, a different
 memory policy, which [`BENCHMARK_ENV.md`](BENCHMARK_ENV.md) records as a variable
 across runs. Until 2026-08-26 this footnote quoted run O's +24.6 % as though it

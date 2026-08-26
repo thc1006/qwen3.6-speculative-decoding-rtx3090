@@ -1120,7 +1120,42 @@ while its baseline stays inside 115.5–117.3. The two lowest are the two latest
 which is suggestive of a state change rather than noise — and it is two points,
 so it is not evidence yet.
 
-**The cause is not isolated.** Nothing recorded distinguishes the runs in either
+**Run U measures it instead of observing it.** Two pairs is two pairs. The
+question is whether the variance sits *within* a run or *between* runs, and that
+has a design: six independent invocations of one script, fifteen minutes apart,
+each two balanced blocks of `{baseline, spec-dflash-n2}`, on the stock binary
+asserted per arm-run.
+
+| | U1 | U2 | U3 | U4 | U5 | U6 |
+|---|---:|---:|---:|---:|---:|---:|
+| start | 22:12 | 22:15 | 22:18 | 22:21 | 22:24 | 22:27 |
+| `spec-dflash-n2` vs baseline | +22.3 % | +24.2 % | **+17.3 %** | +19.9 % | **+25.6 %** | +24.3 % |
+
+All 240 request-pairs across the six are byte-identical. And:
+
+| | pp |
+|---|---:|
+| SD of the block ratios **within** an invocation, averaged over the six | **0.55** |
+| SD of the six invocation means, **between** invocations | **3.15** |
+| variance ratio | **33×** |
+| range across the six | **8.33** |
+
+**The variance is between invocations, by a factor of thirty-three.** An
+invocation is internally tight and the invocations scatter. Fifteen minutes
+covers 8.3 pp of it, so this is not drift across the day, and no statistic
+computed inside one run can see it — which is exactly what
+[A14](#a14-within-run-repeats-are-not-an-error-bar) warned about, now with a
+number.
+
+Across the whole day the same configuration was measured **twelve times**:
++26.7, +24.6, +26.3, +25.9, +20.7, +23.4, +22.3, +24.2, +17.3, +19.9, +25.6,
++24.3 — **range 9.4 pp, SD 2.9**. The no-speculation baseline over those same
+twelve runs holds **115.72–117.25 tok/s, a CV of 0.42 %**. The reference is
+steady to four parts in a thousand while the arm under test moves by nine points,
+on identical output. Whatever this is, it is a property of the speculative path
+and not of the machine's general state.
+
+**The cause is not isolated.** Nothing recorded distinguishes the runs in any
 pair. What sits between T and T3 is machine history — two rebuilds and a killed
 rehearsal — which changes page cache and allocator state and is captured by no
 field here. That is a hypothesis, not a finding, and it is written as one.
@@ -1132,16 +1167,17 @@ identical at 785 creates and 728 restores in **every** arm-run of both, and the
 share of the excess it explains is 54.7 % against 54.6 %. That attribution
 replicates.
 
-The headline DFlash figure does not replicate at that precision.
+The headline DFlash figure does not replicate at that precision, and run U says
+by how much.
 [A14](#a14-within-run-repeats-are-not-an-error-bar) already said within-run
 repeats are not a between-run error bar; this is that statement applied to the
 headline arm, with the confounds removed one at a time. The 95 % paired-block
 interval on `spec-dflash-n2` in run O2 is `[+25.5 %, +27.1 %]`, a width of
 1.6 pp. Run O3's is `[+21.4 %, +25.6 %]`. **The two intervals barely overlap — by
 0.1 pp, out of widths of 1.6 and 4.2 — on byte-identical output from the same
-binary.** Six runs of the configuration span
-+20.7 % to +26.7 %. The interval describes the run, not the configuration, and
-the README quotes the range beside it for that reason.
+binary.** Twelve runs of the configuration span
+**+17.3 % to +26.7 %**. The interval describes the invocation, not the
+configuration, and the README quotes the range beside it for that reason.
 
 ### A17. The thinking-off comparisons are not comparisons of the same amount of work
 
@@ -1150,8 +1186,8 @@ metric when the arms generate the same number of tokens and a confounded one
 when they do not, because decode rate falls as the KV cache grows: an arm that
 stops at 187 tokens is being scored on cheaper tokens than one that runs to 300.
 
-With thinking **on**, the question never arises here. All **5484** thinking-on
-requests in the controlled tier, across 29 run directories, returned
+With thinking **on**, the question never arises here. All **5724** thinking-on
+requests in the controlled tier, across 35 run directories, returned
 `finish_reason: length` at exactly their run's `max_tokens`. Not one stopped
 early.
 
@@ -1170,7 +1206,7 @@ generated exactly the same number of tokens. The split is clean:
 
 | run | thinking | prompts | length-matched | largest \|shift\| |
 |---|---|---:|---:|---:|
-| every thinking-on run with a computable comparison (25) | on | 10 or 20 | **all of them** | **0.00 pp** |
+| every thinking-on run with a computable comparison (31) | on | 10 or 20 | **all of them** | **0.00 pp** |
 | `matrix_L_thinkoff` | off | 10 | 5 | **16.79 pp** |
 | `matrix_M3_thinkoff` | off | 10 | 5 | 10.15 pp |
 | `matrix_R_ext_thinkoff` | off | 20 | 6 | 7.49 pp |

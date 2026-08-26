@@ -1250,6 +1250,53 @@ for _d in sorted(glob.glob("v4_audit_2026_08_25/data/*/manifest.json")):
     if _m.get("runner_sha256"):
         _declared[os.path.basename(os.path.dirname(_d))] = _m["runner_sha256"]
 chk("runs that record which harness ran them", len(_declared) >= 1, True)
+
+# `harness_tree_sha` is the caller's word for which commit it ran from, and a
+# caller can be wrong: run U's driver script declared 842c971b while the runner
+# it actually executed is the one committed at 1b8053a. The two fields are
+# compared, and every disagreement has to be listed here on purpose rather than
+# passing silently. `runner_sha256` is the authoritative one.
+_KNOWN_DECLARED_MISMATCH = {
+    # run -> why the declared commit is not the one holding the runner used
+    "matrix_T3_timers_20260826_203251": "chain script written before the runner was committed",
+    "matrix_O3_latin_20260826_203251": "chain script written before the runner was committed",
+    "matrix_U1_dflashvar_20260826_210153": "driver script edited while waiting",
+    "matrix_U2_dflashvar_20260826_210153": "driver script edited while waiting",
+    "matrix_U3_dflashvar_20260826_210153": "driver script edited while waiting",
+    "matrix_U4_dflashvar_20260826_210153": "driver script edited while waiting",
+    "matrix_U5_dflashvar_20260826_210153": "driver script edited while waiting",
+    "matrix_U6_dflashvar_20260826_210153": "driver script edited while waiting",
+}
+_mismatch = []
+_resolved = 0
+for _d in sorted(glob.glob("v4_audit_2026_08_25/data/*/manifest.json")):
+    _m = json.load(open(_d))
+    _rn = os.path.basename(os.path.dirname(_d))
+    _decl = (_m.get("harness_tree_sha") or {}).get("sha")
+    _actual = _m.get("runner_sha256")
+    if not (_decl and _actual):
+        continue
+    try:
+        _blob = _sp2.run(["git", "-C", str(_repo), "show",
+                          f"{_decl}:bench/retest_runner.py"],
+                         capture_output=True, timeout=60)
+    except Exception:  # noqa: BLE001
+        continue
+    if _blob.returncode != 0:
+        continue
+    _resolved += 1
+    if hashlib.sha256(_blob.stdout).hexdigest() != _actual:
+        _mismatch.append(_rn)
+if _resolved:
+    chk("every declared harness commit contains the runner that ran, or is listed",
+        sorted(set(_mismatch) - set(_KNOWN_DECLARED_MISMATCH)), [])
+    chk("and every listed exception really is one",
+        sorted(set(_KNOWN_DECLARED_MISMATCH) - set(_mismatch)), [])
+else:
+    # no git history reachable - a shallow clone, or the mirror the data
+    # mutation harness builds. Skipped rather than passed vacuously.
+    print("  ----  declared-vs-actual harness commits: no git history reachable, "
+          "skipped")
 if _blobs:
     chk("every recorded harness hash is in this repository's history",
         sorted(k for k, v in _declared.items() if v not in _blobs), [])
@@ -1285,7 +1332,7 @@ chk("A17 run R code_rust speculative lengths",
     sorted(n for a, v in _rlen["code_rust"].items() if a != "baseline" for n in v),
     [300, 300, 300])
 chk("A17 thinking-off runs with a computable comparison", len(_off), 4)
-chk("A17 thinking-on runs with a computable comparison", len(_on), 25)
+chk("A17 thinking-on runs with a computable comparison", len(_on), 31)
 chk("A17 every thinking-on run is fully length-matched",
     sorted({r["prompts"] == r["length_matched_prompts"] for r in _on}), [True])
 chk("A17 no thinking-on arm moves when the comparison is restricted",
@@ -1324,7 +1371,7 @@ for _f in glob.glob("v4_audit_2026_08_25/data/*/*__rep*.json"):
     for _x in json.load(open(_f)).get("rows") or []:
         _stops[_k][_x.get("finish_reason")] += 1
 chk("A17 no thinking-on request stopped before the cap",
-    dict(_stops["on"]), {"length": 5484})
+    dict(_stops["on"]), {"length": 5724})
 # finish_reason is the server's word for it; the claim is about token counts
 _short = 0
 for _f in glob.glob("v4_audit_2026_08_25/data/*/*__rep*.json"):
@@ -1665,13 +1712,106 @@ for _d in sorted(glob.glob("v4_audit_2026_08_25/data/matrix_*")):
     if os.path.isfile(_mp):
         _TAGDIR[os.path.basename(_d).split("_")[1]] = _d
 _foot = " ".join(_norm(" ".join(_rl)).split())
-_fn = re.findall(r"(O2|O3|M1|T3|O|T) \*\*([+-][0-9.]+) %\*\* \((\d\d:\d\d)\)", _foot)
-chk("footnote measurements parsed", len(_fn), 6)
+_fn = re.findall(r"(O2|O3|M1|T3|U[1-6]|O|T) \*\*([+-][0-9.]+) %\*\* (\d\d:\d\d)", _foot)
+chk("footnote measurements parsed", len(_fn), 12)
 for _tag, _val, _clock in _fn:
     chk(f"footnote {_tag}: the value it prints",
         round(_rel(_TAGDIR[_tag], "spec-dflash-n2"), 1), float(_val), 0.05)
     chk(f"footnote {_tag}: the clock time it prints",
         json.load(open(f"{_TAGDIR[_tag]}/manifest.json"))["created"][11:16], _clock)
+
+
+print("\n=== run U: within an invocation against between invocations ===")
+# The designed test behind A16. Six independent invocations of one script,
+# fifteen minutes apart, each two balanced blocks of {baseline, spec-dflash-n2},
+# on the stock binary asserted per arm-run.
+_U = sorted(glob.glob("v4_audit_2026_08_25/data/matrix_U*_dflashvar_*"))
+chk("U invocations", len(_U), 6)
+chk("every U invocation is attested",
+    sorted(d for d in _U if not os.path.isfile(f"{d}/RUN_COMPLETE.json")), [])
+chk("every U invocation is position-balanced",
+    sorted({json.load(open(f"{d}/manifest.json"))["schedule_is_position_balanced"]
+            for d in _U}), [True])
+chk("every U invocation asserted the stock library",
+    sorted({(json.load(open(f"{d}/manifest.json")).get("expect_lib_sha256") or "")[:16]
+            for d in _U}), ["a0cbe4d04bcda3f8"])
+
+
+def _u_blocks(d, arm):
+    out = {}
+    for f in glob.glob(f"{d}/{arm}__rep*.json"):
+        r = json.load(open(f))
+        out[r["repeat"]] = (1000 * sum(x["predicted_n"] for x in r["rows"])
+                            / sum(x["predicted_ms"] for x in r["rows"]))
+    return out
+
+
+_u_within, _u_means = [], []
+for _d in _U:
+    _b, _a = _u_blocks(_d, "baseline"), _u_blocks(_d, "spec-dflash-n2")
+    _rel = [100 * (_a[k] / _b[k] - 1) for k in sorted(_b) if k in _a]
+    _u_within.append(st.stdev(_rel))
+    _u_means.append(st.mean(_rel))
+chk("U: within-invocation SD of the block ratios (pp)",
+    round(st.mean(_u_within), 2), 0.55, 0.005)
+chk("U: between-invocation SD of the six means (pp)",
+    round(st.stdev(_u_means), 2), 3.15, 0.005)
+chk("U: the variance ratio",
+    round(st.stdev(_u_means) ** 2 / st.mean(_u_within) ** 2), 33, 0.5)
+chk("U: range across the six invocations (pp)",
+    round(max(_u_means) - min(_u_means), 1), 8.3, 0.05)
+chk("U: the lowest invocation (%)", round(min(_u_means), 1), 17.3, 0.05)
+chk("U: the highest invocation (%)", round(max(_u_means), 1), 25.6, 0.05)
+
+_u_same = _u_diff = 0
+for _arm in ("baseline", "spec-dflash-n2"):
+    for _rep in (0, 1):
+        _ref = None
+        for _d in _U:
+            _h = [hashlib.sha256(json.dumps(
+                [x.get("tokens"), x.get("content"), x.get("reasoning_content")],
+                ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+                for x in json.load(open(f"{_d}/{_arm}__rep{_rep}.json"))["rows"]]
+            if _ref is None:
+                _ref = _h
+            for _x, _y in zip(_ref, _h):
+                if _x == _y:
+                    _u_same += 1
+                else:
+                    _u_diff += 1
+chk("U: request-pairs compared across invocations", _u_same + _u_diff, 240)
+chk("U: all of them byte-identical", _u_diff, 0)
+
+# the reference is steady while the arm under test is not. The comparable set
+# is rebuilt here rather than borrowed, because this section runs before the
+# footnote's.
+_TGT_SHA = "707a55a8a4397ecde44de0c499d3e68c1ad1d240d1da65826b4949d1043f4450"
+_comparable_dirs = []
+for _mp in sorted(glob.glob("v4_audit_2026_08_25/data/matrix_*/manifest.json")):
+    _mm = json.load(open(_mp))
+    if (_mm.get("think") == "on" and _mm.get("concurrency") == 1
+            and _mm.get("prompt_set", "v1") == "v1" and str(_mm.get("ctx")) == "8192"
+            and str(_mm.get("fit_target")) == "3072"
+            and _mm.get("target_sha256") == _TGT_SHA
+            and "spec-dflash-n2" in (_mm.get("arms") or {})):
+        _comparable_dirs.append(os.path.dirname(_mp))
+chk("comparable measurements of the DFlash arm", len(_comparable_dirs), 12)
+_dfl_base = []
+for _d in _comparable_dirs:
+    _n = _ms = 0
+    for _f in glob.glob(f"{_d}/baseline__rep*.json"):
+        _r = json.load(open(_f))
+        _n += sum(x["predicted_n"] for x in _r["rows"])
+        _ms += sum(x["predicted_ms"] for x in _r["rows"])
+    _dfl_base.append(1000 * _n / _ms)
+chk("the baseline's CV across the twelve comparable runs (%)",
+    round(100 * st.stdev(_dfl_base) / st.mean(_dfl_base), 2), 0.42, 0.005)
+chk("the baseline's range across them",
+    [round(min(_dfl_base), 2), round(max(_dfl_base), 2)], [115.72, 117.25], 0.005)
+chk("README contrasts the steady reference with the moving arm",
+    "CV of **0.42 %**" in " ".join(pathlib.Path(__file__).resolve().parents[1]
+                                   .joinpath("README.md").read_text(encoding="utf-8").split()),
+    True)
 
 
 print("\n=== the balanced design is verified, not declared ===")
@@ -1985,7 +2125,8 @@ for _d in sorted(glob.glob("v4_audit_2026_08_25/data/matrix_*")):
 
 _README = _norm(pathlib.Path(__file__).resolve().parents[1].joinpath("README.md")
                 .read_text(encoding="utf-8"))
-for _tag in ("O", "M1", "O2", "T", "T3", "O3"):
+for _tag in ("O", "M1", "O2", "T", "T3", "O3",
+             "U1", "U2", "U3", "U4", "U5", "U6"):
     _v = _comparable.get(_tag, {}).get("spec-dflash-n2")
     chk(f"footnote: run {_tag} spec-dflash-n2 is a real run", _v is not None, True)
     if _v is not None:
@@ -1993,26 +2134,27 @@ for _tag in ("O", "M1", "O2", "T", "T3", "O3"):
             _norm(f"{_v:+.1f} %").replace("+", "+") in _README, True)
 
 _dfl = {t: v["spec-dflash-n2"] for t, v in _comparable.items() if "spec-dflash-n2" in v}
-chk("footnote: spec-dflash-n2 was measured in six comparable runs", len(_dfl), 6)
+chk("footnote: spec-dflash-n2 was measured in twelve comparable runs", len(_dfl), 12)
 _spread = max(_dfl.values()) - min(_dfl.values())
-chk("footnote: the between-run spread (pp)", round(_spread, 1), 6.0, 0.05)
-chk("README quotes that spread", "6.0 pp spread" in _README, True)
+chk("footnote: the between-run spread (pp)", round(_spread, 1), 9.4, 0.05)
+chk("README quotes that spread", "Range 9.4 pp" in _README, True)
 
 _all_spreads = sorted(
     (max(v.values()) - min(v.values()) for v in
      ({t: c[a] for t, c in _comparable.items() if a in c}
       for a in {a for c in _comparable.values() for a in c})
      if len(v) > 1), reverse=True)
-chk("footnote: spec-dflash-n2's spread ranks second",
+chk("footnote: spec-dflash-n2's spread is now the largest",
     _all_spreads.index(round(_spread, 10)) if round(_spread, 10) in _all_spreads
-    else [round(x, 10) for x in _all_spreads].index(round(_spread, 10)), 1)
-chk("README says second largest", "second largest" in _README, True)
-chk("footnote: run T3 is the lowest of the five, so O2 is not",
-    min(_dfl, key=_dfl.get), "T3")
+    else [round(x, 10) for x in _all_spreads].index(round(_spread, 10)), 0)
+chk("footnote: run U3 is the lowest, so O2 is not", min(_dfl, key=_dfl.get), "U3")
+chk("README names the lowest", "run U3 is, at +17.3 %" in _README, True)
 chk("README says the interval describes the run, not the configuration",
     "describe run O2, not the configuration" in " ".join(_README.split()), True)
 chk("README quotes the between-run range",
-    "+20.7 % to +26.7 %" in _norm(_README), True)
+    "+17.3 % to +26.7 %" in _norm(_README), True)
+chk("and the range is what the twelve runs actually span",
+    [round(min(_dfl.values()), 1), round(max(_dfl.values()), 1)], [17.3, 26.7], 0.05)
 chk("README no longer claims the lower of the two is quoted",
     "The lower of the two is quoted" in _README, False)
 
