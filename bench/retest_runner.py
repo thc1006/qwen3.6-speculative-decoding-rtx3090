@@ -38,6 +38,11 @@ Everything is configured through the environment:
     BENCH_MAX_TOKENS   max_tokens per completion               (default 300)
     BENCH_ARMS         comma-separated arm names to run        (default: all)
     BENCH_FLAVOR       legacy | master  - speculative flag spelling (default legacy)
+    BENCH_PROMPTS      v1 | extended - which prompt set. Default v1, the ten
+                       prompts every archived and v4 number rests on. `extended`
+                       is twenty deliberately different ones, including two real
+                       multi-turn exchanges, and exists to test whether a result
+                       is a property of the v1 mix.
     BENCH_CTX          N  - context passed as -c, applied to every arm in the
                        run (default 16384). Lower it to buy headroom, but note
                        that with BENCH_FIT=on the fitter will reclaim what you
@@ -199,6 +204,122 @@ _DRAFT_ARGS = ["-md", "{DRAFT}", "-ngld", "99", _NMAX, "8", _NMIN, "4"] + _SPEC_
 # It exists because the v1 matrix has an `ngcache-kv-fp16` row with no matched
 # no-speculation fp16-KV control, so that row cannot separate a speculation
 # effect from a KV-precision effect (ERRATA B7).
+# Every number in the v4 tier rests on the ten prompts above - 226 arm-runs of
+# them. A result that is an artefact of that particular mix would be invisible
+# across all of them, because they all share it. PROMPTS_EXTENDED is a second,
+# deliberately different set: longer inputs, structured output, four languages,
+# arithmetic, and two genuinely multi-turn exchanges rather than the v1 set's
+# two independent single-turn requests. Select with BENCH_PROMPTS=extended;
+# the default is unchanged so every historical comparison still joins.
+PROMPTS_EXTENDED: list[tuple[str, str, object]] = [
+    # --- long input, short output: the shape a summariser has ---------------
+    ("summarise_long", "You summarise accurately and briefly.",
+     "Summarise the following in exactly three sentences.\n\n"
+     "The Gated DeltaNet layer replaces softmax attention with a linear "
+     "recurrence whose state is updated by a delta rule, so the cost of "
+     "generating a token does not grow with the length of the context. The "
+     "trade-off is that the state is a fixed-size summary, so information that "
+     "is not written into it is unrecoverable. Hybrid models interleave a small "
+     "number of full-attention layers among the recurrent ones to recover exact "
+     "recall where it matters. In practice the interleaving ratio is chosen "
+     "empirically, and the resulting model behaves like a recurrent network for "
+     "throughput purposes and like a transformer for recall on the layers that "
+     "keep full attention. Serving such a model complicates any technique that "
+     "needs to roll a sequence back, because the recurrent state cannot be "
+     "truncated in place the way a key-value cache can."),
+    # --- structured, low-entropy output -------------------------------------
+    ("json_schema", "You output JSON and nothing else.",
+     "Emit a JSON object describing a job queue: keys name, version, and "
+     "queues (array). Each queue has name, max_retries, visibility_timeout_s, "
+     "and dead_letter (string or null). Include queues named ingest, transcode "
+     "and notify."),
+    ("sql_report", "You write PostgreSQL.",
+     "Write a query returning, per month of 2026, the number of distinct users "
+     "who placed at least two orders that month. Tables: orders(id, user_id, "
+     "placed_at, total_cents). Comment each clause."),
+    ("regex_explain", "You explain precisely.",
+     "What does the regular expression ^(?!.*--)[a-z0-9](?:[a-z0-9-]{0,61}"
+     "[a-z0-9])?$ match, and what does the negative lookahead add? Answer in "
+     "four or five sentences."),
+    # --- code, three languages ----------------------------------------------
+    ("code_rust", "You write idiomatic Rust.",
+     "Write a function that takes &[u8] and returns Result<String, Utf8Error> "
+     "containing the input hex-encoded, without allocating per byte. Include a "
+     "doc comment."),
+    ("code_python", "You write Python with type hints.",
+     "Write a context manager `timed(label)` that logs the wall-clock duration "
+     "of the block at DEBUG level, and re-raises any exception unchanged after "
+     "logging the duration."),
+    ("code_bash", "You write portable shell.",
+     "Write a POSIX sh function that retries a command up to N times with "
+     "exponential backoff, printing each attempt to stderr, and returns the "
+     "command's final exit status."),
+    # --- arithmetic and multi-step reasoning --------------------------------
+    ("arithmetic", "You compute carefully and show your work.",
+     "A server writes 82.079 MiB of state 772 times and reads back 82.08 MiB "
+     "709 times during a 123.9-second run. How many GiB moved in total, and "
+     "what fraction of a 936 GB/s memory bandwidth does that represent if it "
+     "were spread evenly? Show the steps."),
+    ("logic_puzzle", "You reason step by step.",
+     "Five benchmark runs A-E finished in some order. C did not finish first or "
+     "last. A finished immediately before E. B finished after D but before C. "
+     "What was the order? Explain each deduction."),
+    # --- four languages ------------------------------------------------------
+    ("zh_hant_long", "你是一位技術寫作者,使用臺灣繁體中文。",
+     "請用四到六句話說明:為什麼在混合式遞迴模型上,推測解碼的回滾成本會比在純"
+     "注意力模型上高?請避免使用簡體字詞彙。"),
+    ("ja_explain", "あなたは簡潔な技術ライターです。",
+     "投機的デコーディングにおける「受理率」と「実効速度」が必ずしも一致しない"
+     "理由を、三文から四文で説明してください。"),
+    ("de_explain", "Du schreibst präzise technische Erklärungen.",
+     "Erkläre in vier Sätzen, warum ein separates Entwurfsmodell auf einem "
+     "Mixture-of-Experts-Ziel teurer sein kann, als die Intuition nahelegt."),
+    ("fr_explain", "Tu écris des explications techniques concises.",
+     "Explique en quatre phrases la différence entre l'auto-spéculation et la "
+     "spéculation avec un modèle de brouillon distinct."),
+    # --- genuinely multi-turn, which the v1 set never was --------------------
+    ("multiturn_real_1", "You are a careful assistant with a long memory.",
+     [{"role": "user", "content": "I'm benchmarking a 35B MoE model on a single 24 GB card."},
+      {"role": "assistant", "content": "Understood. What are you measuring?"},
+      {"role": "user", "content": "Decode throughput with and without speculative decoding."},
+      {"role": "assistant", "content": "Noted. Anything else I should keep in mind?"},
+      {"role": "user", "content": "Yes - the draft model has to fit in what's left. "
+                                  "Given all that, what should I watch out for first?"}]),
+    ("multiturn_real_2", "You are a careful assistant with a long memory.",
+     [{"role": "user", "content": "My name is Hctsai and my card is an RTX 3090."},
+      {"role": "assistant", "content": "Got it, Hctsai."},
+      {"role": "user", "content": "The target model is 21 GB on disk."},
+      {"role": "assistant", "content": "That is most of the card."},
+      {"role": "user", "content": "Remind me what I told you about myself and the hardware, "
+                                  "then say what headroom is left."}]),
+    # --- open-ended prose, high entropy -------------------------------------
+    ("creative", "You write vividly and briefly.",
+     "Write a six-line poem about a benchmark that disproves its own author. "
+     "Do not use the word 'irony'."),
+    ("opinion", "You give balanced, concrete answers.",
+     "Is it reasonable to publish a benchmark that retracts its own headline? "
+     "Give the strongest argument on each side, in about six sentences."),
+    # --- instruction-following edge cases -----------------------------------
+    ("constrained", "You follow formatting instructions exactly.",
+     "List exactly seven differences between a recurrent state and a key-value "
+     "cache. Number them 1 to 7. Each item must be one sentence and must not "
+     "contain a comma."),
+    ("refusal_adjacent", "You are helpful and precise.",
+     "Explain how speculative decoding could be used to fingerprint which model "
+     "a server is running, and what a server operator could do about it."),
+    ("terse", "You answer in as few words as possible.",
+     "What is the break-even draft acceptance rate for a drafter that costs one "
+     "quarter of a target forward pass and drafts two tokens per round? Show the "
+     "expression, then the number."),
+]
+
+PROMPT_SETS = {"v1": PROMPTS, "extended": PROMPTS_EXTENDED}
+_PS = os.environ.get("BENCH_PROMPTS", "v1").strip().lower()
+if _PS not in PROMPT_SETS:
+    sys.exit(f"BENCH_PROMPTS must be one of {', '.join(PROMPT_SETS)}")
+PROMPT_SET_NAME = _PS
+PROMPTS = PROMPT_SETS[_PS]
+
 KV_FP16 = "--kv-fp16"
 
 
@@ -476,11 +597,15 @@ def stop_server(proc: subprocess.Popen, settle_mib: int = 2048,
           f"{settle_timeout:.0f}s after the server was killed", flush=True)
 
 
-def chat(system: str, user: str) -> dict:
+def chat(system: str, user) -> dict:
+    """`user` is a string for a single turn, or a list of message dicts for a
+    real multi-turn exchange. The v1 set only ever used the first form, which is
+    why its `multi_turn_1` / `multi_turn_2` tags are two independent single-turn
+    requests (ERRATA C3). The extended set uses the second."""
+    turns = user if isinstance(user, list) else [{"role": "user", "content": user}]
     body = {
         "model": "retest",
-        "messages": [{"role": "system", "content": system},
-                     {"role": "user", "content": user}],
+        "messages": [{"role": "system", "content": system}] + turns,
         "max_tokens": MAX_TOKENS,
         "temperature": 0.0,
         "seed": 42,
@@ -742,6 +867,7 @@ def main() -> None:
         "repeats": REPEATS, "max_tokens": MAX_TOKENS,
         "temperature": 0.0, "seed": 42, "think": THINK, "think_env": _THINK_RAW,
         "concurrency": CONCURRENCY, "fit": FIT, "ctx": CTX,
+        "prompt_set": PROMPT_SET_NAME, "n_prompts": len(PROMPTS),
         "fit_target": FIT_TARGET or None,
         "ordering": "ABBA: arm order is reversed on odd repeats",
         "gpu_fields": GPU_FIELDS,
