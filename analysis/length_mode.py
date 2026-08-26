@@ -1,0 +1,276 @@
+#!/usr/bin/env python3
+"""What `ignore_eos` does to a speculative arm, with the invocation controlled.
+
+Run V measured the hard cap by running one whole matrix free-running and
+another whole matrix capped, sixteen minutes later. ERRATA A16 finds an
+unexplained DFlash-specific invocation effect of the same size as the shift run
+V reported - runs U3 and U5 are six minutes apart and differ by 8.30 pp on that
+drafter with nothing changed - so run V measures a difference it cannot
+attribute.
+
+Two designs answer that, and this reads both.
+
+**crossover** (`bench/run_v2_crossover.sh`): eight sessions of two halves each,
+in AB BA BA AB BA AB AB BA order, so each mode runs first four times and second
+four times with the two orders balanced in mean time position. The session is
+the resampling unit. Within a session,
+
+    d(a) = log( r_a,cap / r_base,cap ) - log( r_a,free / r_base,free )
+
+and the mode effect is the mean of d over sessions. Because the order is
+balanced, an order effect cannot masquerade as a mode effect in that mean - and
+splitting the sessions by which mode ran first says whether one is present.
+
+**within** (`bench/run_v3_within.sh`): one balanced square containing both
+modes, `<arm>` and `<arm>-cap` side by side. The same d(a), computed inside a
+single invocation, so the drafter is in whatever state it is in for both halves
+of the contrast. This is the design that identifies the effect; the crossover
+bounds it.
+
+    python analysis/length_mode.py <run-dir> [<run-dir> ...]
+    python analysis/length_mode.py --json <run-dir> ...
+
+Directories are classified by what they contain, not by their names.
+"""
+
+import argparse
+import glob
+import json
+import math
+import os
+import statistics as st
+import sys
+from collections import defaultdict
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from paired_blocks import t_critical_975  # noqa: E402  - same directory
+
+CAP = "-cap"
+
+
+def pooled(run_dir, arm):
+    """Pooled decode rate over every repeat: 1000 * sum(n) / sum(ms)."""
+    ms = n = 0
+    gen = []
+    for f in sorted(glob.glob(os.path.join(run_dir, f"{arm}__rep*.json"))):
+        with open(f, encoding="utf-8") as fh:
+            rows = json.load(fh)["rows"]
+        ms += sum(r["timings"]["predicted_ms"] for r in rows)
+        n += sum(r["timings"]["predicted_n"] for r in rows)
+        gen += [r["timings"]["predicted_n"] for r in rows]
+    if not n:
+        return None
+    return {"tok_s": 1000.0 * n / ms, "generated": n,
+            "lengths": sorted(set(gen)), "requests": len(gen)}
+
+
+def arms_of(run_dir):
+    return sorted({os.path.basename(f).split("__rep")[0]
+                   for f in glob.glob(os.path.join(run_dir, "*__rep*.json"))})
+
+
+def manifest(run_dir):
+    p = os.path.join(run_dir, "manifest.json")
+    if not os.path.exists(p):
+        return {}
+    with open(p, encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def complete(run_dir):
+    return os.path.exists(os.path.join(run_dir, "RUN_COMPLETE.json"))
+
+
+def delta(free_rates, cap_rates, base="baseline"):
+    """log(a_cap / base_cap) - log(a_free / base_free), per configuration."""
+    out = {}
+    for a in sorted(free_rates):
+        if a == base or a not in cap_rates:
+            continue
+        if base not in free_rates or base not in cap_rates:
+            return {}
+        out[a] = (math.log(cap_rates[a] / cap_rates[base])
+                  - math.log(free_rates[a] / free_rates[base]))
+    return out
+
+
+def interval(values):
+    """Mean and a two-sided 95 % Student-t interval over the given values."""
+    n = len(values)
+    m = st.mean(values)
+    if n < 2:
+        return m, None, None, n
+    half = t_critical_975(n - 1) * st.stdev(values) / math.sqrt(n)
+    return m, m - half, m + half, n
+
+
+def classify(dirs):
+    """Split the directories into within-invocation runs and crossover halves."""
+    within, halves = [], []
+    for d in dirs:
+        arms = arms_of(d)
+        if not arms:
+            continue
+        if any(a.endswith(CAP) for a in arms):
+            within.append(d)
+        else:
+            man = manifest(d)
+            mode = ("hardcap" if man.get("ignore_eos") else "freerun")
+            base = os.path.basename(d.rstrip("/"))
+            halves.append((base, mode, d))
+    return within, halves
+
+
+def session_of(name):
+    """Which session a half belongs to.
+
+    `matrix_V2_s3_hardcap_20260827_041902` -> `s3`. Run V's own halves carry no
+    session marker - `matrix_V_freerun_20260826_210956` and
+    `matrix_V_hardcap_20260826_210956` - so they fall back to the shared
+    trailing timestamp and come out as ONE session, which is what they are, and
+    one session buys no interval.
+    """
+    parts = name.split("_")
+    for part in parts:
+        if len(part) > 1 and part[0] == "s" and part[1:].isdigit():
+            return part
+    stamp = [p for p in parts if p.isdigit() and len(p) in (6, 8)]
+    return "_".join(stamp[-2:]) if len(stamp) >= 2 else name
+
+
+def report_within(dirs, out):
+    print("=== both modes inside one invocation ===")
+    per_arm = defaultdict(list)
+    for d in sorted(dirs):
+        arms = arms_of(d)
+        free = {a: pooled(d, a)["tok_s"] for a in arms
+                if not a.endswith(CAP) and pooled(d, a)}
+        cap = {a[:-len(CAP)]: pooled(d, a)["tok_s"] for a in arms
+               if a.endswith(CAP) and pooled(d, a)}
+        man = manifest(d)
+        print(f"\n  {os.path.basename(d.rstrip('/'))}  "
+              f"complete={complete(d)}  order={man.get('order_mode')}  "
+              f"balanced={man.get('schedule_is_position_balanced')}  "
+              f"repeats={man.get('repeats')}")
+        d_ = delta(free, cap)
+        if not d_:
+            print("    no usable baseline pair in this run")
+            continue
+        print(f"    {'configuration':<22} {'freerun':>9} {'hard cap':>10} "
+              f"{'shift':>9}")
+        for a, v in sorted(d_.items(), key=lambda kv: -kv[1]):
+            fr = 100 * (free[a] / free["baseline"] - 1)
+            cp = 100 * (cap[a] / cap["baseline"] - 1)
+            print(f"    {a:<22} {fr:+8.2f}% {cp:+9.2f}% {cp - fr:+8.2f} pp")
+            per_arm[a].append(cp - fr)
+        out.setdefault("within", []).append(
+            {"dir": os.path.basename(d.rstrip("/")), "complete": complete(d),
+             "freerun_tok_s": free, "hardcap_tok_s": cap,
+             "shift_pp": {a: 100 * (cap[a] / cap["baseline"] - 1)
+                          - 100 * (free[a] / free["baseline"] - 1)
+                          for a in d_}})
+    if per_arm:
+        print(f"\n  across {len(dirs)} invocation(s):")
+        out["within_summary"] = {}
+        for a, vs in sorted(per_arm.items(), key=lambda kv: -st.mean(kv[1])):
+            m, lo, hi, n = interval(vs)
+            rng = "" if lo is None else f"  [{lo:+.2f}, {hi:+.2f}]"
+            print(f"    {a:<22} {m:+8.2f} pp{rng}   n={n}")
+            out["within_summary"][a] = {"mean_pp": m, "lo": lo, "hi": hi, "n": n}
+
+
+def report_crossover(halves, out):
+    print("\n=== the crossover: the session is the resampling unit ===")
+    by_session = defaultdict(dict)
+    order = {}
+    for name, mode, d in halves:
+        s = session_of(name)
+        by_session[s][mode] = d
+        order.setdefault(s, []).append((name, mode))
+    for s in order:
+        order[s] = [m for _, m in sorted(order[s])]
+    usable, dropped = [], []
+    for s, halves_ in sorted(by_session.items()):
+        if set(halves_) == {"freerun", "hardcap"} and all(
+                complete(v) for v in halves_.values()):
+            usable.append(s)
+        else:
+            dropped.append((s, sorted(halves_), [complete(v) for v in halves_.values()]))
+    print(f"  sessions with both halves complete: {len(usable)} of {len(by_session)}")
+    for s, present, ok in dropped:
+        print(f"    dropped {s}: halves {present}, complete {ok}")
+    if not usable:
+        return
+
+    deltas = defaultdict(dict)
+    first_mode = {}
+    for s in usable:
+        f, c = by_session[s]["freerun"], by_session[s]["hardcap"]
+        # which ran first, from the manifests' own timestamps
+        tf, tc = manifest(f).get("created", ""), manifest(c).get("created", "")
+        first_mode[s] = "freerun" if tf and tc and tf < tc else "hardcap"
+        fr = {a: pooled(f, a)["tok_s"] for a in arms_of(f) if pooled(f, a)}
+        cp = {a: pooled(c, a)["tok_s"] for a in arms_of(c) if pooled(c, a)}
+        for a, v in delta(fr, cp).items():
+            deltas[a][s] = (v, 100 * (fr[a] / fr["baseline"] - 1),
+                            100 * (cp[a] / cp["baseline"] - 1))
+
+    print(f"\n  {'configuration':<22} {'mean shift':>11} {'95 % t over sessions':>24}"
+          f" {'sessions':>9}")
+    out["crossover"] = {}
+    for a in sorted(deltas, key=lambda k: -st.mean(
+            [100 * (v[2] - v[1]) / 100 for v in deltas[k].values()])):
+        shifts = [v[2] - v[1] for v in deltas[a].values()]
+        m, lo, hi, n = interval(shifts)
+        rng = "" if lo is None else f"[{lo:+.2f} pp, {hi:+.2f} pp]"
+        print(f"  {a:<22} {m:+10.2f} pp {rng:>24} {n:>9}")
+        out["crossover"][a] = {"mean_shift_pp": m, "lo": lo, "hi": hi,
+                               "sessions": n,
+                               "per_session": {s: v[2] - v[1]
+                                               for s, v in deltas[a].items()}}
+
+    print("\n  does the order matter? the same shift, split by which mode ran first")
+    print(f"  {'configuration':<22} {'freerun first':>14} {'hard cap first':>15}"
+          f" {'difference':>12}")
+    out["order_contrast"] = {}
+    for a in sorted(deltas):
+        ff = [v[2] - v[1] for s, v in deltas[a].items() if first_mode[s] == "freerun"]
+        hf = [v[2] - v[1] for s, v in deltas[a].items() if first_mode[s] == "hardcap"]
+        if not ff or not hf:
+            continue
+        print(f"  {a:<22} {st.mean(ff):+13.2f} {st.mean(hf):+14.2f} "
+              f"{st.mean(ff) - st.mean(hf):+11.2f} pp")
+        out["order_contrast"][a] = {"freerun_first_pp": st.mean(ff),
+                                    "hardcap_first_pp": st.mean(hf),
+                                    "difference_pp": st.mean(ff) - st.mean(hf),
+                                    "n_freerun_first": len(ff),
+                                    "n_hardcap_first": len(hf)}
+    print("\n  A large difference in that last column is an order or state effect,"
+          "\n  not a mode effect. The balanced design is what makes it visible.")
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("dirs", nargs="+")
+    ap.add_argument("--json", help="write the numbers here")
+    args = ap.parse_args()
+    dirs = [d for d in args.dirs if os.path.isdir(d)]
+    if not dirs:
+        sys.exit("no run directories")
+    within, halves = classify(dirs)
+    out: dict = {}
+    if within:
+        report_within(within, out)
+    if halves:
+        report_crossover(halves, out)
+    if not within and not halves:
+        sys.exit("nothing recognisable in those directories")
+    if args.json:
+        with open(args.json, "w", encoding="utf-8") as fh:
+            json.dump(out, fh, indent=1, sort_keys=True)
+        print(f"\n  wrote {args.json}")
+
+
+if __name__ == "__main__":
+    main()

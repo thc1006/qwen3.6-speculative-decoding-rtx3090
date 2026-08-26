@@ -155,6 +155,17 @@ PORT = _env_int("BENCH_PORT", 18131, 1, 65535)
 REPEATS = _env_int("BENCH_REPEATS", 3, 1)
 MAX_TOKENS = _env_int("BENCH_MAX_TOKENS", 300, 1)
 IGNORE_EOS = _env_bool("BENCH_IGNORE_EOS", False)
+# `BENCH_IGNORE_EOS` is a RUN-level treatment: it applies to every arm. That is
+# what run V used, and it is why run V cannot separate the treatment from the
+# invocation - the freerun matrix ran first and the hard-cap matrix afterwards,
+# sixteen minutes later, and A16 finds a DFlash-specific invocation effect of
+# the same size as the shift it reported (ERRATA A17).
+#
+# An arm whose name ends with BENCH_HARDCAP_SUFFIX takes its SERVER FLAGS from
+# the base name and sends `ignore_eos` on its own requests. Both modes then sit
+# in one balanced square, in one invocation, adjacent in time, so the contrast
+# is within-invocation and whatever state the drafter is in applies to both.
+HARDCAP_SUFFIX = os.environ.get("BENCH_HARDCAP_SUFFIX", "").strip()
 # the raw string is kept for the manifest: "what was asked for" and "what was
 # run" are different records, and D2 was a mismatch between them
 _THINK_RAW = os.environ.get("BENCH_THINK", "on")
@@ -503,6 +514,23 @@ ARMS: dict[str, list[str]] = {
     "ngram-map-k4v-m4":   _ngram("ngram-map-k4v", ["--spec-ngram-map-k4v-size-n", "12",
                                                    "--spec-ngram-map-k4v-size-m", "4"]),
 }
+
+
+def arm_is_hardcap(arm: str) -> bool:
+    """True for `<base><suffix>` where `<base>` is a real arm and this is not.
+
+    A real arm always wins: if the suffix happened to match the tail of a
+    genuine entry, that entry is served as itself.
+    """
+    if not HARDCAP_SUFFIX or arm in ARMS or not arm.endswith(HARDCAP_SUFFIX):
+        return False
+    return arm[:-len(HARDCAP_SUFFIX)] in ARMS
+
+
+def arm_base(arm: str) -> str:
+    """The arm whose server flags this one runs with."""
+    return arm[:-len(HARDCAP_SUFFIX)] if arm_is_hardcap(arm) else arm
+
 
 
 # ---------------------------------------------------------------- utils ----
@@ -904,7 +932,7 @@ def stop_server(proc: subprocess.Popen, baseline_mib: int | None = None,
             "wait_s": round(time.perf_counter() - t0, 2), "readable": True}
 
 
-def chat(system: str, user) -> dict:
+def chat(system: str, user, hardcap: bool = False) -> dict:
     """`user` is a string for a single turn, or a list of message dicts for a
     real multi-turn exchange. The v1 set only ever used the first form, which is
     why its `multi_turn_1` / `multi_turn_2` tags are two independent single-turn
@@ -922,8 +950,11 @@ def chat(system: str, user) -> dict:
     }
     if THINK == "off":
         body["chat_template_kwargs"] = {"enable_thinking": False}
-    if IGNORE_EOS:
-        # Force every arm to generate exactly MAX_TOKENS.
+    if IGNORE_EOS or hardcap:
+        # Force this request to generate exactly MAX_TOKENS.
+        #
+        # `IGNORE_EOS` does it for the whole run; `hardcap` does it for one arm,
+        # so a freerun arm and a hard-cap arm can be measured side by side.
         #
         # With thinking on, every request hits the cap anyway and the arms are
         # length-matched for free. With thinking off they are not: speculation
@@ -1004,11 +1035,12 @@ def run_prompt_set(arm: str, rep: int,
     rows: list[dict] = []
     crashed: dict | None = None
     t0 = time.perf_counter()
+    hardcap = arm_is_hardcap(arm)
 
     if CONCURRENCY == 1:
         for tag, sysmsg, usermsg in PROMPTS:
             try:
-                r = chat(sysmsg, usermsg)
+                r = chat(sysmsg, usermsg, hardcap)
             except Exception as e:  # noqa: BLE001
                 # A server death is a finding, not a harness failure: record
                 # where it happened and move on to the next arm.
@@ -1148,7 +1180,7 @@ def build_schedule(arms: list[str], repeats: int, mode: str) -> list[list[str]]:
 
 
 def run_arm(arm: str, rep: int) -> dict:
-    extra = ARMS[arm]
+    extra = ARMS[arm_base(arm)]
     log_path = OUT / "server_logs" / f"{arm}__rep{rep}.log"
     # Caveat on this snapshot: the previous arm's server has been waited on, but
     # the driver can still report the outgoing process's utilisation and clocks
@@ -1181,10 +1213,11 @@ def run_arm(arm: str, rep: int) -> dict:
             # inside the measured window.
             _wu = ("You are concise.", "Warm up with a few sentences about the weather.")
             if CONCURRENCY == 1:
-                chat(*_wu)
+                chat(*_wu, arm_is_hardcap(arm))
             else:
                 with cf.ThreadPoolExecutor(max_workers=CONCURRENCY) as pool:
-                    for f in [pool.submit(chat, *_wu) for _ in range(CONCURRENCY)]:
+                    for f in [pool.submit(chat, *_wu, arm_is_hardcap(arm))
+                              for _ in range(CONCURRENCY)]:
                         f.result()
         except Exception as e:  # noqa: BLE001
             return {"arm": arm, "repeat": rep, "ready_s": ready_s,
@@ -1283,11 +1316,12 @@ def validate_run(out: Path, arms: list[str], repeats: int,
             if not row.get("predicted_n"):
                 problems.append(f"arm-run {arm} rep{rep} prompt {row.get('tag')} "
                                 f"produced no tokens")
-            elif IGNORE_EOS and row["predicted_n"] != MAX_TOKENS:
+            elif ((IGNORE_EOS or arm_is_hardcap(str(arm)))
+                  and row["predicted_n"] != MAX_TOKENS):
                 problems.append(f"arm-run {arm} rep{rep} prompt {row.get('tag')} "
-                                f"generated {row['predicted_n']} tokens with "
-                                f"BENCH_IGNORE_EOS on; the point of that flag is "
-                                f"that every arm generates exactly {MAX_TOKENS}")
+                                f"generated {row['predicted_n']} tokens under a "
+                                f"hard cap; the point of the cap is that the arm "
+                                f"generates exactly {MAX_TOKENS}")
 
     # A file whose name disagrees with its contents makes every per-arm glob a
     # lie, and no count-based check can see it.
@@ -1328,19 +1362,22 @@ def main() -> None:
     wanted = os.environ.get("BENCH_ARMS")
     arms = [a.strip() for a in wanted.split(",")] if wanted else list(ARMS)
     for a in arms:
-        if a not in ARMS:
-            sys.exit(f"unknown arm {a!r}; known: {', '.join(ARMS)}")
+        if a not in ARMS and not arm_is_hardcap(a):
+            hint = ("" if not HARDCAP_SUFFIX else
+                    f" (BENCH_HARDCAP_SUFFIX={HARDCAP_SUFFIX!r}, so "
+                    f"'<arm>{HARDCAP_SUFFIX}' is accepted for any known arm)")
+            sys.exit(f"unknown arm {a!r}{hint}; known: {', '.join(ARMS)}")
     dupes = sorted({a for a in arms if arms.count(a) > 1})
     if dupes:
         # Two entries write the same `<arm>__rep<n>.json`, so the second
         # silently overwrites the first and half the GPU time is discarded.
         # validate_run catches it after the fact; this catches it before.
         sys.exit(f"BENCH_ARMS repeats {', '.join(dupes)}; each arm may appear once")
-    if any("{DRAFT}" in x for a in arms for x in ARMS[a]) and not DRAFT:
+    if any("{DRAFT}" in x for a in arms for x in ARMS[arm_base(a)]) and not DRAFT:
         sys.exit("set MODEL_DRAFT for the draft arms")
-    if any("{MTP}" in x for a in arms for x in ARMS[a]) and not MTP:
+    if any("{MTP}" in x for a in arms for x in ARMS[arm_base(a)]) and not MTP:
         sys.exit("set MODEL_MTP for the MTP arms")
-    if any("{DFLASH}" in x for a in arms for x in ARMS[a]) and not DFLASH:
+    if any("{DFLASH}" in x for a in arms for x in ARMS[arm_base(a)]) and not DFLASH:
         sys.exit("set MODEL_DFLASH for the DFlash arms")
 
     # Build and validate the block schedule before the first server starts, so a
@@ -1370,7 +1407,9 @@ def main() -> None:
         "mtp_sha256": sha256(MTP) if MTP else None,
         "common_args": COMMON_ARGS,
         "flavor": FLAVOR,
-        "arms": {a: ARMS[a] for a in arms},
+        "arms": {a: ARMS[arm_base(a)] for a in arms},
+        "hardcap_suffix": HARDCAP_SUFFIX or None,
+        "hardcap_arms": sorted(a for a in arms if arm_is_hardcap(a)),
         "repeats": REPEATS, "max_tokens": MAX_TOKENS,
         "temperature": 0.0, "seed": 42, "think": THINK, "think_env": _THINK_RAW, "ignore_eos": IGNORE_EOS,
         "concurrency": CONCURRENCY, "fit": FIT, "ctx": CTX,

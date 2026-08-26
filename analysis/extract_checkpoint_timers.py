@@ -20,19 +20,34 @@ import re
 import statistics as st
 import sys
 
-RE_TGT = re.compile(r"AUDIT_US update_tgt=(\d+)")
-RE_DFT = re.compile(r"AUDIT_US update_dft=(\d+)")
-RE_LOAD = re.compile(r"AUDIT_US load_tgt=(\d+) load_dft=(\d+)")
+# One `AUDIT_US` record per line, as `key=value` pairs. Positional regexes tied
+# the reader to the field ORDER, so adding the synchronisation split - which
+# inserts `sync_tgt=` after `update_tgt=` and `sync_lt=` between `load_tgt=` and
+# `load_dft=` - would have silently stopped matching the restore line and
+# reported zero restores rather than failing.
+RE_AUDIT = re.compile(r"AUDIT_US ((?:\w+=\d+ ?)+)")
+RE_PAIR = re.compile(r"(\w+)=(\d+)")
+
+
+def _records(text: str) -> list[dict]:
+    return [{k: int(v) for k, v in RE_PAIR.findall(body)}
+            for body in RE_AUDIT.findall(text)]
 
 
 def analyse(path: str) -> dict:
     with open(path, errors="replace") as fh:
         text = fh.read()
-    tgt = [int(x) for x in RE_TGT.findall(text)]
-    dft = [int(x) for x in RE_DFT.findall(text)]
-    loads = RE_LOAD.findall(text)
-    lt = [int(a) for a, _ in loads]
-    ld = [int(b) for _, b in loads]
+    recs = _records(text)
+    tgt = [r["update_tgt"] for r in recs if "update_tgt" in r]
+    dft = [r["update_dft"] for r in recs if "update_dft" in r]
+    loads = [r for r in recs if "load_tgt" in r]
+    lt = [r["load_tgt"] for r in loads]
+    ld = [r.get("load_dft", 0) for r in loads]
+    # The split, when the binary emits it. `update_tgt` and friends still mean
+    # THE WHOLE CALL, so everything below is unchanged on an unsplit log; the
+    # state work is the call minus its wait.
+    sync = {k: [r[k] for r in recs if k in r]
+            for k in ("sync_tgt", "sync_dft", "sync_lt", "sync_ld")}
     out = {
         "log": os.path.basename(path),
         # repeat-independent: the first version stripped only `__rep0.log`,
@@ -56,6 +71,26 @@ def analyse(path: str) -> dict:
         if vals:
             out[f"{name}_median_ms"] = round(st.median(vals) / 1000, 3)
             out[f"{name}_max_ms"] = round(max(vals) / 1000, 3)
+    # additive: absent entirely on a log from the unsplit build, so the
+    # committed extractions reproduce byte for byte
+    if any(sync.values()):
+        pairs = (("sync_tgt", tgt), ("sync_dft", dft),
+                 ("sync_lt", lt), ("sync_ld", ld))
+        for key, whole in pairs:
+            vals = sync[key]
+            if not vals:
+                continue
+            out[f"{key}_s"] = round(sum(vals) / 1e6, 3)
+            out[f"{key.replace('sync', 'state')}_s"] = round(
+                (sum(whole) - sum(vals)) / 1e6, 3)
+        out["sync_total_s"] = round(
+            sum(sum(v) for v in sync.values()) / 1e6, 3)
+        out["state_total_s"] = round(
+            ((sum(tgt) + sum(dft) + sum(lt) + sum(ld))
+             - sum(sum(v) for v in sync.values())) / 1e6, 3)
+        out["sync_share_of_checkpoint_pct"] = round(
+            100.0 * out["sync_total_s"] / out["checkpoint_total_s"], 1
+        ) if out["checkpoint_total_s"] else None
     return out
 
 

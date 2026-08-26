@@ -869,7 +869,10 @@ class ArmsMustGenerateTheSameAmountOfWork(unittest.TestCase):
             self.assertNotEqual(r.returncode, 0)
             self.assertFalse((out / "RUN_COMPLETE.json").exists())
             failed = json.loads((out / "RUN_FAILED.json").read_text())
-            self.assertTrue(any("BENCH_IGNORE_EOS" in x for x in failed["problems"]))
+            # the message covers both mechanisms now: the run-level flag and
+            # the per-arm suffix that lets both modes share one invocation
+            self.assertTrue(any("under a hard cap" in x for x in failed["problems"]),
+                            failed["problems"])
 
     def test_the_flag_reaches_the_server(self):
         """The stub stops early unless the request carries `ignore_eos`, so a
@@ -1119,6 +1122,277 @@ class WhatAnsweredMustHaveLoadedTheRightModel(unittest.TestCase):
             [])
 
 
+class TimerExtractionMustNotDependOnFieldOrder(unittest.TestCase):
+    """The reader matched `AUDIT_US load_tgt=(\\d+) load_dft=(\\d+)` positionally.
+    Splitting the timers inserts `sync_lt=` between those two, and a positional
+    regex does not fail on that - it stops matching, and the extraction reports
+    zero restores and a smaller total that still looks like a measurement."""
+
+    def _ex(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "ck", ROOT / "analysis" / "extract_checkpoint_timers.py")
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        return m
+
+    OLD = ("AUDIT_US update_tgt=35344\n"
+           "AUDIT_US load_tgt=22315 load_dft=7398\n"
+           "AUDIT_US update_dft=1000\n")
+    NEW = ("AUDIT_US update_tgt=35344 sync_tgt=30000\n"
+           "AUDIT_US load_tgt=22315 sync_lt=20000 load_dft=7398 sync_ld=7000\n"
+           "AUDIT_US update_dft=1000 sync_dft=900\n")
+
+    def _run(self, text):
+        with tempfile.TemporaryDirectory() as t:
+            f = Path(t) / "spec-draft-n8__rep0.log"
+            f.write_text(text, encoding="utf-8")
+            return self._ex().analyse(str(f))
+
+    def test_the_old_format_still_reads(self):
+        r = self._run(self.OLD)
+        self.assertEqual(r["creates"], 1)
+        self.assertEqual(r["restores"], 1)
+        self.assertAlmostEqual(r["load_tgt_s"], 0.022, places=3)
+        self.assertAlmostEqual(r["load_dft_s"], 0.007, places=3)
+        self.assertNotIn("sync_total_s", r, "no split fields on an unsplit log")
+
+    def test_the_split_format_reads_the_same_totals(self):
+        old, new = self._run(self.OLD), self._run(self.NEW)
+        for k in ("creates", "restores", "update_tgt_s", "update_dft_s",
+                  "load_tgt_s", "load_dft_s", "checkpoint_total_s"):
+            self.assertEqual(old[k], new[k], k)
+
+    def test_the_split_is_reported_and_adds_up(self):
+        r = self._run(self.NEW)
+        # the field is rounded to milliseconds, so compare at its own precision
+        self.assertAlmostEqual(r["sync_total_s"],
+                               round((30000 + 20000 + 7000 + 900) / 1e6, 3),
+                               places=3)
+        self.assertAlmostEqual(r["sync_total_s"] + r["state_total_s"],
+                               r["checkpoint_total_s"], places=3)
+        self.assertAlmostEqual(r["state_tgt_s"], round((35344 - 30000) / 1e6, 3),
+                               places=3)
+        self.assertGreater(r["sync_share_of_checkpoint_pct"], 0)
+
+    def test_a_restore_line_is_never_silently_dropped(self):
+        """The failure this class exists for: a field inserted in the middle."""
+        r = self._run("AUDIT_US load_tgt=100 sync_lt=90 load_dft=10 sync_ld=9\n")
+        self.assertEqual(r["restores"], 1)
+
+
+class ARunScriptMustSetEveryFieldItClaimsToReproduce(unittest.TestCase):
+    """`run_v2_crossover.sh` says it uses "run V's configuration otherwise
+    verbatim". It did not: `BENCH_FIT_TARGET` was unset, so it took the 1024 MiB
+    default, and ERRATA A9 says that margin is exactly what kills a DFlash arm -
+    the fitter sizes the target to leave 1024 MiB and a BF16 DFlash drafter plus
+    its compute buffer does not fit in it. Every `spec-dflash-n2` arm-run of the
+    first attempt aborted before `/health`, twenty-five minutes of GPU time for
+    nothing, and the run script's own comment was the thing that was wrong.
+
+    A comment is not a check. This is."""
+
+    # script -> the published run whose configuration it says it reproduces
+    CLAIMS = {
+        "bench/run_v2_crossover.sh": "matrix_V_freerun_20260826_210956",
+        "bench/run_v3_within.sh": "matrix_V_freerun_20260826_210956",
+        "bench/run_t4_split_timers.sh": "matrix_T_timers_20260826_182639",
+    }
+    # environment variable -> the manifest field it lands in
+    FIELDS = {
+        "BENCH_CTX": "ctx", "BENCH_FIT_TARGET": "fit_target",
+        "BENCH_MAX_TOKENS": "max_tokens", "BENCH_CONCURRENCY": "concurrency",
+        "BENCH_FLAVOR": "flavor", "BENCH_THINK": "think",
+    }
+    # recorded as a boolean, set as a word
+    BOOLS = {"BENCH_FIT": "fit"}
+
+    @staticmethod
+    def _exports(path):
+        out = {}
+        for line in Path(path).read_text(encoding="utf-8").splitlines():
+            m = re.match(r'\s*export (BENCH_\w+)=("?)([^"\s]*)\2\s*$', line)
+            if m:
+                out[m.group(1)] = m.group(3)
+        return out
+
+    def test_every_treatment_field_the_reference_run_recorded_is_set(self):
+        for script, run in self.CLAIMS.items():
+            man = json.loads((ROOT / "v4_audit_2026_08_25" / "data" / run
+                              / "manifest.json").read_text(encoding="utf-8"))
+            env = self._exports(ROOT / script)
+            for var, field in self.FIELDS.items():
+                want = man.get(field)
+                if want in (None, ""):
+                    continue
+                with self.subTest(script=script, var=var):
+                    self.assertIn(var, env,
+                                  f"{script} does not set {var}, and {run} "
+                                  f"recorded {field}={want!r} - the default is "
+                                  f"not what that run measured")
+                    self.assertEqual(str(env[var]), str(want),
+                                     f"{script} sets {var}={env[var]!r}, "
+                                     f"{run} recorded {field}={want!r}")
+            for var, field in self.BOOLS.items():
+                if field not in man:
+                    continue
+                with self.subTest(script=script, var=var):
+                    self.assertIn(var, env, f"{script} does not set {var}")
+                    on = str(env[var]).lower() in ("on", "1", "true", "yes")
+                    self.assertEqual(on, bool(man[field]),
+                                     f"{script} sets {var}={env[var]!r}, "
+                                     f"{run} recorded {field}={man[field]!r}")
+
+    def test_the_fit_target_is_the_one_that_keeps_dflash_alive(self):
+        """The specific value, named, because the default is a live failure."""
+        for script in ("bench/run_v2_crossover.sh", "bench/run_v3_within.sh"):
+            with self.subTest(script=script):
+                self.assertEqual(self._exports(ROOT / script).get("BENCH_FIT_TARGET"),
+                                 "3072")
+
+    def test_the_scripts_do_not_set_a_run_level_cap_by_accident(self):
+        """`run_v3_within.sh` measures both modes per arm; a run-level
+        BENCH_IGNORE_EOS would flatten the freerun half into the capped one."""
+        env = self._exports(ROOT / "bench" / "run_v3_within.sh")
+        self.assertNotIn("BENCH_IGNORE_EOS", env)
+        self.assertEqual(env.get("BENCH_HARDCAP_SUFFIX"), "-cap")
+
+
+class BothModesMustFitInOneInvocation(unittest.TestCase):
+    """`BENCH_IGNORE_EOS` is a run-level treatment, so run V had to measure the
+    two modes as two runs sixteen minutes apart - and A16 finds a
+    DFlash-specific invocation effect of the same size as the shift it reported,
+    which is why A17 cannot attribute it. An arm named `<base><suffix>` takes its
+    server flags from `<base>` and sends `ignore_eos` on its own requests, so
+    both modes sit in one balanced square, in one invocation, adjacent in time.
+    """
+
+    FAKE = ROOT / "tests" / "fake_llama_server.py"
+
+    def _run(self, out: Path, arms: str, extra: dict | None = None):
+        env = dict(os.environ)
+        env.update({
+            "LLAMA_SERVER_BIN": str(self.FAKE), "MODEL_TARGET": "/dev/null",
+            "BENCH_ARMS": arms, "BENCH_REPEATS": "2",
+            "BENCH_ORDER": "latin", "BENCH_OUT": str(out),
+            "BENCH_PORT": free_port(), "BENCH_MAX_TOKENS": "300",
+            "BENCH_FIT": "off", "BENCH_HARDCAP_SUFFIX": "-cap",
+            "FAKE_SHORT_UNLESS_IGNORE_EOS": "1", "FAKE_PREDICTED_N": "300",
+        })
+        env.update(extra or {})
+        return subprocess.run([sys.executable, str(RUNNER)], env=env,
+                              capture_output=True, text=True, timeout=600)
+
+    def test_one_run_carries_both_modes(self):
+        with tempfile.TemporaryDirectory() as t:
+            out = Path(t) / "both"
+            r = self._run(out, "baseline,baseline-cap")
+            self.assertEqual(r.returncode, 0, (r.stdout + r.stderr)[-1500:])
+            self.assertTrue((out / "RUN_COMPLETE.json").exists())
+            free = json.loads((out / "baseline__rep0.json").read_text())
+            cap = json.loads((out / "baseline-cap__rep0.json").read_text())
+            # the fake server returns a third unless ignore_eos is on the request
+            self.assertTrue(all(x["predicted_n"] == 100 for x in free["rows"]),
+                            [x["predicted_n"] for x in free["rows"]])
+            self.assertTrue(all(x["predicted_n"] == 300 for x in cap["rows"]),
+                            [x["predicted_n"] for x in cap["rows"]])
+
+    def test_the_capped_arm_runs_the_base_arms_flags(self):
+        with tempfile.TemporaryDirectory() as t:
+            out = Path(t) / "flags"
+            self.assertEqual(self._run(out, "baseline,baseline-cap").returncode, 0)
+            man = json.loads((out / "manifest.json").read_text())
+            self.assertEqual(man["arms"]["baseline-cap"], man["arms"]["baseline"])
+            self.assertEqual(man["hardcap_suffix"], "-cap")
+            self.assertEqual(man["hardcap_arms"], ["baseline-cap"])
+            # argv actually used, not just what the manifest says
+            free = json.loads((out / "baseline__rep0.json").read_text())["argv"]
+            cap = json.loads((out / "baseline-cap__rep0.json").read_text())["argv"]
+            self.assertEqual([a for a in cap if "--port" not in a],
+                             [a for a in free if "--port" not in a])
+
+    def test_a_capped_arm_that_generates_short_fails_the_run(self):
+        with tempfile.TemporaryDirectory() as t:
+            out = Path(t) / "short"
+            r = self._run(out, "baseline-cap",
+                          {"FAKE_SHORT_UNLESS_IGNORE_EOS": "0",
+                           "FAKE_PREDICTED_N": "100"})
+            self.assertNotEqual(r.returncode, 0)
+            self.assertIn("under a hard cap", r.stdout + r.stderr)
+            self.assertFalse((out / "RUN_COMPLETE.json").exists())
+
+    def test_an_uncapped_arm_may_stop_early(self):
+        """The freerun half of the contrast must NOT be held to the cap, or the
+        design collapses back into one mode."""
+        with tempfile.TemporaryDirectory() as t:
+            out = Path(t) / "free"
+            r = self._run(out, "baseline")
+            self.assertEqual(r.returncode, 0, (r.stdout + r.stderr)[-800:])
+            rows = json.loads((out / "baseline__rep0.json").read_text())["rows"]
+            self.assertTrue(all(x["predicted_n"] == 100 for x in rows))
+
+    def test_the_suffix_is_opt_in(self):
+        with tempfile.TemporaryDirectory() as t:
+            r = self._run(Path(t) / "off", "baseline-cap",
+                          {"BENCH_HARDCAP_SUFFIX": ""})
+            self.assertNotEqual(r.returncode, 0)
+            self.assertIn("unknown arm", r.stdout + r.stderr)
+
+    def test_a_real_arm_wins_over_the_suffix_rule(self):
+        """`baseline-kvfp16` is a real arm AND `baseline` + `-kvfp16`. Without
+        the `arm in ARMS` guard it would be served as the baseline's flags with
+        a cap - a different configuration entirely, measured under the name of
+        the one that was asked for, silently."""
+        import importlib.util
+        os.environ["BENCH_HARDCAP_SUFFIX"] = "-kvfp16"
+        try:
+            spec = importlib.util.spec_from_file_location("rr_suffix", RUNNER)
+            m = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(m)
+            self.assertIn("baseline-kvfp16", m.ARMS)
+            self.assertIn("baseline", m.ARMS)
+            self.assertNotEqual(m.ARMS["baseline-kvfp16"], m.ARMS["baseline"])
+            self.assertFalse(m.arm_is_hardcap("baseline-kvfp16"),
+                             "a real arm was taken for a capped one")
+            self.assertEqual(m.arm_base("baseline-kvfp16"), "baseline-kvfp16")
+        finally:
+            os.environ.pop("BENCH_HARDCAP_SUFFIX", None)
+
+    def test_that_arm_still_runs_as_itself_end_to_end(self):
+        with tempfile.TemporaryDirectory() as t:
+            out = Path(t) / "real"
+            r = self._run(out, "baseline-kvfp16",
+                          {"BENCH_HARDCAP_SUFFIX": "-kvfp16"})
+            self.assertEqual(r.returncode, 0, (r.stdout + r.stderr)[-900:])
+            man = json.loads((out / "manifest.json").read_text())
+            self.assertEqual(man["hardcap_arms"], [])
+            argv = json.loads(
+                (out / "baseline-kvfp16__rep0.json").read_text())["argv"]
+            # `--kv-fp16` is a sentinel: it drops `-ctk q8_0 -ctv q8_0` rather
+            # than adding a flag, so the tell is that the quantised KV args are
+            # gone. Plain `baseline` keeps them, so this argv could not have
+            # come from serving the baseline under another name.
+            self.assertNotIn("q8_0", " ".join(argv), argv)
+            rows = json.loads(
+                (out / "baseline-kvfp16__rep0.json").read_text())["rows"]
+            self.assertTrue(all(x["predicted_n"] == 100 for x in rows),
+                            "it was capped, so it was treated as baseline+cap")
+
+    def test_a_suffix_on_something_that_is_not_an_arm_is_refused(self):
+        with tempfile.TemporaryDirectory() as t:
+            r = self._run(Path(t) / "nope", "nonsense-cap")
+            self.assertNotEqual(r.returncode, 0)
+            self.assertIn("unknown arm", r.stdout + r.stderr)
+
+    def test_the_run_level_flag_still_caps_everything(self):
+        with tempfile.TemporaryDirectory() as t:
+            out = Path(t) / "runlevel"
+            r = self._run(out, "baseline", {"BENCH_IGNORE_EOS": "on"})
+            self.assertEqual(r.returncode, 0, (r.stdout + r.stderr)[-800:])
+            rows = json.loads((out / "baseline__rep0.json").read_text())["rows"]
+            self.assertTrue(all(x["predicted_n"] == 300 for x in rows))
+
+
 class RederivationMustNotForgive(unittest.TestCase):
     """`analysis/rederive_from_logs.py` is the only thing that ties the derived
     JSON to the logs it came from. A re-derivation that reports success when a
@@ -1304,6 +1578,10 @@ class EveryPublishedFixIsStillHere(unittest.TestCase):
          "the whole shared-library map is pinned"),
         ("bench/retest_runner.py", "unverified = baseline_mib is not None",
          "an unreadable teardown is a failure only where a reading existed"),
+        ("bench/retest_runner.py", "if IGNORE_EOS or hardcap:",
+         "one invocation can carry both length modes"),
+        ("bench/retest_runner.py", "def arm_is_hardcap",
+         "a hard-cap arm is resolved from its base"),
         ("bench/retest_runner.py", "if ok >= consecutive:",
          "a teardown needs consecutive low readings"),
         ("analysis/paired_blocks.py", "def is_position_balanced",
