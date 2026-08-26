@@ -23,6 +23,10 @@ jobs:
         with: { python-version: "3.12" }
       - name: byte-compile everything
         run: python -m compileall -q analysis bench tests
+      - name: pyflakes - unused names are usually the residue of an edit
+        run: |
+          pip install pyflakes==3.4.0
+          pyflakes analysis/*.py bench/*.py tests/*.py
       - name: relative links and heading anchors
         run: python analysis/check_links.py
       - name: shellcheck

@@ -228,7 +228,7 @@ def report(path: Path) -> None:
     g1, g2 = sum(gfx[:h]) / h, sum(gfx[h:]) / (len(gfx) - h)
     ht = len(temps) // 2
     t1, t2 = sum(temps[:ht]) / ht, sum(temps[ht:]) / (len(temps) - ht)
-    print(f"  drift, first half -> second half:")
+    print("  drift, first half -> second half:")
     print(f"    clock       {g1:.0f} -> {g2:.0f} MHz  ({100*(g2/g1-1):+.2f} %)")
     print(f"    temperature {t1:.1f} -> {t2:.1f} C   ({t2-t1:+.1f} C)")
     # 0.5 % is the tolerance: boost clocks jitter by more than that between

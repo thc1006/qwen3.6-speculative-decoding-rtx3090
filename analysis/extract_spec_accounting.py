@@ -36,7 +36,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import statistics as st
 import sys
 
 RE_STATS = re.compile(
@@ -124,7 +123,9 @@ def analyse(path: str) -> dict:
         span = stamped[-1][0] - stamped[0][0]
         out["log_span_s"] = round(span, 1)
         if ck and other:
-            excess = sum(ck) - len(ck) * st.median(other)
+            # the wall-clock excess this used to compute from log intervals is
+            # withdrawn (A12): the create and restore messages sit on opposite
+            # sides of the work they name. Only the count survives.
             out["checkpoint_lines"] = len(ck)
     return out
 

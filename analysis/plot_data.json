@@ -393,6 +393,7 @@
     ]
   },
   "head_to_head": {
+    "position_balanced": true,
     "rows": [
       {
         "acceptance_pct": null,
@@ -448,6 +449,7 @@
         "family": "spec-mtp",
         "pooled": 141.9478
       }
-    ]
+    ],
+    "run": "matrix_O2_latin_20260826_153711"
   }
 }

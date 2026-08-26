@@ -380,16 +380,37 @@ def plot_head_to_head() -> None:
     # Prefer run O2, the balanced Latin square, and draw its block-level
     # intervals. Run O is the same arms at three repeats with the list merely
     # reversed on odd repeats, which leaves arm position confounded with time.
-    src = sorted(glob.glob(str(DATA / "matrix_O2_latin_*")))
-    tag = "O2"
+    # Newest balanced matrix first, then the older one. `tag` was set here and
+    # never read, so the footer said "Run O2" whichever run was actually
+    # plotted - including the fallback, which is not a Latin square.
+    src = sorted(glob.glob(str(DATA / "matrix_O3_latin_*"))) \
+        or sorted(glob.glob(str(DATA / "matrix_O2_latin_*")))
     if not src:
         src = sorted(glob.glob(str(DATA / "matrix_O_headtohead_*")))
-        tag = "O"
     if not src:
         print("  no head-to-head data - skipping chart")
         return
     run = Path(src[-1])
+    tag = run.name.split("_")[1]
     arms = load(f"{run.name}/*__rep*.json")
+
+    # Whether every arm visited every position is a property of the run, not of
+    # its name. `t_start` is time.perf_counter() inside the one driver process,
+    # so it orders the arm-runs within a block.
+    _blocks: dict = defaultdict(list)
+    for _rs in arms.values():
+        for _r in _rs:
+            if _r.get("rows"):
+                _blocks[_r["repeat"]].append(
+                    (min(x["t_start"] for x in _r["rows"]), _r["arm"]))
+    _pos: dict = defaultdict(list)
+    for _rep in sorted(_blocks):
+        for _i, (_, _a) in enumerate(sorted(_blocks[_rep])):
+            _pos[_a].append(_i + 1)
+    _n = len(_pos)
+    _per = (len(next(iter(_pos.values()))) / _n) if _pos else 0
+    balanced = bool(_pos) and _per == int(_per) and all(
+        sorted(v) == sorted(list(range(1, _n + 1)) * int(_per)) for v in _pos.values())
     if "baseline" not in arms:
         print("  no baseline in the head-to-head run - skipping chart")
         return
@@ -421,9 +442,10 @@ def plot_head_to_head() -> None:
         dn = sum(x["draft_n"] for r in runs for x in r["rows"])
         da = sum(x["draft_n_accepted"] for r in runs for x in r["rows"])
         rows.append((a, pooled(runs), (100*da/dn) if dn else None, fam(a)))
-    record("head_to_head", rows=[{"arm": a, "pooled": pl,
-                                 "acceptance_pct": ac, "family": fm}
-                                for a, pl, ac, fm in rows])
+    record("head_to_head", run=run.name, position_balanced=balanced,
+           rows=[{"arm": a, "pooled": pl,
+                 "acceptance_pct": ac, "family": fm}
+                for a, pl, ac, fm in rows])
     rows.sort(key=lambda r: r[1])
 
     fig, ax = plt.subplots(figsize=(10.4, 6.2))
@@ -471,8 +493,9 @@ def plot_head_to_head() -> None:
     _footer(fig,
             base=f"2026-08-26, llama.cpp 3737e4137, one RTX 3090, "
                  f"Qwen3.6-35B-A3B-UD-Q4_K_XL, greedy, thinking on, ten prompts. "
-                 f"Run O2: {n_blocks} balanced Latin-square blocks, every arm at every "
-                 f"position exactly once. Controls and caveats: ERRATA.md, "
+                 f"Run {tag} ({run.name}): {n_blocks} blocks, "
+                 f"{'position-balanced - every arm at every position an equal number of times' if balanced else 'NOT position-balanced, so arm position is confounded with time'}, "
+                 f"verified from the arm-runs' own timestamps. Controls and caveats: ERRATA.md, "
                  f"v4_audit_2026_08_25/README.md.",
             extra=" Bars are pooled decode rate; the interval is a 95 % paired block "
                   "interval against the baseline measured in the same block. Acceptance "

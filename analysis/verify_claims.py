@@ -977,7 +977,6 @@ chk("coverage at 94 < 0.95", 1-(1-rho)**94 < 0.95, True)
 chk("coverage at 95 >= 0.95", 1-(1-rho)**95 >= 0.95, True)
 
 print("\n=== do the documents actually quote these figures? ===")
-import pathlib
 
 # The documents use typographic minus (U+2212) and en/em dashes; a needle typed
 # with an ASCII hyphen would fail against correct prose. Twice during this audit
@@ -1431,7 +1430,6 @@ chk("ERRATA says which run each timing table belongs to",
 
 
 print("\n=== A16: run T against run T3 ===")
-import csv as _csv2
 _er_a16 = " ".join(_norm(pathlib.Path(__file__).resolve().parents[1]
                          .joinpath("ERRATA.md").read_text(encoding="utf-8")).split())
 
