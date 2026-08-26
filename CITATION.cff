@@ -7,6 +7,8 @@ message: >-
   v1.0 through v3.0 contain claims retracted by the 2026-08-25 audit; see
   ERRATA.md.
 type: dataset
+version: v4.1
+date-released: 2026-08-26
 authors:
   - family-names: Tsai
     given-names: Hsiu-Chi

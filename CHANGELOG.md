@@ -106,6 +106,11 @@ matched no-speculation baseline inside every run. The headline reverses.
 
 ## [v4.0] — 2026-08-25 · audit and retraction
 
+> Never tagged or published on its own. Its changes ship inside **v4.1**, whose
+> tag both entries link to. The two entries are kept separate because they
+> document different work: v4.0 corrected what had been published, v4.1 measured
+> what had not been run.
+
 A full adversarial re-examination of everything this repository has published.
 No raw measurement file was edited; `results/`, `v2_3090_followup/v2_*/`,
 `exp2_codejson_n3/master.log`, and `v3_dflash_2026_05_07/data/` are
@@ -218,7 +223,7 @@ speculative activity beat its matched no-speculation reference in aggregate.
 That statement is narrower than what was published, and it is what the data
 support.
 
-## [Sibling-repo notice] — vllm-2x3090 v5.0 (2026-05-17)
+## Sibling-repo notice — vllm-2x3090 v5.0 (2026-05-17)
 
 A natural follow-up to this repo's MTP findings was published in the sibling [`qwen3.6-vllm-2x3090` v5.0](https://github.com/thc1006/qwen3.6-vllm-2x3090/releases/tag/v5.0): a same-hardware A/B between the production MoE Qwen3.6-35B-A3B-AWQ + MTP k=3 + TP=2 stack and the new dense sibling **Qwen3.6-27B-AWQ** on a voice-agent workload (10 prompts × 3 trials × 2 models = 60 samples).
 
@@ -466,10 +471,11 @@ threshold (~94 tokens for this sparsity), so each drafted token pulls
 new experts through the memory hierarchy and verification pays for
 the union.
 
-[Unreleased]: https://github.com/thc1006/qwen3.6-speculative-decoding-rtx3090/compare/v4.0...HEAD
-[v4.0]: https://github.com/thc1006/qwen3.6-speculative-decoding-rtx3090/releases/tag/v4.0
+[v4.1]: https://github.com/thc1006/qwen3.6-speculative-decoding-rtx3090/releases/tag/v4.1
+[v4.0]: https://github.com/thc1006/qwen3.6-speculative-decoding-rtx3090/releases/tag/v4.1
 [v3.0]: https://github.com/thc1006/qwen3.6-speculative-decoding-rtx3090/releases/tag/v3.0
 [v2.3]: https://github.com/thc1006/qwen3.6-speculative-decoding-rtx3090/releases/tag/v2.3
+[v2.2]: https://github.com/thc1006/qwen3.6-speculative-decoding-rtx3090/releases/tag/v2.3
 [v2.1]: https://github.com/thc1006/qwen3.6-speculative-decoding-rtx3090/releases/tag/v2.1
 [v2.0]: https://github.com/thc1006/qwen3.6-speculative-decoding-rtx3090/releases/tag/v2.0
 [v1.0]: https://github.com/thc1006/qwen3.6-speculative-decoding-rtx3090/releases/tag/v1.0
