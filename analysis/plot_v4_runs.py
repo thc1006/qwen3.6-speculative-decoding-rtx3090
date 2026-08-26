@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import glob
 import json
+import os
 import sys
 import statistics as st
 from collections import defaultdict
@@ -380,11 +381,14 @@ def plot_head_to_head() -> None:
     # Prefer run O2, the balanced Latin square, and draw its block-level
     # intervals. Run O is the same arms at three repeats with the list merely
     # reversed on odd repeats, which leaves arm position confounded with time.
-    # Newest balanced matrix first, then the older one. `tag` was set here and
-    # never read, so the footer said "Run O2" whichever run was actually
-    # plotted - including the fallback, which is not a Latin square.
-    src = sorted(glob.glob(str(DATA / "matrix_O3_latin_*"))) \
-        or sorted(glob.glob(str(DATA / "matrix_O2_latin_*")))
+    # The run the documents are built on, named explicitly rather than picked by
+    # a glob that a later run could win: a chart that silently switches source
+    # would disagree with the table beside it. Override with BENCH_PLOT_RUN.
+    # `tag` was set here and never read, so the footer said "Run O2" whichever
+    # run was actually plotted - including the fallback, which is not a Latin
+    # square.
+    want = os.environ.get("BENCH_PLOT_RUN", "matrix_O2_latin_*")
+    src = sorted(glob.glob(str(DATA / want)))
     if not src:
         src = sorted(glob.glob(str(DATA / "matrix_O_headtohead_*")))
     if not src:
