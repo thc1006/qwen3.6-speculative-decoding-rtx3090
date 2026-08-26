@@ -18,7 +18,14 @@
 > inside each run, thinking suppression verified per request rather than
 > assumed, concurrent client requests verified from request timestamps, full per-request text
 > and token ids, and continuous GPU telemetry. Its findings are the ones to
-> cite about current llama.cpp.
+> cite about current llama.cpp, with two limits stated up front rather than
+> buried: the same configuration measured five times spans **6.0 pp**
+> ([A16](ERRATA.md#a16-two-runs-identical-in-every-recorded-respect-and-byte-identical-in-output-differ-by-34--on-one-arm)),
+> so quote the range and not the interval; and **every thinking-off comparison
+> here is confounded by output length**
+> ([A17](ERRATA.md#a17-the-thinking-off-comparisons-are-not-comparisons-of-the-same-amount-of-work)),
+> which flips one published sign. The thinking-on results, which is everything
+> in the table below, are unaffected by the second.
 >
 > The audit **retracted this repository's headline mechanism.** Earlier versions
 > reported "100 % draft acceptance yet slower, therefore MoE expert-loading
