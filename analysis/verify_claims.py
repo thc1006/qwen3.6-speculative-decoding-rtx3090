@@ -1563,6 +1563,42 @@ for _arm in _mT["arms"]:
 _ck3 = st.mean([r["checkpoint_total_s"] for r in
                 json.load(open(f"{_T3}/checkpoint_timers.json"))
                 if r["arm"] == "spec-draft-n8"])
+# the per-prompt claims A16 makes, each one checked rather than summarised
+_pp: dict = {}
+for _lbl, _d in (("T", _T), ("T3", _T3)):
+    for _f in glob.glob(f"{_d}/*__rep*.json"):
+        _r = json.load(open(_f))
+        for _x in _r["rows"]:
+            _k = (_lbl, _r["arm"], _x["tag"])
+            _v = _pp.setdefault(_k, [0, 0, 0, 0.0])
+            _v[0] += _x["draft_n"]
+            _v[1] += _x["draft_n_accepted"]
+            _v[2] += _x["predicted_n"]
+            _v[3] += _x["predicted_ms"]
+_arms3 = sorted({k[1] for k in _pp})
+_acc_gap, _ratio_gap, _rate_gap = [], [], []
+for _arm in _arms3:
+    for _tag in sorted({k[2] for k in _pp if k[1] == _arm}):
+        _a, _b = _pp[("T", _arm, _tag)], _pp[("T3", _arm, _tag)]
+        if _a[0] and _b[0]:
+            _acc_gap.append(abs(100 * _a[1] / _a[0] - 100 * _b[1] / _b[0]))
+            _ratio_gap.append(abs(_a[0] / _a[2] - _b[0] / _b[2]))
+        _rate_gap.append(100 * ((_b[2] / _b[3]) / (_a[2] / _a[3]) - 1))
+chk("A16 acceptance matches to a tenth of a point on every prompt",
+    round(max(_acc_gap), 2) <= 0.1, True)
+chk("A16 draft tokens per generated token match to three decimals",
+    round(max(_ratio_gap), 4) < 0.0005, True)
+_dflash = []
+for _tag in sorted({k[2] for k in _pp if k[1] == "spec-dflash-n2"}):
+    _a, _b = _pp[("T", "spec-dflash-n2", _tag)], _pp[("T3", "spec-dflash-n2", _tag)]
+    _dflash.append(100 * ((_b[2] / _b[3]) / (_a[2] / _a[3]) - 1))
+chk("A16 the DFlash shortfall is on every prompt",
+    sorted({x < 0 for x in _dflash}), [True])
+chk("A16 the smallest per-prompt DFlash shortfall (%)",
+    round(max(_dflash), 1), -0.6, 0.05)
+chk("A16 the largest per-prompt DFlash shortfall (%)",
+    round(min(_dflash), 1), -4.7, 0.05)
+
 chk("A16 T3 checkpoint total (s)", round(_ck3, 3), 39.159, 0.0005)
 chk("A16 T3 creates and restores match run T",
     sorted({(r["creates"], r["restores"]) for r in
