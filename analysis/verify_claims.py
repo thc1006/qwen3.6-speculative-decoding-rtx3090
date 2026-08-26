@@ -1692,6 +1692,16 @@ chk("every run directory carries a manifest",
     sorted(d.name for d in _dirs if not (d / "manifest.json").is_file()), [])
 _attested = [d for d in _dirs if (d / "RUN_COMPLETE.json").is_file()]
 chk("attested runs carry the completeness marker", len(_attested) >= 3, True)
+# `paired_blocks.py` writes its output INTO the run directory, so an
+# exploratory invocation with different options silently replaces committed
+# data. Two of these were committed at --iters=2000 from a run I made while
+# looking at something else.
+_pbs = {os.path.basename(os.path.dirname(f)):
+        json.load(open(f)).get("bootstrap_iters")
+        for f in glob.glob("v4_audit_2026_08_25/data/*/paired_blocks.json")}
+chk("every committed paired_blocks.json used the default iteration count",
+    sorted(k for k, v in _pbs.items() if v != 20000), [])
+chk("run directories carrying one", len(_pbs) >= 5, True)
 chk("no run directory carries a failure marker",
     sorted(d.name for d in _dirs if (d / "RUN_FAILED.json").is_file()), [])
 

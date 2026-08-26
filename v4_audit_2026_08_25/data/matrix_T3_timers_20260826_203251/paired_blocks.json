@@ -1,7 +1,7 @@
 {
   "baseline": "baseline",
   "blocks": 3,
-  "bootstrap_iters": 2000,
+  "bootstrap_iters": 20000,
   "arms": [
     {
       "arm": "spec-dflash-n2",

@@ -1,0 +1,59 @@
+{
+  "baseline": "baseline",
+  "blocks": 5,
+  "bootstrap_iters": 20000,
+  "arms": [
+    {
+      "arm": "spec-mtp-n2",
+      "point_pct": 11.51,
+      "ci95_boot_pct": [
+        11.0,
+        12.06
+      ],
+      "ci95_t_pct": [
+        10.64,
+        12.38
+      ],
+      "blocks": 5
+    },
+    {
+      "arm": "spec-dflash-n2",
+      "point_pct": 11.35,
+      "ci95_boot_pct": [
+        11.03,
+        11.81
+      ],
+      "ci95_t_pct": [
+        10.7,
+        12.0
+      ],
+      "blocks": 5
+    },
+    {
+      "arm": "spec-dflash-n4",
+      "point_pct": -1.35,
+      "ci95_boot_pct": [
+        -1.57,
+        -1.1
+      ],
+      "ci95_t_pct": [
+        -1.72,
+        -0.97
+      ],
+      "blocks": 5
+    },
+    {
+      "arm": "spec-draft-n8",
+      "point_pct": -76.76,
+      "ci95_boot_pct": [
+        -76.83,
+        -76.7
+      ],
+      "ci95_t_pct": [
+        -76.87,
+        -76.66
+      ],
+      "blocks": 5
+    }
+  ]
+}
