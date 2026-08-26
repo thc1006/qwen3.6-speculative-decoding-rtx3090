@@ -38,6 +38,7 @@ C_REF = "#3f6d9e"       # no speculation
 C_ACTIVE = "#c0504d"    # matched-vocabulary drafter
 C_DFLASH = "#4a7c59"    # DFlash
 C_DFLASH2 = "#8fae7f"   # DFlash, second configuration
+C_INACTIVE = "#8d9aa8"  # drafter-free n-gram methods
 
 FOOTER = ("2026-08-26, llama.cpp 3737e4137, one RTX 3090, Qwen3.6-35B-A3B-UD-Q4_K_XL, "
           "greedy, thinking on, ten prompts, three repeats per arm. "
@@ -300,7 +301,72 @@ def plot_acceptance_threshold() -> None:
     print(f"  wrote {(OUT / 'plot_acceptance_threshold.png').relative_to(ROOT)}")
 
 
+# ----------------------------------------------------------------- run O ----
+def plot_head_to_head() -> None:
+    """Every method against one baseline, in one matrix, under one policy.
+
+    Bars are coloured by what the drafter IS, not by how it scored, because
+    that is the finding: the winners and losers separate by drafter
+    architecture and not by acceptance, draft length, or n-gram versus model.
+    """
+    arms = load("matrix_O_headtohead_*/*__rep*.json")
+    if "baseline" not in arms:
+        print("  no run O data - skipping head-to-head chart")
+        return
+    base = pooled(arms["baseline"])
+    FAMILY = {
+        "spec-dflash": ("self-speculative (target's own layers)", C_DFLASH),
+        "spec-mtp":    ("self-speculative (target's own MTP head)", "#2f7d5a"),
+        "spec-draft":  ("external draft model", C_ACTIVE),
+        "ngram":       ("drafter-free n-gram", C_INACTIVE),
+        "baseline":    ("no speculation", C_REF),
+    }
+    def fam(a):
+        for k in FAMILY:
+            if a.startswith(k):
+                return k
+        return "ngram"
+    rows = []
+    for a, runs in arms.items():
+        dn = sum(x["draft_n"] for r in runs for x in r["rows"])
+        da = sum(x["draft_n_accepted"] for r in runs for x in r["rows"])
+        rows.append((a, pooled(runs), (100*da/dn) if dn else None, fam(a)))
+    rows.sort(key=lambda r: r[1])
+
+    fig, ax = plt.subplots(figsize=(10.4, 6.2))
+    y = range(len(rows))
+    for i, (a, p_, acc, f) in enumerate(rows):
+        ax.barh(i, p_, height=0.66, color=FAMILY[f][1], alpha=0.92,
+                edgecolor="white", linewidth=0.6)
+        d = 100*(p_/base - 1)
+        lbl = f"{p_:.1f}   {d:+.1f} %" + (f"   acc {acc:.1f} %" if acc is not None else "")
+        ax.text(p_ + 2.0, i, lbl, va="center", ha="left", fontsize=8.8, color="#1f1f24")
+    ax.set_yticks(list(y))
+    ax.set_yticklabels([r[0] for r in rows], fontsize=9)
+    ax.axvline(base, color=C_REF, ls="--", lw=1.2)
+    ax.text(base, len(rows)-0.35, f" no speculation, {base:.1f}", color=C_REF,
+            fontsize=8.8, va="top", ha="left")
+    ax.set_xlim(0, max(r[1] for r in rows) * 1.34)
+    ax.set_xlabel("pooled decode throughput (tokens / second)  -  higher is faster")
+    ax.set_title("Nine methods, one baseline, one matrix, one memory policy\n"
+                 "the divide is whether the drafter is a second model - not acceptance, "
+                 "not draft length",
+                 fontsize=11.5)
+    handles = [plt.Rectangle((0, 0), 1, 1, color=v[1], label=v[0])
+               for v in FAMILY.values()]
+    ax.legend(handles=handles, loc="lower right", fontsize=8.4, frameon=False)
+    ax.grid(axis="x", color="#dcdcdc", lw=0.6)
+    ax.set_axisbelow(True)
+    plt.tight_layout(rect=[0, 0.06, 1, 1])
+    _footer(fig, " spec-draft-n1 accepts 69.7 % of its drafts and is 73 % slower: "
+                 "acceptance does not decide this.")
+    plt.savefig(OUT / "plot_head_to_head.png", dpi=150, bbox_inches="tight")
+    plt.close()
+    print(f"  wrote {(OUT / 'plot_head_to_head.png').relative_to(ROOT)}")
+
+
 if __name__ == "__main__":
     plot_batching()
     plot_dflash_sweep()
     plot_acceptance_threshold()
+    plot_head_to_head()

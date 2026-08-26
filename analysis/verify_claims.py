@@ -434,6 +434,106 @@ for name, pat, lo, hi, drift, swt in (("I+J", "gpu_telemetry_IJ_*.csv", 55, 73, 
         chk(f"thermal {name}: clock drift first->second half (%)",
             round(abs(100*(st.mean(ck[h:])/st.mean(ck[:h])-1)), 2), drift, 0.005)
 
+print("\n=== runs M, N and O (2026-08-26) ===")
+def _agg(pat, arm):
+    rs = [json.load(open(f)) for f in glob.glob(f"v4_audit_2026_08_25/data/{pat}/{arm}__rep*.json")]
+    rs = [r for r in rs if r.get("rows")]
+    if not rs: return None
+    n = sum(x["predicted_n"] for r in rs for x in r["rows"])
+    ms = sum(x["predicted_ms"] for r in rs for x in r["rows"])
+    dn = sum(x["draft_n"] for r in rs for x in r["rows"])
+    da = sum(x["draft_n_accepted"] for r in rs for x in r["rows"])
+    a = [r["aggregate_tok_s"] for r in rs if r.get("wall_s")]
+    return {"pooled": 1000*n/ms, "agg": st.mean(a), "acc": (100*da/dn) if dn else None,
+            "drafted": dn, "reps": len(rs)}
+
+# M1: both self-speculative families under one policy
+_b = _agg("matrix_M1_*", "baseline")
+chk("M1 baseline aggregate", round(_b["agg"], 1), 103.3, 0.05)
+for arm, agg_, delta, acc in (("spec-mtp-n1", 118.4,  14.6, 89.0),
+                              ("spec-mtp-n2", 122.5,  18.6, 78.4),
+                              ("spec-mtp-n4", 111.5,   8.0, 61.4),
+                              ("spec-mtp-n8",  71.4, -30.9, 41.4),
+                              ("spec-dflash-n2", 127.3, 23.2, 72.3),
+                              ("spec-dflash-n4", 119.9, 16.1, 55.2)):
+    v = _agg("matrix_M1_*", arm)
+    chk(f"M1 {arm} aggregate", round(v["agg"], 1), agg_, 0.05)
+    chk(f"M1 {arm} vs baseline", round(100*(v["agg"]/_b["agg"]-1), 1), delta, 0.05)
+    chk(f"M1 {arm} acceptance %", round(v["acc"], 1), acc, 0.05)
+chk("M1 DFlash beats MTP at the same draft length",
+    _agg("matrix_M1_*", "spec-dflash-n2")["agg"] > _agg("matrix_M1_*", "spec-mtp-n2")["agg"], True)
+
+# M4: the drafter-precision objection
+_b4 = _agg("matrix_M4_q4km_*", "baseline")
+for arm, delta, acc in (("spec-mtp-n2", 22.3, 79.4), ("spec-mtp-n4", 1.2, 60.6)):
+    v = _agg("matrix_M4_q4km_*", arm)
+    chk(f"M4 Q4_K_M {arm} vs baseline", round(100*(v["agg"]/_b4["agg"]-1), 1), delta, 0.05)
+    chk(f"M4 Q4_K_M {arm} acceptance %", round(v["acc"], 1), acc, 0.05)
+chk("M4 the more quantised drafter is FASTER at n_max 2",
+    100*(_agg("matrix_M4_q4km_*","spec-mtp-n2")["agg"]/_b4["agg"]-1) >
+    100*(_agg("matrix_M1_*","spec-mtp-n2")["agg"]/_b["agg"]-1), True)
+
+# M3: thinking off, pooled (outputs differ in length by arm - A11)
+_b3 = _agg("matrix_M3_thinkoff_*", "baseline")
+chk("M3 repeats", _b3["reps"], 5)
+for arm, delta, acc in (("spec-mtp-n2", 11.4, 67.5), ("spec-mtp-n4", -8.2, 49.5),
+                        ("spec-dflash-n2", 8.5, 58.4)):
+    v = _agg("matrix_M3_thinkoff_*", arm)
+    chk(f"M3 think-off {arm} pooled vs baseline", round(100*(v["pooled"]/_b3["pooled"]-1), 1), delta, 0.05)
+    chk(f"M3 think-off {arm} acceptance %", round(v["acc"], 1), acc, 0.05)
+chk("M3 the DFlash/MTP ranking flips with thinking off",
+    _agg("matrix_M3_thinkoff_*","spec-mtp-n2")["pooled"] >
+    _agg("matrix_M3_thinkoff_*","spec-dflash-n2")["pooled"], True)
+
+# M2: MTP degrades gracefully where DFlash collapses
+for c, delta in ((4, 3.4), (8, -7.6)):
+    bb = _agg(f"matrix_M2_conc{c}_*", "baseline"); vv = _agg(f"matrix_M2_conc{c}_*", "spec-mtp-n2")
+    chk(f"M2 c={c} mtp-n2 vs baseline", round(100*(vv["agg"]/bb["agg"]-1), 1), delta, 0.05)
+    peaks = sorted({json.load(open(f)).get("max_in_flight")
+                    for f in glob.glob(f"v4_audit_2026_08_25/data/matrix_M2_conc{c}_*/*__rep*.json")})
+    chk(f"M2 c={c} batch actually formed", peaks, [c])
+chk("M2 MTP at c=8 loses far less than DFlash did", -7.6 > -74.1, True)
+
+# N: the ngram-map arms never engage
+_bn = _agg("matrix_N_ngrammap_*", "baseline")
+for arm, drafted in (("ngram-map-k", 144), ("ngram-map-k-m8", 24), ("ngram-map-k-m4", 12),
+                     ("ngram-map-k4v", 144), ("ngram-map-k4v-m8", 24), ("ngram-map-k4v-m4", 12)):
+    v = _agg("matrix_N_ngrammap_*", arm)
+    chk(f"N {arm} draft tokens over 30 requests", v["drafted"], drafted)
+    chk(f"N {arm} acceptance %", round(v["acc"], 1), 0.0, 0.05)
+    chk(f"N {arm} within 2 % of baseline", abs(100*(v["agg"]/_bn["agg"]-1)) < 2.0, True)
+
+# O: the head-to-head, and the threshold falsified inside one matrix
+_bo = _agg("matrix_O_headtohead_*", "baseline")
+chk("O baseline pooled", round(_bo["pooled"], 1), 117.0, 0.05)
+# both metrics, each checked against its own baseline: the first version of the
+# README table put pooled values beside aggregate deltas
+for arm, pooled_, dp, agg_, da_, acc in (
+        ("spec-dflash-n2",  145.8,  24.6, 126.6,  21.1, 72.3),
+        ("spec-mtp-n2",     142.5,  21.8, 122.8,  17.5, 78.4),
+        ("spec-dflash-n4",  138.1,  18.0, 119.6,  14.5, 55.2),
+        ("ngram-map-k4v-m8",116.1,  -0.8, 103.8,  -0.7, 50.0),
+        ("ngram-mod-n24",   103.4, -11.7,  93.5, -10.5,  5.0),
+        ("ngram-cache",      93.9, -19.7,  85.9, -17.8,  5.2),
+        ("spec-draft-n8",    30.8, -73.7,  29.8, -71.5, 29.5),
+        ("spec-draft-n1",    29.1, -75.1,  28.2, -73.0, 69.7)):
+    v = _agg("matrix_O_headtohead_*", arm)
+    chk(f"O {arm} pooled", round(v["pooled"], 1), pooled_, 0.05)
+    chk(f"O {arm} delta pooled", round(100*(v["pooled"]/_bo["pooled"]-1), 1), dp, 0.05)
+    chk(f"O {arm} aggregate", round(v["agg"], 1), agg_, 0.05)
+    chk(f"O {arm} delta aggregate", round(100*(v["agg"]/_bo["agg"]-1), 1), da_, 0.05)
+    chk(f"O {arm} acceptance %", round(v["acc"], 1), acc, 0.05)
+_o1 = _agg("matrix_O_headtohead_*", "spec-draft-n1")
+_od = _agg("matrix_O_headtohead_*", "spec-dflash-n2")
+chk("O: spec-draft-n1 has HIGHER acceptance than a winning arm", _o1["acc"] > 48.2, True)
+chk("O: and is still slower than no speculation", _o1["agg"] < _bo["agg"], True)
+chk("O: the threshold is falsified inside one matrix",
+    (_o1["acc"] > 48.2) and (_o1["agg"] < _bo["agg"]), True)
+chk("O: v1's three methods are the three worst rows",
+    sorted([("spec-draft-n1", _o1["pooled"]), ("spec-draft-n8", _agg("matrix_O_headtohead_*","spec-draft-n8")["pooled"]),
+            ("ngram-cache", _agg("matrix_O_headtohead_*","ngram-cache")["pooled"])],
+           key=lambda t: t[1])[0][0], "spec-draft-n1")
+
 print("\n=== ERRATA A12: the measured mechanism ===")
 _sa = {(r["arm"], r["run"]): r for r in
        json.load(open("v4_audit_2026_08_25/data/spec_accounting_20260826.json"))}
@@ -584,6 +684,15 @@ DOC_CLAIMS = [
     ("ERRATA.md",   "68.7 %",    "A12 threshold failure point"),
     ("README.md",   "17.24 s",   "README drafter generate time"),
     ("README.md",   "12 / 12",   "README threshold within DFlash"),
+    ("README.md",   "145.8",     "README head-to-head winner"),
+    ("README.md",   "-75.1 %",   "README head-to-head worst row, pooled"),
+    ("README.md",   "69.7 %",    "README the falsifying acceptance"),
+    ("v4_audit_2026_08_25/README.md", "+23.2 %", "M1 DFlash n2"),
+    ("v4_audit_2026_08_25/README.md", "+18.6 %", "M1 MTP n2"),
+    ("v4_audit_2026_08_25/README.md", "+22.3 %", "M4 Q4_K_M is faster"),
+    ("v4_audit_2026_08_25/README.md", "+11.4 %", "M3 MTP survives think-off"),
+    ("v4_audit_2026_08_25/README.md", "-7.6 %",  "M2 MTP at c=8"),
+    ("v4_audit_2026_08_25/README.md", "0.0 %",   "N ngram-map never engages"),
 ]
 root = pathlib.Path(__file__).resolve().parents[1]
 for f, needle, what in DOC_CLAIMS:

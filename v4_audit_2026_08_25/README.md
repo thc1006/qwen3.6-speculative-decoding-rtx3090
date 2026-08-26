@@ -683,19 +683,181 @@ entirely. Hardware is `0x8 | 0x40 | 0x80`.)
 
 ---
 
-## Answer 3 — what still needs doing
+## Run M — the method the vLLM sibling uses, now measured here too
 
-These runs settle the three questions above. They do **not** make this a
-properly powered benchmark of current llama.cpp: three repeats, ten prompts,
-one draft window, one host, and thinking is still on. The remaining queue is in
-[`../RETEST_TODO.md`](../RETEST_TODO.md) — in particular a working thinking
-control (P0-2), the draft-window sweep with cost instrumentation (P3-1), and
-DFlash on one post-merge binary (P2), which is now `--spec-type draft-dflash`.
-Post-merge master also exposes `draft-eagle3` and `draft-mtp`, which earlier
-versions of this repository listed as "not evaluated here".
+The vLLM result on this same physical hardware is an **MTP** result. Until MTP
+ran under llama.cpp on this card, "llama.cpp loses where vLLM wins" confounded
+the engine with the speculation method. Nothing was blocking it: the target's
+own multi-token-prediction head is in the checkpoint (785 plain BF16 `mtp.*`
+tensors, `text_config.mtp_num_hidden_layers = 1`), master's converter exports it
+with `--mtp`, and `LLM_ARCH_QWEN35MOE` already declares the seventeen `NEXTN`
+tensors. It had simply never been run. The head is 3.7 GB at BF16 and cannot sit
+beside a 21 GB target on a 24 GB card, so it is quantised.
 
-Absolute rates must not be compared across the two runs: no-speculation
-baseline is ~8 % faster on master than on `bcb5eeb64` on the same host.
+Both families in one matrix, one policy, three repeats — aggregate throughput:
+
+| arm | aggregate | vs no speculation | acceptance |
+|---|---|---|---|
+| **`spec-dflash-n2`** | **127.3** | **+23.2 %** | 72.3 % |
+| `spec-mtp-n2` | 122.5 | **+18.6 %** | 78.4 % |
+| `spec-dflash-n4` | 119.9 | +16.1 % | 55.2 % |
+| `spec-mtp-n1` | 118.4 | +14.6 % | 89.0 % |
+| `spec-mtp-n4` | 111.5 | +8.0 % | 61.4 % |
+| no speculation | 103.3 | — | — |
+| `spec-mtp-n8` | 71.4 | −30.9 % | 41.4 % |
+
+**MTP works, and DFlash is better.** Both peak at `n_max 2`; MTP has the higher
+acceptance at every length and still loses on throughput, because its head is a
+full MoE layer plus `lm_head` while DFlash's is smaller.
+
+### The drafter-precision objection, tested
+
+"You quantised the drafter" is the first thing to say about any MTP number here,
+since DFlash ran at BF16. So the same arms were run with a **Q4_K_M** head
+instead of Q8_0:
+
+| arm | Q8_0 drafter | Q4_K_M drafter |
+|---|---|---|
+| `spec-mtp-n2` | +18.6 % (acc 78.4 %) | **+22.3 % (acc 79.4 %)** |
+| `spec-mtp-n4` | +8.0 % (acc 61.4 %) | +1.2 % (acc 60.6 %) |
+
+At `n_max 2` the **more** aggressively quantised drafter is **faster**, at
+essentially unchanged acceptance — the head is cheaper to run and the drafts are
+just as good. So quantisation is not hiding an MTP advantage; if anything it is
+one. The `n_max 4` row moves the other way by 6.8 pp at unchanged acceptance
+(60.6 % against 61.4 %) and run-to-run SDs of 0.38 and 0.33, which those SDs do
+not explain. It is reported as measured and not explained.
+
+### Thinking off, and batching
+
+| | thinking on | thinking off (5 repeats, pooled) |
+|---|---|---|
+| `spec-mtp-n2` | +18.6 % | **+11.4 %** (acc 67.5 %) |
+| `spec-dflash-n2` | +23.2 % | +8.5 % (acc 58.4 %) |
+| `spec-mtp-n4` | +8.0 % | −8.2 % (acc 49.5 %) |
+
+The ranking **flips**: with thinking on DFlash leads, with it off MTP does. MTP
+keeps more of its acceptance when the text stops being planning prose, which is
+what a head trained on the target's own hidden states should do.
+
+Under batching MTP degrades far more gracefully than DFlash:
+
+| requests in flight | DFlash `n4` | MTP `n2` |
+|---|---|---|
+| 1 | +17.3 % | +18.6 % |
+| 4 | +0.4 % | **+3.4 %** |
+| 8 | **−74.1 %** | **−7.6 %** |
+
+DFlash collapses at eight concurrent requests; MTP loses eight per cent. Both
+lose their advantage, but only one of them falls off a cliff.
+
+---
+
+## Run N — the two methods nobody had run, and they do nothing
+
+`ngram-map-k` and `ngram-map-k4v` need no draft model, so they were the cheapest
+available test of whether "short drafts win" is about draft volume or about
+DFlash in particular. Six arms, at the upstream default `size_m 48` and at 8
+and 4:
+
+| arm | aggregate | vs baseline | draft tokens over 30 requests | acceptance |
+|---|---|---|---|---|
+| no speculation | 109.4 | — | 0 | — |
+| `ngram-map-k` (default `m48`) | 107.6 | −1.6 % | 144 | 0.0 % |
+| `ngram-map-k-m8` | 107.6 | −1.6 % | 24 | 0.0 % |
+| `ngram-map-k-m4` | 107.5 | −1.7 % | 12 | 0.0 % |
+| `ngram-map-k4v` (default) | 107.3 | −1.9 % | 144 | 0.0 % |
+| `ngram-map-k4v-m8` | 108.6 | −0.7 % | 24 | 0.0 % |
+| `ngram-map-k4v-m4` | 108.0 | −1.2 % | 12 | 0.0 % |
+
+**They never engage.** 144 draft tokens across thirty requests is three lookup
+hits — `144/48`, `24/8`, `12/4` all give exactly three — and none of them is
+accepted. The draft-length question cannot be asked of a method that does not
+draft, so run N answers a different question than it was designed to: on this
+workload the ngram-map families are a no-op that costs one to two per cent. That
+is a clean negative result for two of the eleven `--spec-type` values and it
+closes the coverage question, but it contributes nothing to the volume argument.
+
+---
+
+## Run O — every method, one baseline, one policy
+
+Runs C through N each answer one question well and sit at different contexts and
+fitter margins, so every cross-method statement so far has had to be assembled
+from deltas. This is the within-run comparison: nine arms, one baseline measured
+beside all of them, `-c 8192`, `--fit-target 3072`, ABBA ordering, three
+repeats, thinking on.
+
+| arm | pooled tok/s | Δ pooled | aggregate tok/s | Δ aggregate | acceptance | draft tokens |
+|---|---:|---:|---:|---:|---:|---:|
+| **`spec-dflash-n2`** — self-speculative | **145.8** | **+24.6 %** | 126.6 | +21.1 % | 72.3 % | 7 323 |
+| `spec-mtp-n2` — the target's own MTP head | 142.5 | +21.8 % | 122.8 | +17.5 % | 78.4 % | 6 972 |
+| `spec-dflash-n4` | 138.1 | +18.0 % | 119.6 | +14.5 % | 55.2 % | 11 163 |
+| **no speculation** | **117.0** | — | **104.5** | — | — | 0 |
+| `ngram-map-k4v-m8` | 116.1 | −0.8 % | 103.8 | −0.7 % | 50.0 % | 72 |
+| `ngram-mod-n24` | 103.4 | −11.7 % | 93.5 | −10.5 % | 5.0 % | 1 728 |
+| `ngram-cache` | 93.9 | −19.7 % | 85.9 | −17.8 % | 5.2 % | 1 566 |
+| `spec-draft-n8` — external 0.8 B drafter | 30.8 | −73.7 % | 29.8 | −71.5 % | 29.5 % | 16 704 |
+| `spec-draft-n1` — same drafter, one token | 29.1 | **−75.1 %** | 28.2 | −73.0 % | **69.7 %** | 4 470 |
+
+Three things this table settles that no earlier table could.
+
+**Self-speculation wins and external speculation loses, on the same card in the
+same hour.** The spread is 145.8 down to 29.1 pooled — a factor of five — and
+the divide is not acceptance, not draft length and not the n-gram/model
+distinction. It is whether the drafter is a second model.
+
+**The acceptance threshold is falsified inside a single matrix.**
+`spec-draft-n1` sits at **69.7 % acceptance**, higher than every winning arm
+except `spec-mtp-n2`, and is **75 % slower** on pooled decode rate, 73 % on aggregate. No reading of acceptance alone
+survives that row. What separates it from `spec-dflash-n2` at 72.3 % is the
+772 checkpoint saves and 709 restores it pays and DFlash does not
+([A12](../ERRATA.md#a12-the-mechanism-measured-it-is-state-checkpointing-and-only-the-external-drafter-path-pays-it)).
+
+**v1's methods are the three worst rows.** `ngram-cache`, `ngram-mod-n24` and
+the external drafter are what this repository originally benchmarked, and they
+occupy the bottom of the table. The original negative finding was correct about
+what it measured; it measured the losing third of the available methods.
+
+---
+
+## What is settled, and what is not
+
+Settled by runs A–O, each against a matched no-speculation baseline measured
+beside it:
+
+- the acceptance artefact and its upstream fix (A1), the vocabulary defect (A2),
+  the abort (A6), the workload the archive never controlled (A5, D3b)
+- **nine of master's eleven `--spec-type` values measured**; the other two,
+  `draft-eagle3` and `draft-dspark`, are blocked for reasons read out of the
+  source, not assumed
+- self-speculation wins on this card and external speculation loses, by a factor
+  of five, in one matrix (run O)
+- the mechanism, measured rather than argued: state checkpointing that only the
+  external-drafter path pays (A12)
+- batching does not rescue speculation and widens the gap (run I); it removes
+  DFlash's advantage entirely and MTP's partly (runs K, M)
+- the win is a property of the workload as much as the method: it halves with
+  thinking off, and the DFlash/MTP ranking flips (runs L, M)
+- speculation is not output-preserving on this build, against a determinism
+  control that holds in every run (A11)
+
+Not settled, and honestly out of reach here:
+
+| gap | why it is still open |
+|---|---|
+| ten prompts | the prompt set is small and fixed; every run shares it, so a prompt-set artefact would be invisible across all of them |
+| `multi_turn_1` / `multi_turn_2` | still two independent single-turn requests. The tags are kept for join compatibility with the archived data and the lie is documented in C3, not fixed |
+| three repeats on most arms | five on runs L and M3 only |
+| one host, one card, one quantisation | nothing here separates the model, the quantisation and the GPU |
+| `n_max 4` under a Q4_K_M MTP head | moves 6.8 pp against Q8_0 at unchanged acceptance and SDs that do not explain it |
+| the 19.5 % checkpoint share | a log-timestamp attribution, not a profile |
+| expert routing | never instrumented, and after A7 and A12 nothing demands it |
+
+Absolute rates must not be compared across runs that differ in `-ngl`, `-c` or
+`--fit-target`; the table in [`../BENCHMARK_ENV.md`](../BENCHMARK_ENV.md) says
+which is which. The no-speculation baseline is also ~8 % faster on master than
+on `bcb5eeb64` on the same host.
 
 ## Files
 

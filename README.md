@@ -57,15 +57,37 @@ is ordinary speculative-decoding economics. The "100 % acceptance yet slower,
 therefore an MoE pathology" anomaly this repository was built around does not
 exist.
 
-**And the direction is not universal.** On 2026-08-26, on the same card and
-prompt set with post-merge master, DFlash self-speculation at a short draft
-window beats a matched no-speculation control, winning on all ten prompts.
-Measured six times across three runs and two memory configurations, the gain is
-**+16 % to +19 % on aggregate throughput and +21 % to +24 % pooled**. The
-single best-powered measurement — five repeats rather than three — is +21.1 %
-pooled at `--spec-draft-n-max 2`; the largest, and the one an unfriendly reader
-should attack first, is +18.7 % aggregate at `n_max 4` in run J, which has three
-repeats and sits at the top of the range. v1 never tested that method, and the archived v3 attempt at it compared
+**And the direction is not universal.** On 2026-08-26, nine of master's eleven
+`--spec-type` methods were measured on this card against one baseline, in one
+matrix, under one memory policy — pooled decode throughput, three repeats,
+thinking on:
+
+| arm | pooled tok/s | Δ pooled | aggregate tok/s | Δ aggregate | acceptance | draft tokens |
+|---|---:|---:|---:|---:|---:|---:|
+| **`spec-dflash-n2`** — self-speculative | **145.8** | **+24.6 %** | 126.6 | +21.1 % | 72.3 % | 7 323 |
+| `spec-mtp-n2` — the target's own MTP head | 142.5 | +21.8 % | 122.8 | +17.5 % | 78.4 % | 6 972 |
+| `spec-dflash-n4` | 138.1 | +18.0 % | 119.6 | +14.5 % | 55.2 % | 11 163 |
+| **no speculation** | **117.0** | — | **104.5** | — | — | 0 |
+| `ngram-map-k4v-m8` | 116.1 | −0.8 % | 103.8 | −0.7 % | 50.0 % | 72 |
+| `ngram-mod-n24` | 103.4 | −11.7 % | 93.5 | −10.5 % | 5.0 % | 1 728 |
+| `ngram-cache` | 93.9 | −19.7 % | 85.9 | −17.8 % | 5.2 % | 1 566 |
+| `spec-draft-n8` — external 0.8 B drafter | 30.8 | −73.7 % | 29.8 | −71.5 % | 29.5 % | 16 704 |
+| `spec-draft-n1` — same drafter, one token | 29.1 | **−75.1 %** | 28.2 | −73.0 % | **69.7 %** | 4 470 |
+
+![Nine methods, one baseline, one matrix](analysis/plot_head_to_head.png)
+
+A factor of five separates the top from the bottom, and the divide is not
+acceptance, not draft length, and not model-versus-n-gram. It is **whether the
+drafter is a second model**. `spec-draft-n1` accepts 69.7 % of its drafts —
+more than every winning arm but one — and is 75 % slower, because a separate
+draft context makes this hybrid target checkpoint and restore ~101 MiB of
+recurrent state on every partially accepted round, 772 times per arm-run, which
+DFlash and MTP do zero times at every draft length from 1 to 16
+([ERRATA A12](ERRATA.md#a12-the-mechanism-measured-it-is-state-checkpointing-and-only-the-external-drafter-path-pays-it)).
+
+**The three methods v1 benchmarked are the bottom three rows.** The original
+negative finding was right about what it measured. It measured the losing third
+of the available methods. v1 never tested that method, and the archived v3 attempt at it compared
 two different binaries. The sign flips with the draft window — +18.7 % at 4,
 −14.8 % at 8, −47.4 % at 16 — so "speculative decoding loses here" was a
 statement about draft-window regimes that this repository had not yet separated.
@@ -586,12 +608,19 @@ Details and controls in
 ### The vLLM sibling result
 
 [`thc1006/qwen3.6-vllm-2x3090`](https://github.com/thc1006/qwen3.6-vllm-2x3090)
-reports a positive vLLM MTP result on the same physical hardware. It is a
-useful counterexample to any engine-independent claim, and it is **not** a
-matched cross-engine control: two GPUs, tensor parallelism, a different engine,
-a different quantisation stack, built-in MTP heads, different flags, and a
-different protocol. Cite it as related evidence; do not use it to decompose the
-cause of the llama.cpp result.
+reports a positive vLLM **MTP** result on the same physical hardware. It is
+still **not** a matched cross-engine control — two GPUs, tensor parallelism, a
+different engine, a different quantisation stack, different flags, a different
+protocol — so do not use it to decompose the cause of the llama.cpp result.
+
+But one thing it used to confound is now separated. "llama.cpp loses where vLLM
+wins" could have been about the engine or about the method, because the method
+vLLM used had never been run under llama.cpp here. It has been now: the same
+target's own MTP head, exported with the stock converter, is **+17.5 %** against
+a matched baseline in run O and **+18.6 %** in run M. MTP is not what llama.cpp
+was failing at — this repository had simply never pointed llama.cpp at it. What
+remains between the two results is the engine, the parallelism and the
+quantisation stack, and none of those is measured here.
 
 ---
 

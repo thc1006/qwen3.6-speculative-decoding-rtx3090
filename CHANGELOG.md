@@ -6,6 +6,87 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning is not strictly semver — each numbered release is a public
 publication point with its own data set.
 
+## [v4.1] — 2026-08-26 · the controlled tier, and a reversal
+
+v4.0 audited what this repository had published. v4.1 measures what it had never
+run. Nine of master's eleven `--spec-type` methods, on one card, against a
+matched no-speculation baseline inside every run. The headline reverses.
+
+### Added
+
+- **Runs I–O**, 110 arm-runs on post-merge master `3737e4137`, each with its own
+  baseline, ABBA ordering, 3–5 repeats, per-request text and token ids,
+  recorded batch width, and a continuous GPU trace:
+
+  | run | question | answer |
+  |---|---|---|
+  | I | does batching rescue speculation, as upstream says? | no — no-speculation gains +64 % at eight in flight, the drafter −8 % |
+  | J | DFlash off vs on, one binary — the A/B v3 never had | **+18.7 %**, and it reverses v3's sign |
+  | K | where is the optimum, and does it survive batching? | a plateau at `n_max` 2–4, a cliff after; batching erases it |
+  | L | does the win survive the workload changing? | it halves with thinking off, and `n_max 4` goes negative |
+  | M | `draft-mtp` — the method the vLLM sibling uses | **+17.5 to +21.8 %**; nothing was blocking it, it had never been run |
+  | N | `ngram-map-k` / `k4v`, never run here | they never engage: 0.0 % acceptance, three lookup hits in thirty requests |
+  | O | every method, one baseline, one matrix, one policy | a factor of five, split by drafter architecture |
+
+- **ERRATA A11** — speculation is not output-preserving on this build. Against a
+  determinism control that holds in every run (170/170 self-reproducible), token
+  streams differ from no-speculation in 27–30 of 30 request-pairs at the
+  300-token cap, and the divergence rate tracks output length.
+- **ERRATA A12** — the mechanism, measured. An external drafter forces the
+  hybrid target to checkpoint and restore 82.079 MiB of target state plus
+  19.266 MiB of draft state on every partially accepted round: 772 saves and 709
+  restores per arm-run, ≈133 GiB of state traffic, ≈19.5 % of the wall clock.
+  DFlash and MTP do it **zero** times at every draft length from 1 to 16.
+- `analysis/plot_v4_runs.py`, `analysis/extract_spec_accounting.py`,
+  `bench/stage_mtp_source.py`, and four new charts.
+
+### Changed
+
+- **The headline.** "Every tested condition that recorded speculative activity
+  was slower" is still true of the archival tier, and the archival tier tested
+  the losing third of the methods. Self-speculation wins here by a fifth;
+  external speculation loses by three quarters. The README leads with the
+  nine-arm table rather than with v1's negative.
+- README now describes an archival tier and a controlled tier separately, and
+  says which to cite about current llama.cpp. Its IMPORTANT block had claimed
+  this repository holds only 2026-04-21…05-07 data and "is not a benchmark of
+  current llama.cpp master"; both were false once runs A–O existed.
+- `BENCHMARK_ENV.md` gains the v4 artefact hashes and, more usefully, the
+  memory-policy table — `-ngl`, `-c` and `--fit-target` are variables across
+  these runs, which is exactly why absolute rates do not transfer between them.
+- `bench/retest_runner.py`: `BENCH_CONCURRENCY` now actually dispatches
+  concurrently and reads the achieved batch width back out of request
+  timestamps; `wait_health` notices a dead server instead of burning a
+  300-second timeout; `stop_server` waits for the driver to release VRAM;
+  `BENCH_CTX` and `BENCH_FIT_TARGET` make the memory policy explicit.
+
+### Retracted
+
+- **"A configuration is worth running when it clears ~48 % draft acceptance."**
+  Published in this repository on 2026-08-26 and falsified the same day. It is
+  12/12 inside the DFlash family and fails on the external drafter exactly where
+  it should matter: `spec-draft-n1` reaches **68.7 % acceptance and is 74.8 %
+  slower**. Scored per family it is 21/23, and both failures are at the
+  high-acceptance end. The threshold is a property of the drafter, not of
+  acceptance — see A12.
+- **v3's DFlash direction.** What v3 measured at short draft windows was a
+  binary change, not a DFlash penalty.
+- **"vLLM MTP remains the only positive-yield speculative decoding path on this
+  hardware"** (`pr_comment.md`). MTP now runs under llama.cpp here, and so does
+  DFlash, and both are positive.
+
+### Fixed
+
+- The data map described `bench/retest_runner.py` as "never executed"; it
+  produced every v4 measurement.
+- `RETEST_TODO.md`'s MTP entry was wrong twice — first "no head weights", then
+  "a converter gap". The weights are present, and the stock converter and stock
+  runtime both support the architecture. A patch attempt refuted the second
+  claim in one step with `TypeError: Cannot create a consistent MRO`.
+- Two independent waiter loops raced and ran two benchmarks on one card for
+  ninety seconds. Everything they touched was discarded and the runs re-driven
+  from a single sequential process.
+
 ## [v4.0] — 2026-08-25 · audit and retraction
 
 A full adversarial re-examination of everything this repository has published.
