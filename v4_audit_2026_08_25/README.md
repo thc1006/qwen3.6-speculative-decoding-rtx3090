@@ -1097,14 +1097,16 @@ Not settled, and honestly out of reach here:
 
 | gap | why it is still open |
 |---|---|
-| three repeats on most arms | five on runs L and M3 only |
+| three repeats on most arms | five on runs L and M3, **nine on run O2**, the balanced matrix the headline uses |
 | one host, one card, one quantisation | nothing here separates the model, the quantisation and the GPU |
 | ~~`n_max 4` under a Q4_K_M MTP head~~ | **closed by run Q.** It was one Q8_0 measurement that did not replicate, not a drafter-precision effect ([A14](../ERRATA.md#a14-within-run-repeats-are-not-an-error-bar)) |
 | ~~ten prompts~~ | **closed by runs P and R.** Twenty different prompts, sharing none with the v1 set, move the decode speed-up by at most 4.3 pp |
 | ~~`multi_turn_1` / `multi_turn_2`~~ | **closed for new runs.** The extended set carries two genuinely multi-turn exchanges, gated on the model recalling four-turn-old context. The v1 tags keep their names and their behaviour so archived joins still work |
 | between-run reproducibility | median 0.56 pp over ten independently repeated pairs, and one pair at 8.5 pp that resisted every check ([A14](../ERRATA.md#a14-within-run-repeats-are-not-an-error-bar)) |
-| the wall-clock cost of checkpointing | **not measured; the previous estimate is withdrawn.** The create and restore messages sit on opposite sides of the work they name, so a next-log-line interval times one direction and not the other. Needs the timers upstream left commented out at `server-context.cpp:2963` and `:2967` |
-| the other 76 % of the external drafter's excess decode time | checkpoint work and verification of discarded tokens, in unknown proportion |
+| ~~the wall-clock cost of checkpointing~~ | **closed by runs T and T3.** The timers upstream left commented out at `server-context.cpp:2963` and `:2967` were uncommented and three more added: **39.08 s of a 71.4 s excess, 54.7 %**, replicated at 54.6 % in a second balanced run ([A12](../ERRATA.md#a12-what-the-checkpoint-path-costs-measured-with-timers-in-the-source)) |
+| the unattributed 21 % of the external drafter's excess decode time | 54.7 % is checkpoint work and 24.2 % is the drafter's own `generate()`; the remainder is verification of discarded tokens and scheduling, in unknown proportion. The figure was "the other 76 %" before the timers existed |
+| why two runs of the same configuration differ by 3.4 % on one arm | identical binary, identical models, identical fit, identical clocks, byte-identical output ([A16](../ERRATA.md#a16-two-runs-identical-in-every-recorded-respect-and-byte-identical-in-output-differ-by-34--on-one-arm)). Nothing recorded distinguishes them |
+| every thinking-off comparison here | the arms generated different numbers of tokens, and controlling for it moves each model-drafting arm by +2.5 to +16.8 pp and flips one published sign ([A17](../ERRATA.md#a17-the-thinking-off-comparisons-are-not-comparisons-of-the-same-amount-of-work)). `BENCH_IGNORE_EOS` measures it properly; no archived run used it |
 | expert routing | never instrumented, and after A7 and A12 nothing demands it |
 
 Absolute rates must not be compared across runs that differ in `-ngl`, `-c` or

@@ -1080,6 +1080,12 @@ DOC_CLAIMS = [
     ("v4_audit_2026_08_25/README.md", "+11.4 %", "M3 MTP survives think-off"),
     ("v4_audit_2026_08_25/README.md", "-7.6 %",  "M2 MTP at c=8"),
     ("v4_audit_2026_08_25/README.md", "0.0 %",   "N ngram-map never engages"),
+    ("v4_audit_2026_08_25/README.md", "closed by runs T and T3",
+     "the checkpoint wall-clock gap is no longer listed as open"),
+    ("v4_audit_2026_08_25/README.md", "A16",
+     "the unexplained between-run shift is listed as open"),
+    ("v4_audit_2026_08_25/README.md", "A17",
+     "the length confound is listed as open"),
 ]
 root = pathlib.Path(__file__).resolve().parents[1]
 for f, needle, what in DOC_CLAIMS:
