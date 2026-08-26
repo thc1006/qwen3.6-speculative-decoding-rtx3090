@@ -1300,10 +1300,20 @@ _REWRITE = json.load(open("v4_audit_2026_08_25/data/harness_sha_rewrite_map.json
 _RW_MAP = _REWRITE["cause_1_identity_rewrite"]["map"]
 _RW_RUNS = _REWRITE["cause_2_driver_declared_the_wrong_commit"]["runs"]
 chk("the rewrite map names the two commits that moved", len(_RW_MAP), 2)
-chk("and both new SHAs are in this history",
-    sorted(v for v in _RW_MAP.values()
-           if _sp2.run(["git", "-C", str(_repo), "cat-file", "-e", v],
-                       capture_output=True).returncode != 0), [])
+# Everything below needs this repository's history. `tests/data_mutate.py` runs
+# this file in a mirror that has no `.git`, and CI runs that harness, so the
+# git-backed checks have to skip there rather than fail - which is how they
+# broke the "unit and mutation" job while passing everywhere else.
+_HAS_GIT = _sp2.run(["git", "-C", str(_repo), "rev-parse", "--git-dir"],
+                    capture_output=True).returncode == 0
+if not _HAS_GIT:
+    print("  ----  no git history here (a mirror, or a shallow clone); "
+          "the harness-provenance checks are skipped, not passed")
+if _HAS_GIT:
+    chk("and both new SHAs are in this history",
+        sorted(v for v in _RW_MAP.values()
+               if _sp2.run(["git", "-C", str(_repo), "cat-file", "-e", v],
+                           capture_output=True).returncode != 0), [])
 _resolved, _mismatch, _dangling = 0, [], []
 for _d in sorted(glob.glob("v4_audit_2026_08_25/data/*/manifest.json")):
     _m = json.load(open(_d))
@@ -1325,16 +1335,15 @@ for _d in sorted(glob.glob("v4_audit_2026_08_25/data/*/manifest.json")):
     _resolved += 1
     if hashlib.sha256(_blob.stdout).hexdigest() != _actual:
         _mismatch.append(_rn)
-if _resolved or _dangling:
+if _HAS_GIT and (_resolved or _dangling):
     chk("every declared harness commit resolves, after the rewrite map",
         sorted(_dangling), [])
     chk("the runs whose declared commit is not the one that ran",
         sorted(_mismatch), sorted(_RW_RUNS))
     chk("and each one says why", sorted(r for r, w in _RW_RUNS.items() if not w), [])
-else:
-    print("  ----  declared-vs-actual harness commits: no git history reachable, "
-          "skipped")
-if _blobs:
+elif _HAS_GIT:
+    print("  ----  declared-vs-actual harness commits: nothing to resolve")
+if _HAS_GIT and _blobs:
     chk("every recorded harness hash is in this repository's history",
         sorted(k for k, v in _declared.items() if v not in _blobs), [])
     # deliberately NOT asserting that the working-tree file is in history: it
