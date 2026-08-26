@@ -445,16 +445,21 @@ def plot_head_to_head() -> None:
     for a, runs in arms.items():
         dn = sum(x["draft_n"] for r in runs for x in r["rows"])
         da = sum(x["draft_n_accepted"] for r in runs for x in r["rows"])
-        rows.append((a, pooled(runs), (100*da/dn) if dn else None, fam(a)))
+        ng = sum(x["predicted_n"] for r in runs for x in r["rows"])
+        # draft tokens proposed per token generated. Without it the acceptance
+        # figure reads as success for an arm that hardly ever drafts:
+        # ngram-map-k4v-m8 shows 50 % from 216 proposals over 27 000 tokens.
+        rows.append((a, pooled(runs), (100*da/dn) if dn else None, fam(a),
+                     (dn / ng) if ng else None))
     record("head_to_head", run=run.name, position_balanced=balanced,
-           rows=[{"arm": a, "pooled": pl,
-                 "acceptance_pct": ac, "family": fm}
-                for a, pl, ac, fm in rows])
+           rows=[{"arm": a, "pooled": pl, "acceptance_pct": ac,
+                  "draft_per_generated": dg, "family": fm}
+                 for a, pl, ac, fm, dg in rows])
     rows.sort(key=lambda r: r[1])
 
     fig, ax = plt.subplots(figsize=(10.4, 6.2))
     y = range(len(rows))
-    for i, (a, p_, acc, f) in enumerate(rows):
+    for i, (a, p_, acc, f, dpg) in enumerate(rows):
         ax.barh(i, p_, height=0.66, color=FAMILY[f][1], alpha=0.92,
                 edgecolor="white", linewidth=0.6)
         d = 100*(p_/base - 1)
@@ -471,7 +476,8 @@ def plot_head_to_head() -> None:
             dtxt = f"{c['point_pct']:+.1f} % [{lo:+.1f}, {hi:+.1f}]"
         else:
             dtxt = f"{d:+.1f} %"
-        lbl = f"{p_:.1f}   {dtxt}" + (f"   acc {acc:.1f} %" if acc is not None else "")
+        lbl = f"{p_:.1f}   {dtxt}" + (
+            f"   draft/gen {dpg:.2f}, acc {acc:.1f} %" if acc is not None else "")
         ax.text(max(p_, x_hi if c else p_) + 2.0, i, lbl, va="center", ha="left",
                 fontsize=8.4, color="#1f1f24")
     ax.set_yticks(list(y))
@@ -505,7 +511,9 @@ def plot_head_to_head() -> None:
                   "interval against the baseline measured in the same block. Acceptance "
                   "is the server-side counter, which under-reports on the checkpointing "
                   "rows (ERRATA A13): spec-draft-n1 reads 69.7 % here and 100.0 % from "
-                  "the drafter, and is 74.8 % slower either way.")
+                  "the drafter, and is 74.8 % slower either way. draft/gen is proposals "
+                  "per generated token, and is what makes acceptance readable: "
+                  "ngram-map-k4v-m8's 50 % is 108 of 216 proposals over 27 000 tokens.")
     if not CHECK:  # --check verifies the numbers, it must not dirty the tree
         plt.savefig(OUT / "plot_head_to_head.png", dpi=150, bbox_inches="tight")
     plt.close()

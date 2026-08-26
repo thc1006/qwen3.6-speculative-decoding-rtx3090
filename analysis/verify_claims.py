@@ -1382,6 +1382,14 @@ chk("of which this many were accepted", _dg["ngram-map-k4v-m8"][1], 108)
 chk("out of this many generated", _dg["ngram-map-k4v-m8"][2], 27000)
 chk("README says how little it drafts", "216 tokens across 27 000" in _rmd, True)
 chk("the baseline drafts nothing", _dg["baseline"][0], 0)
+_hh = {r["arm"]: r for r in json.load(open("analysis/plot_data.json"))["head_to_head"]["rows"]}
+chk("the chart carries the same draft/gen as the table",
+    sorted(a for a, v in _hh.items()
+           if v.get("draft_per_generated") is not None
+           and round(v["draft_per_generated"], 2) != round(_dg[a][0] / _dg[a][2], 2)), [])
+chk("the chart plots the run the README documents",
+    json.load(open("analysis/plot_data.json"))["head_to_head"]["run"],
+    os.path.basename(_O2))
 
 
 print("\n=== the headline interval column is the t interval, and says so ===")

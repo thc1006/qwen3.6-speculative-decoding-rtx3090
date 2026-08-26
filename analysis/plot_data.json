@@ -398,54 +398,63 @@
       {
         "acceptance_pct": null,
         "arm": "baseline",
+        "draft_per_generated": 0.0,
         "family": "baseline",
         "pooled": 115.7213
       },
       {
         "acceptance_pct": 5.1724,
         "arm": "ngram-cache",
+        "draft_per_generated": 0.174,
         "family": "ngram",
         "pooled": 93.7334
       },
       {
         "acceptance_pct": 50.0,
         "arm": "ngram-map-k4v-m8",
+        "draft_per_generated": 0.008,
         "family": "ngram",
         "pooled": 115.3858
       },
       {
         "acceptance_pct": 5.0347,
         "arm": "ngram-mod-n24",
+        "draft_per_generated": 0.192,
         "family": "ngram",
         "pooled": 103.0598
       },
       {
         "acceptance_pct": 72.3474,
         "arm": "spec-dflash-n2",
+        "draft_per_generated": 0.8137,
         "family": "spec-dflash",
         "pooled": 146.1631
       },
       {
         "acceptance_pct": 55.1733,
         "arm": "spec-dflash-n4",
+        "draft_per_generated": 1.2403,
         "family": "spec-dflash",
         "pooled": 137.916
       },
       {
         "acceptance_pct": 69.6644,
         "arm": "spec-draft-n1",
+        "draft_per_generated": 0.4967,
         "family": "spec-draft",
         "pooled": 29.1563
       },
       {
         "acceptance_pct": 29.5438,
         "arm": "spec-draft-n8",
+        "draft_per_generated": 1.856,
         "family": "spec-draft",
         "pooled": 30.853
       },
       {
         "acceptance_pct": 78.3993,
         "arm": "spec-mtp-n2",
+        "draft_per_generated": 0.7747,
         "family": "spec-mtp",
         "pooled": 141.9478
       }
