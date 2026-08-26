@@ -1126,6 +1126,80 @@
           "acceptance_length_matched": 72.35
         }
       }
+    },
+    {
+      "run": "matrix_V_freerun_20260826_210956",
+      "think": "off",
+      "ignore_eos": false,
+      "prompts": 10,
+      "length_matched_prompts": 5,
+      "arms": {
+        "spec-dflash-n2": {
+          "all_prompts_pct": 11.35,
+          "acceptance_all_prompts": 58.42,
+          "length_matched_pct": 21.25,
+          "shift_pp": 9.9,
+          "acceptance_length_matched": 69.34
+        },
+        "spec-dflash-n4": {
+          "all_prompts_pct": -1.35,
+          "acceptance_all_prompts": 40.95,
+          "length_matched_pct": 12.67,
+          "shift_pp": 14.02,
+          "acceptance_length_matched": 51.13
+        },
+        "spec-mtp-n2": {
+          "all_prompts_pct": 11.5,
+          "acceptance_all_prompts": 67.53,
+          "length_matched_pct": 17.55,
+          "shift_pp": 6.05,
+          "acceptance_length_matched": 75.0
+        },
+        "spec-draft-n8": {
+          "all_prompts_pct": -76.76,
+          "acceptance_all_prompts": 23.15,
+          "length_matched_pct": -73.74,
+          "shift_pp": 3.02,
+          "acceptance_length_matched": 28.93
+        }
+      }
+    },
+    {
+      "run": "matrix_V_hardcap_20260826_210956",
+      "think": "off",
+      "ignore_eos": true,
+      "prompts": 10,
+      "length_matched_prompts": 10,
+      "arms": {
+        "spec-dflash-n2": {
+          "all_prompts_pct": 20.6,
+          "acceptance_all_prompts": 66.9,
+          "length_matched_pct": 20.6,
+          "shift_pp": 0.0,
+          "acceptance_length_matched": 66.9
+        },
+        "spec-dflash-n4": {
+          "all_prompts_pct": 10.55,
+          "acceptance_all_prompts": 47.92,
+          "length_matched_pct": 10.55,
+          "shift_pp": 0.0,
+          "acceptance_length_matched": 47.92
+        },
+        "spec-mtp-n2": {
+          "all_prompts_pct": 21.18,
+          "acceptance_all_prompts": 76.09,
+          "length_matched_pct": 21.18,
+          "shift_pp": 0.0,
+          "acceptance_length_matched": 76.09
+        },
+        "spec-draft-n8": {
+          "all_prompts_pct": -70.45,
+          "acceptance_all_prompts": 34.21,
+          "length_matched_pct": -70.45,
+          "shift_pp": 0.0,
+          "acceptance_length_matched": 34.21
+        }
+      }
     }
   ]
 }

@@ -1221,8 +1221,9 @@ requests in the controlled tier, across 35 run directories, returned
 `finish_reason: length` at exactly their run's `max_tokens`. Not one stopped
 early.
 
-With thinking **off** it does arise, and 696 of the 940 thinking-off requests
-stopped before the cap. What causes it is
+With thinking **off** it does arise, and **881 of the 1440** thinking-off
+requests stopped before the cap — every one of them in a run that did not force
+`ignore_eos`. What causes it is
 [A11](#a11-speculative-decoding-is-not-output-preserving-on-this-build-and-the-engine-is-deterministic-enough-to-prove-it): speculation is not output-preserving on this build, so the arms
 produce different text and stop in different places. In run R the baseline
 generates **300** tokens on `code_bash` where the speculative arms generate
@@ -1237,18 +1238,20 @@ generated exactly the same number of tokens. The split is clean:
 | run | thinking | prompts | length-matched | largest \|shift\| |
 |---|---|---:|---:|---:|
 | every thinking-on run with a computable comparison (31) | on | 10 or 20 | **all of them** | **0.00 pp** |
+| `matrix_V_hardcap`, thinking off **with the cap forced** | off | 10 | **all of them** | **0.00 pp** |
 | `matrix_L_thinkoff` | off | 10 | 5 | **16.79 pp** |
 | `matrix_M3_thinkoff` | off | 10 | 5 | 10.15 pp |
 | `matrix_R_ext_thinkoff` | off | 20 | 6 | 7.49 pp |
 | `D_master_matrix_think_off` | off | 10 | 5 | 6.37 pp *(the only run whose largest is negative)* |
+| `matrix_V_freerun` | off | 10 | 5 | 11.90 pp |
 
 **A published sign flips.** Run L's `spec-dflash-n4` at thinking off is reported
 as **−2.7 %** in `v4_audit_2026_08_25/README.md` and in the v4.1 changelog entry
 — "`n_max 4` goes negative". On the five prompts where every arm generated the
 same 300 tokens it is **+14.1 %**.
 
-Across the four thinking-off runs there are fourteen arm-vs-baseline
-comparisons. **Every one of the twelve arms that drafts from a model** — DFlash,
+Across the five uncapped thinking-off runs there are eighteen arm-vs-baseline
+comparisons. **Every one of the sixteen arms that drafts from a model** — DFlash,
 MTP, or the external drafter — moves in the same direction, +2.52 pp to
 +16.79 pp: `spec-dflash-n2` +7.6 % → +17.4 %, `spec-dflash-n6` −24.7 % →
 −10.9 %, `spec-mtp-n2` +11.4 % → +18.2 %, `spec-mtp-n4` −8.2 % → −0.3 %, run R's
@@ -1260,7 +1263,7 @@ The two exceptions are the n-gram arms, and they are both in run D:
 `ngram-cache` moves −6.37 pp (−32.6 % → −39.0 %) and `ngram-mod-n24` −0.17 pp.
 An n-gram drafter has no model to diverge with; what changes its length is the
 target's own output, and on the five long prompts it does worse rather than
-better. Two of fourteen, in the opposite direction, in one run — the confound is
+better. Two of eighteen, in the opposite direction, in one run — the confound is
 one-directional for the arms this repository draws conclusions about, and not a
 law.
 
@@ -1277,13 +1280,37 @@ and the [A12](#a12-what-the-checkpoint-path-costs-measured-with-timers-in-the-so
 checkpoint attribution are all thinking-on, all at 300 tokens on every request,
 and all shift by 0.00 pp under the same test.
 
-**Fixed in the harness, not in the archive.** `BENCH_IGNORE_EOS=on` sends
-`ignore_eos` with every request so each arm generates exactly `BENCH_MAX_TOKENS`
-regardless of where it would have stopped, and a run that asks for it and does
-not get it fails validation instead of being averaged. This is
-[`RETEST_TODO.md`](RETEST_TODO.md) P1-3, which had been open since the audit
-began and was the right task all along. The archived thinking-off runs stay as
-they are; what they measured is now stated.
+**Run V measures it instead of subsetting.** `BENCH_IGNORE_EOS=on` sends
+`ignore_eos` with every request, so each arm generates exactly
+`BENCH_MAX_TOKENS` wherever it would have stopped. Run V is the same five arms,
+five balanced blocks, thinking off, run twice back to back in one session — once
+as the archive did it, once with the hard cap. The freerun half produced
+**fourteen distinct output lengths from 22 to 300**; the hardcap half produced
+**one, 300**, on every request of every arm.
+
+Two decimals, because two of these land exactly on a half and the direction a
+half rounds is not something a published table should depend on.
+
+| arm | freerun, as the archive did it | hard cap | shift |
+|---|---:|---:|---:|
+| `spec-dflash-n2` | +11.35 % | **+20.60 %** | **+9.26 pp** |
+| `spec-mtp-n2` | +11.50 % | **+21.18 %** | **+9.68 pp** |
+| `spec-dflash-n4` | **−1.35 %** | **+10.55 %** | **+11.90 pp, and the sign flips** |
+| `spec-draft-n8` | −76.76 % | −70.45 % | +6.31 pp |
+
+**`spec-dflash-n4` is the arm A17 was written about**, and its sign flips under
+the designed control exactly as the subset restriction predicted. Every arm
+moves in the direction the subsetting indicated, by 6.31 to 11.90 pp.
+
+The two methods agree in direction and not in magnitude: restricting the
+freerun half to its own length-matched prompts gives +21.25, +17.55, +12.67 and
+−73.74 against the hard cap's +20.60, +21.18, +10.55 and −70.45. The subset is half
+the prompts and the biased half, which is the caveat stated above; the hard cap
+is the measurement.
+
+This closes [`RETEST_TODO.md`](RETEST_TODO.md) P1-3. The archived thinking-off
+runs stay as they are; what they measured is now stated, and what they would
+have measured is now known.
 
 ---
 

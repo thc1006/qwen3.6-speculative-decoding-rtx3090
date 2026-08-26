@@ -26,9 +26,14 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+# Everything verify_claims.py reads. It grew: the historical-script check added
+# four files at the repository root, and the mirror silently lacked them until
+# the checker crashed on the unperturbed copy.
 COPY = ("analysis", "bench", "tests", "v4_audit_2026_08_25", "results",
         "v2_3090_followup", "v3_dflash_2026_05_07", "README.md", "ERRATA.md",
-        "CHANGELOG.md", "RETEST_TODO.md", "BENCHMARK_ENV.md")
+        "CHANGELOG.md", "RETEST_TODO.md", "BENCHMARK_ENV.md",
+        "run_matrix.sh", "run_p0_matrix.sh", "run_verify_matrix.sh",
+        "collect_env.sh")
 
 
 def mirror(into: Path) -> Path:
@@ -59,6 +64,7 @@ def scale_row(rel: str, field: str, factor: float):
         d = _rows(p)
         d["rows"][0][field] = d["rows"][0][field] * factor
         _write(p, d)
+    go.touches = (rel,)
     return go
 
 
@@ -68,6 +74,7 @@ def set_row(rel: str, field: str, value):
         d = _rows(p)
         d["rows"][0][field] = value
         _write(p, d)
+    go.touches = (rel,)
     return go
 
 
@@ -79,12 +86,14 @@ def timers(arm: str, field: str, fn):
             if r["arm"] == arm:
                 r[field] = fn(r[field])
         _write(p, d)
+    go.touches = ("v4_audit_2026_08_25/data/checkpoint_timers_20260826.json",)
     return go
 
 
 def drop(rel: str):
     def go(m: Path):
         (m / rel).unlink()
+    go.touches = (rel,)
     return go
 
 
@@ -97,6 +106,9 @@ def zero_length_shifts(m: Path):
                 if "shift_pp" in v:
                     v["shift_pp"] = 0.0
     _write(p, d)
+
+
+zero_length_shifts.touches = ("analysis/length_matching.json",)
 
 
 def warm_telemetry(m: Path):
@@ -127,6 +139,7 @@ def edit_doc(rel: str, old: str, new: str):
         if old not in t:
             raise AssertionError(f"anchor not found in {rel}: {old[:40]!r}")
         p.write_text(t.replace(old, new, 1), encoding="utf-8")
+    go.touches = (rel,)
     return go
 
 
@@ -184,7 +197,7 @@ MUTATIONS = [
      edit_doc("README.md", "| `ngram-cache` | 93.7 |",
               "| `ngram-cache` | 93.7 (101.3 MiB) |")),
     ("A12: the checkpoint total becomes 39.80 s",
-     edit_doc("ERRATA.md", "| **speculative checkpoint, total** | **39.08** |",
+     edit_doc("ERRATA.md", "| **speculative checkpoint, total** | **39.07** |",
               "| **speculative checkpoint, total** | **39.80** |")),
     ("A12: run T's nominal volume becomes 131.27 GiB",
      edit_doc("ERRATA.md", "| **121.27** |", "| **131.27** |")),
@@ -209,6 +222,14 @@ MUTATIONS = [
     ("v4 README: an n-gram throughput becomes 110.6",
      edit_doc("v4_audit_2026_08_25/README.md",
               "| `ngram-map-k-m8` | 107.6 |", "| `ngram-map-k-m8` | 110.6 |")),
+    ("A17: run V's hard-cap figure becomes +22.60 %",
+     edit_doc("ERRATA.md", "| `spec-dflash-n2` | +11.35 % | **+20.60 %** |",
+              "| `spec-dflash-n2` | +11.35 % | **+22.60 %** |")),
+    ("A17: the sign-flipping arm stops flipping",
+     edit_doc("ERRATA.md", "| `spec-dflash-n4` | **\u22121.35 %** | **+10.55 %** |",
+              "| `spec-dflash-n4` | **+1.35 %** | **+10.55 %** |")),
+    ("A16: a run U figure becomes +19.3 %",
+     edit_doc("README.md", "U3 **+17.3 %** 22:18", "U3 **+19.3 %** 22:18")),
     ("C4b: the clock mean becomes 1947",
      edit_doc("ERRATA.md", "1800\u20131965 MHz of a 2100 MHz maximum, mean 1937",
               "1800\u20131965 MHz of a 2100 MHz maximum, mean 1947")),
@@ -228,8 +249,17 @@ def main() -> None:
             sys.exit("the checker fails on an unperturbed mirror; fix that first\n"
                      + base.stdout[-2000:])
         for name, fn in MUTATIONS:
-            shutil.rmtree(work)
-            shutil.copytree(pristine, work)
+            # restore only what the last mutation touched. Re-copying the whole
+            # mirror each time cost about six minutes of the seven this took.
+            touched = getattr(fn, "touches", None)
+            if touched:
+                for rel in touched:
+                    dst = work / rel
+                    dst.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(pristine / rel, dst)
+            else:
+                shutil.rmtree(work)
+                shutil.copytree(pristine, work)
             try:
                 fn(work)
             except Exception as e:  # noqa: BLE001
@@ -242,6 +272,10 @@ def main() -> None:
             print(f"  {name:52s} {'caught' if caught else '*** SURVIVED ***'}")
             if not caught:
                 survived.append(name)
+            for rel in (getattr(fn, "touches", None) or ()):
+                dst = work / rel
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(pristine / rel, dst)
     print()
     if survived:
         sys.exit(f"  {len(survived)} perturbation(s) survived: " + "; ".join(survived))

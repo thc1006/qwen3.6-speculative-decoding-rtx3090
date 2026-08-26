@@ -26,7 +26,8 @@ RE_LOAD = re.compile(r"AUDIT_US load_tgt=(\d+) load_dft=(\d+)")
 
 
 def analyse(path: str) -> dict:
-    text = open(path, errors="replace").read()
+    with open(path, errors="replace") as fh:
+        text = fh.read()
     tgt = [int(x) for x in RE_TGT.findall(text)]
     dft = [int(x) for x in RE_DFT.findall(text)]
     loads = RE_LOAD.findall(text)

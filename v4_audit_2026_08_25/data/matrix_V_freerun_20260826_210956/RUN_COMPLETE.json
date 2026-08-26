@@ -1,0 +1,17 @@
+{
+  "completed_at": "2026-08-26T22:48:08+0800",
+  "arms": [
+    "baseline",
+    "spec-dflash-n2",
+    "spec-dflash-n4",
+    "spec-mtp-n2",
+    "spec-draft-n8"
+  ],
+  "repeats": 5,
+  "prompt_set": "v1",
+  "n_prompts": 10,
+  "expected_arm_runs": 25,
+  "observed_arm_runs": 25,
+  "order_mode": "latin",
+  "schedule_is_position_balanced": true
+}

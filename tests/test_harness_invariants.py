@@ -11,6 +11,7 @@ No GPU, no network, no third-party packages. `python -m unittest discover tests`
 """
 from __future__ import annotations
 
+import itertools
 import json
 import os
 import socket
@@ -23,6 +24,30 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 RUNNER = ROOT / "bench" / "retest_runner.py"
 sys.path.insert(0, str(ROOT / "analysis"))
+
+
+_PORT_SEQ = itertools.count()
+
+
+def free_port() -> str:
+    """A free port, disjoint from any other process running this suite.
+
+    Hard-coded ports made two concurrent runs collide: the second run's stub
+    server could not bind and the first run's requests reached the wrong
+    process. Binding port 0 and closing it does not fix that either - the kernel
+    can hand the same ephemeral port to the other process in the window before
+    the stub binds it, and with two suites running that happened often enough to
+    hang both. So: a base derived from this process's PID, outside the ephemeral
+    range, plus a counter, with the port confirmed unused before it is returned.
+    """
+    base = 20000 + (os.getpid() * 97) % 30000
+    for _ in range(200):
+        port = 20000 + (base + next(_PORT_SEQ)) % 40000
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sk:
+            sk.settimeout(0.3)
+            if sk.connect_ex(("127.0.0.1", port)) != 0:
+                return str(port)
+    raise RuntimeError("no free port found")
 
 
 def run_runner(env_extra: dict, out: Path) -> subprocess.CompletedProcess:
@@ -409,7 +434,7 @@ class RunnerMustNotAttestAFailedRun(unittest.TestCase):
     """
 
     FAKE = ROOT / "tests" / "fake_llama_server.py"
-    PORT = "18921"
+    PORT = None  # each test picks its own
 
     def _run(self, out: Path, extra: dict | None = None) -> subprocess.CompletedProcess:
         env = dict(os.environ)
@@ -417,7 +442,7 @@ class RunnerMustNotAttestAFailedRun(unittest.TestCase):
             "LLAMA_SERVER_BIN": str(self.FAKE), "MODEL_TARGET": "/dev/null",
             "BENCH_ARMS": "baseline", "BENCH_REPEATS": "2",
             "BENCH_ORDER": "cyclic", "BENCH_OUT": str(out),
-            "BENCH_PORT": self.PORT, "BENCH_MAX_TOKENS": "8", "BENCH_FIT": "off",
+            "BENCH_PORT": free_port(), "BENCH_MAX_TOKENS": "8", "BENCH_FIT": "off",
         })
         env.update(extra or {})
         return subprocess.run([sys.executable, str(RUNNER)], env=env,
@@ -480,7 +505,8 @@ class ProvenanceMustIdentifyWhatRan(unittest.TestCase):
 
     FAKE = ROOT / "tests" / "fake_llama_server.py"
 
-    def _run(self, out: Path, port: str, extra: dict | None = None):
+    def _run(self, out: Path, port: str | None = None, extra: dict | None = None):
+        port = port or free_port()
         env = dict(os.environ)
         env.update({
             "LLAMA_SERVER_BIN": str(self.FAKE), "MODEL_TARGET": "/dev/null",
@@ -495,7 +521,7 @@ class ProvenanceMustIdentifyWhatRan(unittest.TestCase):
     def test_the_manifest_identifies_the_harness_and_the_prompts(self):
         with tempfile.TemporaryDirectory() as t:
             out = Path(t) / "prov"
-            self._run(out, "18931", {"BENCH_HARNESS_SHA": "cafebabe"})
+            self._run(out, None, {"BENCH_HARNESS_SHA": "cafebabe"})
             man = json.loads((out / "manifest.json").read_text())
             self.assertRegex(man["runner_sha256"], r"^[0-9a-f]{64}$")
             self.assertRegex(man["prompt_set_sha256"], r"^[0-9a-f]{64}$")
@@ -531,7 +557,7 @@ class ProvenanceMustIdentifyWhatRan(unittest.TestCase):
     def test_each_arm_run_records_the_library_that_answered_it(self):
         with tempfile.TemporaryDirectory() as t:
             out = Path(t) / "libs"
-            self._run(out, "18934")
+            self._run(out)
             r = json.loads((out / "baseline__rep0.json").read_text())
             self.assertIn("server_lib_sha256", r)
             self.assertRegex(r["server_log_sha256"], r"^[0-9a-f]{64}$")
@@ -540,7 +566,7 @@ class ProvenanceMustIdentifyWhatRan(unittest.TestCase):
     def test_a_commit_that_is_not_the_expected_one_fails_the_run(self):
         with tempfile.TemporaryDirectory() as t:
             out = Path(t) / "wrong"
-            r = self._run(out, "18935", {"FAKE_COMMIT": "abc1234",
+            r = self._run(out, None, {"FAKE_COMMIT": "abc1234",
                                          "BENCH_EXPECT_COMMIT": "deadbeef"})
             self.assertNotEqual(r.returncode, 0)
             self.assertFalse((out / "RUN_COMPLETE.json").exists())
@@ -550,7 +576,7 @@ class ProvenanceMustIdentifyWhatRan(unittest.TestCase):
     def test_the_expected_commit_passes(self):
         with tempfile.TemporaryDirectory() as t:
             out = Path(t) / "right"
-            r = self._run(out, "18936", {"FAKE_COMMIT": "abc1234",
+            r = self._run(out, None, {"FAKE_COMMIT": "abc1234",
                                          "BENCH_EXPECT_COMMIT": "abc1234"})
             self.assertEqual(r.returncode, 0, r.stdout[-1500:] + r.stderr[-1500:])
 
@@ -608,7 +634,8 @@ class ArmsMustGenerateTheSameAmountOfWork(unittest.TestCase):
 
     FAKE = ROOT / "tests" / "fake_llama_server.py"
 
-    def _run(self, out: Path, port: str, extra: dict | None = None):
+    def _run(self, out: Path, port: str | None = None, extra: dict | None = None):
+        port = port or free_port()
         env = dict(os.environ)
         env.update({
             "LLAMA_SERVER_BIN": str(self.FAKE), "MODEL_TARGET": "/dev/null",
@@ -623,7 +650,7 @@ class ArmsMustGenerateTheSameAmountOfWork(unittest.TestCase):
     def test_a_short_generation_under_ignore_eos_fails_the_run(self):
         with tempfile.TemporaryDirectory() as t:
             out = Path(t) / "short"
-            r = self._run(out, "18941", {"BENCH_IGNORE_EOS": "on",
+            r = self._run(out, None, {"BENCH_IGNORE_EOS": "on",
                                          "FAKE_PREDICTED_N": "100"})
             self.assertNotEqual(r.returncode, 0)
             self.assertFalse((out / "RUN_COMPLETE.json").exists())
@@ -635,7 +662,7 @@ class ArmsMustGenerateTheSameAmountOfWork(unittest.TestCase):
         run that passes with it on proves the field was actually sent."""
         with tempfile.TemporaryDirectory() as t:
             out = Path(t) / "sent"
-            r = self._run(out, "18942", {"BENCH_IGNORE_EOS": "on",
+            r = self._run(out, None, {"BENCH_IGNORE_EOS": "on",
                                          "FAKE_SHORT_UNLESS_IGNORE_EOS": "1"})
             self.assertEqual(r.returncode, 0, r.stdout[-1500:] + r.stderr[-1500:])
             rows = json.loads((out / "baseline__rep0.json").read_text())["rows"]
@@ -646,7 +673,7 @@ class ArmsMustGenerateTheSameAmountOfWork(unittest.TestCase):
         archived run predates the flag."""
         with tempfile.TemporaryDirectory() as t:
             out = Path(t) / "off"
-            r = self._run(out, "18943", {"FAKE_PREDICTED_N": "100"})
+            r = self._run(out, None, {"FAKE_PREDICTED_N": "100"})
             self.assertEqual(r.returncode, 0, r.stdout[-1500:] + r.stderr[-1500:])
             self.assertTrue((out / "RUN_COMPLETE.json").exists())
             man = json.loads((out / "manifest.json").read_text())
@@ -723,6 +750,76 @@ class InFlightCountMustBeASweepLine(unittest.TestCase):
         ):
             with self.subTest(name):
                 self.assertEqual(f(rows), want)
+
+
+class EveryPublishedFixIsStillHere(unittest.TestCase):
+    """A long editing session reverts things.
+
+    Each entry is a fragment of a fix this repository published, and the file it
+    lives in. Not a substitute for the behavioural tests above - those are what
+    prove the fixes work - but those cannot cover a whole file, and one fix did
+    silently disappear: `analysis/extract_checkpoint_timers.py` went back to
+    `open(path).read()` under a later edit, which the ResourceWarning in the
+    test output was quietly reporting for an hour.
+    """
+
+    FIXES = [
+        ("analysis/extract_checkpoint_timers.py", 're.sub(r"__rep',
+         "arm name is repeat-independent"),
+        ("analysis/extract_checkpoint_timers.py", "not fully covered",
+         "--repeats refuses partial coverage"),
+        ("analysis/extract_checkpoint_timers.py",
+         'with open(path, errors="replace") as fh', "the log file is closed"),
+        ("analysis/extract_checkpoint_timers.py",
+         "(sum(tgt) + sum(dft) + sum(lt) + sum(ld)) / 1e6",
+         "the total is rounded once, not summed from rounded parts"),
+        ("bench/retest_runner.py", "def is_position_balanced",
+         "balance means equal visits"),
+        ("bench/retest_runner.py", "def validate_run",
+         "the run validates itself before attesting"),
+        ("bench/retest_runner.py", "RUN_FAILED.json", "and says so when it fails"),
+        ("bench/retest_runner.py", "if proc is not None and proc.poll() is not None",
+         "liveness is checked before readiness"),
+        ("bench/retest_runner.py", "if not port_is_free(PORT)",
+         "the port is free before spawning"),
+        ("bench/retest_runner.py", "TEARDOWN[(arm, rep)]",
+         "teardown is recorded, not printed"),
+        ("bench/retest_runner.py", 'body["ignore_eos"] = True',
+         "the hard cap reaches the server"),
+        ("bench/retest_runner.py", "if REPEATS < 1", "an empty run is refused"),
+        ("bench/retest_runner.py", "each arm may appear once",
+         "a repeated arm is refused"),
+        ("bench/retest_runner.py", 'res["server_log_sha256"] = sha256',
+         "the log is hashed after the server stops"),
+        ("bench/retest_runner.py", "json.dumps(PROMPTS, sort_keys=True",
+         "the prompt hash covers the prompts"),
+        ("analysis/check_data_integrity.py", "expected_cells - set(cells)",
+         "the exact (arm, repeat) product"),
+        ("analysis/check_data_integrity.py", "filename says arm=",
+         "filename against contents"),
+        ("analysis/paired_blocks.py", "def observed_schedule",
+         "the schedule is re-derived from the data"),
+        ("analysis/matrix_report.py", "DIFFERENT numbers of tokens",
+         "the length confound is surfaced"),
+        ("analysis/thermal_report.py", "def detect", "all three telemetry schemas"),
+        ("analysis/thermal_report.py", "THROTTLE_BITS",
+         "the bitmask is decoded rather than reported as zero"),
+        ("analysis/thermal_report.py", "act = [r for r in busy",
+         "flags are counted over loaded samples"),
+        ("bench/convert_dflash.sh", "Only now is the conversion a success",
+         "the drafter is promoted after the load check"),
+        ("bench/collect_evidence.sh", "nothing to archive",
+         "an empty archive is refused"),
+        ("analysis/plot_v4_runs.py", "if not CHECK", "--check is read-only"),
+        ("analysis/plot_v4_runs.py", "BENCH_PLOT_RUN",
+         "the chart names its source run"),
+    ]
+
+    def test_each_one(self):
+        for rel, needle, what in self.FIXES:
+            with self.subTest(what):
+                self.assertIn(needle, (ROOT / rel).read_text(encoding="utf-8"),
+                              f"{what}: gone from {rel}")
 
 
 class StagingMustNotDestroyItsSource(unittest.TestCase):

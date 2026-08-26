@@ -1266,6 +1266,8 @@ _KNOWN_DECLARED_MISMATCH = {
     "matrix_U4_dflashvar_20260826_210153": "driver script edited while waiting",
     "matrix_U5_dflashvar_20260826_210153": "driver script edited while waiting",
     "matrix_U6_dflashvar_20260826_210153": "driver script edited while waiting",
+    "matrix_V_freerun_20260826_210956": "same driver, same edit",
+    "matrix_V_hardcap_20260826_210956": "same driver, same edit",
 }
 _mismatch = []
 _resolved = 0
@@ -1313,7 +1315,11 @@ else:
 print("\n=== A17: are the arms compared on the same amount of work? ===")
 _lm = json.load(open("analysis/length_matching.json"))["runs"]
 _on = [r for r in _lm if r["think"] != "off"]
-_off = [r for r in _lm if r["think"] == "off"]
+# run V's hard-cap half is thinking-off AND fully length-matched by design, so
+# the confound claims below are about the thinking-off runs that did NOT
+# force the cap - which is every archived one
+_off = [r for r in _lm if r["think"] == "off" and not r.get("ignore_eos")]
+_off_capped = [r for r in _lm if r["think"] == "off" and r.get("ignore_eos")]
 # the two prompts A17 names, checked rather than remembered
 _R = "v4_audit_2026_08_25/data/matrix_R_ext_thinkoff_20260826_110747"
 _rlen: dict = {}
@@ -1331,7 +1337,10 @@ chk("A17 run R code_rust baseline length",
 chk("A17 run R code_rust speculative lengths",
     sorted(n for a, v in _rlen["code_rust"].items() if a != "baseline" for n in v),
     [300, 300, 300])
-chk("A17 thinking-off runs with a computable comparison", len(_off), 4)
+chk("A17 thinking-off runs measured without a hard cap", len(_off), 5)
+chk("A17 and the one measured with it", len(_off_capped), 1)
+chk("A17 the capped one is fully length-matched",
+    [r["prompts"] == r["length_matched_prompts"] for r in _off_capped], [True])
 chk("A17 thinking-on runs with a computable comparison", len(_on), 31)
 chk("A17 every thinking-on run is fully length-matched",
     sorted({r["prompts"] == r["length_matched_prompts"] for r in _on}), [True])
@@ -1341,10 +1350,11 @@ chk("A17 every thinking-off run is only partly length-matched",
     sorted({r["prompts"] > r["length_matched_prompts"] for r in _off}), [True])
 _shifts = {(r["run"], a): v["shift_pp"] for r in _off for a, v in r["arms"].items()
            if "shift_pp" in v}
-chk("A17 arm-vs-baseline comparisons in the thinking-off runs", len(_shifts), 14)
+chk("A17 arm-vs-baseline comparisons in the uncapped thinking-off runs",
+    len(_shifts), 18)
 _model = {k: v for k, v in _shifts.items() if not k[1].startswith("ngram-")}
 _ngram = {k: v for k, v in _shifts.items() if k[1].startswith("ngram-")}
-chk("A17 arms that draft from a model", len(_model), 12)
+chk("A17 arms that draft from a model", len(_model), 16)
 chk("A17 every one of them shifts the same way",
     sorted({v > 0 for v in _model.values()}), [True])
 chk("A17 the largest such shift (pp)", round(max(_model.values()), 2), 16.79, 0.005)
@@ -1382,7 +1392,7 @@ for _f in glob.glob("v4_audit_2026_08_25/data/*/*__rep*.json"):
         if _x["predicted_n"] != _m["max_tokens"]:
             _short += 1
 chk("A17 and every one of them generated exactly max_tokens", _short, 0)
-chk("A17 thinking-off requests that stopped early", _stops["off"]["stop"], 696)
+chk("A17 thinking-off requests that stopped early", _stops["off"]["stop"], 881)
 # the second reading A17 overturns: acceptance, not only throughput
 _D = [r for r in _lm if r["run"].startswith("D_master")][0]
 _Con = [r for r in _lm if r["run"] == "C_master_matrix_think_on"][0]
@@ -2007,9 +2017,9 @@ def _u_blocks(d, arm):
 _u_within, _u_means = [], []
 for _d in _U:
     _b, _a = _u_blocks(_d, "baseline"), _u_blocks(_d, "spec-dflash-n2")
-    _rel = [100 * (_a[k] / _b[k] - 1) for k in sorted(_b) if k in _a]
-    _u_within.append(st.stdev(_rel))
-    _u_means.append(st.mean(_rel))
+    _urel = [100 * (_a[k] / _b[k] - 1) for k in sorted(_b) if k in _a]
+    _u_within.append(st.stdev(_urel))
+    _u_means.append(st.mean(_urel))
 chk("U: within-invocation SD of the block ratios (pp)",
     round(st.mean(_u_within), 2), 0.55, 0.005)
 chk("U: between-invocation SD of the six means (pp)",
@@ -2174,6 +2184,90 @@ chk("ERRATA states the correction to the between-invocation framing",
     "This corrects the framing above" in _norm(
         pathlib.Path(__file__).resolve().parents[1].joinpath("ERRATA.md")
         .read_text(encoding="utf-8")), True)
+
+
+print("\n=== run V: the length confound, measured instead of subsetted ===")
+_VF = sorted(glob.glob("v4_audit_2026_08_25/data/matrix_V_freerun_*"))[0]
+_VH = sorted(glob.glob("v4_audit_2026_08_25/data/matrix_V_hardcap_*"))[0]
+_mVF = json.load(open(f"{_VF}/manifest.json"))
+_mVH = json.load(open(f"{_VH}/manifest.json"))
+chk("V: the two halves differ only in ignore_eos",
+    [(_mVF.get("ignore_eos"), _mVH.get("ignore_eos"))] +
+    [_mVF.get(k) == _mVH.get(k) for k in
+     ("arms", "repeats", "think", "ctx", "fit_target", "prompt_set",
+      "max_tokens", "seed", "target_sha256", "dflash_sha256", "mtp_sha256",
+      "draft_sha256", "server_lib_sha256", "common_args")],
+    [(False, True)] + [True] * 14)
+chk("V: both halves are position-balanced",
+    [_mVF["schedule_is_position_balanced"], _mVH["schedule_is_position_balanced"]],
+    [True, True])
+chk("V: both are attested",
+    [os.path.isfile(f"{d}/RUN_COMPLETE.json") for d in (_VF, _VH)], [True, True])
+
+
+def _v_lengths(d):
+    out = set()
+    for f in glob.glob(f"{d}/*__rep*.json"):
+        for x in json.load(open(f))["rows"]:
+            out.add(x["predicted_n"])
+    return out
+
+
+chk("V freerun: distinct output lengths", len(_v_lengths(_VF)), 14)
+chk("V freerun: the shortest and longest",
+    [min(_v_lengths(_VF)), max(_v_lengths(_VF))], [22, 300])
+chk("V hardcap: every request generated exactly the cap",
+    sorted(_v_lengths(_VH)), [300])
+chk("V hardcap: and every one is a length stop",
+    sorted({x.get("finish_reason") for f in glob.glob(f"{_VH}/*__rep*.json")
+            for x in json.load(open(f))["rows"]}), ["length"])
+
+# two decimals: two of these land on an exact half, and which way a half rounds
+# is not something an assertion should depend on
+for _arm, _free, _hard, _shift in (("spec-dflash-n2", 11.35, 20.60, 9.26),
+                                   ("spec-mtp-n2", 11.50, 21.18, 9.68),
+                                   ("spec-dflash-n4", -1.35, 10.55, 11.90),
+                                   ("spec-draft-n8", -76.76, -70.45, 6.31)):
+    chk(f"V {_arm}: freerun (%)", round(_rel(_VF, _arm), 2), _free, 0.005)
+    chk(f"V {_arm}: hard cap (%)", round(_rel(_VH, _arm), 2), _hard, 0.005)
+    chk(f"V {_arm}: the shift (pp)",
+        round(_rel(_VH, _arm) - _rel(_VF, _arm), 2), _shift, 0.005)
+chk("V: the arm A17 is about changes sign under the hard cap",
+    (_rel(_VF, "spec-dflash-n4") < 0, _rel(_VH, "spec-dflash-n4") > 0), (True, True))
+chk("V: every arm moves the way the subsetting said it would",
+    sorted({round(_rel(_VH, a) - _rel(_VF, a), 1) > 0 for a in _mVF["arms"]
+            if a != "baseline"}), [True])
+# and the table itself, parsed - the cells were computed and asserted while the
+# table was not, which is the third time that gap has appeared in this file
+_vt_lines = pathlib.Path(__file__).resolve().parents[1].joinpath("ERRATA.md") \
+    .read_text(encoding="utf-8").splitlines()
+_vt_i = next(i for i, l in enumerate(_vt_lines)
+             if l.startswith("| arm | freerun, as the archive did it | hard cap | shift |"))
+_vt = {}
+for _l in _vt_lines[_vt_i + 2:]:
+    if not _l.startswith("|"):
+        break
+    _c = [x.strip().strip("*`").replace("`", "").strip("* ").strip()
+          for x in _l.strip("|").split("|")]
+    if len(_c) >= 4:
+        _vt[_c[0]] = _c[1:4]
+chk("A17 run V table rows parsed", len(_vt), 4)
+for _arm, _cells in _vt.items():
+    chk(f"A17 V table {_arm}: freerun",
+        round(_rel(_VF, _arm), 2),
+        float(_norm(_cells[0]).replace("%", "").replace(" ", "")), 0.005)
+    chk(f"A17 V table {_arm}: hard cap",
+        round(_rel(_VH, _arm), 2),
+        float(_norm(_cells[1]).replace("%", "").replace(" ", "")), 0.005)
+    chk(f"A17 V table {_arm}: the shift is the difference",
+        round(_rel(_VH, _arm) - _rel(_VF, _arm), 2),
+        float(_norm(_cells[2]).split()[0].replace("pp", "").replace(",", "")), 0.005)
+
+_er_v = " ".join(_norm(pathlib.Path(__file__).resolve().parents[1]
+                       .joinpath("ERRATA.md").read_text(encoding="utf-8")).split())
+chk("ERRATA reports run V", "Run V measures it instead of subsetting" in _er_v, True)
+chk("and says the two methods agree in direction, not magnitude",
+    "agree in direction and not in magnitude" in _er_v, True)
 
 
 print("\n=== the balanced design is verified, not declared ===")
