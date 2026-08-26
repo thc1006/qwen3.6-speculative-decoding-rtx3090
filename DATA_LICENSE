@@ -17,6 +17,16 @@ CC0-1.0 applies to the measurement artefacts:
     v2_3090_followup/exp2_codejson_n3/results.json
     v2_3090_followup/exp2_codejson_n3/master.log
     v3_dflash_2026_05_07/data/**
+    v4_audit_2026_08_25/data/**        the 2026-08-25/26 controlled tier:
+                                       per-arm-run JSON, manifests, run markers,
+                                       GPU telemetry CSV, checkpoint timer
+                                       extractions and log SHA-256 manifests
+    analysis/*.json                     derived aggregates, including
+    analysis/*.csv                      plot_data.json and the counter comparison
+
+The v4 tier was added on 2026-08-25 and this list did not name it until
+2026-08-26, which left 601 committed measurement files without a stated
+licence. They are CC0-1.0 like every other measurement here.
 
 Everything else - code, shell scripts, Markdown, and the generated charts -
 is MIT, see LICENSE.
@@ -24,8 +34,12 @@ is MIT, see LICENSE.
 ## Not covered
 
 The model weights are not distributed here and are not covered by this
-licence. `Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf` and `Qwen3.5-0.8B-Q4_K_M.gguf`
-carry their own upstream terms; see the Qwen and unsloth model cards.
+licence. `Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf`, `Qwen3.5-0.8B-Q4_K_M.gguf`, the
+DFlash drafter and the MTP head carry their own upstream terms; see the Qwen,
+unsloth and z-lab model cards.
+
+`v4_audit_2026_08_25/patches/checkpoint_timers.patch` is a diff against
+llama.cpp and carries llama.cpp's MIT licence, not this repository's.
 
 Raw logs contain model output generated during benchmarking. That text is
 included as measurement evidence and inherits whatever terms apply to the

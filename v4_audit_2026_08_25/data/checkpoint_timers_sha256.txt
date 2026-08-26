@@ -1,0 +1,16 @@
+# SHA-256 of the twelve run T server logs the checkpoint timers were extracted from.
+# Source: 100.112.135.98:~/bench/matrix_T_timers_20260826_182639/server_logs/
+# 73 MB in total; not committed. Re-derive with:
+#   python analysis/extract_checkpoint_timers.py <logs>/*.log
+27308657c051a32a37c6626ad2b518611888637a401cfe81acd18e9b34dc6e28  baseline__rep0.log
+c3b46827034ffd136d4b809bf653d887628486c93cef9eab5b384e67cdfacf4b  baseline__rep1.log
+ae3e8a9c73cbb4caf010351e96cb9d3a945742dd869de217b9d3bed84c810660  baseline__rep2.log
+e404a8cc905d3140b0af5c70a49d57a437316c8d54dc00a4d9fc04c3a6ba57b3  baseline__rep3.log
+48c2a7cbc6bce3e9ddef8e860bd1371f7d89261d66408210a3ca661079da6425  spec-dflash-n2__rep0.log
+3f1013c968367a616d3a2a82847959487aea90950b40eec27d5139df80880ae2  spec-dflash-n2__rep1.log
+a9c4c4263cce59b6a02cfd9e3fdd0960b4759d8047ad9fc659ecc29b3c4108a3  spec-dflash-n2__rep2.log
+492c616ee0b671521470590dcf324cd9fe9d15677faf1e49d3dfe9cfa7f6438d  spec-dflash-n2__rep3.log
+8b5885c8be81b42158df4dd900761a700e3f9c139d4996c9ecdec340747c0dad  spec-draft-n8__rep0.log
+0b84438b2456054a64ef31f80360d5f3f2f0821664c12a662f7d60b00ee2cb8b  spec-draft-n8__rep1.log
+219cef7eedbcd471bcc481bd6fc766881243e20a8437beef79e0f374c553d9af  spec-draft-n8__rep2.log
+f477909464213704e04008dac61e36bb2e22f02662b7db49222765f32508c443  spec-draft-n8__rep3.log

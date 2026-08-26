@@ -14,9 +14,12 @@ appears once per block:
              is the one measured inside the same block, not a grand mean
   point      geometric mean of those ratios, i.e. exp(mean(log ratio))
   interval   percentile bootstrap over BLOCKS, resampling whole blocks with
-             replacement. The unit of resampling is the block because that is
-             the unit of randomisation; resampling requests or arm-runs would
-             understate the interval in exactly the way A14 documents
+             replacement. The block is the unit of resampling because it is
+             the unit of replication: arms are assigned to positions by a fixed
+             cyclic rotation, not at random, so "unit of randomisation" is the
+             wrong name for it and this said so until 2026-08-26. Resampling
+             requests or arm-runs instead would understate the interval in
+             exactly the way A14 documents
   t interval reported alongside as a check that the bootstrap is not doing
              something strange on nine blocks
 

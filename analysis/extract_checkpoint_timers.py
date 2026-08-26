@@ -34,7 +34,12 @@ def analyse(path: str) -> dict:
     ld = [int(b) for _, b in loads]
     out = {
         "log": os.path.basename(path),
-        "arm": os.path.basename(path).replace("__rep0.log", "").replace(".log", ""),
+        # repeat-independent: the first version stripped only `__rep0.log`,
+        # so rep1..N kept the suffix in `arm` and any per-arm assertion silently
+        # covered rep0 alone.
+        "arm": re.sub(r"__rep\d+\.log$", "", os.path.basename(path)).replace(".log", ""),
+        "repeat": (int(m.group(1)) if (m := re.search(r"__rep(\d+)\.log$",
+                                                      os.path.basename(path))) else None),
         "creates": len(tgt), "restores": len(loads),
         "update_tgt_s": round(sum(tgt) / 1e6, 3),
         "update_dft_s": round(sum(dft) / 1e6, 3),
@@ -51,9 +56,35 @@ def analyse(path: str) -> dict:
 
 
 def main() -> None:
-    if len(sys.argv) < 2:
-        sys.exit("usage: python analysis/extract_checkpoint_timers.py <log> [...]")
-    print(json.dumps([analyse(p) for p in sys.argv[1:]], indent=2))
+    argv = [a for a in sys.argv[1:] if not a.startswith("--")]
+    if not argv:
+        sys.exit("usage: python analysis/extract_checkpoint_timers.py [--repeats N] <log> [...]")
+    want = None
+    if "--repeats" in sys.argv:
+        want = int(sys.argv[sys.argv.index("--repeats") + 1])
+        argv = [a for a in argv if a != str(want)]
+    recs = [analyse(p) for p in argv]
+
+    # A control that reports zero checkpoint operations is only as strong as the
+    # number of arm-runs behind it. The first extraction covered rep0 alone for
+    # both controls while covering all four repeats of the treatment, so the
+    # comparison was four logs against one and nothing said so.
+    by_arm: dict[str, set] = {}
+    for r in recs:
+        by_arm.setdefault(r["arm"], set()).add(r["repeat"])
+    if want is not None:
+        short = {a: sorted(v) for a, v in by_arm.items()
+                 if v != set(range(want))}
+        if short:
+            sys.exit(f"--repeats {want} but these arms are not fully covered: "
+                     + "; ".join(f"{a} has {v}" for a, v in sorted(short.items())))
+    else:
+        n = {len(v) for v in by_arm.values()}
+        if len(n) > 1:
+            print(f"# WARNING: uneven repeat coverage across arms: "
+                  f"{ {a: sorted(v) for a, v in sorted(by_arm.items())} }",
+                  file=sys.stderr)
+    print(json.dumps(recs, indent=2))
 
 
 if __name__ == "__main__":

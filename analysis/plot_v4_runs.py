@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import glob
 import json
+import sys
 import statistics as st
 from collections import defaultdict
 from pathlib import Path
@@ -43,6 +44,30 @@ C_INACTIVE = "#8d9aa8"  # drafter-free n-gram methods
 FOOTER = ("2026-08-26, llama.cpp 3737e4137, one RTX 3090, Qwen3.6-35B-A3B-UD-Q4_K_XL, "
           "greedy, thinking on, ten prompts, three repeats per arm. "
           "Controls and caveats: ERRATA.md, v4_audit_2026_08_25/README.md.")
+
+
+SERIES: dict = {}
+CHECK = "--check" in sys.argv
+
+
+def record(chart: str, **series) -> None:
+    """Register what a chart actually plots.
+
+    A PNG cannot be diffed usefully and matplotlib output is not byte-stable
+    across versions, so CI cannot tell a chart that is current from one left
+    behind by a data change. Every chart registers its plotted series here;
+    `--check` recomputes them and compares against the committed
+    `analysis/plot_data.json`, which is the part a reader would be misled by.
+    """
+    def _clean(v):
+        if isinstance(v, float):
+            return None if v != v else round(v, 4)
+        if isinstance(v, (list, tuple)):
+            return [_clean(x) for x in v]
+        if isinstance(v, dict):
+            return {k: _clean(x) for k, x in v.items()}
+        return v
+    SERIES[chart] = _clean(series)
 
 
 def _footer(fig, extra="", base=None):
@@ -85,6 +110,8 @@ def plot_batching() -> None:
                 for r in arms["baseline"] + arms["spec-draft-n8"]}
         widths.append(sorted(x for x in seen if x is not None))
 
+    record("batching", levels=levels, base_y=base_y, base_e=base_e,
+           spec_y=spec_y, spec_e=spec_e, widths=widths)
     fig, ax = plt.subplots(figsize=(9.2, 5.4))
     x = range(len(levels))
     ax.errorbar(x, base_y, yerr=base_e, color=C_REF, marker="o", lw=2.0,
@@ -127,9 +154,11 @@ def plot_batching() -> None:
     _footer(fig, " Error bars are the run-to-run SD of three repeats. The x axis is "
                  "CONCURRENT CLIENT REQUESTS, verified from request timestamps; the "
                  "server's decode batch width was not instrumented.")
-    plt.savefig(OUT / "plot_batching.png", dpi=150, bbox_inches="tight")
+    if not CHECK:  # --check verifies the numbers, it must not dirty the tree
+        plt.savefig(OUT / "plot_batching.png", dpi=150, bbox_inches="tight")
     plt.close()
-    print(f"  wrote {(OUT / 'plot_batching.png').relative_to(ROOT)}")
+    if not CHECK:
+        print(f"  wrote {(OUT / 'plot_batching.png').relative_to(ROOT)}")
 
 
 # ------------------------------------------------------------ runs J, K ----
@@ -148,6 +177,9 @@ def plot_dflash_sweep() -> None:
                      for a in arms if a.startswith("spec-dflash-n"))
         if pts:
             series.append((label, pts, colour, b))
+    record("dflash_sweep",
+           series=[{"label": lb, "points": pt, "baseline": bs}
+                   for lb, pt, _c, bs in series])
     if not series:
         print("  no DFlash data - skipping sweep chart")
         return
@@ -199,9 +231,11 @@ def plot_dflash_sweep() -> None:
     plt.tight_layout(rect=[0, 0.05, 1, 1])
     _footer(fig, " Runs J and K differ in context and fitter margin, so only their "
                  "deltas against their own baselines are comparable.")
-    plt.savefig(OUT / "plot_dflash_sweep.png", dpi=150, bbox_inches="tight")
+    if not CHECK:  # --check verifies the numbers, it must not dirty the tree
+        plt.savefig(OUT / "plot_dflash_sweep.png", dpi=150, bbox_inches="tight")
     plt.close()
-    print(f"  wrote {(OUT / 'plot_dflash_sweep.png').relative_to(ROOT)}")
+    if not CHECK:
+        print(f"  wrote {(OUT / 'plot_dflash_sweep.png').relative_to(ROOT)}")
 
 
 # ----------------------------------------------------------------- run L ----
@@ -274,6 +308,10 @@ def plot_acceptance_threshold() -> None:
                edgecolor="#3f3f46", linewidth=1.4, marker="D",
                label=f"runs J and K, whole arms ({len(oos)} points, NOT fitted)")
 
+    record("acceptance_threshold", fitted=sorted(zip(xs, ys)),
+           out_of_sample=sorted(oos), slope=slope, intercept=inter,
+           break_even=brk, r=num / den)
+
     lo, hi = 15, 95
     ax.plot([lo, hi], [slope * lo + inter, slope * hi + inter], color="#7a7a82",
             lw=1.3, ls="-", label=f"least squares on run L  (r = {num / den:+.3f})")
@@ -301,9 +339,11 @@ def plot_acceptance_threshold() -> None:
                  "both workloads, five repeats per arm, per prompt. Out-of-sample points: "
                  "runs J and K, whole arms, three repeats. "
                  "Controls and caveats: ERRATA.md, v4_audit_2026_08_25/README.md.")
-    plt.savefig(OUT / "plot_acceptance_threshold.png", dpi=150, bbox_inches="tight")
+    if not CHECK:  # --check verifies the numbers, it must not dirty the tree
+        plt.savefig(OUT / "plot_acceptance_threshold.png", dpi=150, bbox_inches="tight")
     plt.close()
-    print(f"  wrote {(OUT / 'plot_acceptance_threshold.png').relative_to(ROOT)}")
+    if not CHECK:
+        print(f"  wrote {(OUT / 'plot_acceptance_threshold.png').relative_to(ROOT)}")
 
 
 # ----------------------------------------------------------------- run O ----
@@ -358,6 +398,9 @@ def plot_head_to_head() -> None:
         dn = sum(x["draft_n"] for r in runs for x in r["rows"])
         da = sum(x["draft_n_accepted"] for r in runs for x in r["rows"])
         rows.append((a, pooled(runs), (100*da/dn) if dn else None, fam(a)))
+    record("head_to_head", rows=[{"arm": a, "pooled": pl,
+                                 "acceptance_pct": ac, "family": fm}
+                                for a, pl, ac, fm in rows])
     rows.sort(key=lambda r: r[1])
 
     fig, ax = plt.subplots(figsize=(10.4, 6.2))
@@ -413,13 +456,40 @@ def plot_head_to_head() -> None:
                   "is the server-side counter, which under-reports on the checkpointing "
                   "rows (ERRATA A13): spec-draft-n1 reads 69.7 % here and 100.0 % from "
                   "the drafter, and is 74.8 % slower either way.")
-    plt.savefig(OUT / "plot_head_to_head.png", dpi=150, bbox_inches="tight")
+    if not CHECK:  # --check verifies the numbers, it must not dirty the tree
+        plt.savefig(OUT / "plot_head_to_head.png", dpi=150, bbox_inches="tight")
     plt.close()
-    print(f"  wrote {(OUT / 'plot_head_to_head.png').relative_to(ROOT)}")
+    if not CHECK:
+        print(f"  wrote {(OUT / 'plot_head_to_head.png').relative_to(ROOT)}")
 
 
-if __name__ == "__main__":
+def main() -> None:
+    check = "--check" in sys.argv
+    if check:
+        # draw to a file-free backend: --check verifies the numbers, and
+        # rewriting the PNGs would make a read-only check dirty the tree
+        import matplotlib
+        matplotlib.use("Agg")
     plot_batching()
     plot_dflash_sweep()
     plot_acceptance_threshold()
     plot_head_to_head()
+    ref = ROOT / "analysis" / "plot_data.json"
+    if check:
+        if not ref.exists():
+            sys.exit(f"{ref} is missing; run this script without --check first")
+        want = json.loads(ref.read_text(encoding="utf-8"))
+        if want != SERIES:
+            bad = sorted({k for k in set(want) | set(SERIES)
+                          if want.get(k) != SERIES.get(k)})
+            sys.exit(f"the committed charts are stale: {bad} no longer match the "
+                     f"data. Re-run `python analysis/plot_v4_runs.py`.")
+        print(f"  charts match the data ({len(SERIES)} series)")
+        return
+    ref.write_text(json.dumps(SERIES, indent=2, sort_keys=True) + "\n",
+                   encoding="utf-8")
+    print(f"  wrote {ref.relative_to(ROOT)}")
+
+
+if __name__ == "__main__":
+    main()

@@ -13,7 +13,7 @@
 > benchmark of all RTX 3090 systems, of all Qwen3.6 quantisations, of all
 > speculative-decoding methods, or of end-to-end voice-agent latency.
 >
-> The **controlled tier** is runs A–M, collected 2026-08-25/26 on post-merge
+> The **controlled tier** is runs A–T3, collected 2026-08-25/26 on post-merge
 > master `3737e4137`: repeated arm-runs with a matched no-speculation baseline
 > inside each run, thinking suppression verified per request rather than
 > assumed, concurrent client requests verified from request timestamps, full per-request text
@@ -36,9 +36,13 @@
 > those.** With an external draft model, speculation still loses badly here, and
 > batching widens the gap rather than closing it. With the target's *own* layers
 > as the drafter — DFlash, and the model's built-in multi-token-prediction head
-> — it wins, by roughly a fifth, at short draft windows and one request at a
-> time. "Speculative decoding loses on this hardware" was a statement about a
-> regime this repository had not separated.
+> — it wins, by a fifth to a quarter, at short draft windows and one request at
+> a time. The width of that band is not rounding: the same DFlash configuration
+> measured five times spans +20.7 % to +26.7 %, and two of those runs used the
+> same binary and produced byte-identical output
+> ([ERRATA A16](ERRATA.md#a16-two-runs-identical-in-every-recorded-respect-and-byte-identical-in-output-differ-by-34--on-one-arm)).
+> "Speculative decoding loses on this hardware" was a statement about a regime
+> this repository had not separated.
 
 ## Result in one sentence
 
@@ -63,7 +67,7 @@ matrix under one memory policy, as a **balanced Latin square**: nine blocks, eac
 arm appearing exactly once per block and visiting every position exactly once —
 verified from the execution log, not from the design. Each change below is
 paired against the baseline measured **inside the same block**, and the interval
-is over blocks, which is the unit of randomisation:
+is over blocks, which is the unit of replication and of resampling:
 
 | arm | pooled tok/s | change | 95 % CI | acceptance † |
 |---|---:|---:|---:|---:|
@@ -84,10 +88,26 @@ three repeats with the arm list merely reversed on odd repeats, which leaves
 position confounded with time. Its point estimates were 0.3–1.7 pp away from
 these, and for `spec-mtp-n2` its +21.8 % falls **outside** the interval above.
 
-† This table is run O2. The same configuration was measured again in run M1 and
-`spec-dflash-n2` read **+26.7 %** there against +24.6 % here — a 2.1 pp
-between-run spread, the second largest in the dataset. The lower of the two is
-quoted. What a three-repeat delta is actually worth is measured in
+† This table is run O2, and **the intervals in it describe run O2, not the
+configuration.** `spec-dflash-n2` was measured five times under this memory
+policy — run O **+24.6 %**, run M1 **+26.7 %**, run O2 **+26.3 %**, run T
+**+25.9 %**, run T3 **+20.7 %** — a 6.0 pp spread, the second largest in the
+dataset after `spec-mtp-n4` (8.6 pp). The paired-block interval above is 1.6 pp
+wide; the between-run range is nearly four times that, and runs T and T3 sit
+5.2 pp apart while running **the same binary on the same models and producing
+byte-identical output**. That pair is
+[ERRATA A16](ERRATA.md#a16-two-runs-identical-in-every-recorded-respect-and-byte-identical-in-output-differ-by-34--on-one-arm);
+its cause is not isolated. Treat +20.7 % to +26.7 % as what this configuration
+delivers and the interval as within-run precision only.
+
+O2 is quoted because it is the balanced nine-block design, not because it is
+lowest — run T3 is. Runs K1 and L read about +21 % for the same arm and are
+excluded from the comparison above: they ran at `--fit-target 2048`, a different
+memory policy, which [`BENCHMARK_ENV.md`](BENCHMARK_ENV.md) records as a variable
+across runs. Until 2026-08-26 this footnote quoted run O's +24.6 % as though it
+were this table's own figure — it was written when run O *was* the headline table
+and was not updated when O2 replaced it. What a three-repeat delta is actually
+worth is measured in
 [ERRATA A14](ERRATA.md#a14-within-run-repeats-are-not-an-error-bar).
 
 † Server-side acceptance counter. It agrees with llama.cpp's other counter to
@@ -692,6 +712,11 @@ hundredths of a second across four arm-runs, at a median of 21.9 ms per save and
 22.4 ms per restore. `spec-dflash-n2` on the same prompts performs **zero** of
 these operations, spends 3.41 s drafting, and finishes **5.3 s faster than not
 speculating at all**.
+
+Both sides of that comparison are measured at the same depth: all twelve logs
+of the run are extracted, four repeats per arm. `baseline` and `spec-dflash-n2`
+emit zero checkpoint records in every one of their four arm-runs, and
+`spec-draft-n8` emits 785 saves and 728 restores in every one of its four.
 
 The measurement required rebuilding llama.cpp with timers around the four
 checkpoint calls, so that run alone is not on a stock binary. It was used as its

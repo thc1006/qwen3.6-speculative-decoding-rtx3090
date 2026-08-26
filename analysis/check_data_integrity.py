@@ -3,7 +3,16 @@
 Separate from `verify_claims.py`, which asks whether the documents match the
 data. This asks whether the data is well-formed at all: does every file parse,
 does every arm-run carry the prompts its manifest says it should, did anything
-crash, and is anything left over from a different run.
+crash, is anything left over from a different run, and is every scheduled
+(arm, repeat) cell present exactly once.
+
+That last one is why counts are not enough. An earlier version compared only
+per-arm occurrence counts against `repeats`, so a directory holding rep0 twice
+and no rep3 had the right number of files for the right arm and passed. The
+check below builds the exact Cartesian product `arms x range(repeats)` and
+requires a bijection with what is on disk, and separately requires each file's
+name to agree with the `arm`/`repeat` inside it - a mismatch makes every
+per-arm glob downstream silently wrong while every count stays correct.
 
 Two tiers, because the fields the runner writes changed during the audit:
 
@@ -69,6 +78,7 @@ def check_dir(d: Path) -> tuple[list[str], str]:
 
     row_counts = Counter()
     seen_arms = Counter()
+    cells: Counter = Counter()
     seen_expected: set[str] = set()
     for f in files:
         name = Path(f).name
@@ -80,6 +90,14 @@ def check_dir(d: Path) -> tuple[list[str], str]:
             if k not in r:
                 bad.append(f"{name}: missing {k!r}"); break
         else:
+            # the name is what every downstream glob selects on; the contents are
+            # what every downstream analysis reads. They must be the same run.
+            stem = name[:-len(".json")]
+            f_arm, _, f_rep = stem.rpartition("__rep")
+            if r["arm"] != f_arm or str(r["repeat"]) != f_rep:
+                bad.append(f"{name}: filename says arm={f_arm!r} rep={f_rep!r}, "
+                           f"contents say arm={r['arm']!r} rep={r['repeat']!r}")
+            cells[(r["arm"], r["repeat"])] += 1
             if r.get("crashed"):
                 if name in expected_crashes:
                     seen_expected.add(name)
@@ -112,8 +130,42 @@ def check_dir(d: Path) -> tuple[list[str], str]:
     if declared and set(seen_arms) - declared:
         bad.append(f"{d.name}: results for arms not in the manifest: "
                    f"{sorted(set(seen_arms) - declared)}")
-    if man.get("repeats") and any(v > man["repeats"] for v in seen_arms.values()):
-        bad.append(f"{d.name}: more repeats on disk than the manifest declares")
+
+    # the exact (arm, repeat) set, not a count
+    reps = man.get("repeats")
+    if declared and isinstance(reps, int) and reps > 0:
+        expected_cells = {(a, r) for a in declared for r in range(reps)}
+        dupes = sorted(k for k, v in cells.items() if v > 1)
+        for k in dupes:
+            bad.append(f"{d.name}: cell {k[0]} rep{k[1]} appears {cells[k]} times")
+        for a, r in sorted(expected_cells - set(cells)):
+            bad.append(f"{d.name}: cell {a} rep{r} is missing")
+        for a, r in sorted(set(cells) - expected_cells):
+            bad.append(f"{d.name}: cell {a} rep{r} was never scheduled")
+
+    # RUN_COMPLETE.json is an attestation; check it against the directory it
+    # attests to rather than treating its presence as proof.
+    rc_path = d / "RUN_COMPLETE.json"
+    if rc_path.exists():
+        try:
+            rc = json.loads(rc_path.read_text(encoding="utf-8"))
+        except Exception as e:  # noqa: BLE001
+            bad.append(f"{d.name}: RUN_COMPLETE.json does not parse: {e}")
+        else:
+            if set(rc.get("arms") or []) != declared:
+                bad.append(f"{d.name}: RUN_COMPLETE arms differ from the manifest")
+            if rc.get("repeats") != reps:
+                bad.append(f"{d.name}: RUN_COMPLETE repeats={rc.get('repeats')} "
+                           f"but manifest says {reps}")
+            exp_runs = rc.get("expected_arm_runs")
+            if exp_runs is not None and exp_runs != len(files):
+                bad.append(f"{d.name}: RUN_COMPLETE claims {exp_runs} arm-runs, "
+                           f"{len(files)} on disk")
+            if rc.get("n_prompts") is not None and n_expected is not None \
+                    and rc["n_prompts"] != n_expected:
+                bad.append(f"{d.name}: RUN_COMPLETE n_prompts disagrees with the manifest")
+    if (d / "RUN_FAILED.json").exists():
+        bad.append(f"{d.name}: RUN_FAILED.json present - the runner rejected this run")
 
     # the allowlist must not outlive the crashes it excuses
     stale = expected_crashes - seen_expected

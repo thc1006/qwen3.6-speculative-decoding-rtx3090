@@ -69,7 +69,8 @@ import torch, transformers, gguf, safetensors
 print(f"  deps: torch {torch.__version__}, transformers {transformers.__version__}")
 PY
 
-# Never health-check a half-written file: convert to a temp path, promote on success.
+# Never health-check a half-written file, and never promote one the loader has
+# not accepted: convert to a temp path, load-check the temp path, promote last.
 TMP_GGUF="${OUT_GGUF}.partial"
 rm -f "$TMP_GGUF"
 
@@ -98,18 +99,17 @@ sys.exit(0 if hit else 1)
 PY
 [ $? -eq 0 ] || die "converted file still lacks target_layers; master's converter did not write it"
 
-mv -f "$TMP_GGUF" "$OUT_GGUF"
-sha="$(sha256sum "$OUT_GGUF" | awk '{print $1}')"
-printf '%s  %s\nconverter_commit %s\n' "$sha" "$(basename "$OUT_GGUF")" "$CONVERTER_SHA" \
-    > "${OUT_GGUF}.provenance"
-ls -la "$OUT_GGUF"
-echo "sha256 $sha  (provenance written next to the file)"
+# The file stays at the temp path until the loader has accepted it. Promoting
+# here - which is what this did - defeats the temp path entirely: a drafter that
+# converts and carries `target_layers` but that the loader refuses is still
+# sitting at the final path when the script dies, and the next benchmark run
+# picks it up. `target_layers` present is not the success condition; loading is.
 
 # ---- does the merged loader actually accept it? -----------------------------
 echo "=== load check with --spec-type draft-dflash ==="
 LOADLOG="$LOG_DIR/dflash_loadcheck_$(date +%Y%m%d_%H%M%S).log"
 timeout 240 "$LLAMA_REPO/build/bin/llama-server" \
-    -m "$TARGET_GGUF" -md "$OUT_GGUF" \
+    -m "$TARGET_GGUF" -md "$TMP_GGUF" \
     --spec-type draft-dflash --spec-draft-n-max 8 -ngld 99 \
     -ngl 999 -c 4096 --jinja -fa on -ctk q8_0 -ctv q8_0 --no-webui \
     --host 127.0.0.1 --port "$PORT" -v > "$LOADLOG" 2>&1 &
@@ -124,5 +124,17 @@ kill -TERM "$srv" 2>/dev/null; wait "$srv" 2>/dev/null
 
 echo "health=$ok  log=$LOADLOG"
 grep -iE "target_layers|dflash|speculative decoding context init|error" "$LOADLOG" | head -12
-[ "$ok" -eq 1 ] || die "loader still refuses the converted drafter; see $LOADLOG"
+if [ "$ok" -ne 1 ]; then
+    rm -f "$TMP_GGUF"
+    die "loader still refuses the converted drafter; see $LOADLOG (the partial \
+file has been removed, nothing was promoted to $OUT_GGUF)"
+fi
+
+# Only now is the conversion a success.
+mv -f "$TMP_GGUF" "$OUT_GGUF"
+sha="$(sha256sum "$OUT_GGUF" | awk '{print $1}')"
+printf '%s  %s\nconverter_commit %s\n' "$sha" "$(basename "$OUT_GGUF")" "$CONVERTER_SHA" \
+    > "${OUT_GGUF}.provenance"
+ls -la "$OUT_GGUF"
+echo "sha256 $sha  (provenance written next to the file)"
 echo "OK: $OUT_GGUF loads under --spec-type draft-dflash on $CONVERTER_SHA"

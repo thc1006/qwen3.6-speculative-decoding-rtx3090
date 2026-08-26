@@ -126,8 +126,8 @@ else:
              f"{sorted(_THINK_ON)} or {sorted(_THINK_OFF)}")
 CONCURRENCY = max(1, int(os.environ.get("BENCH_CONCURRENCY", "1")))
 _ORDER_RAW = os.environ.get("BENCH_ORDER", "latin").strip().lower()
-if _ORDER_RAW not in ("latin", "mirrored"):
-    sys.exit("BENCH_ORDER must be 'latin' or 'mirrored'")
+if _ORDER_RAW not in ("latin", "cyclic", "mirrored"):
+    sys.exit("BENCH_ORDER must be 'latin', 'cyclic' or 'mirrored'")
 ORDER_MODE = _ORDER_RAW
 # Pinning -ngl 999 makes llama.cpp's memory fitter abort ("n_gpu_layers already
 # set by user to 999, abort") instead of adjusting the parameters the caller
@@ -476,6 +476,83 @@ ARMS: dict[str, list[str]] = {
 
 # ---------------------------------------------------------------- utils ----
 
+def sha256_bytes(b: bytes) -> str:
+    return hashlib.sha256(b).hexdigest()
+
+
+def runner_sha256() -> str:
+    """This file's own hash. The manifest records which binary answered and
+    which model it loaded; without this it does not record which harness asked.
+    Run O2's identity fields were empty because of a regex in this file, and
+    nothing in its output said which version of the file that was."""
+    try:
+        return sha256(__file__)
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def prompt_set_sha256() -> str:
+    """Hash of the prompt set as sent, not of its name.
+
+    `prompt_set: v1` in a manifest is a label; two runs can carry the same label
+    and different prompts if the list is edited between them, and every
+    cross-run comparison in this repository assumes they cannot.
+    """
+    canon = json.dumps(PROMPTS, sort_keys=True, ensure_ascii=False,
+                       separators=(",", ":")).encode("utf-8")
+    return sha256_bytes(canon)
+
+
+def harness_tree_sha() -> dict:
+    """Where the harness came from, when it is run from a checkout.
+
+    The benchmark host has no clone of this repository - the runner is copied
+    to it - so this is best-effort and `BENCH_HARNESS_SHA` is how the caller
+    states it explicitly. Recorded as `declared` in that case, so a reader can
+    tell an assertion from an observation.
+    """
+    declared = os.environ.get("BENCH_HARNESS_SHA", "").strip()
+    if declared:
+        return {"sha": declared, "source": "declared via BENCH_HARNESS_SHA"}
+    try:
+        out = subprocess.run(["git", "-C", str(Path(__file__).resolve().parent),
+                              "rev-parse", "HEAD"],
+                             capture_output=True, text=True, timeout=10)
+        if out.returncode == 0 and out.stdout.strip():
+            dirty = subprocess.run(["git", "-C", str(Path(__file__).resolve().parent),
+                                    "status", "--porcelain"],
+                                   capture_output=True, text=True, timeout=10).stdout
+            return {"sha": out.stdout.strip(),
+                    "dirty": bool(dirty.strip()),
+                    "source": "git rev-parse in the harness directory"}
+    except Exception:  # noqa: BLE001
+        pass
+    return {"sha": None, "source": "not a checkout and BENCH_HARNESS_SHA unset"}
+
+
+# If set, every arm-run must report this commit / these library hashes, and the
+# run aborts on the first that does not. Without it a binary swapped between
+# arms is invisible: `server_lib_sha256` is taken once, at run start.
+EXPECT_COMMIT = os.environ.get("BENCH_EXPECT_COMMIT", "").strip()
+EXPECT_LIB = os.environ.get("BENCH_EXPECT_LIB_SHA256", "").strip()
+
+
+def check_identity(arm: str, rep: int, ident: dict, libs: dict) -> list[str]:
+    """Compare what answered against what the caller said should answer."""
+    bad: list[str] = []
+    if EXPECT_COMMIT:
+        got = ident.get("commit") or ""
+        if not got.startswith(EXPECT_COMMIT) and not EXPECT_COMMIT.startswith(got or "\0"):
+            bad.append(f"{arm} rep{rep}: server reports commit {got!r}, "
+                       f"BENCH_EXPECT_COMMIT={EXPECT_COMMIT!r}")
+    if EXPECT_LIB:
+        impl = libs.get("libllama-server-impl.so", "")
+        if not impl.startswith(EXPECT_LIB):
+            bad.append(f"{arm} rep{rep}: libllama-server-impl.so is {impl[:16]!r}, "
+                       f"BENCH_EXPECT_LIB_SHA256={EXPECT_LIB[:16]!r}")
+    return bad
+
+
 def _server_lib_hashes() -> dict:
     """Hash every shared object beside the server binary, de-duplicated by the
     file the symlink resolves to. Both `libfoo.so` and `libfoo.so.0` are present
@@ -645,7 +722,7 @@ def gpu_mem_used_mib() -> int | None:
 
 
 def stop_server(proc: subprocess.Popen, settle_mib: int = 2048,
-                settle_timeout: float = 60.0) -> None:
+                settle_timeout: float = 60.0) -> dict:
     """Kill the server AND wait for the driver to hand the memory back.
 
     Reaping the process is not the same as the CUDA context being torn down.
@@ -671,10 +748,19 @@ def stop_server(proc: subprocess.Popen, settle_mib: int = 2048,
     while time.perf_counter() - t0 < settle_timeout:
         used = gpu_mem_used_mib()
         if used is None or used <= settle_mib:
-            return
+            return {"settled": True, "mib_after": used,
+                    "wait_s": round(time.perf_counter() - t0, 2),
+                    "readable": used is not None}
         time.sleep(1.0)
-    print(f"    ! GPU still reports {gpu_mem_used_mib()} MiB in use "
+    used = gpu_mem_used_mib()
+    print(f"    ! GPU still reports {used} MiB in use "
           f"{settle_timeout:.0f}s after the server was killed", flush=True)
+    # Printing this and carrying on is what the first version did. The next arm
+    # then sizes itself with `-fit on` against a stale free-memory reading, so
+    # the failure lands on the *following* arm and looks like that arm's fault.
+    # Recorded per arm-run and treated as a run-level failure below.
+    return {"settled": False, "mib_after": used,
+            "wait_s": round(time.perf_counter() - t0, 2), "readable": True}
 
 
 def chat(system: str, user) -> dict:
@@ -848,6 +934,48 @@ def max_client_requests_in_flight(rows: list[dict]) -> int:
     return peak
 
 
+SCHEDULE: list[list[str]] = []
+TEARDOWN: dict = {}
+
+
+def position_counts(schedule: list[list[str]]) -> dict[str, list[int]]:
+    pos: dict[str, list[int]] = {a: [] for a in schedule[0]}
+    for order in schedule:
+        for i, a in enumerate(order):
+            pos[a].append(i + 1)
+    return pos
+
+
+def build_schedule(arms: list[str], repeats: int, mode: str) -> list[list[str]]:
+    """Build the arm order for every block, and refuse to call it balanced
+    unless it is.
+
+    `latin` is reserved for a schedule where every arm visits every position
+    exactly once, which a cyclic rotation gives only when `repeats == len(arms)`.
+    An earlier version generated the rotation for any pair and labelled the
+    result `latin` regardless: three arms over four repeats produces rotations
+    0, 1, 2, 0, so one arm sits in the same position twice while the manifest
+    claimed balance. `cyclic` is that same rotation, named for what it is.
+    """
+    n = len(arms)
+    if mode == "mirrored":
+        sched = [arms if r % 2 == 0 else list(reversed(arms)) for r in range(repeats)]
+    else:
+        step = max(1, n // max(1, repeats))
+        sched = [arms[(r * step) % n:] + arms[:(r * step) % n] for r in range(repeats)]
+    if mode == "latin":
+        pos = position_counts(sched)
+        balanced = all(sorted(v) == list(range(1, n + 1)) for v in pos.values())
+        if not balanced:
+            sys.exit(
+                f"BENCH_ORDER=latin asks for a position-balanced schedule and "
+                f"{n} arms over {repeats} repeats cannot give one: "
+                + "; ".join(f"{a} at {v}" for a, v in list(pos.items())[:3])
+                + f". Use BENCH_REPEATS={n} for a full cyclic Latin square, or "
+                f"BENCH_ORDER=cyclic to run the rotation without claiming balance.")
+    return sched
+
+
 def run_arm(arm: str, rep: int) -> dict:
     extra = ARMS[arm]
     log_path = OUT / "server_logs" / f"{arm}__rep{rep}.log"
@@ -909,6 +1037,12 @@ def run_arm(arm: str, rep: int) -> dict:
             # who actually answered, read back from the server's own startup log
             "server_pid": proc.pid,
             "server_identity": server_identity(log_path),
+            # Taken per arm-run, not once per run: the run-level hash cannot
+            # see a binary replaced between two arms.
+            "server_lib_sha256": _server_lib_hashes(),
+            "server_loaded_commit": server_identity(log_path).get("commit"),
+            # `server_log_sha256` is filled in by the driver after the server is
+            # stopped: hashing it here would hash a file still being written.
             # system-level metric, valid at every concurrency level
             "concurrency": CONCURRENCY,
             "wall_s": wall_s,
@@ -922,7 +1056,78 @@ def run_arm(arm: str, rep: int) -> dict:
             "rows": rows,
         }
     finally:
-        stop_server(proc)
+        TEARDOWN[(arm, rep)] = stop_server(proc)
+
+
+def validate_run(out: Path, arms: list[str], repeats: int,
+                 results: list[dict]) -> list[str]:
+    """Return every reason this directory is not a complete, self-consistent run.
+
+    Checks the exact (arm, repeat) Cartesian product, not a count: N*R files can
+    be reached with one arm run twice and another not at all.
+    """
+    problems: list[str] = []
+    expected = {(a, r) for a in arms for r in range(repeats)}
+
+    seen: dict[tuple[str, int], int] = {}
+    for res in results:
+        key = (res.get("arm"), res.get("repeat"))
+        seen[key] = seen.get(key, 0) + 1
+    for key, n in sorted(seen.items(), key=lambda kv: (str(kv[0][0]), str(kv[0][1]))):
+        if n > 1:
+            problems.append(f"arm-run {key[0]} rep{key[1]} recorded {n} times")
+    for a, r in sorted(expected - set(seen)):
+        problems.append(f"arm-run {a} rep{r} missing from the results")
+    for key in sorted(set(seen) - expected, key=lambda k: (str(k[0]), str(k[1]))):
+        problems.append(f"arm-run {key[0]} rep{key[1]} was not scheduled")
+
+    for res in results:
+        arm, rep = res.get("arm"), res.get("repeat")
+        problems += check_identity(arm, rep, res.get("server_identity") or {},
+                                   res.get("server_lib_sha256") or {})
+        td = res.get("teardown") or {}
+        if td.get("readable") and not td.get("settled"):
+            problems.append(f"arm-run {arm} rep{rep}: the GPU still held "
+                            f"{td.get('mib_after')} MiB {td.get('wait_s')}s after "
+                            f"teardown, so the next arm sized itself against a "
+                            f"stale reading")
+        if res.get("crashed"):
+            c = res["crashed"]
+            problems.append(f"arm-run {arm} rep{rep} crashed at "
+                            f"{c.get('tag')}: {c.get('error')}")
+            continue
+        rows = res.get("rows") or []
+        if len(rows) != len(PROMPTS):
+            problems.append(f"arm-run {arm} rep{rep} has {len(rows)} prompt rows, "
+                            f"expected {len(PROMPTS)}")
+        got = {row.get("tag") for row in rows}
+        want = {t for t, _, _ in PROMPTS}
+        if got != want:
+            problems.append(f"arm-run {arm} rep{rep} prompt tags differ: "
+                            f"missing {sorted(want - got)}, extra {sorted(got - want)}")
+        for row in rows:
+            if not row.get("predicted_n"):
+                problems.append(f"arm-run {arm} rep{rep} prompt {row.get('tag')} "
+                                f"produced no tokens")
+
+    # A file whose name disagrees with its contents makes every per-arm glob a
+    # lie, and no count-based check can see it.
+    for f in sorted(out.glob("*__rep*.json")):
+        stem = f.name[:-len(".json")]
+        f_arm, _, f_rep = stem.rpartition("__rep")
+        try:
+            body = json.loads(f.read_text(encoding="utf-8"))
+        except Exception as e:                       # noqa: BLE001 - report, not raise
+            problems.append(f"{f.name} is not readable JSON: {e}")
+            continue
+        if body.get("arm") != f_arm or str(body.get("repeat")) != f_rep:
+            problems.append(f"{f.name} contains arm={body.get('arm')!r} "
+                            f"repeat={body.get('repeat')!r}")
+    on_disk = {f.name for f in out.glob("*__rep*.json")}
+    for a, r in sorted(expected):
+        if f"{a}__rep{r}.json" not in on_disk:
+            problems.append(f"{a}__rep{r}.json was not written")
+    return problems
 
 
 def main() -> None:
@@ -953,6 +1158,11 @@ def main() -> None:
     if any("{DFLASH}" in x for a in arms for x in ARMS[a]) and not DFLASH:
         sys.exit("set MODEL_DFLASH for the DFlash arms")
 
+    # Build and validate the block schedule before the first server starts, so a
+    # schedule that cannot deliver what BENCH_ORDER promises costs zero GPU time.
+    global SCHEDULE
+    SCHEDULE = build_schedule(arms, REPEATS, ORDER_MODE)
+
     OUT.mkdir(parents=True, exist_ok=True)
     manifest = {
         "created": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
@@ -979,13 +1189,25 @@ def main() -> None:
         "repeats": REPEATS, "max_tokens": MAX_TOKENS,
         "temperature": 0.0, "seed": 42, "think": THINK, "think_env": _THINK_RAW,
         "concurrency": CONCURRENCY, "fit": FIT, "ctx": CTX,
+        "runner_sha256": runner_sha256(),
+        "harness_tree_sha": harness_tree_sha(),
+        "prompt_set_sha256": prompt_set_sha256(),
+        "expect_commit": EXPECT_COMMIT or None,
+        "expect_lib_sha256": EXPECT_LIB or None,
         "order_mode": ORDER_MODE,
+        "schedule": SCHEDULE,
+        "schedule_position_counts": position_counts(SCHEDULE) if SCHEDULE else {},
+        "schedule_is_position_balanced": bool(SCHEDULE) and all(
+            sorted(v) == list(range(1, len(SCHEDULE[0]) + 1))
+            for v in position_counts(SCHEDULE).values()),
         "prompt_set": PROMPT_SET_NAME, "n_prompts": len(PROMPTS),
         "prompt_tags": [t for t, _, _ in PROMPTS],
         "fit_target": FIT_TARGET or None,
-        "ordering": ("latin: arm order rotated by repeat index, step N/repeats"
-                     if ORDER_MODE == "latin" else
-                     "mirrored: arm order reversed on odd repeats; balanced only for even repeats"),
+        "ordering": {
+            "latin": "cyclic rotation, validated position-balanced before the run",
+            "cyclic": "cyclic rotation; NOT position-balanced and not claimed to be",
+            "mirrored": "arm order reversed on odd repeats; balanced only for even repeats",
+        }[ORDER_MODE],
         "gpu_fields": GPU_FIELDS,
         "nvidia_smi": nvidia_smi(),
     }
@@ -1002,21 +1224,20 @@ def main() -> None:
         #   latin     rotate by the repeat index. Each arm occupies `repeats`
         #             distinct positions, advancing uniformly; with repeats == N
         #             it is a full cyclic Latin square. This is the default.
+        #   cyclic    the same rotation when repeats != N, where it cannot be
+        #             position-balanced. Named separately so the manifest never
+        #             claims a balance the schedule does not have.
         #   mirrored  the old forward/reverse alternation, kept for continuity
         #             with runs A-R. Rejected for odd repeats, where it is not
         #             balanced at all.
-        if ORDER_MODE == "mirrored":
-            order = arms if rep % 2 == 0 else list(reversed(arms))
-        else:
-            # step by N/R so `repeats` blocks spread across the positions rather
-            # than crowding adjacent ones: nine arms in three repeats puts each
-            # arm at positions 1, 4 and 7 rather than 1, 9 and 8.
-            step = max(1, len(arms) // max(1, REPEATS))
-            k = (rep * step) % len(arms)
-            order = arms[k:] + arms[:k]
+        order = SCHEDULE[rep]
         print(f"\n=== repeat {rep}  order: {' -> '.join(order)} ===", flush=True)
         for arm in order:
             res = run_arm(arm, rep)
+            res["teardown"] = TEARDOWN.get((arm, rep))
+            # after stop_server, so the file is complete and closed
+            _lp = OUT / str(res.get("server_log") or "")
+            res["server_log_sha256"] = sha256(str(_lp)) if _lp.is_file() else None
             results.append(res)
             (OUT / f"{arm}__rep{rep}.json").write_text(
                 json.dumps(res, indent=2, ensure_ascii=False) + "\n")
@@ -1024,12 +1245,33 @@ def main() -> None:
     (OUT / "all_results.json").write_text(
         json.dumps(results, indent=2, ensure_ascii=False) + "\n")
     print(f"\n=== wrote {OUT}/ ({len(results)} arm-runs) ===")
-    (OUT / "RUN_COMPLETE.json").write_text(json.dumps({
+    # RUN_COMPLETE.json is the marker every downstream consumer trusts to mean
+    # "this directory holds a whole run". It used to be written unconditionally
+    # once the arm loop returned, so a run in which an arm crashed - run_arm
+    # records the failure and continues - still produced the marker, and the
+    # integrity checker read it as an attestation of completeness. Validate
+    # first; on failure write RUN_FAILED.json instead, so a partial directory
+    # announces itself rather than passing silently.
+    problems = validate_run(OUT, arms, REPEATS, results)
+    stamp = {
         "completed_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         "arms": arms, "repeats": REPEATS, "prompt_set": PROMPT_SET_NAME,
         "n_prompts": len(PROMPTS),
         "expected_arm_runs": len(arms) * REPEATS,
-    }, indent=2) + "\n", encoding="utf-8")
+        "observed_arm_runs": len(results),
+        "order_mode": ORDER_MODE,
+        "schedule_is_position_balanced": manifest["schedule_is_position_balanced"],
+    }
+    if problems:
+        stamp["problems"] = problems
+        (OUT / "RUN_FAILED.json").write_text(
+            json.dumps(stamp, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        print(f"\n=== RUN FAILED: {len(problems)} problem(s) ===", flush=True)
+        for x in problems:
+            print(f"    - {x}", flush=True)
+        sys.exit(1)
+    (OUT / "RUN_COMPLETE.json").write_text(
+        json.dumps(stamp, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
 if __name__ == "__main__":

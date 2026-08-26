@@ -1,6 +1,6 @@
 name: audit
 
-# Four required jobs. This repository publishes numbers, and every one of them
+# Five required jobs. This repository publishes numbers, and every one of them
 # has to be re-derivable from the committed data by a machine that was not the
 # one that produced it. Several of the checks below exist because the claim they
 # guard was published wrong first.
@@ -18,8 +18,8 @@ jobs:
     name: static
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with: { python-version: "3.12" }
       - name: byte-compile everything
         run: python -m compileall -q analysis bench tests
@@ -34,8 +34,8 @@ jobs:
     name: unit and mutation
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with: { python-version: "3.12" }
       - name: regression tests for defects this repository shipped
         run: python -m unittest discover -s tests -v
@@ -46,8 +46,8 @@ jobs:
     name: data integrity
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with: { python-version: "3.12" }
       - name: structure of every committed run directory
         run: python analysis/check_data_integrity.py
@@ -56,8 +56,32 @@ jobs:
     name: claims
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with: { python-version: "3.12" }
       - name: re-derive every quoted figure and grep the documents for it
         run: python analysis/verify_claims.py
+      - name: every attested run aggregates without a completeness failure
+        run: |
+          set -e
+          for d in v4_audit_2026_08_25/data/*/; do
+            if [ -f "$d/RUN_COMPLETE.json" ]; then
+              echo "--- $d"
+              python analysis/matrix_report.py --strict "$d"
+            fi
+          done
+
+  audit-charts:
+    name: charts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        # 3.13, not 3.12: requirements-plot.lock pins cp313 wheels by hash
+        with: { python-version: "3.13" }
+      - name: install the plotting dependencies
+        # hash-pinned: the job that checks the charts must not be able to change
+        # without a change in this repository
+        run: pip install --require-hashes -r requirements-plot.lock
+      - name: the committed charts must still match the committed data
+        run: python analysis/plot_v4_runs.py --check

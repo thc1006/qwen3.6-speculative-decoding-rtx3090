@@ -183,8 +183,9 @@ def _fixture_run(d: Path, *, rows: int = 10, arms=("baseline", "arm-x"),
                           "draft_n_accepted": 0, "timings": {}} for t in use],
             }), encoding="utf-8")
     if complete:
-        (d / "RUN_COMPLETE.json").write_text(json.dumps({"expected_arm_runs": len(arms) * repeats}),
-                                             encoding="utf-8")
+        (d / "RUN_COMPLETE.json").write_text(json.dumps({
+            "expected_arm_runs": len(arms) * repeats, "arms": list(arms),
+            "repeats": repeats, "n_prompts": 10}), encoding="utf-8")
     return d
 
 
@@ -226,6 +227,360 @@ class StrictAggregationMustRefuseBadRuns(unittest.TestCase):
     def test_missing_completion_marker_fails(self):
         with tempfile.TemporaryDirectory() as t:
             self.assertNotEqual(self._strict(_fixture_run(Path(t) / "partial", complete=False)), 0)
+
+
+class RunMustCoverTheExactCell(unittest.TestCase):
+    """Counts are not coverage.
+
+    Every check here defeats a count-based one: the directory holds the right
+    number of files, for the right arms, with the right rows, and is still not
+    the run it claims to be.
+    """
+
+    def _integrity(self, d: Path) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [sys.executable, str(ROOT / "analysis" / "check_data_integrity.py"), str(d.parent)],
+            capture_output=True, text=True)
+
+    def _one(self, t: str, name: str, **kw) -> Path:
+        root = Path(t) / "root"; root.mkdir()
+        return _fixture_run(root / name, **kw)
+
+    def test_a_well_formed_run_passes(self):
+        with tempfile.TemporaryDirectory() as t:
+            self.assertEqual(self._integrity(self._one(t, "ok")).returncode, 0)
+
+    def test_a_missing_arm_fails(self):
+        with tempfile.TemporaryDirectory() as t:
+            d = self._one(t, "no_arm")
+            for f in d.glob("arm-x__rep*.json"):
+                f.unlink()
+            r = self._integrity(d)
+            self.assertNotEqual(r.returncode, 0)
+            self.assertIn("arm-x rep0 is missing", r.stdout + r.stderr)
+
+    def test_a_missing_repeat_fails(self):
+        with tempfile.TemporaryDirectory() as t:
+            d = self._one(t, "no_rep")
+            (d / "arm-x__rep1.json").unlink()
+            r = self._integrity(d)
+            self.assertNotEqual(r.returncode, 0)
+            self.assertIn("arm-x rep1 is missing", r.stdout + r.stderr)
+
+    def test_a_duplicated_cell_with_the_right_file_count_fails(self):
+        """rep0 twice, rep1 never: four files, two arms, all rows present."""
+        with tempfile.TemporaryDirectory() as t:
+            d = self._one(t, "dupe_cell")
+            body = json.loads((d / "arm-x__rep0.json").read_text())
+            (d / "arm-x__rep1.json").write_text(json.dumps(body), encoding="utf-8")
+            self.assertEqual(len(list(d.glob("*__rep*.json"))), 4)
+            r = self._integrity(d)
+            self.assertNotEqual(r.returncode, 0)
+            out = r.stdout + r.stderr
+            self.assertIn("appears 2 times", out)
+            self.assertIn("rep1 is missing", out)
+
+    def test_a_filename_that_disagrees_with_its_contents_fails(self):
+        with tempfile.TemporaryDirectory() as t:
+            d = self._one(t, "mislabelled")
+            body = json.loads((d / "arm-x__rep1.json").read_text())
+            body["arm"] = "baseline"
+            (d / "arm-x__rep1.json").write_text(json.dumps(body), encoding="utf-8")
+            r = self._integrity(d)
+            self.assertNotEqual(r.returncode, 0)
+            self.assertIn("filename says", r.stdout + r.stderr)
+
+    def test_a_forged_completion_marker_fails(self):
+        """The marker is an attestation, not proof: check it against the data."""
+        with tempfile.TemporaryDirectory() as t:
+            d = self._one(t, "forged")
+            (d / "RUN_COMPLETE.json").write_text(json.dumps({
+                "expected_arm_runs": 99, "arms": ["baseline", "arm-x", "ghost"],
+                "repeats": 7, "n_prompts": 10}), encoding="utf-8")
+            r = self._integrity(d)
+            self.assertNotEqual(r.returncode, 0)
+            out = r.stdout + r.stderr
+            self.assertIn("RUN_COMPLETE arms differ", out)
+            self.assertIn("RUN_COMPLETE repeats=7", out)
+            self.assertIn("claims 99 arm-runs", out)
+
+    def test_a_run_the_runner_rejected_is_not_read_as_data(self):
+        with tempfile.TemporaryDirectory() as t:
+            d = self._one(t, "rejected")
+            (d / "RUN_FAILED.json").write_text('{"problems": ["arm-x rep1 crashed"]}',
+                                               encoding="utf-8")
+            r = self._integrity(d)
+            self.assertNotEqual(r.returncode, 0)
+            self.assertIn("RUN_FAILED", r.stdout + r.stderr)
+
+
+class LatinSquareMustBeBalancedOrNotCalledLatin(unittest.TestCase):
+    """`latin` was generated for any (arms, repeats) pair and labelled balanced.
+
+    Three arms over four repeats rotates 0, 1, 2, 0, so one arm sits in the same
+    position twice - and run T's manifest recorded `order_mode: latin` for
+    exactly that shape.
+    """
+
+    def _build(self, arms, repeats, mode):
+        import importlib.util
+        os.environ.update(LLAMA_SERVER_BIN="/bin/true", MODEL_TARGET="/dev/null",
+                          BENCH_OUT="/tmp/_lsq_probe")
+        spec = importlib.util.spec_from_file_location("_rr_lsq", RUNNER)
+        rr = importlib.util.module_from_spec(spec); spec.loader.exec_module(rr)
+        return rr, rr.build_schedule(list(arms), repeats, mode)
+
+    def test_three_arms_over_four_repeats_is_refused_as_latin(self):
+        with self.assertRaises(SystemExit) as cm:
+            self._build("abc", 4, "latin")
+        self.assertIn("cannot give one", str(cm.exception))
+
+    def test_the_same_shape_runs_as_cyclic(self):
+        rr, sched = self._build("abc", 4, "cyclic")
+        self.assertEqual(len(sched), 4)
+        pos = rr.position_counts(sched)
+        self.assertNotEqual(sorted(pos["a"]), [1, 2, 3, 4])
+
+    def test_a_square_schedule_is_balanced(self):
+        rr, sched = self._build("abc", 3, "latin")
+        for arm, positions in rr.position_counts(sched).items():
+            self.assertEqual(sorted(positions), [1, 2, 3], arm)
+
+    def test_the_manifest_records_whether_it_is_balanced(self):
+        with tempfile.TemporaryDirectory() as d:
+            out = Path(d) / "out"
+            r = run_runner({"BENCH_ORDER": "cyclic", "BENCH_ARMS": "baseline",
+                            "BENCH_REPEATS": "2"}, out)
+            self.assertIn("schedule_is_position_balanced", r.stdout + r.stderr)
+
+
+class TimerExtractionMustBeRepeatIndependent(unittest.TestCase):
+    """`.replace("__rep0.log", "")` left rep1..N carrying the suffix, so a
+    per-arm assertion covered rep0 alone while looking like it covered them all.
+    """
+
+    def test_every_repeat_normalises_to_the_same_arm(self):
+        sys.path.insert(0, str(ROOT / "analysis"))
+        import extract_checkpoint_timers as ect
+        with tempfile.TemporaryDirectory() as t:
+            d = Path(t)
+            for rep in range(4):
+                (d / f"spec-draft-n8__rep{rep}.log").write_text(
+                    "AUDIT_US update_tgt=1000\nAUDIT_US load_tgt=1 load_dft=0\n",
+                    encoding="utf-8")
+            arms = {ect.analyse(str(f))["arm"] for f in sorted(d.glob("*.log"))}
+        self.assertEqual(arms, {"spec-draft-n8"},
+                         f"repeats did not collapse to one arm: {sorted(arms)}")
+
+    def test_the_repeat_index_is_preserved(self):
+        sys.path.insert(0, str(ROOT / "analysis"))
+        import extract_checkpoint_timers as ect
+        with tempfile.TemporaryDirectory() as t:
+            f = Path(t) / "baseline__rep2.log"
+            f.write_text("AUDIT_US update_tgt=5\n", encoding="utf-8")
+            rec = ect.analyse(str(f))
+        self.assertEqual((rec["arm"], rec["repeat"]), ("baseline", 2))
+
+
+class RunnerMustNotAttestAFailedRun(unittest.TestCase):
+    """End-to-end, against `tests/fake_llama_server.py`.
+
+    `RUN_COMPLETE.json` used to be written unconditionally once the arm loop
+    returned. `run_arm` records a crash and carries on, so a run in which an arm
+    died still produced the marker that every downstream consumer reads as
+    "this directory holds a whole run" - and no test could see it, because
+    reaching that line needed a GPU. The stub server reaches it in a second.
+    """
+
+    FAKE = ROOT / "tests" / "fake_llama_server.py"
+    PORT = "18921"
+
+    def _run(self, out: Path, extra: dict | None = None) -> subprocess.CompletedProcess:
+        env = dict(os.environ)
+        env.update({
+            "LLAMA_SERVER_BIN": str(self.FAKE), "MODEL_TARGET": "/dev/null",
+            "BENCH_ARMS": "baseline", "BENCH_REPEATS": "2",
+            "BENCH_ORDER": "cyclic", "BENCH_OUT": str(out),
+            "BENCH_PORT": self.PORT, "BENCH_MAX_TOKENS": "8", "BENCH_FIT": "off",
+        })
+        env.update(extra or {})
+        return subprocess.run([sys.executable, str(RUNNER)], env=env,
+                              capture_output=True, text=True, timeout=600)
+
+    def test_a_clean_run_is_attested(self):
+        with tempfile.TemporaryDirectory() as t:
+            out = Path(t) / "ok"
+            r = self._run(out)
+            self.assertEqual(r.returncode, 0, r.stdout[-2000:] + r.stderr[-2000:])
+            self.assertTrue((out / "RUN_COMPLETE.json").exists())
+            self.assertFalse((out / "RUN_FAILED.json").exists())
+            stamp = json.loads((out / "RUN_COMPLETE.json").read_text())
+            self.assertEqual(stamp["observed_arm_runs"], stamp["expected_arm_runs"])
+            self.assertEqual(len(list(out.glob("*__rep*.json"))), 2)
+
+    def test_a_crashed_arm_run_is_not_attested(self):
+        with tempfile.TemporaryDirectory() as t:
+            out = Path(t) / "crash"
+            r = self._run(out, {"FAKE_FAIL_ON_TAG": "5"})
+            self.assertNotEqual(r.returncode, 0)
+            self.assertFalse((out / "RUN_COMPLETE.json").exists(),
+                             "a run with a crashed arm was marked complete")
+            failed = json.loads((out / "RUN_FAILED.json").read_text())
+            self.assertTrue(any("crashed" in x for x in failed["problems"]))
+
+    def test_an_arm_run_that_produced_no_tokens_is_not_attested(self):
+        with tempfile.TemporaryDirectory() as t:
+            out = Path(t) / "empty"
+            r = self._run(out, {"FAKE_PREDICTED_N": "0"})
+            self.assertNotEqual(r.returncode, 0)
+            self.assertFalse((out / "RUN_COMPLETE.json").exists())
+            failed = json.loads((out / "RUN_FAILED.json").read_text())
+            self.assertTrue(any("produced no tokens" in x for x in failed["problems"]))
+
+    def test_a_server_that_never_becomes_healthy_is_not_attested(self):
+        with tempfile.TemporaryDirectory() as t:
+            out = Path(t) / "dead"
+            r = self._run(out, {"FAKE_EXIT_BEFORE_HEALTH": "1"})
+            self.assertNotEqual(r.returncode, 0)
+            self.assertFalse((out / "RUN_COMPLETE.json").exists())
+
+    def test_the_identity_is_read_back_from_the_server_own_log(self):
+        """`server_identity()` parses the banner rather than trusting the flags;
+        its regex once required a colon after `build` and silently recorded
+        nothing for all 81 arm-runs of run O2."""
+        with tempfile.TemporaryDirectory() as t:
+            out = Path(t) / "ident"
+            self._run(out, {"FAKE_BUILD": "12345", "FAKE_COMMIT": "abc1234"})
+            body = json.loads((out / "baseline__rep0.json").read_text())
+            self.assertEqual(body["server_identity"],
+                             {"build": "12345", "commit": "abc1234"})
+
+
+class ProvenanceMustIdentifyWhatRan(unittest.TestCase):
+    """A manifest that names the binary and the model still does not say which
+    harness asked, which prompts it sent, or whether the binary stayed the same
+    between arms. Run O2 recorded an empty `server_identity` for all 81 arm-runs
+    and nothing in its output said which version of the runner produced it."""
+
+    FAKE = ROOT / "tests" / "fake_llama_server.py"
+
+    def _run(self, out: Path, port: str, extra: dict | None = None):
+        env = dict(os.environ)
+        env.update({
+            "LLAMA_SERVER_BIN": str(self.FAKE), "MODEL_TARGET": "/dev/null",
+            "BENCH_ARMS": "baseline", "BENCH_REPEATS": "1",
+            "BENCH_ORDER": "cyclic", "BENCH_OUT": str(out),
+            "BENCH_PORT": port, "BENCH_MAX_TOKENS": "8", "BENCH_FIT": "off",
+        })
+        env.update(extra or {})
+        return subprocess.run([sys.executable, str(RUNNER)], env=env,
+                              capture_output=True, text=True, timeout=600)
+
+    def test_the_manifest_identifies_the_harness_and_the_prompts(self):
+        with tempfile.TemporaryDirectory() as t:
+            out = Path(t) / "prov"
+            self._run(out, "18931", {"BENCH_HARNESS_SHA": "cafebabe"})
+            man = json.loads((out / "manifest.json").read_text())
+            self.assertRegex(man["runner_sha256"], r"^[0-9a-f]{64}$")
+            self.assertRegex(man["prompt_set_sha256"], r"^[0-9a-f]{64}$")
+            self.assertEqual(man["harness_tree_sha"]["sha"], "cafebabe")
+
+    def test_the_prompt_hash_moves_when_the_prompts_do(self):
+        with tempfile.TemporaryDirectory() as t:
+            a = Path(t) / "v1"; b = Path(t) / "ext"
+            self._run(a, "18932", {"BENCH_PROMPTS": "v1"})
+            self._run(b, "18933", {"BENCH_PROMPTS": "extended"})
+            ha = json.loads((a / "manifest.json").read_text())["prompt_set_sha256"]
+            hb = json.loads((b / "manifest.json").read_text())["prompt_set_sha256"]
+            self.assertNotEqual(ha, hb, "two different prompt sets hashed the same")
+
+    def test_editing_a_prompt_changes_the_hash_under_an_unchanged_name(self):
+        """The failure this guards against is a prompt edited in place while the
+        label stays `v1`, which no name-based identifier can see and which every
+        cross-run comparison in this repository assumes cannot happen."""
+        import importlib.util
+        os.environ.update(LLAMA_SERVER_BIN="/bin/true", MODEL_TARGET="/dev/null",
+                          BENCH_OUT="/tmp/_prompt_hash_probe")
+        spec = importlib.util.spec_from_file_location("_rr_ph", RUNNER)
+        rr = importlib.util.module_from_spec(spec); spec.loader.exec_module(rr)
+        before = rr.prompt_set_sha256()
+        name_before = rr.PROMPT_SET_NAME
+        tag, sysmsg, usermsg = rr.PROMPTS[0]
+        rr.PROMPTS = [(tag, sysmsg, str(usermsg) + " (edited)")] + list(rr.PROMPTS[1:])
+        after = rr.prompt_set_sha256()
+        self.assertEqual(rr.PROMPT_SET_NAME, name_before, "the label must not move")
+        self.assertNotEqual(before, after,
+                            "an edited prompt hashed the same under the same label")
+
+    def test_each_arm_run_records_the_library_that_answered_it(self):
+        with tempfile.TemporaryDirectory() as t:
+            out = Path(t) / "libs"
+            self._run(out, "18934")
+            r = json.loads((out / "baseline__rep0.json").read_text())
+            self.assertIn("server_lib_sha256", r)
+            self.assertRegex(r["server_log_sha256"], r"^[0-9a-f]{64}$")
+            self.assertEqual(r["server_loaded_commit"], r["server_identity"]["commit"])
+
+    def test_a_commit_that_is_not_the_expected_one_fails_the_run(self):
+        with tempfile.TemporaryDirectory() as t:
+            out = Path(t) / "wrong"
+            r = self._run(out, "18935", {"FAKE_COMMIT": "abc1234",
+                                         "BENCH_EXPECT_COMMIT": "deadbeef"})
+            self.assertNotEqual(r.returncode, 0)
+            self.assertFalse((out / "RUN_COMPLETE.json").exists())
+            failed = json.loads((out / "RUN_FAILED.json").read_text())
+            self.assertTrue(any("BENCH_EXPECT_COMMIT" in x for x in failed["problems"]))
+
+    def test_the_expected_commit_passes(self):
+        with tempfile.TemporaryDirectory() as t:
+            out = Path(t) / "right"
+            r = self._run(out, "18936", {"FAKE_COMMIT": "abc1234",
+                                         "BENCH_EXPECT_COMMIT": "abc1234"})
+            self.assertEqual(r.returncode, 0, r.stdout[-1500:] + r.stderr[-1500:])
+
+
+class TeardownMustNotContaminateTheNextArm(unittest.TestCase):
+    """`stop_server` waits for the driver to hand the memory back, and used to
+    print a warning and carry on when it did not. The next arm then sized itself
+    with `-fit on` against a stale free-memory reading, so the failure landed on
+    the following arm and looked like that arm's fault."""
+
+    def _rr(self):
+        import importlib.util
+        os.environ.update(LLAMA_SERVER_BIN="/bin/true", MODEL_TARGET="/dev/null",
+                          BENCH_OUT="/tmp/_td_probe")
+        spec = importlib.util.spec_from_file_location("_rr_td", RUNNER)
+        rr = importlib.util.module_from_spec(spec); spec.loader.exec_module(rr)
+        return rr
+
+    def test_an_unsettled_teardown_fails_the_run(self):
+        rr = self._rr()
+        res = [{"arm": "a", "repeat": 0, "rows": [], "crashed": None,
+                "teardown": {"settled": False, "mib_after": 21000,
+                             "wait_s": 60.0, "readable": True}}]
+        with tempfile.TemporaryDirectory() as t:
+            probs = rr.validate_run(Path(t), ["a"], 1, res)
+        self.assertTrue(any("21000 MiB" in x for x in probs), probs)
+
+    def test_a_settled_teardown_raises_nothing(self):
+        rr = self._rr()
+        res = [{"arm": "a", "repeat": 0, "rows": [], "crashed": None,
+                "teardown": {"settled": True, "mib_after": 30,
+                             "wait_s": 1.0, "readable": True}}]
+        with tempfile.TemporaryDirectory() as t:
+            probs = rr.validate_run(Path(t), ["a"], 1, res)
+        self.assertFalse([x for x in probs if "teardown" in x], probs)
+
+    def test_a_host_without_nvidia_smi_is_not_treated_as_a_failure(self):
+        """`readable` false means the reading was unavailable, not that the GPU
+        held memory; CI has no GPU and must not fail on that."""
+        rr = self._rr()
+        res = [{"arm": "a", "repeat": 0, "rows": [], "crashed": None,
+                "teardown": {"settled": True, "mib_after": None,
+                             "wait_s": 0.0, "readable": False}}]
+        with tempfile.TemporaryDirectory() as t:
+            probs = rr.validate_run(Path(t), ["a"], 1, res)
+        self.assertFalse([x for x in probs if "teardown" in x], probs)
 
 
 class StagingMustNotDestroyItsSource(unittest.TestCase):

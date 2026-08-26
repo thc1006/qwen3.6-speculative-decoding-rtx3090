@@ -19,8 +19,13 @@ identifiers:
     value: 10.5281/zenodo.19776558
     description: Concept DOI for all archived releases
 repository-code: https://github.com/thc1006/qwen3.6-speculative-decoding-rtx3090
-license: MIT
-license-url: https://github.com/thc1006/qwen3.6-speculative-decoding-rtx3090/blob/master/LICENSE
+# `type: dataset`, and the measurements are CC0-1.0; the code that produced and
+# analyses them is MIT. Both are listed because citing this as MIT-only
+# misstates the terms on the part a reader is most likely to reuse.
+license:
+  - CC0-1.0
+  - MIT
+license-url: https://github.com/thc1006/qwen3.6-speculative-decoding-rtx3090/blob/master/DATA_LICENSE
 keywords:
   - speculative-decoding
   - llama.cpp

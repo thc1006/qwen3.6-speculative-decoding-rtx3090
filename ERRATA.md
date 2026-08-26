@@ -790,18 +790,38 @@ only, mean of four:
 
 Median cost of one create is **21.9 ms** and of one `load_tgt` **22.4 ms**. The
 total is reproducible to two hundredths of a second: 39.10, 39.07, 39.06, 39.07
-across the four arm-runs.
+across the four arm-runs, and the event counts are identical in all four — 785
+creates and 728 restores every time.
+
+**Both controls were measured at the same depth.** All twelve logs of run T are
+extracted, four repeats per arm, not one log per control: `baseline` and
+`spec-dflash-n2` emit **0** `AUDIT_US` records in every one of their four
+arm-runs, and `spec-draft-n8` emits exactly **1513** (785 + 728) in every one of
+its four. The first version of `analysis/extract_checkpoint_timers.py` stripped
+only the literal `__rep0.log` when deriving the arm name, so repeats 1–3 were
+filed under `spec-draft-n8__rep1` and the like, and the controls — which were
+extracted for rep0 alone — rested on a single log each. The extractor now strips
+`__rep\d+` and records the repeat index separately; per-log SHA-256 sums are in
+`v4_audit_2026_08_25/data/checkpoint_timers_sha256.txt`.
 
 The corresponding volume, at the 82.079 MiB the server reports per checkpoint —
 `common_prompt_checkpoint::size()` returns `data_tgt + data_dft + data_spec`, so
 that figure is already the total and the separately logged 19.266 MiB draft
 component is part of it, not additional:
 
-| | GiB |
-|---|---|
-| creates, 772 × 82.079 MiB (run J counts) | **61.88** |
-| restores, 709 × 82.08 MiB | 56.83 |
-| **combined nominal state volume** | **118.71** |
+| | creates | restores | combined, GiB |
+|---|---|---|---|
+| **run T**, the source-timed run above | 785 → 62.92 | 728 → 58.35 | **121.27** |
+| run J, the earlier log-counted run | 772 → 61.88 | 709 → 56.83 | **118.71** |
+
+The two runs are the same arm on the same build and differ by 13 creates and 19
+restores — 1.7 % and 2.6 % — which is the run-to-run variation in how often the
+sampler diverges from the draft, not a discrepancy. They are separated here
+because an earlier version of this section quoted run T's event counts in the
+timing table and run J's in the volume table without saying so, which read as
+one measurement and was two. **The timing table above and the run T row here
+come from the same twelve logs**; the run J row is retained because the figure
+118.71 GiB appears in `README.md`, `CHANGELOG.md` and the pull request.
 
 That is an event-count × reported-size estimate, not measured memory traffic; no
 profiler or memory-controller counter was read. An earlier version added the
@@ -1019,6 +1039,60 @@ The instrumentation itself is archived at
 with the reasoning in that directory's README. The llama.cpp working tree is
 restored to stock afterwards; nothing is committed, pushed or proposed upstream
 from here.
+
+### A16. Two runs, identical in every recorded respect and byte-identical in output, differ by 3.4 % on one arm
+
+Run T3 (2026-08-26 20:32) is run T (18:26) repeated at three balanced blocks
+instead of four unbalanced ones. Everything else was held: the same instrumented
+`libllama-server-impl.so` `ce94855f…`, the same target, drafter and DFlash GGUFs
+by SHA-256, the same `--fit-target 3072`, the same ten prompts, greedy at seed
+42. The runner asserted the library hash **per arm-run** this time, so the binary
+is pinned for each of the nine, not once for the run.
+
+The two runs produced **byte-identical output**. Every generated token id, every
+`content` string and every `reasoning_content` string matches across all three
+arms and all ten prompts. Acceptance matches to a tenth of a percentage point on
+every prompt, and draft tokens per generated token to three decimals. The server
+did the same work in the same order both times.
+
+| arm | run T | run T3 | change |
+|---|---:|---:|---:|
+| no speculation | 116.34 | 117.25 | **+0.79 %** |
+| `spec-draft-n8` | 30.85 | 30.82 | −0.11 % |
+| `spec-dflash-n2` | 146.48 | 141.50 | **−3.40 %** |
+
+The DFlash shortfall is on **every prompt** — −0.6 % to −4.7 %, never positive —
+and the three T3 repeats agree among themselves to 0.7 %. It is a shift of the
+whole run, not one bad arm-run.
+
+**It is not thermal, and it is not the fitter.** The continuous telemetry for the
+two runs is the same to a tenth of a degree and a megahertz: mean 63.5 °C and
+1946 MHz in T against 63.6 °C and 1947 MHz in T3, mean board power 240.3 W
+against 240.1 W, with the same software power-cap events at the same rate. Both
+DFlash servers logged the same fit: 41/41 target layers and 9/9 drafter layers
+offloaded, `n_batch` 2048, `n_ubatch` 512, and identical graph-split counts
+(`122 (with bs=512), 82 (with bs=1)`).
+
+**The cause is not isolated.** Nothing recorded distinguishes the two runs. What
+is between them is machine history — two rebuilds and a killed rehearsal — which
+changes page cache and allocator state and is not captured by any field here.
+That is a hypothesis, not a finding, and it is written as one.
+
+**What it means for the numbers.** The arm that [A12](#a12-what-the-checkpoint-path-costs-measured-with-timers-in-the-source)
+attributes is stable across the two runs: `spec-draft-n8` moves 0.11 %, the
+checkpoint total moves from 39.075 s to 39.159 s (0.2 %), the event counts are
+identical at 785 creates and 728 restores in **every** arm-run of both, and the
+share of the excess it explains is 54.7 % against 54.6 %. That attribution
+replicates.
+
+The headline DFlash figure does not replicate at that precision.
+[A14](#a14-within-run-repeats-are-not-an-error-bar) already said within-run
+repeats are not a between-run error bar; this is that statement applied to the
+headline arm, with the confounds removed one at a time. The 95 % paired-block
+interval on `spec-dflash-n2` in run O2 is `[+25.5 %, +27.1 %]`, a width of
+1.6 pp, and two runs of the same binary on the same data sit 5.2 pp apart. **The
+interval describes the run, not the configuration.** The README quotes the
+between-run range beside it for that reason.
 
 ---
 

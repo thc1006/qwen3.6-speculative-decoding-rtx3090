@@ -22,7 +22,7 @@ Run: python analysis/verify_claims.py   (from the repo root; exits non-zero on
 any mismatch)
 """
 import sys
-import csv, json, glob, math, os, re, statistics as st
+import csv, hashlib, json, glob, math, os, pathlib, re, statistics as st
 from collections import defaultdict
 
 FAIL=[]
@@ -898,9 +898,22 @@ chk("C4b power limit is stock and constant",
     sorted({int(_n(r, "power_limit_w")) for r in _c4l}), [350])
 
 print("\n=== A12: the checkpoint cost, timed in the source ===")
-_tm = {r["arm"]: r for r in
-       json.load(open("v4_audit_2026_08_25/data/checkpoint_timers_20260826.json"))}
-_ext = [r for k, r in _tm.items() if k.startswith("spec-draft-n8")]
+# Keyed by arm this was a dict, so the four arm-runs of one arm collapsed into
+# whichever the JSON listed last. It went unnoticed because the extractor that
+# wrote the file stripped only `__rep0.log`, leaving repeats 1-3 under distinct
+# keys; fixing the extractor exposed the defect here. Grouped, not keyed.
+_tmr = json.load(open("v4_audit_2026_08_25/data/checkpoint_timers_20260826.json"))
+_tm: dict = {}
+for _r in _tmr:
+    _tm.setdefault(_r["arm"], []).append(_r)
+chk("A12 timer records are one per arm-run, not one per arm",
+    len(_tmr), sum(len(v) for v in _tm.values()))
+chk("A12 every arm is covered at the same depth",
+    sorted({len(v) for v in _tm.values()}), [4])
+chk("A12 each arm carries every repeat index",
+    sorted({tuple(sorted(r["repeat"] for r in v)) for v in _tm.values()}),
+    [(0, 1, 2, 3)])
+_ext = _tm["spec-draft-n8"]
 chk("A12 timed arm-runs of the external drafter", len(_ext), 4)
 chk("A12 checkpoint creates per arm-run", sorted({r["creates"] for r in _ext}), [785])
 chk("A12 restores per arm-run", sorted({r["restores"] for r in _ext}), [728])
@@ -915,9 +928,9 @@ chk("A12 the total is reproducible across arm-runs",
     round(max(r["checkpoint_total_s"] for r in _ext) -
           min(r["checkpoint_total_s"] for r in _ext), 2) <= 0.05, True)
 chk("A12 DFlash performs no checkpoint operations",
-    _tm["spec-dflash-n2"]["checkpoint_total_s"], 0.0)
+    sorted({r["checkpoint_total_s"] for r in _tm["spec-dflash-n2"]}), [0.0])
 chk("A12 the baseline performs none either",
-    _tm["baseline"]["checkpoint_total_s"], 0.0)
+    sorted({r["checkpoint_total_s"] for r in _tm["baseline"]}), [0.0])
 
 # the accounting, from run T's own decode times
 _T = glob.glob("v4_audit_2026_08_25/data/matrix_T_timers_*")[0]
@@ -1074,6 +1087,141 @@ for f, needle, what in DOC_CLAIMS:
     print(f"  {'PASS' if ok else 'FAIL'}  {f:32s} quotes {needle!r:20s} ({what})")
     if not ok:
         FAIL.append(f"{f}:{needle}")
+
+
+print("\n=== A16: run T against run T3 ===")
+_T = "v4_audit_2026_08_25/data/matrix_T_timers_20260826_182639"
+_T3 = "v4_audit_2026_08_25/data/matrix_T3_timers_20260826_203251"
+
+
+def _pool(d, arm):
+    n = ms = 0
+    for f in glob.glob(f"{d}/{arm}__rep*.json"):
+        r = json.load(open(f))
+        n += sum(x["predicted_n"] for x in r["rows"])
+        ms += sum(x["predicted_ms"] for x in r["rows"])
+    return (1000 * n / ms, ms / 1000, len(glob.glob(f"{d}/{arm}__rep*.json")))
+
+
+for _arm, _want in (("baseline", 0.79), ("spec-draft-n8", -0.11),
+                    ("spec-dflash-n2", -3.40)):
+    _a = _pool(_T, _arm)[0]
+    _b = _pool(_T3, _arm)[0]
+    chk(f"A16 {_arm} T -> T3 (%)", round(100 * (_b / _a - 1), 2), _want, 0.005)
+
+# the design that made T3 worth running at all
+_mT = json.load(open(f"{_T}/manifest.json"))
+_mT3 = json.load(open(f"{_T3}/manifest.json"))
+chk("A16 T3 is position-balanced", _mT3.get("schedule_is_position_balanced"), True)
+chk("A16 T3 asserted the instrumented library per arm-run",
+    (_mT3.get("expect_lib_sha256") or "")[:16], "ce94855f4f2d82ba")
+chk("A16 T3 asserted the commit", _mT3.get("expect_commit"), "3737e4137")
+for _k in ("target_sha256", "draft_sha256", "dflash_sha256", "server_lib_sha256",
+           "common_args", "max_tokens", "seed", "think", "concurrency", "ctx",
+           "fit_target", "n_prompts", "arms"):
+    chk(f"A16 {_k} is identical in T and T3", _mT.get(_k) == _mT3.get(_k), True)
+
+# byte-identical output is the whole point of the entry
+_sig = {}
+for _lbl, _d in (("T", _T), ("T3", _T3)):
+    for _arm in _mT["arms"]:
+        _r = json.load(open(f"{_d}/{_arm}__rep0.json"))
+        _sig[(_lbl, _arm)] = [
+            (x["tag"], hashlib.sha256(json.dumps(
+                [x.get("tokens"), x.get("content"), x.get("reasoning_content")],
+                ensure_ascii=False, sort_keys=True).encode()).hexdigest())
+            for x in _r["rows"]]
+for _arm in _mT["arms"]:
+    chk(f"A16 {_arm} output is byte-identical across T and T3",
+        _sig[("T", _arm)] == _sig[("T3", _arm)], True)
+
+# the attribution replicates; the headline arm does not, at this precision
+_ck3 = st.mean([r["checkpoint_total_s"] for r in
+                json.load(open(f"{_T3}/checkpoint_timers.json"))
+                if r["arm"] == "spec-draft-n8"])
+chk("A16 T3 checkpoint total (s)", round(_ck3, 3), 39.159, 0.0005)
+chk("A16 T3 creates and restores match run T",
+    sorted({(r["creates"], r["restores"]) for r in
+            json.load(open(f"{_T3}/checkpoint_timers.json"))
+            if r["arm"] == "spec-draft-n8"}), [(785, 728)])
+_ex3 = _pool(_T3, "spec-draft-n8")[1] / 3 - _pool(_T3, "baseline")[1] / 3
+chk("A16 T3 checkpoint share of the excess (%)", round(100 * _ck3 / _ex3, 1), 54.6, 0.05)
+chk("ERRATA records that the cause is not isolated",
+    "The cause is not isolated" in _norm(
+        pathlib.Path(__file__).resolve().parents[1].joinpath("ERRATA.md")
+        .read_text(encoding="utf-8")), True)
+
+
+print("\n=== the headline footnote is derived, not typed ===")
+# The footnote under the headline table quoted run O's +24.6 % as this table's
+# own figure for eleven days, because it was written when run O was the headline
+# and nothing tied it to the data when O2 replaced it. Each figure below is
+# recomputed and the README is required to contain exactly that string.
+_TGT = "707a55a8a4397ecde44de0c499d3e68c1ad1d240d1da65826b4949d1043f4450"
+
+
+def _pooled_of(d, arm):
+    tot_n = tot_ms = 0
+    for f in glob.glob(f"{d}/{arm}__rep*.json"):
+        r = json.load(open(f))
+        if r.get("crashed"):
+            continue
+        tot_n += sum(x["predicted_n"] for x in r["rows"])
+        tot_ms += sum(x["predicted_ms"] for x in r["rows"])
+    return (1000 * tot_n / tot_ms) if tot_ms else None
+
+
+_comparable = {}
+for _d in sorted(glob.glob("v4_audit_2026_08_25/data/matrix_*")):
+    _mp = os.path.join(_d, "manifest.json")
+    if not os.path.isfile(_mp):
+        continue
+    _m = json.load(open(_mp))
+    # every knob that changes what is being measured, held fixed
+    if not (_m.get("think") == "on" and _m.get("concurrency") == 1
+            and _m.get("prompt_set", "v1") == "v1" and str(_m.get("ctx")) == "8192"
+            and str(_m.get("fit_target")) == "3072"
+            and _m.get("target_sha256") == _TGT and "baseline" in _m["arms"]):
+        continue
+    _b = _pooled_of(_d, "baseline")
+    if not _b:
+        continue
+    _tag = os.path.basename(_d).split("_")[1]
+    _comparable[_tag] = {a: 100 * (_pooled_of(_d, a) / _b - 1)
+                         for a in _m["arms"] if a != "baseline" and _pooled_of(_d, a)}
+
+_README = _norm(pathlib.Path(__file__).resolve().parents[1].joinpath("README.md")
+                .read_text(encoding="utf-8"))
+for _tag in ("O", "M1", "O2", "T", "T3"):
+    _v = _comparable.get(_tag, {}).get("spec-dflash-n2")
+    chk(f"footnote: run {_tag} spec-dflash-n2 is a real run", _v is not None, True)
+    if _v is not None:
+        chk(f"README quotes run {_tag}'s {_v:+.1f} %",
+            _norm(f"{_v:+.1f} %").replace("+", "+") in _README, True)
+
+_dfl = {t: v["spec-dflash-n2"] for t, v in _comparable.items() if "spec-dflash-n2" in v}
+chk("footnote: spec-dflash-n2 was measured in five comparable runs", len(_dfl), 5)
+_spread = max(_dfl.values()) - min(_dfl.values())
+chk("footnote: the between-run spread (pp)", round(_spread, 1), 6.0, 0.05)
+chk("README quotes that spread", "6.0 pp spread" in _README, True)
+
+_all_spreads = sorted(
+    (max(v.values()) - min(v.values()) for v in
+     ({t: c[a] for t, c in _comparable.items() if a in c}
+      for a in {a for c in _comparable.values() for a in c})
+     if len(v) > 1), reverse=True)
+chk("footnote: spec-dflash-n2's spread ranks second",
+    _all_spreads.index(round(_spread, 10)) if round(_spread, 10) in _all_spreads
+    else [round(x, 10) for x in _all_spreads].index(round(_spread, 10)), 1)
+chk("README says second largest", "second largest" in _README, True)
+chk("footnote: run T3 is the lowest of the five, so O2 is not",
+    min(_dfl, key=_dfl.get), "T3")
+chk("README says the interval describes the run, not the configuration",
+    "describe run O2, not the configuration" in " ".join(_README.split()), True)
+chk("README quotes the between-run range",
+    "+20.7 % to +26.7 %" in _norm(_README), True)
+chk("README no longer claims the lower of the two is quoted",
+    "The lower of the two is quoted" in _README, False)
 
 
 print("\n=== the checker audits itself ===")
