@@ -111,6 +111,8 @@ MAX_TOKENS = int(os.environ.get("BENCH_MAX_TOKENS", "300"))
 # on without saying so, which is exactly the failure mode that made v2, v3 and
 # Exp 2 unauditable (ERRATA D2) - so normalise, and record the result in the
 # manifest and per request.
+IGNORE_EOS = os.environ.get("BENCH_IGNORE_EOS", "off").strip().lower() in (
+    "on", "1", "true", "yes")
 _THINK_RAW = os.environ.get("BENCH_THINK", "on").strip().lower()
 _THINK_OFF = {"off", "0", "false", "no", "think_off", "disabled", "none"}
 _THINK_ON = {"on", "1", "true", "yes", "enabled"}
@@ -781,6 +783,17 @@ def chat(system: str, user) -> dict:
     }
     if THINK == "off":
         body["chat_template_kwargs"] = {"enable_thinking": False}
+    if IGNORE_EOS:
+        # Force every arm to generate exactly MAX_TOKENS.
+        #
+        # With thinking on, every request hits the cap anyway and the arms are
+        # length-matched for free. With thinking off they are not: speculation
+        # is not output-preserving on this build (ERRATA A11), so the arms stop
+        # at different points, and 34 of 60 arm/prompt pairs in run R differ in
+        # length - one prompt by 38 %, another by 48 % in the other direction.
+        # Pooled throughput then compares arms that did different amounts of
+        # work. This is RETEST_TODO P1-3's "force ignore_eos + a hard cap".
+        body["ignore_eos"] = True
     req = urllib.request.Request(
         f"http://127.0.0.1:{PORT}/v1/chat/completions",
         data=json.dumps(body).encode("utf-8"),
@@ -1109,6 +1122,11 @@ def validate_run(out: Path, arms: list[str], repeats: int,
             if not row.get("predicted_n"):
                 problems.append(f"arm-run {arm} rep{rep} prompt {row.get('tag')} "
                                 f"produced no tokens")
+            elif IGNORE_EOS and row["predicted_n"] != MAX_TOKENS:
+                problems.append(f"arm-run {arm} rep{rep} prompt {row.get('tag')} "
+                                f"generated {row['predicted_n']} tokens with "
+                                f"BENCH_IGNORE_EOS on; the point of that flag is "
+                                f"that every arm generates exactly {MAX_TOKENS}")
 
     # A file whose name disagrees with its contents makes every per-arm glob a
     # lie, and no count-based check can see it.
@@ -1187,7 +1205,7 @@ def main() -> None:
         "flavor": FLAVOR,
         "arms": {a: ARMS[a] for a in arms},
         "repeats": REPEATS, "max_tokens": MAX_TOKENS,
-        "temperature": 0.0, "seed": 42, "think": THINK, "think_env": _THINK_RAW,
+        "temperature": 0.0, "seed": 42, "think": THINK, "think_env": _THINK_RAW, "ignore_eos": IGNORE_EOS,
         "concurrency": CONCURRENCY, "fit": FIT, "ctx": CTX,
         "runner_sha256": runner_sha256(),
         "harness_tree_sha": harness_tree_sha(),

@@ -16,6 +16,9 @@ Environment knobs, used by the tests to drive failure paths:
   FAKE_FAIL_ON_TAG=<n>       return HTTP 500 on the n-th completion request
   FAKE_PREDICTED_N=<n>       tokens to report (default 300); 0 drives the
                              "produced no tokens" branch
+  FAKE_SHORT_UNLESS_IGNORE_EOS=1
+                             stop early unless the request sets ignore_eos, so
+                             the hard-cap guard has something to catch
   FAKE_BUILD=<n> FAKE_COMMIT=<sha>
 """
 from __future__ import annotations
@@ -55,22 +58,30 @@ class H(BaseHTTPRequestHandler):
 
     def do_POST(self):
         n = int(self.headers.get("Content-Length") or 0)
-        self.rfile.read(n)
+        raw = self.rfile.read(n)
+        try:
+            req = json.loads(raw or b"{}")
+        except Exception:  # noqa: BLE001
+            req = {}
         _seen["n"] += 1
         if FAIL_ON and _seen["n"] == FAIL_ON:
             self._send(500, {"error": "fake failure"})
             return
+        n_pred = N_PREDICT
+        if os.environ.get("FAKE_SHORT_UNLESS_IGNORE_EOS") == "1" \
+                and not req.get("ignore_eos"):
+            n_pred = max(1, N_PREDICT // 3)
         ms = 3000.0
         self._send(200, {
             "choices": [{
                 "finish_reason": "length",
                 "message": {"content": "x" * 32, "reasoning_content": ""},
-                "logprobs": {"content": [{"token": "x"} for _ in range(N_PREDICT)]},
+                "logprobs": {"content": [{"token": "x"} for _ in range(n_pred)]},
             }],
-            "usage": {"completion_tokens": N_PREDICT},
+            "usage": {"completion_tokens": n_pred},
             "timings": {
-                "predicted_n": N_PREDICT, "predicted_ms": ms,
-                "predicted_per_second": (N_PREDICT / ms * 1000) if ms else 0,
+                "predicted_n": n_pred, "predicted_ms": ms,
+                "predicted_per_second": (n_pred / ms * 1000) if ms else 0,
                 "prompt_n": 40, "prompt_ms": 100.0,
                 "draft_n": 0, "draft_n_accepted": 0,
             },

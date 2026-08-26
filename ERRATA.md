@@ -1094,6 +1094,80 @@ interval on `spec-dflash-n2` in run O2 is `[+25.5 %, +27.1 %]`, a width of
 interval describes the run, not the configuration.** The README quotes the
 between-run range beside it for that reason.
 
+### A17. The thinking-off comparisons are not comparisons of the same amount of work
+
+Pooled decode rate is generated tokens over decode milliseconds. It is the right
+metric when the arms generate the same number of tokens and a confounded one
+when they do not, because decode rate falls as the KV cache grows: an arm that
+stops at 187 tokens is being scored on cheaper tokens than one that runs to 300.
+
+With thinking **on**, the question never arises here. All **4674** thinking-on
+requests in the controlled tier, across 28 run directories, returned
+`finish_reason: length` at exactly their run's `max_tokens`. Not one stopped
+early. Of the 940 thinking-off requests, **696 did**. With thinking **off** it does arise, and it is
+[A11](#a11-speculative-decoding-is-not-output-preserving-on-this-build-and-the-engine-is-deterministic-enough-to-prove-it)
+that causes it: speculation is not output-preserving on this build, so the arms
+produce different text and stop in different places. In run R the baseline
+generates **300** tokens on `code_bash` where every speculative arm generates
+**187**, and **203** on `code_rust` where every speculative arm generates
+**300** — 38 % short in one direction and 48 % long in the other, on two prompts
+of the same set.
+
+`analysis/length_matching.py` recomputes every run's arm-vs-baseline change
+twice: over all prompts, and over only those prompts where every arm in the run
+generated exactly the same number of tokens. The split is clean:
+
+| run | thinking | prompts | length-matched | largest shift |
+|---|---|---:|---:|---:|
+| every thinking-on run with a computable comparison (24) | on | 10 or 20 | **all of them** | **0.00 pp** |
+| `matrix_L_thinkoff` | off | 10 | 5 | **16.79 pp** |
+| `matrix_M3_thinkoff` | off | 10 | 5 | 10.15 pp |
+| `matrix_R_ext_thinkoff` | off | 20 | 6 | 7.49 pp |
+| `D_master_matrix_think_off` | off | 10 | 5 | 6.37 pp |
+
+**A published sign flips.** Run L's `spec-dflash-n4` at thinking off is reported
+as **−2.7 %** in `v4_audit_2026_08_25/README.md` and in the v4.1 changelog entry
+— "`n_max 4` goes negative". On the five prompts where every arm generated the
+same 300 tokens it is **+14.1 %**.
+
+Across the four thinking-off runs there are fourteen arm-vs-baseline
+comparisons. **Every one of the twelve arms that drafts from a model** — DFlash,
+MTP, or the external drafter — moves in the same direction, +2.52 pp to
++16.79 pp: `spec-dflash-n2` +7.6 % → +17.4 %, `spec-dflash-n6` −24.7 % →
+−10.9 %, `spec-mtp-n2` +11.4 % → +18.2 %, `spec-mtp-n4` −8.2 % → −0.3 %, run R's
+`spec-dflash-n2` +8.6 % → +16.1 %, and the external drafter +2.5 to +3.8 pp on
+each of its three appearances. For those arms, the thinking-off figures this
+repository publishes **understate** speculation.
+
+The two exceptions are the n-gram arms, and they are both in run D:
+`ngram-cache` moves −6.37 pp (−32.6 % → −39.0 %) and `ngram-mod-n24` −0.17 pp.
+An n-gram drafter has no model to diverge with; what changes its length is the
+target's own output, and on the five long prompts it does worse rather than
+better. Two of fourteen, in the opposite direction, in one run — the confound is
+one-directional for the arms this repository draws conclusions about, and not a
+law.
+
+**Neither column is the corrected value.** The length-matched subset is half the
+prompts, and it is not a random half: it is the prompts long enough that every
+arm ran to the cap. Restricting to it changes the workload as well as removing
+the confound. What the table establishes is that the confound is large, that it
+is one-directional, and that no thinking-off number here was computed with it
+controlled.
+
+**What it does not touch.** The headline table, every DFlash and MTP figure
+quoted with thinking on, the acceptance-threshold work, run O2's Latin square
+and the [A12](#a12-what-the-checkpoint-path-costs-measured-with-timers-in-the-source)
+checkpoint attribution are all thinking-on, all at 300 tokens on every request,
+and all shift by 0.00 pp under the same test.
+
+**Fixed in the harness, not in the archive.** `BENCH_IGNORE_EOS=on` sends
+`ignore_eos` with every request so each arm generates exactly `BENCH_MAX_TOKENS`
+regardless of where it would have stopped, and a run that asks for it and does
+not get it fails validation instead of being averaged. This is
+[`RETEST_TODO.md`](RETEST_TODO.md) P1-3, which had been open since the audit
+began and was the right task all along. The archived thinking-off runs stay as
+they are; what they measured is now stated.
+
 ---
 
 ## B — statistics that were reported incorrectly

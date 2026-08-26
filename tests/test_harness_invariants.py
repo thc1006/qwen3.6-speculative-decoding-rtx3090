@@ -583,6 +583,60 @@ class TeardownMustNotContaminateTheNextArm(unittest.TestCase):
         self.assertFalse([x for x in probs if "teardown" in x], probs)
 
 
+class ArmsMustGenerateTheSameAmountOfWork(unittest.TestCase):
+    """Speculation is not output-preserving on this build (ERRATA A11), so with
+    thinking off the arms stop at different points and pooled throughput
+    compares arms that generated different numbers of tokens. `BENCH_IGNORE_EOS`
+    forces the hard cap; a run that asks for it and does not get it is not the
+    run it claims to be."""
+
+    FAKE = ROOT / "tests" / "fake_llama_server.py"
+
+    def _run(self, out: Path, port: str, extra: dict | None = None):
+        env = dict(os.environ)
+        env.update({
+            "LLAMA_SERVER_BIN": str(self.FAKE), "MODEL_TARGET": "/dev/null",
+            "BENCH_ARMS": "baseline", "BENCH_REPEATS": "1",
+            "BENCH_ORDER": "cyclic", "BENCH_OUT": str(out),
+            "BENCH_PORT": port, "BENCH_MAX_TOKENS": "300", "BENCH_FIT": "off",
+        })
+        env.update(extra or {})
+        return subprocess.run([sys.executable, str(RUNNER)], env=env,
+                              capture_output=True, text=True, timeout=600)
+
+    def test_a_short_generation_under_ignore_eos_fails_the_run(self):
+        with tempfile.TemporaryDirectory() as t:
+            out = Path(t) / "short"
+            r = self._run(out, "18941", {"BENCH_IGNORE_EOS": "on",
+                                         "FAKE_PREDICTED_N": "100"})
+            self.assertNotEqual(r.returncode, 0)
+            self.assertFalse((out / "RUN_COMPLETE.json").exists())
+            failed = json.loads((out / "RUN_FAILED.json").read_text())
+            self.assertTrue(any("BENCH_IGNORE_EOS" in x for x in failed["problems"]))
+
+    def test_the_flag_reaches_the_server(self):
+        """The stub stops early unless the request carries `ignore_eos`, so a
+        run that passes with it on proves the field was actually sent."""
+        with tempfile.TemporaryDirectory() as t:
+            out = Path(t) / "sent"
+            r = self._run(out, "18942", {"BENCH_IGNORE_EOS": "on",
+                                         "FAKE_SHORT_UNLESS_IGNORE_EOS": "1"})
+            self.assertEqual(r.returncode, 0, r.stdout[-1500:] + r.stderr[-1500:])
+            rows = json.loads((out / "baseline__rep0.json").read_text())["rows"]
+            self.assertTrue(all(x["predicted_n"] == 300 for x in rows))
+
+    def test_without_the_flag_the_short_generation_is_allowed(self):
+        """Off by default: the think-on runs hit the cap anyway, and every
+        archived run predates the flag."""
+        with tempfile.TemporaryDirectory() as t:
+            out = Path(t) / "off"
+            r = self._run(out, "18943", {"FAKE_PREDICTED_N": "100"})
+            self.assertEqual(r.returncode, 0, r.stdout[-1500:] + r.stderr[-1500:])
+            self.assertTrue((out / "RUN_COMPLETE.json").exists())
+            man = json.loads((out / "manifest.json").read_text())
+            self.assertFalse(man["ignore_eos"])
+
+
 class StagingMustNotDestroyItsSource(unittest.TestCase):
     def test_stage_equal_to_source_is_rejected_and_nothing_is_removed(self):
         with tempfile.TemporaryDirectory() as t:

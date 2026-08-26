@@ -23,7 +23,7 @@ any mismatch)
 """
 import sys
 import csv, hashlib, json, glob, math, os, pathlib, re, statistics as st
-from collections import defaultdict
+from collections import Counter, defaultdict
 
 FAIL=[]
 def chk(name, got, want, tol=0.05):
@@ -1091,6 +1091,57 @@ for f, needle, what in DOC_CLAIMS:
 
 _T = "v4_audit_2026_08_25/data/matrix_T_timers_20260826_182639"
 _T3 = "v4_audit_2026_08_25/data/matrix_T3_timers_20260826_203251"
+print("\n=== A17: are the arms compared on the same amount of work? ===")
+_lm = json.load(open("analysis/length_matching.json"))["runs"]
+_on = [r for r in _lm if r["think"] != "off"]
+_off = [r for r in _lm if r["think"] == "off"]
+chk("A17 thinking-off runs with a computable comparison", len(_off), 4)
+chk("A17 thinking-on runs with a computable comparison", len(_on), 24)
+chk("A17 every thinking-on run is fully length-matched",
+    sorted({r["prompts"] == r["length_matched_prompts"] for r in _on}), [True])
+chk("A17 no thinking-on arm moves when the comparison is restricted",
+    sorted({v.get("shift_pp", 0.0) for r in _on for v in r["arms"].values()}), [0.0])
+chk("A17 every thinking-off run is only partly length-matched",
+    sorted({r["prompts"] > r["length_matched_prompts"] for r in _off}), [True])
+_shifts = {(r["run"], a): v["shift_pp"] for r in _off for a, v in r["arms"].items()
+           if "shift_pp" in v}
+chk("A17 arm-vs-baseline comparisons in the thinking-off runs", len(_shifts), 14)
+_model = {k: v for k, v in _shifts.items() if not k[1].startswith("ngram-")}
+_ngram = {k: v for k, v in _shifts.items() if k[1].startswith("ngram-")}
+chk("A17 arms that draft from a model", len(_model), 12)
+chk("A17 every one of them shifts the same way",
+    sorted({v > 0 for v in _model.values()}), [True])
+chk("A17 the largest such shift (pp)", round(max(_model.values()), 2), 16.79, 0.005)
+chk("A17 the smallest such shift (pp)", round(min(_model.values()), 2), 2.52, 0.005)
+chk("A17 the exceptions are the n-gram arms", len(_ngram), 2)
+chk("A17 and both are in run D",
+    sorted({k[0] for k in _ngram}), ["D_master_matrix_think_off"])
+chk("A17 ngram-cache moves the other way (pp)",
+    round(_shifts[("D_master_matrix_think_off", "ngram-cache")], 2), -6.37, 0.005)
+_L = [r for r in _off if r["run"].startswith("matrix_L_thinkoff")][0]
+chk("A17 run L spec-dflash-n4 as published (%)",
+    _L["arms"]["spec-dflash-n4"]["all_prompts_pct"], -2.69, 0.005)
+chk("A17 run L spec-dflash-n4 length-matched (%)",
+    _L["arms"]["spec-dflash-n4"]["length_matched_pct"], 14.10, 0.005)
+chk("A17 that is a sign flip",
+    _L["arms"]["spec-dflash-n4"]["all_prompts_pct"] < 0
+    < _L["arms"]["spec-dflash-n4"]["length_matched_pct"], True)
+
+# the raw fact underneath it: thinking-on never stops early, thinking-off does
+_stops = {"on": Counter(), "off": Counter()}
+for _f in glob.glob("v4_audit_2026_08_25/data/*/*__rep*.json"):
+    _m = json.load(open(os.path.join(os.path.dirname(_f), "manifest.json")))
+    _k = "off" if str(_m.get("think")) == "off" else "on"
+    for _x in json.load(open(_f)).get("rows") or []:
+        _stops[_k][_x.get("finish_reason")] += 1
+chk("A17 no thinking-on request stopped before the cap",
+    dict(_stops["on"]), {"length": 4674})
+chk("A17 thinking-off requests that stopped early", _stops["off"]["stop"], 696)
+chk("ERRATA quotes the sign flip", "-2.7 %" in _norm(
+    " ".join(pathlib.Path(__file__).resolve().parents[1]
+             .joinpath("ERRATA.md").read_text(encoding="utf-8").split())), True)
+
+
 print("\n=== the file inventory is counted, not typed ===")
 # The v4 Files table listed two of the run directories and called itself the
 # file list. Counts in prose go stale silently; these are derived.
