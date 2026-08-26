@@ -248,6 +248,22 @@ class StrictAggregationMustRefuseBadRuns(unittest.TestCase):
             d = _fixture_run(Path(t) / "full_no_tags", rows=10, with_tags=False)
             self.assertEqual(self._strict(d), 0, "a complete run must still pass")
 
+    def test_a_missing_arm_run_fails(self):
+        """The report aggregated whatever files it found, so deleting a whole
+        arm-run passed --strict while every remaining one was whole."""
+        with tempfile.TemporaryDirectory() as t:
+            d = _fixture_run(Path(t) / "gone")
+            (d / "arm-x__rep1.json").unlink()
+            self.assertNotEqual(self._strict(d), 0)
+
+    def test_a_file_whose_name_disagrees_with_its_contents_fails(self):
+        with tempfile.TemporaryDirectory() as t:
+            d = _fixture_run(Path(t) / "mislabelled")
+            body = json.loads((d / "arm-x__rep1.json").read_text())
+            body["arm"] = "baseline"
+            (d / "arm-x__rep1.json").write_text(json.dumps(body), encoding="utf-8")
+            self.assertNotEqual(self._strict(d), 0)
+
     def test_missing_completion_marker_fails(self):
         with tempfile.TemporaryDirectory() as t:
             self.assertNotEqual(self._strict(_fixture_run(Path(t) / "partial", complete=False)), 0)
@@ -831,6 +847,8 @@ class EveryPublishedFixIsStillHere(unittest.TestCase):
          "the prompt hash covers the prompts"),
         ("analysis/check_data_integrity.py", "expected_cells - set(cells)",
          "the exact (arm, repeat) product"),
+        ("analysis/matrix_report.py", "for a, r in sorted(want - set(have)):",
+         "--strict checks which arm-runs are present"),
         ("analysis/check_data_integrity.py", "filename says arm=",
          "filename against contents"),
         ("analysis/paired_blocks.py", "def observed_schedule",

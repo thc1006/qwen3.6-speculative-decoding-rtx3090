@@ -148,6 +148,32 @@ def report(run_dir: Path) -> None:
                     bad.append(f"{a} rep{r['repeat']}: tag set differs from the manifest")
         if not (run_dir / "RUN_COMPLETE.json").exists():
             bad.append("no RUN_COMPLETE.json")
+        # Which arm-runs are PRESENT, not only whether the present ones are
+        # whole. Deleting a whole arm-run passed this check, and so did renaming
+        # the arm inside a file: the report aggregated whatever it found.
+        declared = set(man.get("arms") or {})
+        reps = man.get("repeats")
+        if declared and isinstance(reps, int) and reps > 0:
+            want = {(a, r) for a in declared for r in range(reps)}
+            have: dict = {}
+            for a, runs in arms.items():
+                for r in runs:
+                    have[(a, r["repeat"])] = have.get((a, r["repeat"]), 0) + 1
+            for a, r in sorted(want - set(have)):
+                bad.append(f"{a} rep{r}: missing")
+            for a, r in sorted(set(have) - want):
+                bad.append(f"{a} rep{r}: not in the manifest's arm list")
+            for k, n in sorted(have.items()):
+                if n > 1:
+                    bad.append(f"{k[0]} rep{k[1]}: {n} files claim this arm-run")
+        # and the name on the file has to be the name inside it
+        for f in sorted(run_dir.glob("*__rep*.json")):
+            stem = f.name[:-len(".json")]
+            f_arm, _, f_rep = stem.rpartition("__rep")
+            d = json.loads(f.read_text(encoding="utf-8"))
+            if d.get("arm") != f_arm or str(d.get("repeat")) != f_rep:
+                bad.append(f"{f.name}: contains arm={d.get('arm')!r} "
+                           f"repeat={d.get('repeat')!r}")
         if bad:
             print("\n  STRICT: refusing to aggregate")
             for b in bad[:12]:
