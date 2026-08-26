@@ -44,8 +44,8 @@ should have used and did not:
 | P0-3 | true acceptance across configurations | **done** — every arm of the matrix carries honest counters on post-merge master |
 | P1-1 | one binary, ABBA, N ≥ 5, full capture | **done** — 13 arms × 5 repeats, 900 requests, hashed manifest |
 | P1-2 | the missing fp16-KV no-speculation control | **done** — closes ERRATA B7 |
-| P1-3 | length-matched long-output comparison | **not done** |
-| P1-4 | repair the prompt set | **partial** — `zh_hant` relabelled; `multi_turn_*` are still two single-turn requests |
+| P1-3 | length-matched long-output comparison | **harness done, measurement pending.** This turned out to matter more than the entry suggested: with thinking off the *arms* generate different token counts, not just the prompts, and controlling for it moves every model-drafting arm by +2.5 to +16.8 pp and flips one published sign ([A17](ERRATA.md#a17-the-thinking-off-comparisons-are-not-comparisons-of-the-same-amount-of-work)). `BENCH_IGNORE_EOS=on` forces the hard cap and a run that does not get it fails validation |
+| P1-4 | repair the prompt set | **partial** — `zh_hant` relabelled; the extended set carries two genuinely multi-turn exchanges, and the v1 `multi_turn_*` tags keep their names and behaviour so archived joins still work |
 | P1-5 | host isolation, clocks, thermals | **done** — 1317-sample trace, no OC, no meaningful throttling, drift diagnosed as cold-start |
 | P2-1 | build one pinned post-merge binary | **done** — `3737e4137` |
 | P2-2 | DFlash off vs on, one binary | **done** — run J. The archived drafter GGUF lacks `target_layers`; `bench/convert_dflash.sh` re-converts it. **The sign reverses**: +18.7 % at `n_max 4`. |
@@ -73,8 +73,17 @@ New work the audit generated that was not on the original list:
   prediction head exportable as a drafter without modifying llama.cpp
 - ERRATA A11: speculation is not output-preserving on this build, established
   against a determinism control that holds in every run
-- the acceptance threshold — around 48 % — and, more importantly, the
-  out-of-sample test showing that the threshold transfers and the slope does not
+- the acceptance threshold — **45–48 %**, quoted as a range because half its
+  fitted points come from a thinking-off run whose arms generated different
+  token counts — and, more importantly, the out-of-sample test showing that the
+  threshold transfers and the slope does not
+- the checkpoint path, timed in the source rather than inferred from log
+  intervals: 39.08 s of a 71.4 s excess, replicated in a second balanced run
+- two runs of one configuration that are identical in every recorded respect,
+  produce byte-identical output, and differ by 3.4 % on one arm
+  ([A16](ERRATA.md#a16-two-runs-identical-in-every-recorded-respect-and-byte-identical-in-output-differ-by-34--on-one-arm))
+- an end-to-end harness test with no GPU (`tests/fake_llama_server.py`), which is
+  what made the completeness and attestation guards testable at all
 
 
 ---
