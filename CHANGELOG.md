@@ -90,7 +90,9 @@ repository grew a controlled tier on post-merge master.
 
 v4.0 audited what this repository had published. v4.1 measures what it had never
 run. Nine of master's eleven `--spec-type` methods, on one card, against a
-matched no-speculation baseline inside every run. The headline reverses.
+matched no-speculation baseline inside every run — the two left out are
+`draft-eagle3`, which needs three extract layers this model does not expose, and
+`draft-dspark`, which the runtime accepts only for DeepseekV4. The headline reverses.
 
 ### Added
 

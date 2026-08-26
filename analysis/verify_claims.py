@@ -1381,6 +1381,41 @@ chk("no run directory carries a failure marker",
     sorted(d.name for d in _dirs if (d / "RUN_FAILED.json").is_file()), [])
 
 
+print("\n=== nine of eleven --spec-type methods ===")
+# The eleven are the whole of llama.cpp's table at
+# common/speculative.cpp:33-43 on 3737e4137. Anything measured here appears in
+# some arm-run's argv; `none` is the baseline, which passes no --spec-type at
+# all and takes the default.
+_ALL_SPEC_TYPES = [
+    "none", "draft-simple", "draft-eagle3", "draft-mtp", "draft-dflash",
+    "draft-dspark", "ngram-simple", "ngram-map-k", "ngram-map-k4v",
+    "ngram-mod", "ngram-cache",
+]
+chk("llama.cpp offers this many --spec-type values", len(_ALL_SPEC_TYPES), 11)
+_seen_types = {"none"}          # the baseline arm passes no flag
+for _f in glob.glob("v4_audit_2026_08_25/data/*/*__rep*.json"):
+    _a = json.load(open(_f)).get("argv") or []
+    if "--spec-type" in _a:
+        _seen_types.add(_a[_a.index("--spec-type") + 1])
+chk("every measured value is one llama.cpp defines",
+    sorted(_seen_types - set(_ALL_SPEC_TYPES)), [])
+chk("methods measured here", len(_seen_types), 9)
+chk("the two that were not",
+    sorted(set(_ALL_SPEC_TYPES) - _seen_types), ["draft-dspark", "draft-eagle3"])
+_docs = " ".join(_norm(" ".join(
+    pathlib.Path(__file__).resolve().parents[1].joinpath(f).read_text(encoding="utf-8")
+    for f in ("README.md", "ERRATA.md", "CHANGELOG.md",
+              "v4_audit_2026_08_25/README.md"))).split())
+chk("the documents say nine of eleven", "ine of master's eleven" in _docs
+    or "ine of eleven" in _docs, True)
+chk("and name both exclusions",
+    "draft-eagle3" in _docs and "draft-dspark" in _docs, True)
+chk("the exclusions are named where the claim is made",
+    all(x in _norm(pathlib.Path(__file__).resolve().parents[1]
+                   .joinpath("CHANGELOG.md").read_text(encoding="utf-8"))
+        for x in ("draft-eagle3", "draft-dspark")), True)
+
+
 print("\n=== the headline table, parsed cell by cell ===")
 # Greping the document for a computed value proves the string exists somewhere,
 # not that the row is right: changing the headline's "+26.3 %" to "+26.9 %"
