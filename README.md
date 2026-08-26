@@ -20,8 +20,7 @@
 > and token ids, and continuous GPU telemetry. Its findings are the ones to
 > cite about current llama.cpp, with two limits stated up front rather than
 > buried: the same configuration measured **twelve times in one day spans
-> 9.4 pp**, and six consecutive invocations fifteen minutes apart span 8.3 of
-> that
+> 9.4 pp**, in two discrete levels 5.4 pp apart, on byte-identical output
 > ([A16](ERRATA.md#a16-two-runs-identical-in-every-recorded-respect-and-byte-identical-in-output-differ-by-34--on-one-arm)),
 > so quote the range and not the interval; and **every thinking-off comparison
 > here is confounded by output length**
@@ -48,10 +47,9 @@
 > — it wins, by a fifth to a quarter, at short draft windows and one request at
 > a time. The width of that band is not rounding. The same DFlash configuration
 > was measured **twelve times** on 2026-08-26 and spans **+17.3 % to +26.7 %**,
-> on byte-identical output, while the no-speculation reference beside it holds
-> to a CV of 0.42 %. Six of the twelve are consecutive invocations of one
-> script, minutes apart, and they alone span 8.3 pp — so it is the *invocation*
-> that varies, not the day
+> on byte-identical output and identical draft counts, while the no-speculation
+> reference beside it holds to a CV of 0.42 %. Pooled by block it is two levels,
+> +25.7 % and +20.3 %, and only this one arm moves between them
 > ([ERRATA A16](ERRATA.md#a16-two-runs-identical-in-every-recorded-respect-and-byte-identical-in-output-differ-by-34--on-one-arm)).
 > "Speculative decoding loses on this hardware" was a statement about a regime
 > this repository had not separated.
@@ -151,11 +149,17 @@ one request at a time:
 
 **Range 9.4 pp, SD 2.9.** The no-speculation baseline over the same twelve runs
 holds 115.72–117.25 tok/s, a CV of **0.42 %** — the reference is steady and the
-arm under test is not. The last six are run U, six consecutive invocations of
-one script fifteen minutes apart, and they alone span 8.3 pp: this is not drift
-across the day. Within an invocation the blocks agree to an SD of **0.55 pp**;
-between invocations the means scatter with an SD of **3.15 pp**, a variance
-ratio of **33×**. Every one of the twelve produced byte-identical output.
+arm under test is not. Every one of the twelve produced byte-identical output,
+and `draft_n` is 2441 with acceptance 72.3 % in all 43 of their blocks: the
+speculative work is the same to the token and only the time differs.
+
+Pooling those 43 blocks, it is **not scatter but two levels** — a high one at
+**+25.7 %** (30 blocks, SD 1.18) and a low one at **+20.3 %** (13 blocks, SD
+1.63). Eleven runs sit wholly in one level; run O3 crosses between them at block
+4, and **in those blocks only this arm moves** — including `spec-dflash-n4`,
+the same drafter at twice the draft length, which never leaves ±1.01 % of its
+own first block. The level survives the server restart between arm-runs, so a
+single measurement lands wherever the state happens to be.
 
 The paired-block interval above is 1.6 pp wide and it is measuring the wrong
 variance component. Read the configuration as **+17 % to +27 %**, and the

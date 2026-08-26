@@ -1814,6 +1814,72 @@ chk("README contrasts the steady reference with the moving arm",
     True)
 
 
+print("\n=== A16: two levels, not noise ===")
+# Every block of every comparable run, for the one arm that moves.
+_lvl, _lvl_meta = [], []
+for _d in _comparable_dirs:
+    def _blk(arm, d=_d):
+        out = {}
+        for f in glob.glob(f"{d}/{arm}__rep*.json"):
+            r = json.load(open(f))
+            out[r["repeat"]] = (1000 * sum(x["predicted_n"] for x in r["rows"])
+                                / sum(x["predicted_ms"] for x in r["rows"]))
+        return out
+    _b, _a = _blk("baseline"), _blk("spec-dflash-n2")
+    for _k in sorted(_b):
+        if _k in _a:
+            _lvl.append(100 * (_a[_k] / _b[_k] - 1))
+            _lvl_meta.append((os.path.basename(_d).split("_")[1], _k))
+chk("A16 block-level measurements of the DFlash arm", len(_lvl), 43)
+_hi = [x for x in _lvl if x >= 23]
+_lo = [x for x in _lvl if x < 23]
+chk("A16 high level: n", len(_hi), 30)
+chk("A16 high level: mean (%)", round(st.mean(_hi), 2), 25.70, 0.005)
+chk("A16 high level: SD (pp)", round(st.stdev(_hi), 2), 1.18, 0.005)
+chk("A16 low level: n", len(_lo), 13)
+chk("A16 low level: mean (%)", round(st.mean(_lo), 2), 20.33, 0.005)
+chk("A16 low level: SD (pp)", round(st.stdev(_lo), 2), 1.63, 0.005)
+chk("A16 the gap between them (pp)",
+    round(st.mean(_hi) - st.mean(_lo), 1), 5.4, 0.05)
+
+# identical speculative work in every one of them
+_work = set()
+for _d in _comparable_dirs:
+    for _f in glob.glob(f"{_d}/spec-dflash-n2__rep*.json"):
+        _r = json.load(open(_f))
+        _work.add((sum(x["draft_n"] for x in _r["rows"]),
+                   round(100 * sum(x["draft_n_accepted"] for x in _r["rows"])
+                         / sum(x["draft_n"] for x in _r["rows"]), 1)))
+chk("A16 the speculative work is identical in all 43", sorted(_work), [(2441, 72.3)])
+
+# run O3 transitions mid-run, and only this arm moves with it
+_o3 = {}
+for _arm in json.load(open(f"{_O3}/manifest.json"))["arms"]:
+    _o3[_arm] = {}
+    for _f in glob.glob(f"{_O3}/{_arm}__rep*.json"):
+        _r = json.load(open(_f))
+        _o3[_arm][_r["repeat"]] = (1000 * sum(x["predicted_n"] for x in _r["rows"])
+                                   / sum(x["predicted_ms"] for x in _r["rows"]))
+_dip = [round(100 * (_o3["spec-dflash-n2"][k] / _o3["spec-dflash-n2"][0] - 1), 2)
+        for k in (4, 5, 6, 7)]
+chk("A16 O3's dip, blocks 4-7 against its own block 0 (%)",
+    _dip, [-4.45, -4.66, -3.33, -2.93], 0.005)
+_others = {a: max(abs(100 * (v[k] / v[0] - 1)) for k in range(9))
+           for a, v in _o3.items() if a != "spec-dflash-n2"}
+chk("A16 no other arm leaves 1.24 % of its own block 0",
+    sorted(a for a, m in _others.items() if round(m, 2) > 1.24), [])
+chk("A16 the largest excursion among them (%)",
+    round(max(_others.values()), 2), 1.24, 0.005)
+chk("A16 the same drafter at twice the draft length (%)",
+    round(_others["spec-dflash-n4"], 2), 1.01, 0.005)
+chk("A16 the dip is at least four times the next largest excursion",
+    round(max(abs(x) for x in _dip) / max(_others.values()), 1) >= 3.7, True)
+chk("ERRATA states the correction to the between-invocation framing",
+    "This corrects the framing above" in _norm(
+        pathlib.Path(__file__).resolve().parents[1].joinpath("ERRATA.md")
+        .read_text(encoding="utf-8")), True)
+
+
 print("\n=== the balanced design is verified, not declared ===")
 # The README says run O2's Latin square was "verified from the execution log,
 # not from the design", and nothing here re-derived it. `t_start` is

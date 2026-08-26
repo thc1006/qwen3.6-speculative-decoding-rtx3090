@@ -1120,43 +1120,59 @@ while its baseline stays inside 115.5–117.3. The two lowest are the two latest
 which is suggestive of a state change rather than noise — and it is two points,
 so it is not evidence yet.
 
-**Run U measures it instead of observing it.** Two pairs is two pairs. The
-question is whether the variance sits *within* a run or *between* runs, and that
-has a design: six independent invocations of one script, fifteen minutes apart,
-each two balanced blocks of `{baseline, spec-dflash-n2}`, on the stock binary
-asserted per arm-run.
+**Run U measures it instead of observing it.** Two pairs is two pairs, so: six
+independent invocations of one script, fifteen minutes apart, each two balanced
+blocks of `{baseline, spec-dflash-n2}`, on the stock binary asserted per
+arm-run. All 240 request-pairs across the six are byte-identical.
 
 | | U1 | U2 | U3 | U4 | U5 | U6 |
 |---|---:|---:|---:|---:|---:|---:|
 | start | 22:12 | 22:15 | 22:18 | 22:21 | 22:24 | 22:27 |
 | `spec-dflash-n2` vs baseline | +22.3 % | +24.2 % | **+17.3 %** | +19.9 % | **+25.6 %** | +24.3 % |
 
-All 240 request-pairs across the six are byte-identical. And:
+Each invocation is internally tight and the six scatter: mean within-invocation
+SD **0.55 pp** against **3.15 pp** between the six means, a range of **8.33 pp**
+in a quarter of an hour. That is not drift across the day, and no statistic
+computed inside one run can see it.
 
-| | pp |
-|---|---:|
-| SD of the block ratios **within** an invocation, averaged over the six | **0.55** |
-| SD of the six invocation means, **between** invocations | **3.15** |
-| variance ratio | **33×** |
-| range across the six | **8.33** |
+**What it actually is: two levels, not noise.** Pool every block of every
+comparable run — 43 measurements of this one arm on 2026-08-26, same policy,
+same models, same prompts:
 
-**The variance is between invocations, by a factor of thirty-three.** An
-invocation is internally tight and the invocations scatter. Fifteen minutes
-covers 8.3 pp of it, so this is not drift across the day, and no statistic
-computed inside one run can see it — which is exactly what
-[A14](#a14-within-run-repeats-are-not-an-error-bar) warned about, now with a
-number.
+| | n | mean | SD |
+|---|---:|---:|---:|
+| high | 30 | **+25.70 %** | 1.18 |
+| low | 13 | **+20.33 %** | 1.63 |
 
-Across the whole day the same configuration was measured **twelve times**:
-+26.7, +24.6, +26.3, +25.9, +20.7, +23.4, +22.3, +24.2, +17.3, +19.9, +25.6,
-+24.3 — **range 9.4 pp, SD 2.9**. The no-speculation baseline over those same
-twelve runs holds **115.72–117.25 tok/s, a CV of 0.42 %**. The reference is
-steady to four parts in a thousand while the arm under test moves by nine points,
-on identical output. Whatever this is, it is a property of the speculative path
-and not of the machine's general state.
+The two groups are 5.4 pp apart and each is about as tight as any other arm's
+block-to-block scatter. **`draft_n` is 2441 and acceptance is 72.3 % in every
+one of the 43** — the speculative work is identical down to the token, and only
+the time differs.
 
-**The cause is not isolated.** Nothing recorded distinguishes the runs in any
-pair. What sits between T and T3 is machine history — two rebuilds and a killed
+Eleven of the twelve runs sit wholly in one level. Run O3 is the exception and
+it is the informative one: blocks 0–3 at ~+26 %, blocks 4–7 at ~+20 %, block 8
+recovering to +23.8 %. **In those blocks only this arm moves.** Against its own
+block 0, `spec-dflash-n2` reads −4.45, −4.66, −3.33, −2.93 % while the
+no-speculation baseline, `spec-draft-n1`, `spec-draft-n8`, `spec-mtp-n2`,
+`ngram-cache`, `ngram-mod-n24`, `ngram-map-k4v-m8` and — decisively —
+**`spec-dflash-n4`, the same DFlash drafter at twice the draft length** — never
+leave ±1.24 %, and `spec-dflash-n4` never leaves ±1.01 %. The next largest
+excursion in the whole run is a quarter the size of this one.
+
+So the level is not a property of the machine, of the GPU, or of DFlash. It is a
+state that a run lands in, that persists across the server restarts between
+arm-runs — every arm-run is a fresh `llama-server` process — and that can change
+inside one run.
+
+**This corrects the framing above.** "The variance is between invocations" is
+what run U shows, because none of U's six straddled a transition; run O3 shows
+one happening inside a single invocation. The 33× ratio is arithmetic on U's
+numbers, not a law.
+
+**The cause is not isolated.** Nothing recorded distinguishes the two levels:
+the same argv, the same fit decisions, the same 82 MiB of GPU memory free at
+start, the same 11–16 s to become healthy, the same clocks and temperatures, the
+same draft counts and acceptance, and byte-identical output. What sits between T and T3 is machine history — two rebuilds and a killed
 rehearsal — which changes page cache and allocator state and is captured by no
 field here. That is a hypothesis, not a finding, and it is written as one.
 
