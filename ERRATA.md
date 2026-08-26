@@ -1128,8 +1128,8 @@ With thinking **off** it does arise, and 696 of the 940 thinking-off requests
 stopped before the cap. What causes it is
 [A11](#a11-speculative-decoding-is-not-output-preserving-on-this-build-and-the-engine-is-deterministic-enough-to-prove-it): speculation is not output-preserving on this build, so the arms
 produce different text and stop in different places. In run R the baseline
-generates **300** tokens on `code_bash` where every speculative arm generates
-**187**, and **203** on `code_rust` where every speculative arm generates
+generates **300** tokens on `code_bash` where the speculative arms generate
+**187, 188 and 188**, and **203** on `code_rust` where all three generate
 **300** — 38 % short in one direction and 48 % long in the other, on two prompts
 of the same set.
 

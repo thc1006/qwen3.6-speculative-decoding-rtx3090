@@ -1253,6 +1253,23 @@ print("\n=== A17: are the arms compared on the same amount of work? ===")
 _lm = json.load(open("analysis/length_matching.json"))["runs"]
 _on = [r for r in _lm if r["think"] != "off"]
 _off = [r for r in _lm if r["think"] == "off"]
+# the two prompts A17 names, checked rather than remembered
+_R = "v4_audit_2026_08_25/data/matrix_R_ext_thinkoff_20260826_110747"
+_rlen: dict = {}
+for _f in glob.glob(f"{_R}/*__rep*.json"):
+    _r = json.load(open(_f))
+    for _x in _r["rows"]:
+        _rlen.setdefault(_x["tag"], {}).setdefault(_r["arm"], set()).add(_x["predicted_n"])
+chk("A17 run R code_bash baseline length",
+    sorted(_rlen["code_bash"]["baseline"]), [300])
+chk("A17 run R code_bash speculative lengths",
+    sorted(n for a, v in _rlen["code_bash"].items() if a != "baseline" for n in v),
+    [187, 188, 188])
+chk("A17 run R code_rust baseline length",
+    sorted(_rlen["code_rust"]["baseline"]), [203])
+chk("A17 run R code_rust speculative lengths",
+    sorted(n for a, v in _rlen["code_rust"].items() if a != "baseline" for n in v),
+    [300, 300, 300])
 chk("A17 thinking-off runs with a computable comparison", len(_off), 4)
 chk("A17 thinking-on runs with a computable comparison", len(_on), 24)
 chk("A17 every thinking-on run is fully length-matched",

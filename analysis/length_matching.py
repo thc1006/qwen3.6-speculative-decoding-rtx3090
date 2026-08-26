@@ -6,7 +6,8 @@ do not. With thinking ON every request in this repository hits the 300-token cap
 and the question does not arise. With thinking OFF it does: speculation is not
 output-preserving on this build (ERRATA A11), so the arms stop at different
 points, and in run R the baseline generates 300 tokens on `code_bash` where the
-speculative arms generate 187, and 203 on `code_rust` where they generate 300.
+speculative arms generate 187, 188 and 188, and 203 on `code_rust` where all
+three generate 300.
 
 This computes, for every run, each arm's pooled change against the baseline
 twice: over all prompts, and over only those prompts where every arm in the run
