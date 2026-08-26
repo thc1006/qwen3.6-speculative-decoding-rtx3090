@@ -1839,6 +1839,35 @@ chk("A16 high level: SD (pp)", round(st.stdev(_hi), 2), 1.18, 0.005)
 chk("A16 low level: n", len(_lo), 13)
 chk("A16 low level: mean (%)", round(st.mean(_lo), 2), 20.33, 0.005)
 chk("A16 low level: SD (pp)", round(st.stdev(_lo), 2), 1.63, 0.005)
+# the words the entry is allowed to use. "Two discrete levels" is not one of
+# them: the widest gap in the sorted values isolates one run at the bottom, not
+# the split, and two runs span more than 3 pp internally.
+_sorted = sorted(_lvl)
+_gaps = sorted(((_sorted[i + 1] - _sorted[i], _sorted[i]) for i in range(len(_sorted) - 1)),
+               reverse=True)
+chk("A16 the block-level range (%)",
+    [round(min(_lvl), 1), round(max(_lvl), 1)], [17.0, 27.8], 0.05)
+chk("A16 the widest gap in the sorted values (pp)", round(_gaps[0][0], 2), 2.06, 0.005)
+chk("A16 and it is not at the +23 % split", round(_gaps[0][1], 1) < 23, True)
+chk("A16 the gap at the split is the second widest (pp)",
+    round(_gaps[1][0], 2), 1.32, 0.005)
+_byrun = {}
+for _v, (_t, _k) in zip(_lvl, _lvl_meta):
+    _byrun.setdefault(_t, []).append(_v)
+chk("A16 runs that cross the split", sorted(
+    t for t, xs in _byrun.items() if any(x >= 23 for x in xs) and any(x < 23 for x in xs)),
+    ["O3"])
+chk("A16 runs that do not", len(_byrun) - 1, 11)
+chk("A16 the largest within-run spread among the rest (pp)",
+    round(max(max(xs) - min(xs) for t, xs in _byrun.items() if t != "O3"), 2), 3.27, 0.005)
+chk("ERRATA withdraws the two-level wording",
+    "does not support the word" in _norm(
+        pathlib.Path(__file__).resolve().parents[1].joinpath("ERRATA.md")
+        .read_text(encoding="utf-8")), True)
+chk("and no longer calls it two discrete levels",
+    "two levels, not noise" in _norm(
+        pathlib.Path(__file__).resolve().parents[1].joinpath("ERRATA.md")
+        .read_text(encoding="utf-8")), False)
 chk("A16 the gap between them (pp)",
     round(st.mean(_hi) - st.mean(_lo), 1), 5.4, 0.05)
 

@@ -1135,43 +1135,50 @@ SD **0.55 pp** against **3.15 pp** between the six means, a range of **8.33 pp**
 in a quarter of an hour. That is not drift across the day, and no statistic
 computed inside one run can see it.
 
-**What it actually is: two levels, not noise.** Pool every block of every
+**What it actually is: the run, not the block.** Pool every block of every
 comparable run — 43 measurements of this one arm on 2026-08-26, same policy,
 same models, same prompts:
 
-![One arm, 43 blocks, two levels](analysis/plot_two_levels.png)
+![One arm, 43 blocks, one day](analysis/plot_two_levels.png)
 
-| | n | mean | SD |
-|---|---:|---:|---:|
-| high | 30 | **+25.70 %** | 1.18 |
-| low | 13 | **+20.33 %** | 1.63 |
+They span **+17.0 % to +27.8 %**, and **`draft_n` is 2441 with acceptance 72.3 %
+in every one of the 43** — the speculative work is identical to the token and
+only the time differs.
 
-The two groups are 5.4 pp apart and each is about as tight as any other arm's
-block-to-block scatter. **`draft_n` is 2441 and acceptance is 72.3 % in every
-one of the 43** — the speculative work is identical down to the token, and only
-the time differs.
+The values cluster by run rather than scattering within one. Splitting at +23 %,
+where the second-widest gap in the sorted values sits, leaves **eleven of the
+twelve runs wholly on one side**; the group above averages +25.7 % over 30
+blocks and the group below +20.3 % over 13. Five runs hold their two blocks to
+within 0.6 pp of each other while sitting 5 pp apart from one another.
 
-Eleven of the twelve runs sit wholly in one level. Run O3 is the exception and
-it is the informative one: blocks 0–3 at ~+26 %, blocks 4–7 at ~+20 %, block 8
-recovering to +23.8 %. **In those blocks only this arm moves.** Against its own
-block 0, `spec-dflash-n2` reads −4.45, −4.66, −3.33, −2.93 % while the
-no-speculation baseline, `spec-draft-n1`, `spec-draft-n8`, `spec-mtp-n2`,
-`ngram-cache`, `ngram-mod-n24`, `ngram-map-k4v-m8` and — decisively —
-**`spec-dflash-n4`, the same DFlash drafter at twice the draft length** — never
-leave ±1.24 %, and `spec-dflash-n4` never leaves ±1.01 %. The next largest
-excursion in the whole run is a quarter the size of this one.
+> **An earlier version of this entry called that "two discrete levels" and it
+> does not support the word.** The widest gap in the sorted values is 2.06 pp
+> and it isolates run U3 at the bottom, not the +23 % split, where the gap is
+> 1.32 pp. Runs O2 and O3 each span more than 3 pp internally. What the data
+> shows is clustering by run with a heavy low tail — not a clean two-state
+> system, and the figure is titled accordingly.
 
-So the level is not a property of the machine, of the GPU, or of DFlash. It is a
-state that a run lands in, that persists across the server restarts between
-arm-runs — every arm-run is a fresh `llama-server` process — and that can change
-inside one run.
+Run O3 is the one that crosses, and it is the informative one: blocks 0–3 at
+~+26 %, blocks 4–7 at ~+20 %, block 8 recovering to +23.8 %. **In those blocks
+only this arm moves.** Against its own block 0, `spec-dflash-n2` reads −4.45,
+−4.66, −3.33, −2.93 % while the no-speculation baseline, `spec-draft-n1`,
+`spec-draft-n8`, `spec-mtp-n2`, `ngram-cache`, `ngram-mod-n24`,
+`ngram-map-k4v-m8` and — decisively — **`spec-dflash-n4`, the same DFlash
+drafter at twice the draft length** — never leave ±1.24 %, and `spec-dflash-n4`
+never leaves ±1.01 %. The excursion is nearly four times the next largest in the
+run.
+
+So whatever moves is not the machine, not the GPU, and not DFlash as such. It
+attaches to one configuration, survives the server restart between arm-runs —
+every arm-run is a fresh `llama-server` process — and can change inside a single
+run.
 
 **This corrects the framing above.** "The variance is between invocations" is
 what run U shows, because none of U's six straddled a transition; run O3 shows
 one happening inside a single invocation. The 33× ratio is arithmetic on U's
 numbers, not a law.
 
-**The cause is not isolated.** Nothing recorded distinguishes the two levels:
+**The cause is not isolated.** Nothing recorded distinguishes a high run from a low one:
 the same argv, the same fit decisions, the same 82 MiB of GPU memory free at
 start, the same 11–16 s to become healthy, the same clocks and temperatures, the
 same draft counts and acceptance, and byte-identical output. What sits between T and T3 is machine history — two rebuilds and a killed

@@ -20,7 +20,7 @@
 > and token ids, and continuous GPU telemetry. Its findings are the ones to
 > cite about current llama.cpp, with two limits stated up front rather than
 > buried: the same configuration measured **twelve times in one day spans
-> 9.4 pp**, in two discrete levels 5.4 pp apart, on byte-identical output
+> 9.4 pp**, clustered by run rather than scattered, on byte-identical output
 > ([A16](ERRATA.md#a16-two-runs-identical-in-every-recorded-respect-and-byte-identical-in-output-differ-by-34--on-one-arm)),
 > so quote the range and not the interval; and **every thinking-off comparison
 > here is confounded by output length**
@@ -48,8 +48,8 @@
 > a time. The width of that band is not rounding. The same DFlash configuration
 > was measured **twelve times** on 2026-08-26 and spans **+17.3 % to +26.7 %**,
 > on byte-identical output and identical draft counts, while the no-speculation
-> reference beside it holds to a CV of 0.42 %. Pooled by block it is two levels,
-> +25.7 % and +20.3 %, and only this one arm moves between them
+> reference beside it holds to a CV of 0.42 %. The values cluster by run, and
+> only this one arm moves between the clusters
 > ([ERRATA A16](ERRATA.md#a16-two-runs-identical-in-every-recorded-respect-and-byte-identical-in-output-differ-by-34--on-one-arm)).
 > "Speculative decoding loses on this hardware" was a statement about a regime
 > this repository had not separated.
@@ -153,13 +153,14 @@ arm under test is not. Every one of the twelve produced byte-identical output,
 and `draft_n` is 2441 with acceptance 72.3 % in all 43 of their blocks: the
 speculative work is the same to the token and only the time differs.
 
-Pooling those 43 blocks, it is **not scatter but two levels** — a high one at
-**+25.7 %** (30 blocks, SD 1.18) and a low one at **+20.3 %** (13 blocks, SD
-1.63). Eleven runs sit wholly in one level; run O3 crosses between them at block
-4, and **in those blocks only this arm moves** — including `spec-dflash-n4`,
-the same drafter at twice the draft length, which never leaves ±1.01 % of its
-own first block. The level survives the server restart between arm-runs, so a
-single measurement lands wherever the state happens to be.
+Pooling those 43 blocks gives **+17.0 % to +27.8 %**, and the values cluster by
+run rather than scattering inside one: split at +23 % and **eleven of the twelve
+runs fall wholly on one side**, averaging +25.7 % above and +20.3 % below. Run
+O3 is the one that crosses, at block 4 — and **in those blocks only this arm
+moves**, including `spec-dflash-n4`, the same drafter at twice the draft length,
+which never leaves ±1.01 % of its own first block. Whatever it is survives the
+server restart between arm-runs, so a single measurement lands wherever it
+happens to be.
 
 The paired-block interval above is 1.6 pp wide and it is measuring the wrong
 variance component. Read the configuration as **+17 % to +27 %**, and the

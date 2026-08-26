@@ -580,8 +580,8 @@ def plot_two_levels() -> None:
     for x, y, t in zip(xs, ys, tags):
         ax.scatter(x, y, s=46, color=(C_HI if y >= SPLIT else C_LO),
                    edgecolor="white", linewidth=0.6, zorder=3)
-    for val, c, lab in ((st.mean(hi), C_HI, f"high, {len(hi)} blocks, mean {st.mean(hi):+.1f} %"),
-                        (st.mean(lo), C_LO, f"low, {len(lo)} blocks, mean {st.mean(lo):+.1f} %")):
+    for val, c, lab in ((st.mean(hi), C_HI, f"above the +23 % split, {len(hi)} blocks, mean {st.mean(hi):+.1f} %"),
+                        (st.mean(lo), C_LO, f"below it, {len(lo)} blocks, mean {st.mean(lo):+.1f} %")):
         ax.axhline(val, color=c, ls="--", lw=1.2, alpha=0.8, label=lab)
     seen, ticks, labels = set(), [], []
     for x, t in zip(xs, tags):
@@ -591,7 +591,8 @@ def plot_two_levels() -> None:
     ax.set_xticklabels(labels, fontsize=8.4)
     ax.set_xlabel("block, ordered by clock; ticks mark the first block of each run")
     ax.set_ylabel("spec-dflash-n2 against the baseline in the same block (%)")
-    ax.set_title(f"One arm, {len(ys)} blocks, one day: two levels {st.mean(hi)-st.mean(lo):.1f} pp apart\n"
+    ax.set_title(f"One arm, {len(ys)} blocks, one day: {min(ys):+.1f} % to {max(ys):+.1f} %, "
+                 f"clustered by run\n"
                  f"draft_n is 2441 and acceptance 72.3 % in every one of them",
                  fontsize=11.5)
     ax.legend(loc="lower left", fontsize=8.8, frameon=False)
@@ -629,7 +630,9 @@ def plot_two_levels() -> None:
                  "the no-speculation arm-run in the same block. ERRATA A16.",
             extra=" The no-speculation baseline over these runs holds 115.72-117.25 "
                   "tok/s, a CV of 0.42 %. Every run produced byte-identical output. "
-                  "The split at +23 % is drawn where the gap is, not fitted.")
+                  "The +23 % split is where the second-widest gap in the sorted values "
+                  "sits and leaves 11 of 12 runs whole; it is a reading aid, not a fitted "
+                  "boundary. The widest gap, 2.06 pp, isolates run U3 at the bottom.")
     if not CHECK:
         plt.savefig(OUT / "plot_two_levels.png", dpi=150, bbox_inches="tight")
     plt.close()
