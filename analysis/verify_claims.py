@@ -724,7 +724,9 @@ chk("A14 spec-mtp-n4 Q8_0 outlier is M1, not run Q",
 chk("A14 the other two cluster within 1 pp", abs(_q8 - _pe) < 1.0, True)
 
 print("\n=== A14: the thermal figures the 'unexplained' claim rests on ===")
-import csv as _csv2, re as _re2
+import csv as _csv2
+import subprocess as _sp2
+import sys as _sys2, re as _re2
 def _tel(pat, lo, hi):
     out = []
     for f in glob.glob(f"v4_audit_2026_08_25/data/{pat}"):
@@ -1325,8 +1327,7 @@ print("\n=== the file inventory is counted, not typed ===")
 # The v4 Files table listed two of the run directories and called itself the
 # file list. Counts in prose go stale silently; these are derived.
 _root = pathlib.Path(__file__).resolve().parents[1]
-_dirs = sorted(d for d in (_root / "v4_audit_2026_08_25" / "data").iterdir()
-               if d.is_dir() and d.name != "telemetry")
+_dirs = sorted(d for d in (_root / "v4_audit_2026_08_25" / "data").iterdir() if d.is_dir())
 _armruns = sorted((_root / "v4_audit_2026_08_25" / "data").glob("*/*__rep*.json"))
 _v4 = " ".join(_norm((_root / "v4_audit_2026_08_25" / "README.md")
                      .read_text(encoding="utf-8")).split())
@@ -1454,7 +1455,7 @@ for _arm, _want in (("baseline", 0.79), ("spec-draft-n8", -0.11),
 _mT = json.load(open(f"{_T}/manifest.json"))
 _mT3 = json.load(open(f"{_T3}/manifest.json"))
 # A16's thermal comparison, from the two traces now committed beside the runs
-_TEL = pathlib.Path(__file__).resolve().parents[1] / "v4_audit_2026_08_25" / "data" / "telemetry"
+_TEL = pathlib.Path(__file__).resolve().parents[1] / "v4_audit_2026_08_25" / "data"
 
 
 def _trace(name, util_key, thr_key):
@@ -1506,6 +1507,24 @@ def _bits(rows, key, bit):
     return n
 
 
+# and the tool named in the documents must actually produce those numbers
+_thermal = _sp2.run(
+    [_sys2.executable, str(pathlib.Path(__file__).resolve().parents[1]
+                           / "analysis" / "thermal_report.py"),
+     "v4_audit_2026_08_25/data/gpu_telemetry_20260825.csv",
+     "v4_audit_2026_08_25/data/gpu_telemetry_T_20260826_182639.csv",
+     "v4_audit_2026_08_25/data/gpu_telemetry_T3_20260826_203251.csv"],
+    capture_output=True, text=True, timeout=120).stdout
+chk("thermal_report reproduces C4b's power-cap count", "636 / 1272" in _thermal, True)
+chk("thermal_report reproduces C4b's sw-thermal count", "2 / 1272" in _thermal, True)
+chk("thermal_report reproduces C4b's hw-thermal count", "1 / 1272" in _thermal, True)
+chk("thermal_report reproduces A16's T power-cap count", "29 / 156" in _thermal, True)
+chk("thermal_report reproduces A16's T3 power-cap count", "27 / 599" in _thermal, True)
+chk("thermal_report reads all three schemas",
+    sorted(x for x in ("schema=full", "schema=compact", "schema=raw")
+           if x not in _thermal), [])
+chk("thermal_report states the sampling interval it found",
+    "sampling 5s" in _thermal and "sampling 1s" in _thermal, True)
 chk("A16 sw_power_cap samples, T", _bits(_tT, "throttle", 0x4), 29)
 chk("A16 sw_power_cap samples, T3",
     _bits(_tT3, " clocks_event_reasons.active", 0x4), 27)

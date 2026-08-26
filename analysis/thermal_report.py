@@ -188,7 +188,7 @@ def report(path: Path) -> None:
         # cannot record them would be a false all-clear, which is exactly the
         # failure this file exists to prevent, so decode the mask instead.
         counts: dict = {}
-        for r in rows:
+        for r in busy:
             m = g(r, "throttle_active")
             if not m:
                 continue
@@ -203,14 +203,18 @@ def report(path: Path) -> None:
               f"columns; decoded from `clocks_throttle_reasons.active`:")
         if counts:
             for name, n in sorted(counts.items(), key=lambda kv: -kv[1]):
-                print(f"    {name:34s} active on {n:5d} / {len(rows)}")
+                print(f"    {name:34s} active on {n:5d} / {len(busy)}")
         else:
-            print("    no throttle bit set on any sample")
+            print("    no throttle bit set on any loaded sample")
         print()
     else:
         for f in FLAGS:
-            act = [r for r in rows if g(r, f) == "Active"]
-            print(f"  {f:22s} active on {len(act):5d} / {len(rows)}")
+            # loaded samples, matching the denominator in the header and in
+            # every statement below. Counting over every row instead - which is
+            # what this did - reports a different fraction from the one the
+            # ERRATA C4b table quotes, out of the same file.
+            act = [r for r in busy if g(r, f) == "Active"]
+            print(f"  {f:22s} active on {len(act):5d} / {len(busy)}")
             for r in act[:3]:
                 print(f"      {g(r,'wall_iso') or g(r,'ts')}  temp={g(r,'temp_c')}C  "
                       f"gfx={g(r,'gfx_mhz')}  power={g(r,'power_w')}")

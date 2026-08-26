@@ -178,12 +178,7 @@ def check_dir(d: Path) -> tuple[list[str], str]:
 
 def main() -> None:
     root = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "v4_audit_2026_08_25" / "data"
-    # `telemetry/` holds the continuous nvidia-smi traces, one per session. It
-    # is measurement data and it is not a run, so it has no manifest and no
-    # arm-runs; named explicitly rather than inferred, so a genuinely broken run
-    # directory cannot be skipped by looking empty.
-    NOT_RUNS = {"telemetry"}
-    dirs = sorted(p for p in root.iterdir() if p.is_dir() and p.name not in NOT_RUNS)
+    dirs = sorted(p for p in root.iterdir() if p.is_dir())
     if not dirs:
         sys.exit(f"no run directories under {root}")
     all_bad: list[str] = []
