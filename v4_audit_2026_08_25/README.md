@@ -672,9 +672,9 @@ So the usable statement is narrower than it first looked: **within a
 self-speculative family on this target, a configuration is worth running when it
 clears roughly 48 % draft acceptance.** It is not a statement about acceptance in
 general. An external 0.8 B drafter is 75 % slower at 68.7 % acceptance, because
-it pays a fixed per-round cost that no acceptance rate can amortise — 101 MiB of
-recurrent state checkpointed and restored, plus a dense forward pass against a
-target that activates only ~3 B parameters. That cost is measured in
+it pays a fixed per-round cost that no acceptance rate can amortise — a full
+checkpoint the server reports at 82.079 MiB, saved and restored, plus a dense
+forward pass against a target that activates only ~3 B parameters. That cost is measured in
 [ERRATA A12](../ERRATA.md#a12-full-checkpoint-activity-on-the-external-drafter-path),
 and it is why the threshold holds inside one family and not across them.
 
@@ -1006,7 +1006,8 @@ Not settled, and honestly out of reach here:
 | ~~ten prompts~~ | **closed by runs P and R.** Twenty different prompts, sharing none with the v1 set, move the decode speed-up by at most 4.3 pp |
 | ~~`multi_turn_1` / `multi_turn_2`~~ | **closed for new runs.** The extended set carries two genuinely multi-turn exchanges, gated on the model recalling four-turn-old context. The v1 tags keep their names and their behaviour so archived joins still work |
 | between-run reproducibility | median 0.56 pp over ten independently repeated pairs, and one pair at 8.5 pp that resisted every check ([A14](../ERRATA.md#a14-within-run-repeats-are-not-an-error-bar)) |
-| the 19.5 % checkpoint share | a log-timestamp attribution, not a profile |
+| the wall-clock cost of checkpointing | **not measured; the previous estimate is withdrawn.** The create and restore messages sit on opposite sides of the work they name, so a next-log-line interval times one direction and not the other. Needs the timers upstream left commented out at `server-context.cpp:2963` and `:2967` |
+| the other 76 % of the external drafter's excess decode time | checkpoint work and verification of discarded tokens, in unknown proportion |
 | expert routing | never instrumented, and after A7 and A12 nothing demands it |
 
 Absolute rates must not be compared across runs that differ in `-ngl`, `-c` or

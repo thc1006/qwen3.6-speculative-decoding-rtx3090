@@ -92,9 +92,10 @@ A factor of five separates the top from the bottom, and the divide is not
 acceptance, not draft length, and not model-versus-n-gram. It is **whether the
 drafter is a second model**. `spec-draft-n1` accepts 69.7 % of its drafts —
 more than every winning arm but one — and is 75 % slower, because a separate
-draft context makes this hybrid target checkpoint and restore ~101 MiB of
-recurrent state on every partially accepted round, 772 times per arm-run, which
-DFlash and MTP do zero times at every draft length from 1 to 16
+draft context makes this hybrid target save and restore a full checkpoint on
+every partially accepted round — the server reports 82.079 MiB per checkpoint,
+772 creates and 709 restores in one arm-run — which DFlash logs zero times at
+draft lengths 1 to 16 and MTP zero times at 1 to 8
 ([ERRATA A12](ERRATA.md#a12-full-checkpoint-activity-on-the-external-drafter-path)).
 
 **The three methods v1 benchmarked are the bottom three rows.** The original
@@ -159,12 +160,14 @@ llama.cpp's two disagreeing acceptance counters. The failures are the
 informative ones: `spec-draft-n1` reaches **69.7 % acceptance** (100.0 % by the
 drafter's own counter) and is **75 % slower**.
 
-So the threshold is not a law about acceptance; it is a property of the drafter.
-The reason is measured rather than argued: a separate draft context forces the
-hybrid target to checkpoint and restore ~101 MiB of recurrent state on every
-partially accepted round — **772 saves and 709 restores in one ten-prompt
-arm-run, about 133 GiB of state traffic and ~19.5 % of its wall clock** — while
-DFlash and MTP do it **zero times at every draft length from 1 to 16**. And the
+So the threshold is not a law about acceptance; it tracks the drafter. What is
+measured is that a separate draft context makes this hybrid target log **772
+full-checkpoint creates and 709 restores in one ten-prompt arm-run**, at a
+reported 82.079 MiB each — a nominal **118.7 GiB** by event count × logged size,
+which is an estimate and not measured memory traffic. DFlash logs none of these
+events at draft lengths 1 to 16 and MTP none at 1 to 8. How much wall clock that
+costs is **not** established here
+([A12](ERRATA.md#a12-full-checkpoint-activity-on-the-external-drafter-path)). And the
 external drafter is 0.8 B *dense* against a target that activates only ~3 B
 parameters per token, so drafting costs a quarter of a target step before any
 state management: 17.24 s in `generate()` against 1.89–3.43 s for a head that

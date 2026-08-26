@@ -39,8 +39,12 @@ matched no-speculation baseline inside every run. The headline reverses.
 - **ERRATA A12** — the mechanism, measured. An external drafter forces the
   hybrid target to checkpoint and restore 82.079 MiB of target state plus
   19.266 MiB of draft state on every partially accepted round: 772 saves and 709
-  restores per arm-run, ≈133 GiB of state traffic, ≈19.5 % of the wall clock.
-  DFlash and MTP do it **zero** times at every draft length from 1 to 16.
+  restores per arm-run, a nominal ≈118.7 GiB by event count × the size the server
+  reports. DFlash logs none at draft lengths 1–16 and MTP none at 1–8. **Both
+  figures were corrected after review**: the volume double-counted the draft
+  component that `size()` already includes, and a "≈19.5 % of the wall clock"
+  claim was withdrawn because the create and restore messages sit on opposite
+  sides of the work they name.
 - **Runs P, Q and R**, 60 further arm-runs. P and R repeat the key arms on a
   second set of **twenty** prompts sharing none with the v1 ten — long inputs,
   structured output, four languages, arithmetic, and two genuinely multi-turn
