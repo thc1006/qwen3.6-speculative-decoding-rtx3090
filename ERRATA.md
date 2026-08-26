@@ -625,7 +625,7 @@ worst.
 
 That is the replay path behind A1's counter artefact and A6's abort. It is a
 known upstream limitation with a proposed fix, not a discovery of this audit.
-What this audit adds is the measurement: 1639 state checkpoints of 101.3 MiB
+What this audit adds is the measurement: 1639 state checkpoints, which the server reports at 82.079 MiB each
 for a single 300-token request, the counter being unreachable because of it,
 and the abort it caused at `bcb5eeb64`.
 
