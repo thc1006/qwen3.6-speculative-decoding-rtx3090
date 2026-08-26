@@ -1,5 +1,15 @@
 """Prove the test suite has teeth.
 
+Runs in a MIRROR of the tree, never in place. The first version edited the real
+source files and restored them in a `finally`, which does not run when the
+process is killed - `timeout`, a `pkill`, a cancelled CI job - and which also
+clobbers any edit made to the same file while it holds its backup. Both
+happened: `bench/retest_runner.py` was committed with
+`body.pop("ignore_eos", None)` where it should read `body["ignore_eos"] = True`,
+and `analysis/extract_checkpoint_timers.py` silently lost its `with open(...)`.
+`tests/test_harness_invariants.EveryPublishedFixIsStillHere` exists because of
+the first and caught it.
+
 A green suite on correct code says nothing about the suite. This breaks each fix
 in turn — restoring the exact defect that was published — and requires the test
 guarding it to fail. If a mutation survives, the guard is decorative and this
@@ -14,11 +24,37 @@ Run: python tests/mutate.py
 """
 from __future__ import annotations
 
+import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+SIDECAR = ROOT / ".mutate-in-progress"
+
+
+def _restore_from_sidecar() -> bool:
+    """Put back a file a previous run was killed in the middle of mutating.
+
+    `finally` does not run when the process is killed, and this script edits
+    source files in place. A run interrupted by SIGKILL - `timeout`, a `pkill`,
+    a CI cancellation - leaves the tree MUTATED, and the mutation is then
+    committed by whoever commits next. That happened: `body["ignore_eos"] = True`
+    was committed as `body.pop("ignore_eos", None)`, and only the
+    fix-presence test noticed.
+
+    So the original is written to a sidecar before each mutation and removed
+    after. If the sidecar exists at startup, a previous run died: restore and
+    say so.
+    """
+    if not SIDECAR.exists():
+        return False
+    rel, _, body = SIDECAR.read_text(encoding="utf-8").partition("\n")
+    (ROOT / rel).write_text(body, encoding="utf-8")
+    SIDECAR.unlink()
+    print(f"  recovered {rel} from an interrupted run")
+    return True
 
 # (description, file, correct fragment, defect to restore, test that must fail)
 MUTATIONS = [
@@ -142,26 +178,51 @@ MUTATIONS = [
 ]
 
 
+COPY = ("analysis", "bench", "tests", "v4_audit_2026_08_25", "results",
+        "v2_3090_followup", "v3_dflash_2026_05_07", "README.md", "ERRATA.md",
+        "CHANGELOG.md", "RETEST_TODO.md", "BENCHMARK_ENV.md",
+        "run_matrix.sh", "run_p0_matrix.sh", "run_verify_matrix.sh",
+        "collect_env.sh")
+
+
+def mirror(into: Path) -> Path:
+    into.mkdir(parents=True, exist_ok=True)
+    for rel in COPY:
+        src = ROOT / rel
+        if not src.exists():
+            continue
+        dst = into / rel
+        if src.is_dir():
+            shutil.copytree(src, dst, dirs_exist_ok=True)
+        else:
+            shutil.copy2(src, dst)
+    return into
+
+
 def main() -> None:
+    _restore_from_sidecar()          # clean up after any older in-place run
     print(f"  {'mutation':52s} guarding test")
     escaped = []
-    for name, path, correct, defect, test in MUTATIONS:
-        p = ROOT / path
-        backup = p.read_text(encoding="utf-8")
-        if correct not in backup:
-            print(f"  {name:52s} ANCHOR MOVED - mutation not applied")
-            escaped.append(f"{name} (anchor moved)")
-            continue
-        try:
-            p.write_text(backup.replace(correct, defect, 1), encoding="utf-8")
-            r = subprocess.run([sys.executable, "-m", "unittest", test],
-                               cwd=ROOT, capture_output=True, text=True, timeout=600)
-            caught = r.returncode != 0
-            print(f"  {name:52s} {'caught' if caught else '*** SURVIVED ***'}")
-            if not caught:
-                escaped.append(name)
-        finally:
-            p.write_text(backup, encoding="utf-8")
+    with tempfile.TemporaryDirectory() as tmp:
+        work = mirror(Path(tmp) / "work")
+        for name, path, correct, defect, test in MUTATIONS:
+            p = work / path
+            original = p.read_text(encoding="utf-8")
+            if correct not in original:
+                print(f"  {name:52s} ANCHOR MOVED - mutation not applied")
+                escaped.append(f"{name} (anchor moved)")
+                continue
+            try:
+                p.write_text(original.replace(correct, defect, 1), encoding="utf-8")
+                r = subprocess.run([sys.executable, "-m", "unittest", test],
+                                   cwd=work, capture_output=True, text=True,
+                                   timeout=600)
+                caught = r.returncode != 0
+                print(f"  {name:52s} {'caught' if caught else '*** SURVIVED ***'}")
+                if not caught:
+                    escaped.append(name)
+            finally:
+                p.write_text(original, encoding="utf-8")
 
     print()
     if escaped:

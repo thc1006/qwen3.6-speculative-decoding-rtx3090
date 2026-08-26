@@ -7,3 +7,6 @@ __pycache__/
 !v2_3090_followup/**/*.log
 .DS_Store
 social/
+
+# tests/mutate.py writes this only while an older in-place run is recovering
+.mutate-in-progress

@@ -793,7 +793,7 @@ def chat(system: str, user) -> dict:
         # length - one prompt by 38 %, another by 48 % in the other direction.
         # Pooled throughput then compares arms that did different amounts of
         # work. This is RETEST_TODO P1-3's "force ignore_eos + a hard cap".
-        body.pop("ignore_eos", None)
+        body["ignore_eos"] = True
     req = urllib.request.Request(
         f"http://127.0.0.1:{PORT}/v1/chat/completions",
         data=json.dumps(body).encode("utf-8"),
