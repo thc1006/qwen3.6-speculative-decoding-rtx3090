@@ -792,9 +792,14 @@ only, mean of four:
 | `update_tgt` — 785 checkpoint creates | 17.34 | 24.3 % |
 | `load_tgt` — 728 restores | 16.33 | 22.9 % |
 | `load_dft` — 728 restores | 5.41 | 7.6 % |
-| **speculative checkpoint, total** | **39.08** | **54.7 %** |
+| **speculative checkpoint, total** | **39.07** | **54.7 %** |
 | drafter `generate()` | 17.27 | 24.2 % |
 | **unattributed** | **15.05** | **21.1 %** |
+
+The three components above are each rounded to two places, so they add to 39.08
+while the total, rounded once from the raw microseconds, is **39.07**. The total
+is the correct one; an earlier version of the extractor summed the four rounded
+component fields and published 39.08.
 
 Median cost of one create is **21.9 ms** and of one `load_tgt` **22.4 ms**. The
 total is reproducible to two hundredths of a second: 39.10, 39.07, 39.06, 39.07
@@ -1187,7 +1192,7 @@ field here. That is a hypothesis, not a finding, and it is written as one.
 
 **What it means for the numbers.** The arm that [A12](#a12-what-the-checkpoint-path-costs-measured-with-timers-in-the-source)
 attributes is stable across the two runs: `spec-draft-n8` moves 0.11 %, the
-checkpoint total moves from 39.075 s to 39.159 s (0.2 %), the event counts are
+checkpoint total moves from 39.07 s to 39.16 s (0.2 %), the event counts are
 identical at 785 creates and 728 restores in **every** arm-run of both, and the
 share of the excess it explains is 54.7 % against 54.6 %. That attribution
 replicates.

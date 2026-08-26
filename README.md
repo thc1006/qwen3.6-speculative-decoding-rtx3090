@@ -279,7 +279,7 @@ reported 82.079 MiB each — a nominal **118.7 GiB** by event count × logged si
 which is an estimate and not measured memory traffic. DFlash logs none of these
 events at draft lengths 1 to 16 and MTP none at 1 to 8. What that costs in wall
 clock **is** established, by rebuilding llama.cpp with timers around the four
-calls: **39.08 s of a 71.4 s excess, 54.7 %**, replicated to 54.6 % in a second
+calls: **39.07 s of a 71.4 s excess, 54.7 %**, replicated to 54.6 % in a second
 balanced run
 ([A12](ERRATA.md#a12-what-the-checkpoint-path-costs-measured-with-timers-in-the-source)).
 This sentence said "not established here" until 2026-08-26, which was true when
@@ -813,7 +813,7 @@ does, over one ten-prompt arm-run of 3000 tokens:
 | drafter `generate()` | 17.27 | 24.2 % |
 | unattributed | 15.05 | 21.1 % |
 
-**More than half of it is state checkpointing** — 39.08 s, reproducible to two
+**More than half of it is state checkpointing** — 39.07 s, reproducible to two
 hundredths of a second across four arm-runs, at a median of 21.9 ms per save and
 22.4 ms per restore. `spec-dflash-n2` on the same prompts performs **zero** of
 these operations, spends 3.41 s drafting, and finishes **5.3 s faster than not

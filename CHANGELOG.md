@@ -17,7 +17,7 @@ were correct.
 - **Run T3** — run T repeated at three **balanced** blocks on the same
   instrumented build, with the library hash asserted per arm-run rather than
   once per run. The checkpoint attribution replicates: 785 creates and 728
-  restores in every arm-run of both runs, 39.159 s against 39.075 s, 54.6 % of
+  restores in every arm-run of both runs, 39.16 s against 39.07 s, 54.6 % of
   the excess against 54.7 %.
 - **ERRATA A16** — and run T3 also produced **byte-identical output** to run T
   on all three arms and all ten prompts, with identical acceptance, identical

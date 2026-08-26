@@ -46,8 +46,11 @@ def analyse(path: str) -> dict:
         "load_tgt_s": round(sum(lt) / 1e6, 3),
         "load_dft_s": round(sum(ld) / 1e6, 3),
     }
+    # rounded once, from the raw microseconds. Summing the four already-rounded
+    # component fields instead can differ by up to 2 ms, which is nothing here
+    # and is still the wrong arithmetic.
     out["checkpoint_total_s"] = round(
-        out["update_tgt_s"] + out["update_dft_s"] + out["load_tgt_s"] + out["load_dft_s"], 3)
+        (sum(tgt) + sum(dft) + sum(lt) + sum(ld)) / 1e6, 3)
     for name, vals in (("update_tgt", tgt), ("load_tgt", lt)):
         if vals:
             out[f"{name}_median_ms"] = round(st.median(vals) / 1000, 3)

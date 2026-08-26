@@ -137,7 +137,7 @@
     "update_dft_s": 0.0,
     "load_tgt_s": 16.325,
     "load_dft_s": 5.406,
-    "checkpoint_total_s": 39.059,
+    "checkpoint_total_s": 39.058,
     "update_tgt_median_ms": 21.915,
     "update_tgt_max_ms": 48.218,
     "load_tgt_median_ms": 22.393,

@@ -78,7 +78,7 @@ New work the audit generated that was not on the original list:
   token counts — and, more importantly, the out-of-sample test showing that the
   threshold transfers and the slope does not
 - the checkpoint path, timed in the source rather than inferred from log
-  intervals: 39.08 s of a 71.4 s excess, replicated in a second balanced run
+  intervals: 39.07 s of a 71.4 s excess, replicated in a second balanced run
 - two runs of one configuration that are identical in every recorded respect,
   produce byte-identical output, and differ by 3.4 % on one arm
   ([A16](ERRATA.md#a16-two-runs-identical-in-every-recorded-respect-and-byte-identical-in-output-differ-by-34--on-one-arm))
