@@ -686,6 +686,45 @@ class AnEmptyRunIsNotACompleteRun(unittest.TestCase):
             self.assertFalse(out.exists() and any(out.glob("*__rep*.json")))
 
 
+class InFlightCountMustBeASweepLine(unittest.TestCase):
+    """The concurrency arms rest on this: if it reads 1 while N were asked for,
+    the run measured nothing about concurrency and the arm-run says so. The
+    handover case is the one that matters - a request ending exactly as the next
+    begins must not count as an overlap, or a strictly serial client would look
+    concurrent."""
+
+    def _f(self):
+        import importlib.util
+        os.environ.update(LLAMA_SERVER_BIN="/bin/true", MODEL_TARGET="/dev/null",
+                          BENCH_OUT="/tmp/_inflight_probe")
+        spec = importlib.util.spec_from_file_location("_rr_if", RUNNER)
+        rr = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(rr)
+        return rr.max_client_requests_in_flight
+
+    def test_the_sweep_line(self):
+        f = self._f()
+        for name, rows, want in (
+            ("no rows", [], 0),
+            ("one request", [{"t_start": 0, "t_end": 1}], 1),
+            ("handover at the same instant",
+             [{"t_start": 0, "t_end": 1}, {"t_start": 1, "t_end": 2}], 1),
+            ("two overlapping",
+             [{"t_start": 0, "t_end": 2}, {"t_start": 1, "t_end": 3}], 2),
+            ("three nested",
+             [{"t_start": 0, "t_end": 9}, {"t_start": 1, "t_end": 8},
+              {"t_start": 2, "t_end": 7}], 3),
+            ("four requests, peak of two",
+             [{"t_start": 0, "t_end": 2}, {"t_start": 1, "t_end": 3},
+              {"t_start": 4, "t_end": 6}, {"t_start": 5, "t_end": 7}], 2),
+            ("a zero-length request",
+             [{"t_start": 1, "t_end": 1}, {"t_start": 1, "t_end": 2}], 1),
+            ("rows without timestamps", [{"predicted_n": 1}], 0),
+        ):
+            with self.subTest(name):
+                self.assertEqual(f(rows), want)
+
+
 class StagingMustNotDestroyItsSource(unittest.TestCase):
     def test_stage_equal_to_source_is_rejected_and_nothing_is_removed(self):
         with tempfile.TemporaryDirectory() as t:
