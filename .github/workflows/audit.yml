@@ -71,6 +71,11 @@ jobs:
         with: { python-version: "3.12" }
       - name: re-derive every quoted figure and grep the documents for it
         run: python analysis/verify_claims.py
+      - name: the past-threshold fit reports and serialises
+        run: |
+          set -e
+          python analysis/past_threshold_fit.py
+          python analysis/past_threshold_fit.py --json > /dev/null
       - name: every attested run aggregates without a completeness failure
         run: |
           set -e

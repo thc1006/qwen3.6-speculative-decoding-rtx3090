@@ -64,7 +64,8 @@ New work the audit generated that was not on the original list:
 - the pre-registered past-threshold prediction and its test
   ([`v4_audit_2026_08_25/PREREGISTERED_PREDICTION.md`](v4_audit_2026_08_25/PREREGISTERED_PREDICTION.md))
 - `analysis/verify_claims.py`, `check_links.py`, `matrix_report.py`,
-  `thermal_report.py`, `plot_v4_runs.py` as standing regression checks
+  `thermal_report.py`, `plot_v4_runs.py`, `past_threshold_fit.py` as standing
+  regression checks
 - the batching arm the harness could not actually run: `BENCH_CONCURRENCY`
   documented concurrent dispatch and issued the prompts one at a time, so
   `--parallel N` allocated slots that stayed idle. The achieved batch width is
@@ -162,7 +163,7 @@ requests. Any master comparison must pass `--spec-type` explicitly.
   because the symptom is silent.
 - **Checkpoint invalidation on hybrid targets.**
   [#24055](https://github.com/ggml-org/llama.cpp/issues/24055). The audit
-  measured 1639 checkpoints at a server-reported 82.079 MiB for one 300-token request; whether
+  measured 1639 checkpoints at a server-reported 82.079 MiB in one arm-run of ten 300-token requests; whether
   that is the same bug is untested here.
 
 ### Still running / next

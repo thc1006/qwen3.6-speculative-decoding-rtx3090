@@ -388,7 +388,7 @@ for n_max 2 and 0.076 for n_max 4, against a 1.4 tok/s gap between them.
 
 **The sweep was extended past the threshold, so this is now answered by
 measurement.** Run E adds `n_max` 64, 96 and 128 on the same pinned binary,
-three repeats each, run-to-run SD 0.03–0.17 tok/s. The sweep now spans
+three repeats each, run-to-run SD 0.05, 0.16 and 0.11 tok/s. The sweep now spans
 **3.1 % to 98.3 % expected routed-expert coverage** and crosses the 95-token
 point MoESD's argument is about.
 
@@ -408,8 +408,8 @@ R² = 0.99303,  n_max = 1 … 128
 ```
 
 No expert term, 99.3 % of the variance, and the slope reads sensibly — 4.04 ms
-per speculated position against a measured 7.87 ms no-speculation decode step,
-about half a target step per drafted token, which is what an autoregressive
+per speculated position against a measured 8.11 ms no-speculation decode step,
+almost exactly half a target step per drafted token, which is what an autoregressive
 0.8 B drafter plus its share of the verify pass should cost.
 
 > [!IMPORTANT]
@@ -421,8 +421,11 @@ about half a target step per drafted token, which is what an autoregressive
 > in the second it fails — see [A10](#a10-the-single-regressor-law-is-falsified-out-of-sample-and-p_min-is-the-lever-that-matters).
 
 **The step in the residuals at the 95.3 % coverage point is −0.39 percentage
-points**: −0.27 % mean below it, −0.67 % at or above. There is no knee, no
-break, and nothing left for a coverage threshold to explain on this hardware.
+points**: −0.27 % mean below it, −0.67 % at or above, in the same
+`(measured − predicted) / predicted` convention as [A10](#a10-the-single-regressor-law-is-falsified-out-of-sample-and-p_min-is-the-lever-that-matters)'s
+residual column, against an arc of about ±11 % across the sweep. There is no
+knee, no break, and nothing left for a coverage threshold to explain on this
+hardware. Recomputed by `analysis/past_threshold_fit.py`.
 
 Two tempting wrong answers were eliminated getting here, and both are recorded
 in [`v4_audit_2026_08_25/PREREGISTERED_PREDICTION.md`](v4_audit_2026_08_25/PREREGISTERED_PREDICTION.md):
@@ -626,7 +629,8 @@ worst.
 That is the replay path behind A1's counter artefact and A6's abort. It is a
 known upstream limitation with a proposed fix, not a discovery of this audit.
 What this audit adds is the measurement: 1639 state checkpoints, which the server reports at 82.079 MiB each
-for a single 300-token request, the counter being unreachable because of it,
+in one `n_max` 1 arm-run of ten 300-token requests — 163.9 per request, not
+1639, which is what this line said until 2026-08-27 — the counter being unreachable because of it,
 and the abort it caused at `bcb5eeb64`.
 
 ### A6. `llama-server` plus a draft model aborts on this model at `bcb5eeb64`

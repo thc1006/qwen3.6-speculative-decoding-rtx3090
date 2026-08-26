@@ -6,11 +6,107 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning is not strictly semver — each numbered release is a public
 publication point with its own data set.
 
-## [Unreleased] — the review pass
+## [Unreleased] — the review pass, and an adversarial pass over it
 
 Two external reviews of the pull request. Every specific accusation in the
 second was verified against the code before anything was changed, and all four
-were correct.
+were correct. Then the same treatment was turned on this branch's own commits,
+and the second half of this entry is what that found.
+
+### Measured
+
+- **Run O3** — the nine-arm headline matrix repeated five hours later on the
+  same stock binary, asserted per arm-run. **810 of 810 request-pairs are
+  byte-identical** to run O2 and acceptance matches to a tenth of a point on
+  every arm, while `spec-dflash-n2` moves −2.9 pp and the other eight move 0.2
+  to 1.0.
+- **Run U** — six independent invocations of one script, fifteen minutes apart,
+  240 of 240 request-pairs byte-identical, spanning **8.3 pp**.
+- **Run V** — the same five arms twice in one session, once as the archive did
+  it and once with `ignore_eos` forcing exactly 300 tokens. Every arm moves
+  6.31 to 11.90 pp and `spec-dflash-n4` changes sign. This closes RETEST_TODO
+  P1-3 and turns [A17](ERRATA.md#a17-the-thinking-off-comparisons-are-not-comparisons-of-the-same-amount-of-work)
+  from a subset argument into a measurement.
+- Pooled over every comparable block, the headline arm spans **+17.0 % to
+  +27.8 %** with `draft_n` 2441 and acceptance 72.3 % in all 43 of them — the
+  speculative work identical to the token, only the time differing.
+
+### What the adversarial pass found in this branch's own work
+
+- **`tests/mutate.py` edited the real source files** and restored them in a
+  `finally` that a kill does not run. It committed one of its own mutations:
+  `bench/retest_runner.py` was published with `body.pop("ignore_eos", None)`.
+  It runs in a mirror now, and `EveryPublishedFixIsStillHere` — added an hour
+  earlier for exactly this — is what caught it.
+- **A13 was built from `*__rep0.log`**: one arm-run per arm however many repeats
+  it had, and it predated six runs. Over everything the base grows **73 → 517**
+  and the claim survives with the margin narrowing **0.5 pp → 0.20 pp**.
+- **The acceptance-threshold scorecard** reads the same file and was keyed by
+  `(run, arm)` in a dict. Aggregated properly it is **78 / 86**, not 35 / 37.
+- **`matrix_report.py --strict`** aggregated whatever files it found: a deleted
+  arm-run and a renamed arm both passed.
+- **The teardown guard** waited for the GPU to fall below an absolute threshold,
+  so any other process on the card failed every arm-run.
+- **The published checkpoint total was 39.08 by double rounding**; it is 39.07.
+- **A withdrawn figure was still in the README** — 101.3 MiB, the sum A12
+  retracted. Every retracted number is guarded now.
+- **Four tables were computed and asserted while the tables themselves were not
+  parsed.** Planting wrong numbers in the headline table, the O2/O3 replication
+  table, the footnote, A12's accounting, A13's counters and C4b's thermals all
+  passed. They are parsed cell by cell, and 36 perturbations are permanent tests.
+- **Two committed `paired_blocks.json` came from an exploratory command** at
+  `--iters=2000` rather than the documented default.
+- **"No raw measurement file was edited" was not what happened**: three v2 files
+  gained an audit block and had two strings corrected. Their 605 measurement
+  values are fingerprinted against master and unchanged.
+- **The pre-registration had no code.** Every other claim in this repository is
+  produced by a script in `analysis/`; the one document written to be
+  falsifiable — `v4_audit_2026_08_25/PREREGISTERED_PREDICTION.md` — was
+  computed by hand. Recomputing it found that the *prediction*, written before
+  the data existed, reproduces to the last decimal: the coefficients, R²,
+  leave-one-out error, collinearity, the power-law extrapolation, all three
+  predicted rows. The *outcome section*, written after, had eight wrong
+  figures:
+  - the error column was computed from its own rounded display, which turned a
+    **−0.6 %** miss at `n_max` 128 into a bolded **0.0 %**;
+  - checkpoint traffic, 55.4 → 24.9 MiB per generated token, was computed at
+    **101.3 MiB per checkpoint — the size A12 withdrew**. It is 44.8 → 20.2.
+    The guard added earlier caught the retracted *number*; this was the
+    retracted number *derived*, and nothing was looking for that;
+  - 1639 checkpoints were attributed to **one 300-token request**. They are one
+    arm-run of **ten**, 163.9 per request — a 10× overstatement, cited in the
+    README's row for upstream issue #24055;
+  - the no-speculation step was quoted as **7.87 ms** until this pass — a
+    figure that is repeat 0 alone. Pooled over the five repeats the model is
+    fitted on it is **8.11**, so the law's intercept is 3.3× it, not 3.4×;
+  - nine **pooled decode rates** were published as "end-to-end throughput,
+    which is what a user actually gets". End to end they are 30.2 … 8.8 tok/s
+    against a **110.8** baseline, not 123.4;
+  - and the earlier **+11.9 % and +15.9 %**, two of the three figures for how
+    much the model over-predicts when fed measured inputs, were **repeat 0 of
+    three**.
+    Pooled they are +12.3 % and +18.1 %. The third, +24.8 %, matches no repeat
+    and no pooling; it is +25.2 %;
+  - the run-to-run scatter was given, here and in A7, as a range that no
+    earlier figure produces. The three standard deviations are 0.05, 0.16
+    and 0.11 tok/s;
+  - and the per-round term's contribution, 91 % of the error draft volume
+    leaves, was truncated rather than rounded. It is 92 %.
+
+  Two figures that *looked* wrong were not. The residual step at the coverage
+  threshold, **−0.39 pp**, and the **24–34 %** amortisation deviation both
+  reproduce exactly — the first in `(measured − predicted) / predicted`, the
+  convention [A10](ERRATA.md#a10-the-single-regressor-law-is-falsified-out-of-sample-and-p_min-is-the-lever-that-matters)
+  publishes and this document did not state, and the second by fitting the six
+  points the model was fitted on rather than everything below the threshold.
+  Reading the step in the opposite convention gives −0.13 pp, which is what
+  this pass first "corrected" it to before checking A10. Both conventions are
+  now written down where the numbers are, and the conclusion never depended on
+  either: the step is two orders of magnitude below the ±11 % scatter it would
+  have to rise out of.
+
+  `analysis/past_threshold_fit.py` now derives all of it, and 117 new assertions
+  parse the document back against the script.
 
 ### Added
 

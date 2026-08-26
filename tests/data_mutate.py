@@ -143,6 +143,9 @@ def edit_doc(rel: str, old: str, new: str):
     return go
 
 
+E = "v4_audit_2026_08_25/data/E_past_threshold"
+C = "v4_audit_2026_08_25/data/C_master_matrix_think_on"
+PRE = "v4_audit_2026_08_25/PREREGISTERED_PREDICTION.md"
 O2 = "v4_audit_2026_08_25/data/matrix_O2_latin_20260826_153711"
 O3 = "v4_audit_2026_08_25/data/matrix_O3_latin_20260826_203251"
 T3 = "v4_audit_2026_08_25/data/matrix_T3_timers_20260826_203251"
@@ -233,6 +236,41 @@ MUTATIONS = [
     ("C4b: the clock mean becomes 1947",
      edit_doc("ERRATA.md", "1800\u20131965 MHz of a 2100 MHz maximum, mean 1937",
               "1800\u20131965 MHz of a 2100 MHz maximum, mean 1947")),
+    # --- the pre-registration, which had no code path until 2026-08-27 -------
+    ("E past-threshold decode time on one request +5 %",
+     scale_row(f"{E}/spec-draft-n96__rep0.json", "predicted_ms", 1.05)),
+    ("E past-threshold draft volume on one request doubled",
+     scale_row(f"{E}/spec-draft-n128__rep0.json", "draft_n", 2)),
+    ("E past-threshold acceptance on one request halved",
+     scale_row(f"{E}/spec-draft-n64__rep0.json", "draft_n_accepted", 0.5)),
+    ("the run C baseline the model is scaled against drifts 1 %",
+     scale_row(f"{C}/baseline__rep2.json", "predicted_ms", 1.01)),
+    ("the fitted per-round coefficient moves one hundredth",
+     edit_doc(PRE, "27.56 * (rounds per generated token)",
+              "27.57 * (rounds per generated token)")),
+    ("a registered prediction row is nudged after the fact",
+     edit_doc(PRE, "| 96 | 4.9 % | 13.86 | 94.42 | **10.6** |",
+              "| 96 | 4.9 % | 13.86 | 94.42 | **10.9** |")),
+    ("the outcome table is rounded back into an exact hit",
+     edit_doc(PRE, "| 128 | 8.9 | 8.85 | **\u22120.6 %** |",
+              "| 128 | 8.9 | 8.9 | **0.0 %** |")),
+    ("a measured outcome rate is improved",
+     edit_doc(PRE, "| 64 | 13.4 | 12.38 |", "| 64 | 13.4 | 12.98 |")),
+    ("the residual step at the coverage point grows a knee",
+     edit_doc(PRE, "coverage point: \u22120.39 percentage points",
+              "coverage point: \u22124.39 percentage points")),
+    ("the no-speculation step reverts to the repeat-0 value",
+     edit_doc(PRE, "measured 8.11 ms no-speculation", "measured 7.87 ms no-speculation")),
+    ("checkpoint traffic reverts to the withdrawn checkpoint size",
+     edit_doc(PRE, "*falls* from 44.8 MiB at `n_max` 1 to 20.2 at 128",
+              "*falls* from 55.4 MiB at `n_max` 1 to 24.9 at 128")),
+    ("the decode series is relabelled as end to end",
+     edit_doc(PRE, "Pooled decode rate: 31.1", "End-to-end throughput: 31.1")),
+    ("the wall-clock baseline is replaced by the decode rate",
+     edit_doc(PRE, "against a **110.8** baseline", "against a **123.4** baseline")),
+    ("1639 checkpoints go back to being one request",
+     edit_doc(PRE, "in one\n`n_max` 1 arm-run", "for a single 300-token request in an\n`n_max` 1 arm-run")),
+
 ]
 
 

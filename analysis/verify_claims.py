@@ -1781,6 +1781,228 @@ for _f, (_ncnv, _nthink, _ndraft) in _HISTORICAL.items():
          if re.match(r'^[A-Z_]+="?/home/[a-z]', l.strip())], [])
 
 
+print("\n=== the past-threshold pre-registration ===")
+# Until 2026-08-27 this was the only analysis in the repository with no
+# committed code path: PREREGISTERED_PREDICTION.md was written from ad-hoc
+# commands, and eight of its published figures were wrong — two baselines taken
+# from repeat 0 alone, two traffic figures computed at the checkpoint size A12
+# withdrew, a decode rate labelled end to end, an error column rounded twice, a
+# checkpoint count attributed to one request instead of ten, and a scatter range
+# nothing produces. The prediction section, written before the data existed,
+# reproduced exactly, and so did the residual step and the amortisation
+# deviation once their conventions were recovered. Everything the document
+# prints comes from analysis/past_threshold_fit.py and is parsed back out of the
+# document here.
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import past_threshold_fit as _ptf
+
+_PT = _ptf.build()
+_PRE_P = pathlib.Path(__file__).resolve().parents[1] \
+    .joinpath("v4_audit_2026_08_25", "PREREGISTERED_PREDICTION.md")
+_PRE = _norm(_PRE_P.read_text(encoding="utf-8"))
+_PRE_LINES = _PRE.splitlines()
+# prose wraps, so sentences are matched against a whitespace-collapsed copy
+_PRE_FLAT = re.sub(r"\s+", " ", _PRE)
+
+
+def _pnum(x):
+    """_f is rebound to a filename by an earlier loop; this is the same parse."""
+    return float(_norm(x).replace("%", "").replace("pp", "").replace(" ", ""))
+
+
+def _pre_table(header_startswith):
+    i = next(i for i, l in enumerate(_PRE_LINES) if l.startswith(header_startswith))
+    rows = []
+    for l in _PRE_LINES[i + 2:]:
+        if not l.startswith("|"):
+            break
+        rows.append([c.strip().strip("*`").replace("`", "").strip("* ").strip()
+                     for c in l.strip("|").split("|")])
+    return rows
+
+
+# --- the model the prediction was made with ------------------------------
+_f3 = _PT["fit3"]
+chk("prereg fit: per-round coefficient", round(_f3["per_round_ms"], 2), 27.56, 0.005)
+chk("prereg fit: per-draft-token coefficient", round(_f3["per_draft_token_ms"], 2), 5.54, 0.005)
+chk("prereg fit: intercept", round(_f3["intercept_ms"], 2), 12.83, 0.005)
+chk("prereg fit: R2", round(_f3["r2"], 4), 0.9956, 0.00005)
+chk("prereg fit: draft volume alone", round(_f3["draft_volume_only_r2"], 4), 0.9471, 0.00005)
+chk("prereg fit: leave-one-out MAE", round(_f3["loo_mae_ms"], 2), 1.63, 0.005)
+chk("prereg fit: worst LOO point is the edge", _f3["loo_worst"][0], 32)
+chk("prereg fit: worst LOO error", round(_f3["loo_worst"][1], 2), 4.99, 0.005)
+chk("prereg fit: regressor correlation", round(_f3["regressor_r"], 3), -0.665, 0.0005)
+chk("prereg fit: regressor VIF", round(_f3["regressor_vif"], 2), 1.79, 0.005)
+for _s in ("27.56 * (rounds per generated token)", "5.54 * (draft tokens per generated token)",
+           "+ 12.83", "R² = 0.9956", "R² = 0.9471", "1.63 ms/token",
+           "r = -0.665 (VIF 1.79)", "`n_max` 32, +4.99"):
+    chk(f"prereg document carries {_s!r}", _norm(_s) in _PRE_FLAT, True)
+# the two figures the model is scaled against, and the one that was wrong
+chk("prereg fit: intercept over the no-speculation cost (%)",
+    round(_f3["intercept_over_baseline_pct"]), 58, 0.5)
+chk("prereg: the no-speculation cost is the pooled one, not repeat 0",
+    round(_PT["baseline"]["C_pooled_ms_per_token"], 2), 8.11, 0.005)
+chk("prereg: repeat 0 alone is what 7.87 was",
+    round(_PT["baseline"]["C_repeat0_ms_per_token"], 2), 7.87, 0.005)
+chk("prereg: the per-round term removes this much of the remaining error (%)",
+    round(_f3["error_removed_by_rounds_pct"]), 92, 0.5)
+chk("prereg document says 92 %, not the truncated 91",
+    "removing 92 % of the remaining error" in _PRE_FLAT, True)
+
+# --- the table committed before the data existed -------------------------
+_pred_rows = {int(r[0]): r[1:] for r in
+              _pre_table("| `n_max` | predicted acceptance |")}
+chk("prereg prediction table rows", sorted(_pred_rows), [64, 96, 128])
+for _n, _row in _pred_rows.items():
+    _p = _PT["predicted"][_n]
+    chk(f"prereg n{_n} predicted acceptance", round(100 * _p["acceptance"], 1), _pnum(_row[0]), 0.05)
+    chk(f"prereg n{_n} predicted draft/gen", round(_p["draft_per_gen"], 2), _pnum(_row[1]), 0.005)
+    chk(f"prereg n{_n} predicted ms/token", round(_p["ms_per_token"], 2), _pnum(_row[2]), 0.005)
+    chk(f"prereg n{_n} predicted tok/s", round(_p["tok_s"], 1), _pnum(_row[3]), 0.05)
+
+# --- what the measurement did to it --------------------------------------
+_out_rows = {int(r[0]): r[1:] for r in
+             _pre_table("| `n_max` | registered tok/s |")}
+chk("prereg outcome table rows", sorted(_out_rows), [64, 96, 128])
+for _n, _row in _out_rows.items():
+    _o = _PT["outcome"][_n]
+    chk(f"prereg n{_n} registered rate is the one predicted in advance",
+        _pnum(_row[0]), round(_PT["predicted"][_n]["tok_s"], 1), 0.05)
+    chk(f"prereg n{_n} registered as published", _pnum(_row[0]), _o["registered_tok_s"], 0.005)
+    chk(f"prereg n{_n} measured tok/s", round(_o["measured_tok_s"], 2), _pnum(_row[1]), 0.005)
+    chk(f"prereg n{_n} error against the registered number",
+        round(_o["error_pct"], 1), _pnum(_row[2]), 0.05)
+    chk(f"prereg n{_n} the measurement is not above the registration",
+        _o["error_pct"] < 0, True)
+# the third row was published as an exact hit; it is 0.6 % low
+chk("prereg n128 is not the exact hit it was published as",
+    round(_PT["outcome"][128]["error_pct"], 1) != 0.0, True)
+chk("prereg records what that column used to read",
+    "-7.5 %, -5.7 % and 0.0 %" in _PRE_FLAT, True)
+_over = [round(_PT["outcome"][n]["measured_input_over_prediction_pct"], 1)
+         for n in (64, 96, 128)]
+chk("prereg: measured inputs over-predict cost", _over, [12.3, 18.1, 25.2])
+chk("prereg document carries the over-prediction",
+    "+12.3 %, +18.1 % and +25.2 %" in _PRE_FLAT, True)
+
+# --- the one-regressor law, and the absent knee ---------------------------
+_law = _PT["law"]
+chk("prereg law: slope", round(_law["slope_ms_per_draft_token"], 3), 4.040, 0.0005)
+chk("prereg law: intercept", round(_law["intercept_ms"], 2), 27.00, 0.005)
+chk("prereg law: R2", round(_law["r2"], 5), 0.99303, 0.000005)
+chk("prereg law: slope is half a target step",
+    round(_law["slope_over_baseline"], 2), 0.50, 0.005)
+chk("prereg law: intercept over the target step",
+    round(_law["intercept_over_baseline"], 1), 3.3, 0.05)
+chk("prereg law: step at the coverage point (pp)", round(_law["step_pp"], 2), -0.39, 0.005)
+chk("prereg law: mean residual below the threshold (%)",
+    round(_law["mean_residual_below_pct"], 2), -0.27, 0.005)
+chk("prereg law: mean residual at or above it (%)",
+    round(_law["mean_residual_at_or_above_pct"], 2), -0.67, 0.005)
+chk("prereg law: the step is dwarfed by the scatter",
+    abs(_law["step_pp"]) < (_law["residual_arc_pct"][1] - _law["residual_arc_pct"][0]) / 50, True)
+chk("prereg law: residual arc",
+    [round(v, 1) for v in _law["residual_arc_pct"]], [-11.0, 10.9])
+for _doc, _what in (("v4_audit_2026_08_25/PREREGISTERED_PREDICTION.md", "the pre-registration"),
+                    ("ERRATA.md", "A7"), ("README.md", "the README")):
+    _t = _norm(pathlib.Path(__file__).resolve().parents[1].joinpath(_doc)
+               .read_text(encoding="utf-8"))
+    chk(f"{_what}: the residual step is -0.39 percentage points",
+        "-0.39 percentage" in _t, True)
+    chk(f"{_what}: 8.11 ms is the no-speculation step it quotes",
+        "7.87 ms no-speculation" not in _t, True)
+
+# --- the coverage arithmetic the whole test is about ----------------------
+for _n, _want in ((1, 3.1), (32, 63.8), (64, 86.9), (96, 95.3), (128, 98.3)):
+    chk(f"prereg coverage at n{_n} (%)", round(_PT["coverage_pct"][_n], 1), _want, 0.05)
+chk("prereg: the threshold arm is the first at or past 95 %",
+    _PT["coverage_pct"][_PT["threshold_nmax"]] >= 95.0
+    and _PT["coverage_pct"][64] < 95.0, True)
+
+# --- throughput: decode rate and wall clock, labelled apart ---------------
+_dec = [round(_PT["arms"][n]["decode_tok_s"], 1) for n in (1, 2, 4, 8, 16, 32, 64, 96, 128)]
+_wall = [round(_PT["arms"][n]["wall_tok_s"], 1) for n in (1, 2, 4, 8, 16, 32, 64, 96, 128)]
+chk("prereg decode rates", _dec, [31.1, 34.2, 35.6, 32.1, 23.7, 17.3, 12.4, 10.0, 8.9])
+chk("prereg wall-clock rates", _wall, [30.2, 33.2, 34.5, 31.1, 23.2, 17.0, 12.2, 9.9, 8.8])
+chk("prereg: it peaks at n_max 4", max(range(len(_dec)), key=lambda i: _dec[i]), 2)
+chk("prereg: and declines monotonically after",
+    all(_dec[i] > _dec[i + 1] for i in range(2, len(_dec) - 1)), True)
+chk("prereg baseline decode rate", round(_PT["baseline"]["C_decode_tok_s"], 1), 123.4, 0.05)
+chk("prereg baseline wall-clock rate", round(_PT["baseline"]["C_wall_tok_s"], 1), 110.8, 0.05)
+chk("prereg document labels the decode series as decode",
+    "Pooled decode rate: 31.1" in _PRE_FLAT, True)
+chk("prereg document publishes the wall-clock series too",
+    "30.2, 33.2, **34.5**, 31.1, 23.2, 17.0, 12.2, 9.9, 8.8" in _PRE_FLAT, True)
+chk("prereg document gives the wall-clock baseline", "**110.8** baseline" in _PRE_FLAT, True)
+
+# --- hypothesis 1: marginal cost amortises -------------------------------
+_am = _PT["amortisation"]
+chk("prereg marginal cost at n1 (ms)",
+    round(_am["marginal_ms_per_draft_token"][1], 1), 48.4, 0.05)
+chk("prereg marginal cost at n128 (ms)",
+    round(_am["marginal_ms_per_draft_token"][128], 1), 4.8, 0.05)
+chk("prereg: it falls monotonically",
+    all(_am["marginal_ms_per_draft_token"][a] > _am["marginal_ms_per_draft_token"][b]
+        for a, b in zip((1, 2, 4, 8, 16, 32, 64, 96), (2, 4, 8, 16, 32, 64, 96, 128))), True)
+chk("prereg: the fitted-six curve puts the three that came after this far below (%)",
+    [round(_am["supra_deviation_pct"][n], 1) for n in (64, 96, 128)], [-24.5, -29.4, -34.1])
+chk("prereg: fitting all nine shrinks the apparent mechanism",
+    all(abs(_am["all_nine_deviation_pct"][n]) < abs(_am["supra_deviation_pct"][n])
+        for n in (96, 128)), True)
+chk("prereg document quotes the range and the three deviations",
+    "24-34 % *below* the curve (-24.5 %, -29.4 %, -34.1 %)" in _PRE_FLAT, True)
+
+# --- hypothesis 2: checkpoint traffic dominates --------------------------
+_ck = _PT["checkpoints"]
+chk("prereg: the checkpoint size is the one A12 left standing",
+    _ck["checkpoint_mib"], 82.079)
+chk("prereg: checkpoints in one n_max 1 arm-run", _ck["checkpoints_per_arm_run"][1], 1639)
+chk("prereg: that arm-run is ten requests", _ck["requests_per_arm_run"], 10)
+chk("prereg: and 3000 generated tokens", _ck["generated_per_arm_run"], 3000)
+chk("prereg: checkpoints per request", round(_ck["checkpoints_per_request"], 1), 163.9, 0.05)
+chk("prereg traffic at n1 (MiB per generated token)",
+    round(_ck["mib_per_generated_token"][1], 1), 44.8, 0.05)
+chk("prereg traffic at n128 (MiB per generated token)",
+    round(_ck["mib_per_generated_token"][128], 1), 20.2, 0.05)
+chk("prereg: traffic falls while cost rises",
+    _ck["mib_per_generated_token"][1] > _ck["mib_per_generated_token"][128]
+    and _PT["arms"][1]["ms_per_token"] < _PT["arms"][128]["ms_per_token"], True)
+chk("prereg: the correlation that refutes it",
+    round(_ck["correlation_with_cost"], 2), -0.52, 0.005)
+# the withdrawn size is exactly what the old figures were computed at
+chk("prereg: 55.4 and 24.9 were 101.345 MiB per checkpoint",
+    [round(_ck["checkpoints_per_arm_run"][n] * 101.345 / 3000, 1) for n in (1, 128)],
+    [55.4, 24.9])
+chk("prereg document carries the corrected traffic", "44.8 MiB at `n_max` 1 to 20.2" in _PRE_FLAT, True)
+chk("prereg document no longer attributes 1639 to one request",
+    "for a single 300-token" not in _PRE_FLAT, True)
+
+# --- the repeat-to-repeat scatter the outcome section quotes --------------
+chk("prereg run-to-run SD (tok/s)",
+    [round(_PT["repeat_sd_tok_s"][n], 2) for n in (64, 96, 128)], [0.05, 0.16, 0.11])
+chk("prereg document quotes the SDs it measured",
+    "0.05, 0.16 and 0.11 tok/s" in _PRE_FLAT, True)
+
+# --- and the thing that makes it a pre-registration at all ---------------
+if _HAS_GIT:
+    def _git(*a):
+        return _sp2.run(["git", "-C", str(_repo)] + list(a),
+                        capture_output=True, text=True).stdout.strip()
+    _first_pre = _git("log", "--reverse", "--format=%H", "--",
+                      "v4_audit_2026_08_25/PREREGISTERED_PREDICTION.md").split("\n")[0]
+    _first_data = _git("log", "--reverse", "--format=%H", "--diff-filter=A", "--",
+                       "v4_audit_2026_08_25/data/E_past_threshold").split("\n")[0]
+    chk("prereg: the prediction table exists in the first commit of the file",
+        "74.76" in _git("show", f"{_first_pre}:v4_audit_2026_08_25/PREREGISTERED_PREDICTION.md"), True)
+    chk("prereg: the outcome section does not",
+        "# Outcome" in _git("show", f"{_first_pre}:v4_audit_2026_08_25/PREREGISTERED_PREDICTION.md"), False)
+    chk("prereg: and that commit is an ancestor of the one that adds the data",
+        _sp2.run(["git", "-C", str(_repo), "merge-base", "--is-ancestor",
+                  _first_pre, _first_data]).returncode, 0)
+else:
+    print("  ----  no git history here; the pre-registration ordering check is "
+          "skipped, not passed")
+
 print("\n=== withdrawn figures must not reappear ===")
 # Every number this repository retracted, and the one place each is allowed to
 # be mentioned: inside the entry that retracts it. A13's 101.3 MiB survived in
@@ -1792,12 +2014,19 @@ _WITHDRAWN = {
     "133.2 GiB": "the nominal volume before that correction (A12)",
     "76.4 GiB": "the written half of it (A12)",
     "19.5 % of the wall": "the log-interval wall-clock share (A12)",
+    # 2026-08-27, the pre-registration's outcome section
+    "7.87 ms": "the no-speculation step from repeat 0 alone (it is 8.11 pooled)",
+    "55.4 MiB": "checkpoint traffic at the withdrawn 101.3 MiB size",
+    "+11.9 %": "the measured-input over-prediction (it is +12.3 %)",
+    "SD 0.03-0.17": "the past-threshold scatter (it is 0.05, 0.16 and 0.11)",
+    "single 300-token request": "1639 checkpoints are one arm-run of ten",
 }
 _ALLOWED = ("ERRATA.md",)          # the entries that retract them
 for _needle, _what in _WITHDRAWN.items():
     _hits = []
     for _f in ("README.md", "CHANGELOG.md", "RETEST_TODO.md", "BENCHMARK_ENV.md",
-               "v4_audit_2026_08_25/README.md", "ERRATA.md"):
+               "v4_audit_2026_08_25/README.md", "ERRATA.md",
+               "v4_audit_2026_08_25/PREREGISTERED_PREDICTION.md"):
         _t = _norm(pathlib.Path(__file__).resolve().parents[1]
                    .joinpath(_f).read_text(encoding="utf-8"))
         if _norm(_needle) not in _t:
