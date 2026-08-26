@@ -1593,6 +1593,35 @@ chk("arms with a derivable throughput", len(_TPUT) >= 30, True)
 chk("every quoted throughput is one of them", _bad_t, [])
 
 
+print("\n=== the historical scripts still document what was run ===")
+# Six driver scripts are kept as evidence and carry a header saying the
+# measurement flags are UNCHANGED and only paths were parameterised. That is a
+# claim about the files, and until now only the header made it. Two of those
+# flags are the subject of ERRATA D1 and D2 - `-no-cnv`, which llama-cli
+# rejected, and `/no_think`, which did not disable thinking - so a well-meaning
+# "fix" to either would delete the evidence for a published retraction.
+_HISTORICAL = {
+    "run_matrix.sh": (1, 1, 2),
+    "run_p0_matrix.sh": (1, 1, 5),
+    "run_verify_matrix.sh": (1, 1, 1),
+    "v2_3090_followup/bench_3090_oleg.sh": (2, 7, 4),
+    "v3_dflash_2026_05_07/bench/bench_dflash.sh": (2, 6, 4),
+    "v2_3090_followup/exp2_codejson_n3/run_n3_codejson.sh": (2, 6, 2),
+}
+for _f, (_ncnv, _nthink, _ndraft) in _HISTORICAL.items():
+    _t = pathlib.Path(__file__).resolve().parents[1].joinpath(_f) \
+        .read_text(encoding="utf-8")
+    chk(f"{_f}: -no-cnv occurrences", _t.count("-no-cnv"), _ncnv)
+    chk(f"{_f}: /no_think occurrences", _t.count("/no_think"), _nthink)
+    chk(f"{_f}: draft-max/draft-min occurrences",
+        _t.count("draft-max") + _t.count("draft-min"), _ndraft)
+    chk(f"{_f}: says it is kept as evidence",
+        "HISTORICAL SCRIPT" in _t and "UNCHANGED" in _t, True)
+    chk(f"{_f}: every host path is overridable",
+        [l.strip() for l in _t.splitlines()
+         if re.match(r'^[A-Z_]+="?/home/[a-z]', l.strip())], [])
+
+
 print("\n=== withdrawn figures must not reappear ===")
 # Every number this repository retracted, and the one place each is allowed to
 # be mentioned: inside the entry that retracts it. A13's 101.3 MiB survived in
