@@ -871,6 +871,63 @@ produced by
 
 ---
 
+### A14. Within-run repeats are not an error bar
+
+Every table in this repository prints a run-to-run SD computed from repeats
+**inside one run**. Those repeats share a server start, a memory layout, a
+thermal state and a position in the arm order. What a reader needs is the
+spread when the same arm at the same configuration is measured again in a
+**different** run, and until 2026-08-26 nothing here had measured it.
+
+Ten (arm, configuration) pairs were measured independently two or three times:
+
+| between-run spread | pairs |
+|---|---|
+| ≤ 0.6 pp | 6 |
+| 0.6 – 1.5 pp | 2 |
+| 2.1 pp (`spec-dflash-n2`) | 1 |
+| **8.5 pp (`spec-mtp-n4`, Q8_0)** | 1 |
+
+Median **0.56 pp**. So the dataset generally reproduces well — better than the
+size of any effect it reports — and **one pair does not**.
+
+**That one was chased down and is unexplained.** `spec-mtp-n4` under the Q8_0
+head reads +10.5 % in run M1 (3 repeats, within-run SD 0.53) and +2.0 % in run Q
+(5 repeats). Each is internally tight; the two intervals do not come close to
+overlapping. Everything that could differ was checked and does not:
+
+| checked | M1 | run Q |
+|---|---|---|
+| server binary sha256 | `b6a5c490…` | same |
+| drafter file sha256 | `5b1e4937…` | same |
+| recorded argv | 30 tokens | byte-identical |
+| what the memory fitter chose | `n_ctx 8192, n_batch 2048, n_ubatch 512`, 41/41 + 42/42 layers | identical |
+| draft tokens per prompt | 331, 369, 368, 310, 290, 360, 324, 383, 377, 344 | identical |
+| draft acceptance | 61.4 % | 61.4 % |
+| temperature under load | 66.1 °C mean | 65.8 °C |
+| SM clock under load | 1938 MHz mean | 1934 MHz |
+| the no-speculation baseline beside it | 115.8 pooled | 116.6 |
+
+Identical work, identical configuration, identical thermal state — and the
+speculative arm is uniformly 6–8 % slower in run Q on **all ten prompts**, while
+the baseline measured beside it is not. A third measurement of the same arm, on
+the extended prompt set, reads +2.7 %, so M1's is the outlier and the effect is
+not a property of run Q.
+
+**What follows for every number here.** A delta measured over three repeats in a
+single run should be read as accurate to about a point, not to the two decimal
+places its SD suggests, and one case in ten was off by eight. Where a figure
+matters, this repository now measures it in more than one run and says so:
+`spec-dflash-n2` at +24.6 % and +26.7 %, `spec-mtp-n2` at +21.6 %, +22.1 % and
++21.0 % across three, `spec-draft-n8` at −74.3 % and −74.2 %. The headline
+ordering — self-speculation above no speculation above external speculation, by
+factors, not points — is far larger than this and is unaffected.
+
+Committed evidence: the manifests and per-request JSON of every run named above;
+the reproducibility table is recomputed from them by `analysis/verify_claims.py`.
+
+---
+
 ## B — statistics that were reported incorrectly
 
 ### B1. `mean tok/s` was the request-mean only; pooled throughput is materially worse

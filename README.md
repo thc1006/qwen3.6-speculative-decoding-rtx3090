@@ -93,7 +93,18 @@ DFlash and MTP do zero times at every draft length from 1 to 16
 
 **The three methods v1 benchmarked are the bottom three rows.** The original
 negative finding was right about what it measured. It measured the losing third
-of the available methods. v1 never tested that method, and the archived v3 attempt at it compared
+of the available methods.
+
+**And it is not a property of those ten prompts.** Every number above and every
+number this repository has ever published rests on the same ten. Repeated on a
+second set of twenty sharing none of them — long inputs, JSON and SQL, four
+languages, arithmetic, two genuinely multi-turn exchanges — the decode speed-up
+moves by at most 4.3 pp, and one arm moves *upward*
+([runs P and R](v4_audit_2026_08_25/README.md#runs-p-and-r--is-the-win-a-property-of-those-ten-prompts)).
+That comparison has to be made on pooled decode rate: the longer prompts put
+12.7 % of wall-clock into prompt processing against 6.7 % for the v1 ten, and
+aggregate throughput divides by wall-clock, so reading it there would have shown
+a collapse that is an artefact of prompt length and not of the method. v1 never tested that method, and the archived v3 attempt at it compared
 two different binaries. The sign flips with the draft window — +18.7 % at 4,
 −14.8 % at 8, −47.4 % at 16 — so "speculative decoding loses here" was a
 statement about draft-window regimes that this repository had not yet separated.

@@ -644,6 +644,65 @@ for arm in ("ngram-map-k", "ngram-map-k4v"):
     chk(f"A13 {arm} generate() calls", r["drafter_calls_generate"], 3271)
     chk(f"A13 {arm} drafts actually produced", r["drafter_drafts"], 2)
 
+print("\n=== runs P, Q and R, and A14 ===")
+def _pl(pat, arm):
+    rs = [json.load(open(f)) for f in glob.glob(f"v4_audit_2026_08_25/data/{pat}/{arm}__rep*.json")]
+    rs = [r for r in rs if r.get("rows")]
+    if not rs: return None
+    n = sum(x["predicted_n"] for r in rs for x in r["rows"])
+    ms = sum(x["predicted_ms"] for r in rs for x in r["rows"])
+    pm = sum(x["timings"].get("prompt_ms", 0) for r in rs for x in r["rows"])
+    pn = sum(x["timings"].get("prompt_n", 0) for r in rs for x in r["rows"])
+    ag = [r["aggregate_tok_s"] for r in rs if r.get("wall_s")]
+    return {"pooled": 1000*n/ms, "agg": st.mean(ag), "prompt_ms": pm, "prompt_n": pn,
+            "dec_ms": ms, "reps": len(rs), "nprompt": len(rs[0]["rows"])}
+
+# the extended set exists and is genuinely different
+_pb = _pl("matrix_P_extended_*", "baseline")
+chk("P prompt count", _pb["nprompt"], 20)
+chk("P prompt tokens", _pb["prompt_n"], 4323)
+_ob = _pl("matrix_O_headtohead_*", "baseline")
+chk("O prompt tokens", _ob["prompt_n"], 1035)
+for lbl, b, want in (("v1 ten", _ob, 6.7), ("extended twenty", _pb, 12.7)):
+    chk(f"prompt processing share, {lbl} (%)",
+        round(100*b["prompt_ms"]/(b["prompt_ms"]+b["dec_ms"]), 1), want, 0.05)
+
+# the generalisation test, on the metric that is comparable across prompt sets
+for arm, d1, d2 in (("spec-dflash-n2", 24.6, 20.3), ("spec-dflash-n4", 18.0, 21.3),
+                    ("spec-mtp-n2", 21.8, 21.0), ("spec-draft-n8", -73.7, -73.1)):
+    chk(f"P {arm} pooled delta, v1 ten", round(100*(_pl("matrix_O_headtohead_*", arm)["pooled"]/_ob["pooled"]-1), 1), d1, 0.05)
+    chk(f"P {arm} pooled delta, extended", round(100*(_pl("matrix_P_extended_*", arm)["pooled"]/_pb["pooled"]-1), 1), d2, 0.05)
+    chk(f"P {arm} shift across prompt sets under 5 pp", abs(d2-d1) < 5.0, True)
+
+# R: the workload control repeats on the new set
+_rb = _pl("matrix_R_ext_thinkoff_*", "baseline")
+_m3 = _pl("matrix_M3_thinkoff_*", "baseline")
+for arm, v1_, ex_ in (("spec-dflash-n2", 8.5, 8.6), ("spec-mtp-n2", 11.4, 13.2)):
+    chk(f"R {arm} think-off, v1 ten", round(100*(_pl("matrix_M3_thinkoff_*", arm)["pooled"]/_m3["pooled"]-1), 1), v1_, 0.05)
+    chk(f"R {arm} think-off, extended", round(100*(_pl("matrix_R_ext_thinkoff_*", arm)["pooled"]/_rb["pooled"]-1), 1), ex_, 0.05)
+
+# Q: the anomaly was one measurement that did not replicate
+for pat, arm, want, reps in (("matrix_M1_*", "spec-mtp-n2", 22.1, 3),
+                             ("matrix_Q_q8_*", "spec-mtp-n2", 21.6, 5),
+                             ("matrix_M4_q4km_*", "spec-mtp-n2", 26.6, 3),
+                             ("matrix_Q_q4km_*", "spec-mtp-n2", 27.0, 5),
+                             ("matrix_M1_*", "spec-mtp-n4", 10.5, 3),
+                             ("matrix_Q_q8_*", "spec-mtp-n4", 2.0, 5),
+                             ("matrix_M4_q4km_*", "spec-mtp-n4", 3.6, 3),
+                             ("matrix_Q_q4km_*", "spec-mtp-n4", 3.6, 5),
+                             ("matrix_P_extended_*", "spec-mtp-n4", 2.7, 3)):
+    b = _pl(pat, "baseline"); v = _pl(pat, arm)
+    chk(f"Q {pat.rstrip('_*')} {arm} pooled delta", round(100*(v["pooled"]/b["pooled"]-1), 1), want, 0.05)
+    chk(f"Q {pat.rstrip('_*')} {arm} repeats", v["reps"], reps)
+chk("Q the Q4_K_M head beats Q8_0 at BOTH draft lengths at five repeats",
+    (round(100*(_pl("matrix_Q_q4km_*","spec-mtp-n2")["pooled"]/_pl("matrix_Q_q4km_*","baseline")["pooled"]-1),1) >
+     round(100*(_pl("matrix_Q_q8_*","spec-mtp-n2")["pooled"]/_pl("matrix_Q_q8_*","baseline")["pooled"]-1),1)) and
+    (round(100*(_pl("matrix_Q_q4km_*","spec-mtp-n4")["pooled"]/_pl("matrix_Q_q4km_*","baseline")["pooled"]-1),1) >
+     round(100*(_pl("matrix_Q_q8_*","spec-mtp-n4")["pooled"]/_pl("matrix_Q_q8_*","baseline")["pooled"]-1),1)), True)
+chk("A14 the non-replicating pair, gap (pp)", round(10.5 - 2.0, 1), 8.5, 0.05)
+chk("A14 spec-mtp-n4 Q8_0 outlier is M1, not run Q",
+    sorted([10.5, 2.0, 2.7])[2], 10.5, 0.05)
+
 print("\n=== theory (ERRATA E1/E2) ===")
 rho=8/256
 chk("rho", round(rho,5), 0.03125, 1e-9)
@@ -721,6 +780,11 @@ DOC_CLAIMS = [
     ("ERRATA.md",   "53.3 pp",   "A13 worst divergence"),
     ("ERRATA.md",   "1639 of 1639", "A13 the drafter counter is also a tautology"),
     ("v4_audit_2026_08_25/README.md", "3271", "N generate() calls"),
+    ("v4_audit_2026_08_25/README.md", "4323", "P extended prompt tokens"),
+    ("v4_audit_2026_08_25/README.md", "12.7 %", "P prompt-processing share"),
+    ("v4_audit_2026_08_25/README.md", "+20.3 %", "P dflash-n2 on the new set"),
+    ("ERRATA.md",   "0.56 pp",   "A14 median between-run spread"),
+    ("ERRATA.md",   "8.5 pp",    "A14 the pair that did not replicate"),
     ("README.md",   "17.24 s",   "README drafter generate time"),
     ("README.md",   "12 / 12",   "README threshold within DFlash"),
     ("README.md",   "145.8",     "README head-to-head winner"),

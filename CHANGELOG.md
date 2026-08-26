@@ -41,6 +41,18 @@ matched no-speculation baseline inside every run. The headline reverses.
   19.266 MiB of draft state on every partially accepted round: 772 saves and 709
   restores per arm-run, ≈133 GiB of state traffic, ≈19.5 % of the wall clock.
   DFlash and MTP do it **zero** times at every draft length from 1 to 16.
+- **Runs P, Q and R**, 60 further arm-runs. P and R repeat the key arms on a
+  second set of **twenty** prompts sharing none with the v1 ten — long inputs,
+  structured output, four languages, arithmetic, and two genuinely multi-turn
+  exchanges, gated on the model recalling four-turn-old context. The decode
+  speed-up moves by at most 4.3 pp, so it is not a property of the original
+  prompt mix. Q settles the one anomaly v4.1 could not explain.
+- **ERRATA A14** — within-run repeats are not an error bar. Ten (arm,
+  configuration) pairs measured in two or three independent runs have a median
+  between-run spread of 0.56 pp, and one pair differs by 8.5 pp with the argv,
+  the drafter hash, the fitter's choices, the per-prompt draft counts, the
+  acceptance, the temperature and the clocks all identical. A three-repeat delta
+  is accurate to about a point, not to its printed SD.
 - **ERRATA A13** — llama.cpp keeps *two* acceptance counters and this repository
   had only ever quoted one. Across 73 single-request arm-runs they agree to
   within 0.5 pp on every path that takes no speculative checkpoint (31 runs) and
@@ -82,6 +94,11 @@ matched no-speculation baseline inside every run. The headline reverses.
   slower**. Scored per family it is 21/23, and both failures are at the
   high-acceptance end. The threshold is a property of the drafter, not of
   acceptance — see A12.
+- **"A Q4_K_M MTP head moves 6.8 pp against Q8_0 at unchanged acceptance."**
+  Reported in this branch as measured-and-unexplained. Five repeats of each
+  drafter dissolve it: the Q8_0 arm at `n_max 4` was one measurement that did
+  not replicate. With it re-measured the Q4_K_M head is ahead at both draft
+  lengths, which is the simpler and correct story.
 - **Run N's "0.0 % acceptance".** Written and corrected the same day. The server
   counter reads 0.0 %; the speculator's own counter reads up to 70.0 %. What is
   measurable without either is that `generate()` was called 3271 times and

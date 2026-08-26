@@ -702,9 +702,19 @@ Both families in one matrix, one policy, three repeats — aggregate throughput:
 | `spec-mtp-n2` | 122.5 | **+18.6 %** | 78.4 % |
 | `spec-dflash-n4` | 119.9 | +16.1 % | 55.2 % |
 | `spec-mtp-n1` | 118.4 | +14.6 % | 89.0 % |
-| `spec-mtp-n4` | 111.5 | +8.0 % | 61.4 % |
+| `spec-mtp-n4` | 111.5 | +8.0 % ‡ | 61.4 % |
 | no speculation | 103.3 | — | — |
 | `spec-mtp-n8` | 71.4 | −30.9 % | 41.4 % |
+
+‡ **This row did not replicate and should not be used.** Measured again at five
+repeats (run Q) the same arm reads +2.0 % on pooled decode rate against this
+run's +10.5 %, and a third measurement on the extended prompt set reads +2.7 %.
+Everything that could differ between the two runs was checked and is identical,
+including the recorded argv, the drafter's sha256, the memory fitter's choices,
+the per-prompt draft counts, the acceptance and the card's temperature and
+clocks. The row is left in place because deleting a measurement that was made is
+not the same as correcting it — see
+[A14](../ERRATA.md#a14-within-run-repeats-are-not-an-error-bar).
 
 **MTP works, and DFlash is better.** Both peak at `n_max 2`; MTP has the higher
 acceptance at every length and still loses on throughput, because its head is a
@@ -724,9 +734,13 @@ instead of Q8_0:
 At `n_max 2` the **more** aggressively quantised drafter is **faster**, at
 essentially unchanged acceptance — the head is cheaper to run and the drafts are
 just as good. So quantisation is not hiding an MTP advantage; if anything it is
-one. The `n_max 4` row moves the other way by 6.8 pp at unchanged acceptance
-(60.6 % against 61.4 %) and run-to-run SDs of 0.38 and 0.33, which those SDs do
-not explain. It is reported as measured and not explained.
+one.
+
+The `n_max 4` row appeared to move the other way by 6.8 pp at unchanged
+acceptance, and this section originally reported that as measured and
+unexplained. **Five repeats of each drafter dissolved it**: the Q8_0 arm was the
+one that did not replicate, and with it re-measured the Q4_K_M head is ahead at
+*both* draft lengths. See run Q below.
 
 ### Thinking off, and batching
 
@@ -840,6 +854,85 @@ what it measured; it measured the losing third of the available methods.
 
 ---
 
+## Runs P and R — is the win a property of those ten prompts?
+
+Every number above rests on the same ten prompts. 226 arm-runs of them. An
+artefact of that mix would be invisible across all of them because they all
+share it, and no number of repeats or arms fixes that. Runs P and R put the same
+arms on a second, deliberately different set of **twenty** prompts: a long input
+with a short required output, JSON and SQL with structure to hit, a regex to
+explain, code in Rust, Python and shell, arithmetic with a checkable answer, a
+logic puzzle, four languages, open-ended prose, three instruction-following edge
+cases, and **two genuinely multi-turn exchanges** — which the v1 set never had
+(C3). The gate on the run checked that the multi-turn history actually reached
+the model, by requiring it to recall a name and a GPU stated four turns earlier.
+
+### The metric has to change, and that is not a detail
+
+The extended prompts are longer: **4323 prompt tokens against 1035**, so prompt
+processing is **12.7 %** of wall-clock instead of **6.7 %**. Aggregate throughput
+divides by wall-clock and therefore carries that term. Speculation does nothing
+for prompt processing, so a set with more of it mechanically compresses the
+aggregate delta — for reasons that have nothing to do with the method.
+
+Read on aggregate, the result looks like a collapse. Read on **pooled** decode
+rate, which is tokens over decode time and is the only quantity comparable
+across prompt sets, it is close to flat:
+
+| arm | v1 ten, pooled | extended twenty, pooled | shift | *(aggregate, not comparable)* |
+|---|---|---|---|---|
+| `spec-dflash-n2` | +24.6 % | **+20.3 %** | −4.3 pp | *+21.1 % → +10.0 %* |
+| `spec-dflash-n4` | +18.0 % | **+21.3 %** | **+3.3 pp** | *+14.5 % → +6.2 %* |
+| `spec-mtp-n2` | +21.8 % | **+21.0 %** | −0.8 pp | *+17.5 % → +3.7 %* |
+| `spec-draft-n8` | −73.7 % | −73.1 % | +0.6 pp | *−71.5 % → −69.9 %* |
+
+**The result generalises.** Across two prompt sets sharing no prompt, the decode
+speed-up moves by at most 4.3 pp and one arm moves *upward*. Had this been
+written up on aggregate it would have read "the win halves on a different prompt
+set", which is false and would have been a metric artefact of exactly the kind
+this repository exists to catch.
+
+The workload control repeats on the new set too. Thinking off, pooled:
+
+| arm | v1 ten (run M3) | extended twenty (run R) |
+|---|---|---|
+| `spec-dflash-n2` | +8.5 % | **+8.6 %** |
+| `spec-mtp-n2` | +11.4 % | **+13.2 %** |
+| `spec-draft-n8` | −75.1 % | −74.6 % |
+
+So the prompt *mix* barely matters and the *workload* matters a great deal: the
+same arms lose two thirds of their advantage when thinking is off, on both sets.
+
+---
+
+## Run Q — the anomaly this repository could not explain, resolved
+
+Run M reported a Q4_K_M MTP head at `n_max 4` moving 6.8 pp against Q8_0 at
+unchanged acceptance, with run-to-run SDs that did not cover it, and said so
+rather than explaining it. Five repeats of each drafter dissolve it:
+
+| arm | drafter | 3 repeats (M1 / M4) | **5 repeats (run Q)** | difference |
+|---|---|---|---|---|
+| `spec-mtp-n2` | Q8_0 | +22.1 % | **+21.6 %** | 0.5 pp |
+| `spec-mtp-n2` | Q4_K_M | +26.6 % | **+27.0 %** | 0.4 pp |
+| `spec-mtp-n4` | Q4_K_M | +3.6 % | **+3.6 %** | 0.0 pp |
+| `spec-mtp-n4` | Q8_0 | **+10.5 %** | **+2.0 %** | **8.5 pp** |
+
+Three of the four reproduce to within 0.5 pp. The fourth does not, and **the
+non-reproducing measurement is the one that created the anomaly.** A third,
+independent measurement of that same arm on the extended prompt set (run P)
+reads **+2.7 %**, so +2.0 %, +2.7 % and +3.6 % cluster and run M1's +10.5 % is
+the outlier.
+
+With it removed the picture is simple and consistent: **the Q4_K_M head is
+better than the Q8_0 head at both draft lengths** — +27.0 % against +21.6 % at
+`n_max 2`, +3.6 % against +2.0 % at `n_max 4`. The smaller head drafts about as
+well and costs less to run. There is no anomaly to explain; there was one
+measurement that did not replicate — which is a different and more useful thing
+to know, and it is what [A14](../ERRATA.md#a14-within-run-repeats-are-not-an-error-bar) is about.
+
+---
+
 ## What is settled, and what is not
 
 Settled by runs A–O, each against a matched no-speculation baseline measured
@@ -865,11 +958,12 @@ Not settled, and honestly out of reach here:
 
 | gap | why it is still open |
 |---|---|
-| ten prompts | the prompt set is small and fixed; every run shares it, so a prompt-set artefact would be invisible across all of them |
-| `multi_turn_1` / `multi_turn_2` | still two independent single-turn requests. The tags are kept for join compatibility with the archived data and the lie is documented in C3, not fixed |
 | three repeats on most arms | five on runs L and M3 only |
 | one host, one card, one quantisation | nothing here separates the model, the quantisation and the GPU |
-| `n_max 4` under a Q4_K_M MTP head | moves 6.8 pp against Q8_0 at unchanged acceptance and SDs that do not explain it |
+| ~~`n_max 4` under a Q4_K_M MTP head~~ | **closed by run Q.** It was one Q8_0 measurement that did not replicate, not a drafter-precision effect ([A14](../ERRATA.md#a14-within-run-repeats-are-not-an-error-bar)) |
+| ~~ten prompts~~ | **closed by runs P and R.** Twenty different prompts, sharing none with the v1 set, move the decode speed-up by at most 4.3 pp |
+| ~~`multi_turn_1` / `multi_turn_2`~~ | **closed for new runs.** The extended set carries two genuinely multi-turn exchanges, gated on the model recalling four-turn-old context. The v1 tags keep their names and their behaviour so archived joins still work |
+| between-run reproducibility | median 0.56 pp over ten independently repeated pairs, and one pair at 8.5 pp that resisted every check ([A14](../ERRATA.md#a14-within-run-repeats-are-not-an-error-bar)) |
 | the 19.5 % checkpoint share | a log-timestamp attribution, not a profile |
 | expert routing | never instrumented, and after A7 and A12 nothing demands it |
 
