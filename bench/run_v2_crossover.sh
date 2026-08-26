@@ -115,4 +115,4 @@ half 8 hardcap ; half 8 freerun
 echo "=== V2 done $(date -Is) ==="
 echo "completed:$DONE"
 echo "failed:${FAILED:- none}"
-ls -d "$BENCH"/matrix_V2_*_"$STAMP" 2>/dev/null | wc -l
+find "$BENCH" -maxdepth 1 -type d -name "matrix_V2_*_$STAMP" -printf . | wc -c
