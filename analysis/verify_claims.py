@@ -1325,7 +1325,8 @@ print("\n=== the file inventory is counted, not typed ===")
 # The v4 Files table listed two of the run directories and called itself the
 # file list. Counts in prose go stale silently; these are derived.
 _root = pathlib.Path(__file__).resolve().parents[1]
-_dirs = sorted(d for d in (_root / "v4_audit_2026_08_25" / "data").iterdir() if d.is_dir())
+_dirs = sorted(d for d in (_root / "v4_audit_2026_08_25" / "data").iterdir()
+               if d.is_dir() and d.name != "telemetry")
 _armruns = sorted((_root / "v4_audit_2026_08_25" / "data").glob("*/*__rep*.json"))
 _v4 = " ".join(_norm((_root / "v4_audit_2026_08_25" / "README.md")
                      .read_text(encoding="utf-8")).split())
@@ -1429,6 +1430,9 @@ chk("ERRATA says which run each timing table belongs to",
 
 
 print("\n=== A16: run T against run T3 ===")
+import csv as _csv2
+_er_a16 = " ".join(_norm(pathlib.Path(__file__).resolve().parents[1]
+                         .joinpath("ERRATA.md").read_text(encoding="utf-8")).split())
 
 
 def _pool(d, arm):
@@ -1449,6 +1453,70 @@ for _arm, _want in (("baseline", 0.79), ("spec-draft-n8", -0.11),
 # the design that made T3 worth running at all
 _mT = json.load(open(f"{_T}/manifest.json"))
 _mT3 = json.load(open(f"{_T3}/manifest.json"))
+# A16's thermal comparison, from the two traces now committed beside the runs
+_TEL = pathlib.Path(__file__).resolve().parents[1] / "v4_audit_2026_08_25" / "data" / "telemetry"
+
+
+def _trace(name, util_key, thr_key):
+    rows = list(_csv2.DictReader(open(_TEL / name, encoding="utf-8")))
+    out = []
+    for r in rows:
+        try:
+            u = float((r[util_key] or "").strip().split()[0])
+        except Exception:  # noqa: BLE001
+            continue
+        out.append((u, r))
+    return out
+
+
+def _mean(rows, key):
+    v = []
+    for _u, r in rows:
+        try:
+            v.append(float((r[key] or "").strip().split()[0]))
+        except Exception:  # noqa: BLE001
+            pass
+    return st.mean(v) if v else float("nan")
+
+
+_tT = [(u, r) for u, r in _trace("gpu_telemetry_T_20260826_182639.csv",
+                                 "util", "throttle") if u >= 50]
+_tT3 = [(u, r) for u, r in _trace("gpu_telemetry_T3_20260826_203251.csv",
+                                  " utilization.gpu [%]",
+                                  " clocks_event_reasons.active") if u >= 50]
+chk("A16 T loaded telemetry samples", len(_tT), 156)
+chk("A16 T3 loaded telemetry samples", len(_tT3), 599)
+chk("A16 mean temperature, T (C)", round(_mean(_tT, "temp"), 1), 63.5, 0.05)
+chk("A16 mean temperature, T3 (C)", round(_mean(_tT3, " temperature.gpu"), 1), 63.6, 0.05)
+chk("A16 mean SM clock, T (MHz)", round(_mean(_tT, "clk_sm")), 1946, 0.5)
+chk("A16 mean SM clock, T3 (MHz)",
+    round(_mean(_tT3, " clocks.current.sm [MHz]")), 1947, 0.5)
+chk("A16 mean board power, T (W)", round(_mean(_tT, "pwr"), 1), 240.3, 0.05)
+chk("A16 mean board power, T3 (W)", round(_mean(_tT3, " power.draw [W]"), 1), 240.1, 0.05)
+
+
+def _bits(rows, key, bit):
+    n = 0
+    for _u, r in rows:
+        try:
+            if int((r[key] or "0").strip(), 16) & bit:
+                n += 1
+        except ValueError:
+            pass
+    return n
+
+
+chk("A16 sw_power_cap samples, T", _bits(_tT, "throttle", 0x4), 29)
+chk("A16 sw_power_cap samples, T3",
+    _bits(_tT3, " clocks_event_reasons.active", 0x4), 27)
+chk("A16 no thermal-slowdown flag on any loaded sample of either run",
+    (_bits(_tT, "throttle", 0x20) + _bits(_tT, "throttle", 0x40)
+     + _bits(_tT3, " clocks_event_reasons.active", 0x20)
+     + _bits(_tT3, " clocks_event_reasons.active", 0x40)), 0)
+chk("ERRATA no longer claims the two throttle rates are the same",
+    "the same software power-cap events at the same rate" in _er_a16, False)
+chk("ERRATA says the fractions are not comparable",
+    "cannot be set beside each other" in _er_a16, True)
 chk("A16 T3 is position-balanced", _mT3.get("schedule_is_position_balanced"), True)
 chk("A16 T3 asserted the instrumented library per arm-run",
     (_mT3.get("expect_lib_sha256") or "")[:16], "ce94855f4f2d82ba")

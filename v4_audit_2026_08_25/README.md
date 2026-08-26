@@ -1124,6 +1124,7 @@ This table listed two of the run directories and the harness. There are 32.
 | `data/matrix_O2_latin_*/` | the balanced nine-arm matrix the README leads with, and its `paired_blocks.json` |
 | `data/matrix_T_timers_*/`, `data/matrix_T3_timers_*/` | the two source-timed checkpoint runs behind [ERRATA A12](../ERRATA.md#a12-what-the-checkpoint-path-costs-measured-with-timers-in-the-source) and [A16](../ERRATA.md#a16-two-runs-identical-in-every-recorded-respect-and-byte-identical-in-output-differ-by-34--on-one-arm), with `checkpoint_timers.json` and the SHA-256 of every log they were extracted from |
 | `data/checkpoint_timers_20260826.json` | run T's twelve timer records, four repeats per arm |
+| `data/telemetry/` | the continuous nvidia-smi traces the thermal claims are computed from. `analysis/thermal_report.py` reads all three schemas the audit recorded |
 | `data/acceptance_counter_comparison.json` | the two acceptance counters, side by side ([A13](../ERRATA.md#a13-there-are-two-acceptance-counters-they-disagree-and-the-disagreement-is-exactly-the-checkpoint-path)) |
 | `data/A_bcb5eeb64_legacy/` | manifests and per-request JSON, run A |
 | `data/B_master_3737e4137/` | manifests and per-request JSON, run B |

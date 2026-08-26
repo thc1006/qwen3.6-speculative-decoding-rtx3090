@@ -1074,12 +1074,22 @@ and the three T3 repeats agree among themselves to 0.7 %. It is a shift of the
 whole run, not one bad arm-run.
 
 **It is not thermal, and it is not the fitter.** The continuous telemetry for the
-two runs is the same to a tenth of a degree and a megahertz: mean 63.5 °C and
-1946 MHz in T against 63.6 °C and 1947 MHz in T3, mean board power 240.3 W
-against 240.1 W, with the same software power-cap events at the same rate. Both
-DFlash servers logged the same fit: 41/41 target layers and 9/9 drafter layers
-offloaded, `n_batch` 2048, `n_ubatch` 512, and identical graph-split counts
-(`122 (with bs=512), 82 (with bs=1)`).
+two runs agrees to a tenth of a degree and a megahertz over their loaded
+samples: mean **63.5 °C and 1946 MHz** in T against **63.6 °C and 1947 MHz** in
+T3, mean board power **240.3 W** against **240.1 W**. Both DFlash servers logged
+the same fit: 41/41 target layers and 9/9 drafter layers offloaded, `n_batch`
+2048, `n_ubatch` 512, and identical graph-split counts (`122 (with bs=512),
+82 (with bs=1)`).
+
+One thing in those traces is *not* comparable and this entry claimed it was.
+The two runs were sampled at different rates — T at 5 s in the `compact` schema,
+T3 at 1 s in `raw` — so their **throttle fractions** cannot be set beside each
+other: `sw_power_cap` is flagged on 29 of T's 156 loaded samples and 27 of T3's
+599, and at 5 s each flagged sample is credited five seconds of coverage while
+at 1 s it is credited one. What that comparison would say if taken at face value
+also points the wrong way for the hypothesis: the run with *more* apparent
+capping is the **faster** one. No thermal slowdown flag is raised on any loaded
+sample of either run.
 
 **The cause is not isolated.** Nothing recorded distinguishes the two runs. What
 is between them is machine history — two rebuilds and a killed rehearsal — which
