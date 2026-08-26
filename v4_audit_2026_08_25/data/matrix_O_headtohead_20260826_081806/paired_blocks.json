@@ -1,0 +1,111 @@
+{
+  "baseline": "baseline",
+  "blocks": 3,
+  "bootstrap_iters": 20000,
+  "arms": [
+    {
+      "arm": "spec-dflash-n2",
+      "point_pct": 24.61,
+      "ci95_boot_pct": [
+        24.17,
+        25.41
+      ],
+      "ci95_t_pct": [
+        22.92,
+        26.33
+      ],
+      "blocks": 3
+    },
+    {
+      "arm": "spec-mtp-n2",
+      "point_pct": 21.78,
+      "ci95_boot_pct": [
+        20.83,
+        23.3
+      ],
+      "ci95_t_pct": [
+        18.54,
+        25.11
+      ],
+      "blocks": 3
+    },
+    {
+      "arm": "spec-dflash-n4",
+      "point_pct": 18.02,
+      "ci95_boot_pct": [
+        17.29,
+        19.19
+      ],
+      "ci95_t_pct": [
+        15.51,
+        20.59
+      ],
+      "blocks": 3
+    },
+    {
+      "arm": "ngram-map-k4v-m8",
+      "point_pct": -0.78,
+      "ci95_boot_pct": [
+        -1.27,
+        -0.21
+      ],
+      "ci95_t_pct": [
+        -2.1,
+        0.56
+      ],
+      "blocks": 3
+    },
+    {
+      "arm": "ngram-mod-n24",
+      "point_pct": -11.68,
+      "ci95_boot_pct": [
+        -11.89,
+        -11.39
+      ],
+      "ci95_t_pct": [
+        -12.32,
+        -11.03
+      ],
+      "blocks": 3
+    },
+    {
+      "arm": "ngram-cache",
+      "point_pct": -19.74,
+      "ci95_boot_pct": [
+        -20.18,
+        -18.95
+      ],
+      "ci95_t_pct": [
+        -21.4,
+        -18.04
+      ],
+      "blocks": 3
+    },
+    {
+      "arm": "spec-draft-n8",
+      "point_pct": -73.67,
+      "ci95_boot_pct": [
+        -73.75,
+        -73.55
+      ],
+      "ci95_t_pct": [
+        -73.92,
+        -73.41
+      ],
+      "blocks": 3
+    },
+    {
+      "arm": "spec-draft-n1",
+      "point_pct": -75.1,
+      "ci95_boot_pct": [
+        -75.2,
+        -74.97
+      ],
+      "ci95_t_pct": [
+        -75.4,
+        -74.8
+      ],
+      "blocks": 3
+    }
+  ]
+}
