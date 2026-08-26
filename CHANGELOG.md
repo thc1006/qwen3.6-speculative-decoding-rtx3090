@@ -74,8 +74,13 @@ a decode graph, and "preserves raw logs" is preserving their hashes.
 - **The teardown guard allowed 2 GiB of residual VRAM** — most of the margin the
   fitter works in, next to a docstring saying a 120 MiB allocation killed the
   next arm — and an unreadable `nvidia-smi` returned *settled*. It is 128 MiB
-  over the pre-run reading, held for three consecutive readings, and an
-  unreadable card is a failure.
+  over the pre-run reading, held for three consecutive readings, and a card that
+  answered before the arm-run and not after is a failure. *Not* a host with no
+  reading at all: the first version of this fix missed that distinction and took
+  four end-to-end harness tests down in CI, which has no `nvidia-smi` — a guard
+  about memory coming back cannot apply where memory was never observable. Both
+  directions are tested, and the CI condition is pinned locally with a failing
+  shim on `PATH`.
 - **`paired_blocks.py` and the runner disagreed on "balanced"**: a two-arm,
   four-repeat schedule the runner accepts was reported unbalanced here, and the
   analysis wrote the same JSON either way. It shares the runner's definition,

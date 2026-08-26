@@ -756,12 +756,11 @@ class TeardownMustNotContaminateTheNextArm(unittest.TestCase):
         self.assertTrue(td["settled"])
         self.assertEqual(td["readings"], 3)
 
-    def test_an_unreadable_gpu_is_a_failure_not_a_pass(self):
-        """`used is None` used to return settled=True, and the validator
-        deliberately ignored unreadable teardowns - so the one instrument this
-        check depends on was optional, and a run with no telemetry passed the
-        same gate as a clean one. stop_server is only ever called on the bench
-        host, where nvidia-smi answering is part of the measurement."""
+    def test_a_card_that_stops_answering_mid_run_is_a_failure(self):
+        """`used is None` used to return settled=True, so the one instrument
+        this check depends on was optional. It is a failure now - but only where
+        a reading existed BEFORE the run, because a guard about memory coming
+        back cannot apply on a host where memory was never observable."""
         rr = self._rr()
         import types
         rr.gpu_mem_used_mib = lambda: None
@@ -772,11 +771,63 @@ class TeardownMustNotContaminateTheNextArm(unittest.TestCase):
         td = rr.stop_server(proc, baseline_mib=16600)
         self.assertFalse(td["settled"])
         self.assertFalse(td["readable"])
+        self.assertIn("before this arm-run and not", td["why"])
         res = [{"arm": "a", "repeat": 0, "rows": [], "crashed": None,
                 "teardown": td}]
         with tempfile.TemporaryDirectory() as t:
             probs = rr.validate_run(Path(t), ["a"], 1, res)
         self.assertTrue([x for x in probs if "teardown" in x], probs)
+
+    def test_the_runner_completes_end_to_end_where_nvidia_smi_fails(self):
+        """CI has no nvidia-smi and this machine does, so a rule keyed on the
+        reading passes here and fails there. This forces the CI condition with a
+        shim: a teardown guard is about memory coming back, and it cannot apply
+        on a host where memory was never observable."""
+        with tempfile.TemporaryDirectory() as t:
+            shim = Path(t) / "bin"
+            shim.mkdir()
+            (shim / "nvidia-smi").write_text("#!/bin/sh\nexit 127\n", encoding="utf-8")
+            (shim / "nvidia-smi").chmod(0o755)
+            env_path = f"{shim}{os.pathsep}{os.environ.get('PATH', '')}"
+            out = Path(t) / "out"
+            env = dict(os.environ)
+            env.update({
+                "PATH": env_path,
+                "LLAMA_SERVER_BIN": str(ROOT / "tests" / "fake_llama_server.py"),
+                "MODEL_TARGET": "/dev/null", "BENCH_ARMS": "baseline",
+                "BENCH_REPEATS": "1", "BENCH_ORDER": "cyclic",
+                "BENCH_OUT": str(out), "BENCH_PORT": free_port(),
+                "BENCH_MAX_TOKENS": "300", "BENCH_FIT": "off",
+            })
+            r = subprocess.run([sys.executable, str(RUNNER)], env=env,
+                               capture_output=True, text=True, timeout=600)
+            self.assertEqual(r.returncode, 0, (r.stdout + r.stderr)[-1500:])
+            self.assertTrue((out / "RUN_COMPLETE.json").exists())
+            body = json.loads((out / "baseline__rep0.json").read_text())
+            td = body["teardown"]
+            self.assertFalse(td["readable"])
+            self.assertTrue(td["settled"])
+            self.assertIn("no GPU reading is available", td["why"])
+
+    def test_a_host_with_no_gpu_at_all_is_not_a_failure(self):
+        """CI has no nvidia-smi, and the harness's own end-to-end tests run
+        there. No reading before and none after is not a teardown problem."""
+        rr = self._rr()
+        import types
+        rr.gpu_mem_used_mib = lambda: None
+        proc = types.SimpleNamespace(pid=1, returncode=0, poll=lambda: 0,
+                                     wait=lambda timeout=None: 0)
+        rr.os.killpg = lambda *a, **k: None
+        rr.os.getpgid = lambda p: 1
+        td = rr.stop_server(proc, baseline_mib=None)
+        self.assertTrue(td["settled"])
+        self.assertFalse(td["readable"])
+        self.assertIn("no GPU reading is available", td["why"])
+        res = [{"arm": "a", "repeat": 0, "rows": [], "crashed": None,
+                "teardown": td}]
+        with tempfile.TemporaryDirectory() as t:
+            probs = rr.validate_run(Path(t), ["a"], 1, res)
+        self.assertFalse([x for x in probs if "teardown" in x], probs)
 
     def _unused_a_host_without_nvidia_smi(self):
         rr = self._rr()
@@ -1251,8 +1302,8 @@ class EveryPublishedFixIsStillHere(unittest.TestCase):
          "the expected library digest must be whole"),
         ("bench/retest_runner.py", "elif libs != _LIB_BASELINE:",
          "the whole shared-library map is pinned"),
-        ("bench/retest_runner.py", "nvidia-smi did not answer",
-         "an unreadable teardown is a failure"),
+        ("bench/retest_runner.py", "unverified = baseline_mib is not None",
+         "an unreadable teardown is a failure only where a reading existed"),
         ("bench/retest_runner.py", "if ok >= consecutive:",
          "a teardown needs consecutive low readings"),
         ("analysis/paired_blocks.py", "def is_position_balanced",

@@ -863,14 +863,24 @@ def stop_server(proc: subprocess.Popen, baseline_mib: int | None = None,
         used = gpu_mem_used_mib()
         readings += 1
         if used is None:
-            # An unreadable card used to count as settled. That makes the one
-            # instrument this check depends on optional, and a run with no
-            # telemetry passed the same gate as a clean one.
-            return {"settled": False, "mib_after": None, "mib_before": baseline_mib,
-                    "ceiling_mib": ceiling,
+            # An unreadable card used to count as settled, which made the one
+            # instrument this check depends on optional: a run with no telemetry
+            # passed the same gate as a clean one. But "unreadable" has two
+            # causes, and only one of them is a problem. If there was no reading
+            # BEFORE the run either, this host has no nvidia-smi - CI, and the
+            # harness's own end-to-end tests - and a guard about memory coming
+            # back cannot apply where memory was never observable. If there WAS
+            # a reading before and there is none now, the instrument died
+            # mid-run and the teardown really is unverified.
+            unverified = baseline_mib is not None
+            return {"settled": not unverified, "mib_after": None,
+                    "mib_before": baseline_mib, "ceiling_mib": ceiling,
                     "wait_s": round(time.perf_counter() - t0, 2),
                     "readable": False, "readings": readings,
-                    "why": "nvidia-smi did not answer, so the teardown is unverified"}
+                    "why": ("nvidia-smi answered before this arm-run and not "
+                            "after, so the teardown is unverified") if unverified
+                           else ("no GPU reading is available on this host at "
+                                 "all, so there is no teardown to verify")}
         if used <= ceiling:
             ok += 1
             if ok >= consecutive:
