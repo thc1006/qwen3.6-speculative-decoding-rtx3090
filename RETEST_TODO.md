@@ -190,10 +190,16 @@ requests. Any master comparison must pass `--spec-type` explicitly.
   llama.cpp working tree was restored to stock after the failed patch; no
   modification of that repository is involved in any measurement here.
 
-- `draft-eagle3` genuinely does need an artefact that is not here: the loader
-  rejects any drafter that is not an EAGLE3 model ("expected 3 extract layers",
-  `common/speculative.cpp:471`), and no EAGLE3 head for this target exists on
-  any of these hosts.
+- **Coverage of `--spec-type` is now complete for what this model can run.**
+  Master exposes eleven values. Nine are measured here — `none`,
+  `draft-simple`, `draft-dflash`, `draft-mtp`, `ngram-simple`, `ngram-mod`,
+  `ngram-cache`, `ngram-map-k`, `ngram-map-k4v`. The other two are blocked for
+  reasons that were checked rather than assumed:
+
+  | type | why it cannot run here |
+  |---|---|
+  | `draft-eagle3` | the loader rejects any drafter that is not an EAGLE3 model — "expected 3 extract layers", `common/speculative.cpp:471` — and no EAGLE3 head for this target exists on any of these hosts |
+  | `draft-dspark` | `convert_hf_to_gguf.py` refuses: "`--dspark` is only supported for `DeepseekV4ForCausalLM`". The DFlash checkpoint here is `DFlashDraftModel` and carries no DSpark config or tensors. This is a model-family limit, not a missing download. |
 - **MTP matters more than the other open items** because the vLLM sibling result
   on this same physical hardware is an MTP result. Until it runs here, "llama.cpp
   loses where vLLM wins" confounds the engine with the speculation method.

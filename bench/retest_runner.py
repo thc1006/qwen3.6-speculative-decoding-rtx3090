@@ -318,6 +318,22 @@ ARMS: dict[str, list[str]] = {
     # --- P1-2: the fp16-KV control the v1 matrix never had --------------------
     "baseline-kvfp16":    [KV_FP16],
     "ngram-cache-kvfp16": _ngram("ngram-cache") + [KV_FP16],
+
+    # The two ngram-map variants master exposes and this repository had never
+    # run. They need no draft model at all, so they are the cheapest available
+    # test of whether "short drafts win" is a property of DFlash or a property
+    # of draft volume. Their defaults are size_n 12 / size_m 48 / min_hits 1 -
+    # a 48-token draft, which every other family here has been punished for.
+    "ngram-map-k":        _ngram("ngram-map-k"),
+    "ngram-map-k-m8":     _ngram("ngram-map-k", ["--spec-ngram-map-k-size-n", "12",
+                                                 "--spec-ngram-map-k-size-m", "8"]),
+    "ngram-map-k-m4":     _ngram("ngram-map-k", ["--spec-ngram-map-k-size-n", "12",
+                                                 "--spec-ngram-map-k-size-m", "4"]),
+    "ngram-map-k4v":      _ngram("ngram-map-k4v"),
+    "ngram-map-k4v-m8":   _ngram("ngram-map-k4v", ["--spec-ngram-map-k4v-size-n", "12",
+                                                   "--spec-ngram-map-k4v-size-m", "8"]),
+    "ngram-map-k4v-m4":   _ngram("ngram-map-k4v", ["--spec-ngram-map-k4v-size-n", "12",
+                                                   "--spec-ngram-map-k4v-size-m", "4"]),
 }
 
 
