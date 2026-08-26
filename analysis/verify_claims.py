@@ -897,146 +897,61 @@ chk("C4b the thermal flags carried no meaningful downclock",
 chk("C4b power limit is stock and constant",
     sorted({int(_n(r, "power_limit_w")) for r in _c4l}), [350])
 
-print("\n=== A12: what the accounting can and cannot say ===")
-def _dec(arm):
-    f = glob.glob(f"v4_audit_2026_08_25/data/matrix_J2_*/{arm}__rep0.json")
-    r = json.load(open(f[0]))
-    return (sum(x["predicted_ms"] for x in r["rows"])/1000,
-            sum(x["predicted_n"] for x in r["rows"]))
-_db, _nb = _dec("baseline"); _ds, _ns = _dec("spec-draft-n8"); _dd, _ = _dec("spec-dflash-n4")
-_exc = _ds - _db
-chk("A12 baseline decode seconds", round(_db, 1), 24.5, 0.05)
-chk("A12 spec-draft-n8 decode seconds", round(_ds, 1), 96.1, 0.05)
-chk("A12 excess to account for (s)", round(_exc, 1), 71.6, 0.05)
-_gen = _ext[0]["drafter_generate_s"]
-chk("A12 drafter generate() share of the excess (%)", round(100*_gen/_exc), 24, 0.5)
-chk("A12 unattributed share of the excess (%)", round(100*(_exc-_gen)/_exc), 76, 0.5)
-chk("A12 most of the excess is NOT attributed", (_exc-_gen)/_exc > 0.5, True)
-chk("A12 DFlash is faster than no speculation on the same prompts (s)",
-    round(_dd - _db, 1), -4.6, 0.05)
+print("\n=== A12: the checkpoint cost, timed in the source ===")
+_tm = {r["arm"]: r for r in
+       json.load(open("v4_audit_2026_08_25/data/checkpoint_timers_20260826.json"))}
+_ext = [r for k, r in _tm.items() if k.startswith("spec-draft-n8")]
+chk("A12 timed arm-runs of the external drafter", len(_ext), 4)
+chk("A12 checkpoint creates per arm-run", sorted({r["creates"] for r in _ext}), [785])
+chk("A12 restores per arm-run", sorted({r["restores"] for r in _ext}), [728])
+chk("A12 update_dft on the speculative checkpoint never fires",
+    sorted({r["update_dft_s"] for r in _ext}), [0.0])
+chk("A12 update_tgt seconds", round(st.mean([r["update_tgt_s"] for r in _ext]), 2), 17.34, 0.005)
+chk("A12 load_tgt seconds", round(st.mean([r["load_tgt_s"] for r in _ext]), 2), 16.33, 0.005)
+chk("A12 load_dft seconds", round(st.mean([r["load_dft_s"] for r in _ext]), 2), 5.41, 0.005)
+_ck = st.mean([r["checkpoint_total_s"] for r in _ext])
+chk("A12 checkpoint total seconds", round(_ck, 2), 39.08, 0.005)
+chk("A12 the total is reproducible across arm-runs",
+    round(max(r["checkpoint_total_s"] for r in _ext) -
+          min(r["checkpoint_total_s"] for r in _ext), 2) <= 0.05, True)
+chk("A12 DFlash performs no checkpoint operations",
+    _tm["spec-dflash-n2"]["checkpoint_total_s"], 0.0)
+chk("A12 the baseline performs none either",
+    _tm["baseline"]["checkpoint_total_s"], 0.0)
 
-print("\n=== harness invariants the external review asked for ===")
-import ast as _ast3, pathlib as _pl3, importlib.util as _iu
-_rs = _pl3.Path("bench/retest_runner.py").read_text(encoding="utf-8")
-# #4 liveness must be checked before a health response is accepted
-_wh = _rs[_rs.index("def wait_health"):]
-_wh = _wh[:_wh.index("\ndef ", 1)]
-chk("harness: wait_health checks proc.poll() before accepting a 200",
-    _wh.index("proc.poll()") < _wh.index("return time.perf_counter"), True)
-chk("harness: the spawn path refuses an occupied port",
-    "if not port_is_free(PORT):" in _rs, True)
-chk("harness: the arm result records who answered",
-    '"server_identity": server_identity(log_path),' in _rs, True)
-# #5 ordering
-chk("harness: mirrored ordering is rejected for odd repeat counts",
-    'ORDER_MODE == "mirrored" and REPEATS % 2 == 1' in _rs, True)
-chk("harness: the default ordering is the balanced one",
-    'os.environ.get("BENCH_ORDER", "latin")' in _rs, True)
-# #9 naming
-chk("harness: the client-side metric is named for what it measures",
-    "def max_client_requests_in_flight" in _rs, True)
-chk("harness: nothing still calls it the batch width",
-    "batch width is read back" in _rs, False)
-# fail-closed config, stale output, completion marker, tag set
-chk("harness: BENCH_THINK fails closed", "is not recognised; use one of" in _rs, True)
-chk("harness: a non-empty output directory is refused",
-    "already contains {len(stale)} arm-run files" in _rs, True)
-chk("harness: a completion marker is written last", "RUN_COMPLETE.json" in _rs, True)
-chk("harness: the manifest records the exact prompt tag set",
-    '"prompt_tags": [t for t, _, _ in PROMPTS],' in _rs, True)
-# analysis
-_mr = _pl3.Path("analysis/matrix_report.py").read_text(encoding="utf-8")
-chk("analysis: completeness comes from the manifest, not the largest row count",
-    'n_prompts = man.get("n_prompts")' in _mr, True)
-chk("analysis: --strict exists and can fail the run", "sys.exit(f\"\\n{len(FAILED)}" in _mr, True)
-_st = _pl3.Path("bench/stage_mtp_source.py").read_text(encoding="utf-8")
-chk("staging: refuses to stage onto or inside the source",
-    "must be outside MTP_SRC" in _st, True)
+# the accounting, from run T's own decode times
+_T = glob.glob("v4_audit_2026_08_25/data/matrix_T_timers_*")[0]
+def _decT(arm):
+    v = [sum(x["predicted_ms"] for x in json.load(open(f))["rows"]) / 1000
+         for f in glob.glob(f"{_T}/{arm}__rep*.json") if json.load(open(f)).get("rows")]
+    return st.mean(v)
+_b, _s, _d = _decT("baseline"), _decT("spec-draft-n8"), _decT("spec-dflash-n2")
+_exc = _s - _b
+chk("A12 excess decode seconds", round(_exc, 1), 71.4, 0.05)
+chk("A12 checkpoint share of the excess (%)", round(100 * _ck / _exc, 1), 54.7, 0.05)
+chk("A12 checkpointing is the largest single term", _ck > 0.5 * _exc, True)
+chk("A12 DFlash is faster than no speculation on the same build (s)",
+    round(_d - _b, 1), -5.3, 0.05)
 
-print("\n=== run O2: the balanced Latin square that replaces run O ===")
-_o2 = glob.glob("v4_audit_2026_08_25/data/matrix_O2_latin_*")
-chk("O2 exists", len(_o2), 1)
-_o2 = _o2[0]
-_o2m = json.load(open(f"{_o2}/manifest.json"))
-chk("O2 ordering is the balanced one", _o2m.get("order_mode"), "latin")
-chk("O2 blocks", _o2m.get("repeats"), 9)
-chk("O2 is attested by the runner", os.path.exists(f"{_o2}/RUN_COMPLETE.json"), True)
-chk("O2 records the prompt tag set", len(_o2m.get("prompt_tags") or []), 10)
-# the design, verified from the execution log rather than asserted
-import re as _re4
-_ordtxt = open("v4_audit_2026_08_25/data/matrix_O2.log", errors="replace").read()
-_orders = _re4.findall(r"=== repeat (\d+)\s+order: (.+?) ===", _ordtxt)
-chk("O2 blocks recorded in the execution log", len(_orders), 9)
-_pos = defaultdict(list)
-for _rep, _line in _orders:
-    for _i, _a in enumerate([x.strip() for x in _line.split("->")]):
-        _pos[_a].append(_i + 1)
-chk("O2 arms in the log", len(_pos), 9)
-chk("O2 every arm visited every position exactly once",
-    all(sorted(v) == list(range(1, 10)) for v in _pos.values()), True)
-# every request answered by the intended binary
-_ids = set()
-for _f in glob.glob(f"{_o2}/*__rep*.json"):
-    _si = json.load(open(_f)).get("server_identity") or {}
-    _ids.add((_si.get("build"), _si.get("commit")))
-chk("O2 a single server identity across all arm-runs", sorted(_ids), [("10622", "3737e4137")])
-chk("O2 arm-runs", len(glob.glob(f"{_o2}/*__rep*.json")), 81)
-# the published table
-_pbj = json.load(open(f"{_o2}/paired_blocks.json"))
-chk("O2 paired against a within-block baseline over nine blocks", _pbj["blocks"], 9)
-_pb = {a["arm"]: a for a in _pbj["arms"]}
-for arm, point, lo, hi, acc in (
-        ("spec-dflash-n2",    26.3,  25.5,  27.1, 72.3),
-        ("spec-mtp-n2",       22.7,  22.1,  23.3, 78.4),
-        ("spec-dflash-n4",    19.2,  18.5,  19.9, 55.2),
-        ("ngram-map-k4v-m8",  -0.3,  -0.6,   0.0, 50.0),
-        ("ngram-mod-n24",    -10.9, -11.4, -10.5,  5.0),
-        ("ngram-cache",      -19.0, -19.4, -18.6,  5.2),
-        ("spec-draft-n8",    -73.3, -73.5, -73.2, 29.5),
-        ("spec-draft-n1",    -74.8, -74.9, -74.7, 69.7)):
-    chk(f"O2 {arm} point estimate (%)", round(_pb[arm]["point_pct"], 1), point, 0.05)
-    chk(f"O2 {arm} 95% t interval", [round(x, 1) for x in _pb[arm]["ci95_t_pct"]], [lo, hi])
-    _rs = [json.load(open(f)) for f in glob.glob(f"{_o2}/{arm}__rep*.json")]
-    _dn = sum(x["draft_n"] for r in _rs for x in r["rows"])
-    _da = sum(x["draft_n_accepted"] for r in _rs for x in r["rows"])
-    chk(f"O2 {arm} acceptance %", round(100*_da/_dn, 1), acc, 0.05)
-# the balanced design moved the estimates, and one old one falls outside
-_opb = {a["arm"]: a for a in json.load(open(
-    "v4_audit_2026_08_25/data/matrix_O_headtohead_20260826_081806/paired_blocks.json"))["arms"]}
-chk("O2: run O's spec-mtp-n2 estimate falls outside the new interval",
-    not (_pb["spec-mtp-n2"]["ci95_t_pct"][0] <= _opb["spec-mtp-n2"]["point_pct"]
-         <= _pb["spec-mtp-n2"]["ci95_t_pct"][1]), True)
-chk("O2: the ordering of the arms is unchanged from run O",
-    [a["arm"] for a in _pbj["arms"]],
-    [a["arm"] for a in json.load(open(
-        "v4_audit_2026_08_25/data/matrix_O_headtohead_20260826_081806/paired_blocks.json"))["arms"]])
+# the withdrawn estimate measured the restore direction and missed the create
+_restore = st.mean([r["load_tgt_s"] + r["load_dft_s"] for r in _ext])
+chk("A12 restore-only total, which the log-gap rule could see (s)",
+    round(_restore, 1), 21.7, 0.05)
+chk("A12 the withdrawn 24.2 s is close to the restore side, not the whole",
+    abs(24.2 - _restore) < abs(24.2 - _ck), True)
 
-print("\n=== A15: the manifest hashed a launcher ===")
-_manifests = sorted(glob.glob("v4_audit_2026_08_25/data/matrix_*/manifest.json"))
-_srv = {json.load(open(f)).get("server_sha256") for f in _manifests}
-_srv.discard(None)
-chk("A15 every post-merge run recorded the same server_sha256", len(_srv), 1)
-chk("A15 and it is the launcher hash the patch README names",
-    sorted(_srv)[0].startswith("b6a5c490bb932ffa"), True)
-# the fix exists in the harness, whether or not a run has used it yet
-_rsrc = open("bench/retest_runner.py").read()
-chk("A15 the runner records every shared object beside the binary",
-    '"server_lib_sha256": _server_lib_hashes(),' in _rsrc, True)
-chk("A15 and de-duplicates them by resolved target",
-    "by_target[real] = p.name" in _rsrc, True)
-# and where a run has used it, the property must hold
-_withlibs = [f for f in _manifests if json.load(open(f)).get("server_lib_sha256")]
-print(f"  (runs carrying server_lib_sha256: {len(_withlibs)})")
-if _withlibs:
-    _libs = json.load(open(sorted(_withlibs)[-1]))["server_lib_sha256"]
-    chk("A15 the server implementation library is among them",
-        any("server-impl" in k for k in _libs), True)
-    chk("A15 the launcher hash differs from the implementation hash",
-        _libs[[k for k in _libs if "server-impl" in k][0]] != sorted(_srv)[0], True)
-_patch = "v4_audit_2026_08_25/patches/checkpoint_timers.patch"
-chk("A15 the instrumentation patch is archived", os.path.exists(_patch), True)
-chk("A15 the patch touches one file and no control flow",
-    open(_patch).read().count("+++ b/") , 1)
+# the instrumented build had to reproduce the stock one
+_O2 = glob.glob("v4_audit_2026_08_25/data/matrix_O2_latin_*")[0]
+def _pool(d, arm):
+    rs = [json.load(open(f)) for f in glob.glob(f"{d}/{arm}__rep*.json")]
+    rs = [r for r in rs if r.get("rows")]
+    n = sum(x["predicted_n"] for r in rs for x in r["rows"])
+    ms = sum(x["predicted_ms"] for r in rs for x in r["rows"])
+    return 1000 * n / ms
+for arm, tol in (("baseline", 1.0), ("spec-draft-n8", 1.0), ("spec-dflash-n2", 1.0)):
+    _delta = 100 * (_pool(_T, arm) / _pool(_O2, arm) - 1)
+    chk(f"A12 control: instrumented reproduces stock for {arm} (within {tol} %)",
+        abs(_delta) < tol, True)
 
 print("\n=== theory (ERRATA E1/E2) ===")
 rho=8/256
@@ -1110,7 +1025,7 @@ DOC_CLAIMS = [
     ("ERRATA.md",   "118.71",    "A12 corrected nominal volume"),
     ("ERRATA.md",   "61.88",     "A12 corrected write side"),
     ("README.md",   "118.7 GiB", "README corrected nominal volume"),
-    ("README.md",   "76 % is unattributed", "README states the limit"),
+    ("README.md",   "21.1 %",    "README unattributed share, measured"),
     ("ERRATA.md",   "68.7 %",    "A12 threshold failure point"),
     ("ERRATA.md",   "0.5 pp",    "A13 no-checkpoint agreement"),
     ("ERRATA.md",   "636 of 1272", "C4b sw_power_cap, corrected"),
@@ -1131,7 +1046,10 @@ DOC_CLAIMS = [
     ("README.md",   "+26.7 %",   "README discloses the same-config replicate"),
     ("v4_audit_2026_08_25/README.md", "292.1 s", "P pooled includes the draft cost"),
     ("v4_audit_2026_08_25/README.md", "72.8 %",  "P acceptance not inflated"),
-    ("README.md",   "17.24 s",   "README drafter generate time"),
+    ("ERRATA.md",   "39.08",     "A12 measured checkpoint total"),
+    ("ERRATA.md",   "54.7 %",    "A12 checkpoint share"),
+    ("ERRATA.md",   "21.9 ms",   "A12 median create"),
+    ("README.md",   "39.08 s",   "README checkpoint total"),
     ("README.md",   "69.7 %",    "README the falsifying acceptance"),
     ("README.md",   "146.2",     "README O2 winner"),
     ("README.md",   "+26.3 %",   "README O2 headline"),

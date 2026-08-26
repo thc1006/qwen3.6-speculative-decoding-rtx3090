@@ -114,7 +114,7 @@ draft context makes this hybrid target save and restore a full checkpoint on
 every partially accepted round — the server reports 82.079 MiB per checkpoint,
 772 creates and 709 restores in one arm-run — which DFlash logs zero times at
 draft lengths 1 to 16 and MTP zero times at 1 to 8
-([ERRATA A12](ERRATA.md#a12-full-checkpoint-activity-on-the-external-drafter-path)).
+([ERRATA A12](ERRATA.md#a12-what-the-checkpoint-path-costs-measured-with-timers-in-the-source)).
 
 **The three methods v1 benchmarked are the bottom three rows.** The original
 negative finding was right about what it measured. It measured the losing third
@@ -185,12 +185,12 @@ reported 82.079 MiB each — a nominal **118.7 GiB** by event count × logged si
 which is an estimate and not measured memory traffic. DFlash logs none of these
 events at draft lengths 1 to 16 and MTP none at 1 to 8. How much wall clock that
 costs is **not** established here
-([A12](ERRATA.md#a12-full-checkpoint-activity-on-the-external-drafter-path)). And the
+([A12](ERRATA.md#a12-what-the-checkpoint-path-costs-measured-with-timers-in-the-source)). And the
 external drafter is 0.8 B *dense* against a target that activates only ~3 B
 parameters per token, so drafting costs a quarter of a target step before any
 state management: 17.24 s in `generate()` against 1.89–3.43 s for a head that
 reuses the target's own layers
-([ERRATA A12](ERRATA.md#a12-full-checkpoint-activity-on-the-external-drafter-path)).
+([ERRATA A12](ERRATA.md#a12-what-the-checkpoint-path-costs-measured-with-timers-in-the-source)).
 
 ![v1 300-token matrix: request-mean vs pooled throughput](analysis/plot_mean_by_config.png)
 
@@ -670,42 +670,38 @@ quantisation stack, and none of those is measured here.
 
 ---
 
-## Where the time goes — partly measured, and not MoE-specific
+## Where the time goes — measured, and not MoE-specific
 
 The audit's re-measurement ([A7](ERRATA.md#a7-with-acceptance-measured-properly-there-is-no-anomaly-left-to-explain))
-removed the mystery: once acceptance is measured rather than assumed, decode
-rate tracks acceptance at r = +0.998 across the prompt set. What the 2026-08-26
-runs add is a partial cost accounting — and the emphasis is on *partial*.
+removed the mystery: decode rate tracks acceptance at r = +0.998 across the
+prompt set. What the 2026-08-26 runs add is where the extra time actually goes,
+timed in the source rather than inferred from log intervals.
 
-| per ten-prompt arm-run | external 0.8 B drafter | DFlash | MTP |
-|---|---|---|---|
-| draft-token acceptance | 41.3 % | 73.0 % | 78.6 % |
-| drafter `generate()` | **17.24 s** | 3.43 s | 2.73 s |
-| full-checkpoint creates / restores logged | **772 / 709** | **0 / 0** | **0 / 0** |
-| nominal state volume (event count × logged size) | **≈ 118.7 GiB** | none logged | none logged |
+An external 0.8 B drafter spends **71.4 s more in decode** than no speculation
+does, over one ten-prompt arm-run of 3000 tokens:
 
-The external-drafter arm spends 71.6 s more in decode than no speculation does.
-Of that, **24 % is the drafter's own forward passes**, measured by llama.cpp's
-counter. The other **76 % is unattributed**: it contains the checkpoint save and
-restore work and the verification of drafted tokens that are then thrown away,
-and this data cannot separate them. An earlier version of this section put a
-19.5 % wall-clock figure on the checkpoint path; that estimator was invalid and
-is withdrawn — the create and restore messages sit on opposite sides of the work
-they name, so the same rule missed one direction and captured the other
-([ERRATA A12](ERRATA.md#a12-full-checkpoint-activity-on-the-external-drafter-path)).
+| | seconds | share |
+|---|---|---|
+| speculative checkpoint save (785) | 17.34 | 24.3 % |
+| speculative checkpoint restore (728) | 21.74 | 30.5 % |
+| drafter `generate()` | 17.27 | 24.2 % |
+| unattributed | 15.05 | 21.1 % |
 
-What is solid is the categorical difference and its size. DFlash and MTP log
-**zero** of these checkpoint events at every draft length tested — 1 to 16 for
-DFlash, 1 to 8 for MTP — and DFlash finishes **4.6 s faster than no speculation
-at all** on the same prompts where the external drafter is 71.6 s slower. Note
-that this is the absence of *this logging event*, not proof of zero
-state-management cost: a rollback that stays inside `llama_n_rs_seq` copies
-state without emitting it.
+**More than half of it is state checkpointing** — 39.08 s, reproducible to two
+hundredths of a second across four arm-runs, at a median of 21.9 ms per save and
+22.4 ms per restore. `spec-dflash-n2` on the same prompts performs **zero** of
+these operations, spends 3.41 s drafting, and finishes **5.3 s faster than not
+speculating at all**.
 
-The second term is arithmetic and does not need instrumentation: this is a 35 B
-model with roughly 3 B active per token, so a 0.8 B **dense** drafter is not the
-1–2 % of target cost that speculative decoding usually assumes. It is nearer a
-quarter.
+The measurement required rebuilding llama.cpp with timers around the four
+checkpoint calls, so that run alone is not on a stock binary. It was used as its
+own control first: its throughput reproduces the stock build to within 0.54 %,
+and to −0.00 % on the arm being attributed. Patch, reasoning and scope in
+[ERRATA A12](ERRATA.md#a12-what-the-checkpoint-path-costs-measured-with-timers-in-the-source).
+
+The second term is arithmetic and needs no instrumentation: this is a 35 B model
+with roughly 3 B active per token, so a 0.8 B **dense** drafter is not the 1–2 %
+of target cost that speculative decoding usually assumes. It is nearer a quarter.
 
 ## Reproduction
 

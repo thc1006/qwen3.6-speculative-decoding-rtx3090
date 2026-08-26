@@ -751,88 +751,92 @@ run (D4). It is a property of speculation on this build, and it reproduces.
 
 ---
 
-### A12. Full-checkpoint activity on the external-drafter path
+### A12. What the checkpoint path costs, measured with timers in the source
 
-This repository retracted "MoE expert loading" as its mechanism (A1, A4). Two
-earlier versions of *this* item then over-reached in turn, and both are corrected
-here.
+Two earlier versions of this item over-reached and were corrected. This one is
+measured: llama.cpp was rebuilt with `ggml_time_us()` around the checkpoint
+calls themselves, because log timestamps could not recover the figure and
+upstream had already left the create-side timer in place, commented out, at
+`server-context.cpp:2963`. The patch is archived at
+[`v4_audit_2026_08_25/patches/checkpoint_timers.patch`](v4_audit_2026_08_25/patches/checkpoint_timers.patch);
+it is 15 insertions in one file and changes no control flow.
 
-**What the logs actually record.** Per arm-run of the ten prompts,
-`llama-server -v`:
+**The instrumented build is not stock, so it was used as its own control
+first.** Run T repeats three of run O2's arms with the same configuration:
 
-| arm | drafts | draft tokens gen / acc | drafter `generate()` | checkpoint creates | restores |
-|---|---|---|---|---|---|
-| `spec-draft-n8` — external 0.8 B drafter | 772 | 6092 / 2515 = 41.3 % | **17.24 s** | **772** | **709** |
-| `spec-dflash-n2` — separate DFlash GGUF | 1337 | 2671 / 1950 = 73.0 % | 3.43 s | **0** | **0** |
-| `spec-mtp-n2` — separate MTP GGUF | 1279 | 2553 / 2006 = 78.6 % | 2.73 s | **0** | **0** |
+| arm | O2, stock, 9 blocks | T, instrumented, 4 blocks | difference |
+|---|---|---|---|
+| no speculation | 115.7 | 116.3 | +0.54 % |
+| `spec-draft-n8` | 30.9 | 30.9 | **−0.00 %** |
+| `spec-dflash-n2` | 146.2 | 146.5 | +0.22 % |
 
-Each create logs `size = 82.079 MiB, draft = 19.266 MiB`. **`size` is already the
-total**: `common_prompt_checkpoint::size()` returns
-`data_tgt.size() + data_dft.size() + data_spec.size()` (`common/common.cpp:2254`),
-and the `draft` field is a component of it, printed for visibility. Multiplying
-the event counts by the reported total:
+The timers cost nothing measurable, so the attribution below is not paying for
+its own instrumentation.
 
-| | GiB |
-|---|---|
-| creates, 772 × 82.079 MiB | **61.88** |
-| restores, 709 × 82.08 MiB | **56.83** |
-| **combined nominal state volume** | **118.71** |
-
-> **Correction.** An earlier version of this item named the first log field
-> `checkpoint_target_mib` and added the 19.266 MiB draft component to it on every
-> create, double-counting it. That gave 76.4 GiB of writes and 133.2 GiB
-> combined. Both figures were wrong, and they appeared in this file, in
-> `README.md` and in the pull-request description.
-
-**This is an event-count × reported-size estimate, not measured traffic.** No
-profiler, memory-controller counter or backend trace was read. It bounds the
-state the server says it copied; it does not establish what crossed DRAM, PCIe
-or VRAM.
-
-**No wall-clock share is claimed, and the previous one is withdrawn.** Earlier
-versions of this item reported "≈ 19.5 % of the arm-run" from the interval
-between each checkpoint log line and the next line in the log. That estimator is
-invalid, because the two messages sit on opposite sides of the work they name:
-
-| | order in `tools/server/server-context.cpp` |
-|---|---|
-| create | `ckpt.update_tgt()` at `:2965`, **then** the "created" message at `:2970` — the interval after the log misses the create copy |
-| restore | the "restoring" message at `:3822`, **then** `load_tgt()` at `:3824` and `load_dft()` at `:3827` — the interval after the log does contain the restore |
-
-So the same rule measures one direction and not the other, and the number it
-produced cannot be called save-plus-restore time. It is removed from the data,
-the documents and the checker. Timing this needs the timers upstream already
-left commented out at `:2963` and `:2967-2968`, which is queued in
-[`RETEST_TODO.md`](RETEST_TODO.md) and not attempted here.
-
-**What is left of the accounting, honestly.** One ten-prompt arm-run of run J,
-decode time only:
+**The accounting.** One ten-prompt arm-run, 3000 generated tokens, decode time
+only, mean of four:
 
 | | seconds | share of the excess |
 |---|---|---|
-| no speculation, decode | 24.5 | — |
-| `spec-draft-n8`, decode | 96.1 | — |
-| **excess to account for** | **71.6** | **100 %** |
-| drafter `generate()`, measured by llama.cpp's own counter | 17.2 | **24 %** |
-| **unattributed** | **54.4** | **76 %** |
+| no speculation, decode | 25.8 | — |
+| `spec-draft-n8`, decode | 97.2 | — |
+| **excess to account for** | **71.4** | **100 %** |
+| `update_tgt` — 785 checkpoint creates | 17.34 | 24.3 % |
+| `load_tgt` — 728 restores | 16.33 | 22.9 % |
+| `load_dft` — 728 restores | 5.41 | 7.6 % |
+| **speculative checkpoint, total** | **39.08** | **54.7 %** |
+| drafter `generate()` | 17.27 | 24.2 % |
+| **unattributed** | **15.05** | **21.1 %** |
 
-The unattributed three quarters contains at least the checkpoint save and
-restore work and the verification of drafted tokens that are then discarded, and
-**this data cannot separate them**. Anyone wanting that split needs source-level
-timers, not log timestamps.
+Median cost of one create is **21.9 ms** and of one `load_tgt` **22.4 ms**. The
+total is reproducible to two hundredths of a second: 39.10, 39.07, 39.06, 39.07
+across the four arm-runs.
 
-**The categorical observation does survive, and it is the useful part.** The
-external drafter logs 772 creates and 709 restores; DFlash logs none at `n_max`
-1, 2, 4, 6, 8 and 16, and MTP none at 1, 2 and 8. That is an absence of *this
-full-checkpoint logging event*, not proof that those paths do no
-state-management work at all — a recurrent rollback that stays within
-`llama_n_rs_seq` copies state without emitting this message. And at the same
-draft position DFlash finishes **4.6 s faster than no speculation at all** on the
-same ten prompts while the external drafter is 71.6 s slower.
+The corresponding volume, at the 82.079 MiB the server reports per checkpoint —
+`common_prompt_checkpoint::size()` returns `data_tgt + data_dft + data_spec`, so
+that figure is already the total and the separately logged 19.266 MiB draft
+component is part of it, not additional:
 
-**Scope.** One target, one host, one binary, one drafter of each kind, one
-arm-run per row. The counts are exact. The volume is an estimate with a stated
-formula. The wall-clock split is not established.
+| | GiB |
+|---|---|
+| creates, 772 × 82.079 MiB (run J counts) | **61.88** |
+| restores, 709 × 82.08 MiB | 56.83 |
+| **combined nominal state volume** | **118.71** |
+
+That is an event-count × reported-size estimate, not measured memory traffic; no
+profiler or memory-controller counter was read. An earlier version added the
+draft component a second time on every create and reported 76.4 and 133.2 GiB.
+Both were wrong and appeared in this file, in `README.md` and in the pull-request
+description.
+
+**So the withdrawn estimate was not merely unsound, it was low — and the reason
+is now quantified.** The retracted figure said 24.2 s, from the interval after
+each checkpoint log line. The create message is emitted *after* `update_tgt()`
+and the restore message *before* `load_tgt()`, so that rule could only see the
+restore direction: 16.33 + 5.41 = **21.7 s**, against the 24.2 s it reported.
+What it missed is the entire create side, 17.34 s. The error was not noise; it
+was exactly the half of the operation the log placement hides.
+
+**Three scope notes, none of which the numbers depend on.**
+
+- `update_dft` on the speculative checkpoint **never fires** — 0 of 785 — because
+  it is gated on the draft context reporting `SEQ_RM_TYPE_FULL` and it does not.
+  The 19.266 MiB of draft state inside each checkpoint is written by the
+  *prompt*-checkpoint path at `:2248`, which is ungated, and the restore side
+  loads it unconditionally. That 5.41 s is therefore the speculative path paying
+  to restore state a different mechanism saved.
+- That other mechanism, context checkpoints, fires **26 times in every arm** —
+  baseline, `spec-draft-n8` and `spec-dflash-n2` alike. It is not instrumented
+  here, and it does not need to be: being identical across arms, it cancels in
+  the excess, which is the quantity being attributed.
+- The 21.1 % that remains unattributed contains the verification of drafted
+  tokens that are then discarded, and anything else the two instrumented
+  mechanisms do not cover. It is not claimed to be any one thing.
+
+**And the contrast that matters is unchanged.** `spec-dflash-n2` on the same
+prompts, same build: **zero** checkpoint operations, 3.41 s of drafter time, and
+a decode time **5.3 s faster than no speculation at all** where the external
+drafter is 71.4 s slower.
 
 ---
 
