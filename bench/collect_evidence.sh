@@ -37,6 +37,15 @@ for f in gpu_telemetry_*.csv; do
     n_tele=$((n_tele + 1))
 done
 echo "manifest: $n_logs logs + $n_tele telemetry files -> $MAN"
+# The committed tree carries EMPTY `server_logs/` directories - the logs are the
+# 3 GB that are not committed - so "the directory exists" is not "there is
+# evidence here". Without this the script produced a 578-byte archive of nothing
+# and exited 0.
+if [ "$n_logs" -eq 0 ]; then
+    echo "no *.log files under any server_logs/ in $SRC - nothing to archive" >&2
+    rm -f "$MAN"
+    exit 1
+fi
 
 # Telemetry is small enough to live in the repository; the logs are not.
 TELE="$OUT/telemetry"
@@ -46,7 +55,11 @@ cp -f gpu_telemetry_*.csv "$TELE"/ 2>/dev/null || true
 # built as an array so a directory with a space in its name cannot split
 dirs=()
 for d in matrix_* smoke_*; do
-    [ -d "$d/server_logs" ] && dirs+=("$d/server_logs")
+    # a directory with no logs in it contributes nothing and would make the
+    # archive look complete
+    if compgen -G "$d/server_logs/*.log" > /dev/null; then
+        dirs+=("$d/server_logs")
+    fi
 done
 if [ "${#dirs[@]}" -eq 0 ]; then
     echo "no server_logs directories under $SRC" >&2

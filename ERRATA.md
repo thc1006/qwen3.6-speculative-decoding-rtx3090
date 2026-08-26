@@ -1137,13 +1137,13 @@ of the same set.
 twice: over all prompts, and over only those prompts where every arm in the run
 generated exactly the same number of tokens. The split is clean:
 
-| run | thinking | prompts | length-matched | largest shift |
+| run | thinking | prompts | length-matched | largest \|shift\| |
 |---|---|---:|---:|---:|
 | every thinking-on run with a computable comparison (24) | on | 10 or 20 | **all of them** | **0.00 pp** |
 | `matrix_L_thinkoff` | off | 10 | 5 | **16.79 pp** |
 | `matrix_M3_thinkoff` | off | 10 | 5 | 10.15 pp |
 | `matrix_R_ext_thinkoff` | off | 20 | 6 | 7.49 pp |
-| `D_master_matrix_think_off` | off | 10 | 5 | 6.37 pp |
+| `D_master_matrix_think_off` | off | 10 | 5 | 6.37 pp *(the only run whose largest is negative)* |
 
 **A published sign flips.** Run L's `spec-dflash-n4` at thinking off is reported
 as **−2.7 %** in `v4_audit_2026_08_25/README.md` and in the v4.1 changelog entry

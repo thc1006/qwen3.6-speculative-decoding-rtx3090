@@ -1311,6 +1311,16 @@ for _f in glob.glob("v4_audit_2026_08_25/data/*/*__rep*.json"):
         _stops[_k][_x.get("finish_reason")] += 1
 chk("A17 no thinking-on request stopped before the cap",
     dict(_stops["on"]), {"length": 4674})
+# finish_reason is the server's word for it; the claim is about token counts
+_short = 0
+for _f in glob.glob("v4_audit_2026_08_25/data/*/*__rep*.json"):
+    _m = json.load(open(os.path.join(os.path.dirname(_f), "manifest.json")))
+    if str(_m.get("think")) == "off" or not _m.get("max_tokens"):
+        continue
+    for _x in json.load(open(_f)).get("rows") or []:
+        if _x["predicted_n"] != _m["max_tokens"]:
+            _short += 1
+chk("A17 and every one of them generated exactly max_tokens", _short, 0)
 chk("A17 thinking-off requests that stopped early", _stops["off"]["stop"], 696)
 # the second reading A17 overturns: acceptance, not only throughput
 _D = [r for r in _lm if r["run"].startswith("D_master")][0]
