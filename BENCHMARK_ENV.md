@@ -441,9 +441,21 @@ table; every matrix carries its own baseline for that reason.
 
 ## Instrumentation
 
-- continuous `nvidia-smi` trace including `clocks_event_reasons.active` for the
-  whole of every session — **5 s** for the sessions up to run O2, **1 s** for
-  runs T3 and O3 onward (`gpu_telemetry_*.csv`, one per session)
+- continuous `nvidia-smi` trace including the throttle-reason bitmask for the
+  whole of every session, one file per session. **Three schemas were used, and
+  `bench/gpu_telemetry.sh` carried only one of them until 2026-08-26** — it
+  produced one of the seventeen traces recorded during the audit; the other two
+  forms lived inline in driver scripts. All three are in that file now, selected
+  by its first argument, so any committed trace can be reproduced:
+
+  | schema | fields | interval | traces | what reads it |
+  |---|---:|---:|---:|---|
+  | `full` | 19 | 5 s | 1 | ERRATA C4b's thermal table |
+  | `compact` | 9 | 5 s | 12 | runs I/J through O2, and run T — including A16's thermal comparison |
+  | `raw` | 10 | 1 s | 4 | runs T3, O3 and later |
+
+  The trace belonging to a run shares its timestamp:
+  `gpu_telemetry_<label>_<stamp>.csv` beside `matrix_<label>_<stamp>/`.
 - per-request JSON with full `content` and `reasoning_content`, token ids via
   `logprobs`, `timings`, and a `thinking_suppressed` flag measured from the
   reasoning channel rather than assumed from the request flag

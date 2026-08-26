@@ -1185,6 +1185,16 @@ chk("the headline run's policy is in the table",
     "3072" in _env and "O2" in _env, True)
 chk("every fit-target 3072 run tag appears in the table",
     sorted(t for t in _policy.get("3072", set()) if t not in _env), [])
+# the telemetry script produced one of seventeen traces; the other two schemas
+# were inline in driver scripts that were never committed
+_tel = pathlib.Path(__file__).resolve().parents[1].joinpath("bench", "gpu_telemetry.sh") \
+    .read_text(encoding="utf-8")
+chk("the telemetry script carries every schema that was used",
+    sorted(x for x in ("full", "compact", "raw") if f"{x})" not in _tel), [])
+chk("its compact schema has the nine fields those traces have",
+    len([c for c in _tel.split("echo 'ts,util")[1].split("'")[0].split(",")]), 8)
+chk("BENCHMARK_ENV names all three", all(x in _env for x in
+    ("`full`", "`compact`", "`raw`")), True)
 
 
 print("\n=== the harness that ran each run is recoverable ===")
