@@ -19,7 +19,7 @@
 > assumed, concurrent client requests verified from request timestamps, full per-request text
 > and token ids, and continuous GPU telemetry. Its findings are the ones to
 > cite about current llama.cpp, with two limits stated up front rather than
-> buried: the same configuration measured five times spans **6.0 pp**
+> buried: the same configuration measured six times spans **6.0 pp**
 > ([A16](ERRATA.md#a16-two-runs-identical-in-every-recorded-respect-and-byte-identical-in-output-differ-by-34--on-one-arm)),
 > so quote the range and not the interval; and **every thinking-off comparison
 > here is confounded by output length**
@@ -45,8 +45,8 @@
 > as the drafter — DFlash, and the model's built-in multi-token-prediction head
 > — it wins, by a fifth to a quarter, at short draft windows and one request at
 > a time. The width of that band is not rounding: the same DFlash configuration
-> measured five times spans +20.7 % to +26.7 %, and two of those runs used the
-> same binary and produced byte-identical output
+> measured six times spans +20.7 % to +26.7 %, and two pairs of those runs used
+> the same binary and produced byte-identical output
 > ([ERRATA A16](ERRATA.md#a16-two-runs-identical-in-every-recorded-respect-and-byte-identical-in-output-differ-by-34--on-one-arm)).
 > "Speculative decoding loses on this hardware" was a statement about a regime
 > this repository had not separated.
@@ -105,25 +105,51 @@ rejected, which is what a 10–19 % loss is made of.
 
 ![Nine methods, one baseline, one matrix](analysis/plot_head_to_head.png)
 
+**It was run twice.** Run O3 is the same nine arms, nine balanced blocks, same
+stock binary and same models, five hours later, with the harness asserting the
+library hash on **every arm-run** rather than once. All **810 request-pairs are
+byte-identical** to O2 — same token ids, same text — and acceptance matches to a
+tenth of a point on every arm. What moves is the time:
+
+| arm | O2 | O3 | shift |
+|---|---:|---:|---:|
+| `spec-dflash-n2` | +26.3 % | **+23.4 %** | **−2.9 pp** |
+| `spec-mtp-n2` | +22.7 % | +21.7 % | −1.0 pp |
+| `spec-dflash-n4` | +19.2 % | +18.3 % | −0.9 pp |
+| `ngram-cache` | −19.0 % | −19.7 % | −0.7 pp |
+| `ngram-mod-n24` | −10.9 % | −11.5 % | −0.5 pp |
+| `ngram-map-k4v-m8` | −0.3 % | −0.6 % | −0.3 pp |
+| `spec-draft-n8` | −73.3 % | −73.5 % | −0.2 pp |
+| `spec-draft-n1` | −74.8 % | −75.0 % | −0.2 pp |
+| *no speculation, absolute* | *115.7* | *116.5* | *+0.7 %* |
+
+Eight arms move by 0.2 to 1.0 pp. **`spec-dflash-n2` moves by 2.9**, and it did
+the same thing between runs T and T3 — 5.2 pp, also on byte-identical output.
+Whatever this is, it is specific to that arm and it is reproducible, and nothing
+recorded distinguishes the runs:
+[ERRATA A16](ERRATA.md#a16-two-runs-identical-in-every-recorded-respect-and-byte-identical-in-output-differ-by-34--on-one-arm).
+
 The design matters and the numbers show it: run O measured the same arms at
 three repeats with the arm list merely reversed on odd repeats, which leaves
 position confounded with time. Its point estimates were 0.3–1.7 pp away from
 these, and for `spec-mtp-n2` its +21.8 % falls **outside** the interval above.
 
 † This table is run O2, and **the intervals in it describe run O2, not the
-configuration.** `spec-dflash-n2` was measured five times under this memory
-policy — run O **+24.6 %**, run M1 **+26.7 %**, run O2 **+26.3 %**, run T
-**+25.9 %**, run T3 **+20.7 %** — a 6.0 pp spread, the second largest in the
-dataset after `spec-mtp-n4` (8.6 pp). The paired-block interval above is 1.6 pp
-wide; the between-run range is nearly four times that, and runs T and T3 sit
-5.2 pp apart while running **the same binary on the same models and producing
-byte-identical output**. That pair is
+configuration.** `spec-dflash-n2` was measured six times under this memory
+policy on 2026-08-26 — M1 **+26.7 %** (08:00), O **+24.6 %** (09:01), O2
+**+26.3 %** (15:37), T **+25.9 %** (18:27), T3 **+20.7 %** (20:33), O3
+**+23.4 %** (20:44) — a 6.0 pp spread, the second largest in the dataset after
+`spec-mtp-n4` (8.6 pp). The paired-block interval above is 1.6 pp wide; the
+between-run range is nearly four times that. Two of those six pairs ran the same
+binary on the same models and produced **byte-identical output** — T against T3,
+5.2 pp apart, and O2 against O3, 2.9 pp apart on 810 of 810 identical
+request-pairs. That is
 [ERRATA A16](ERRATA.md#a16-two-runs-identical-in-every-recorded-respect-and-byte-identical-in-output-differ-by-34--on-one-arm);
 its cause is not isolated. Treat +20.7 % to +26.7 % as what this configuration
 delivers and the interval as within-run precision only.
 
-O2 is quoted because it is the balanced nine-block design, not because it is
-lowest — run T3 is. Runs K1 and L read about +21 % for the same arm and are
+O2 is quoted because the documents are built on it and because run O3 replicates
+it arm for arm; it is not the lowest — run T3 is. Runs K1 and L read about +21 % for the same arm and are
 excluded from the comparison above: they ran at `--fit-target 2048`, a different
 memory policy, which [`BENCHMARK_ENV.md`](BENCHMARK_ENV.md) records as a variable
 across runs. Until 2026-08-26 this footnote quoted run O's +24.6 % as though it

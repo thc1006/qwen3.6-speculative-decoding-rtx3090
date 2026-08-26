@@ -1271,7 +1271,7 @@ chk("A17 run R code_rust speculative lengths",
     sorted(n for a, v in _rlen["code_rust"].items() if a != "baseline" for n in v),
     [300, 300, 300])
 chk("A17 thinking-off runs with a computable comparison", len(_off), 4)
-chk("A17 thinking-on runs with a computable comparison", len(_on), 24)
+chk("A17 thinking-on runs with a computable comparison", len(_on), 25)
 chk("A17 every thinking-on run is fully length-matched",
     sorted({r["prompts"] == r["length_matched_prompts"] for r in _on}), [True])
 chk("A17 no thinking-on arm moves when the comparison is restricted",
@@ -1310,7 +1310,7 @@ for _f in glob.glob("v4_audit_2026_08_25/data/*/*__rep*.json"):
     for _x in json.load(open(_f)).get("rows") or []:
         _stops[_k][_x.get("finish_reason")] += 1
 chk("A17 no thinking-on request stopped before the cap",
-    dict(_stops["on"]), {"length": 4674})
+    dict(_stops["on"]), {"length": 5484})
 # finish_reason is the server's word for it; the claim is about token counts
 _short = 0
 for _f in glob.glob("v4_audit_2026_08_25/data/*/*__rep*.json"):
@@ -1419,6 +1419,98 @@ for _a in _pb["arms"]:
         (_hi - _lo) >= (_bhi - _blo) - 1e-9, True)
 chk("README names the interval it publishes",
     "95 % CI (t, over blocks)" in _README0, True)
+
+
+print("\n=== run O3: the headline matrix, replicated with full provenance ===")
+_O3 = sorted(glob.glob("v4_audit_2026_08_25/data/matrix_O3_latin_*"))[0]
+_mO3 = json.load(open(f"{_O3}/manifest.json"))
+_mO2 = json.load(open(f"{_O2}/manifest.json"))
+chk("O3 arm-runs", len(glob.glob(f"{_O3}/*__rep*.json")), 81)
+chk("O3 is attested", os.path.isfile(f"{_O3}/RUN_COMPLETE.json"), True)
+chk("O3 records the balance it achieved",
+    _mO3.get("schedule_is_position_balanced"), True)
+chk("O3 asserted the stock library per arm-run",
+    (_mO3.get("expect_lib_sha256") or "")[:16], "a0cbe4d04bcda3f8")
+for _k in ("target_sha256", "draft_sha256", "dflash_sha256", "mtp_sha256",
+           "common_args", "max_tokens", "seed", "think", "concurrency", "ctx",
+           "fit_target", "n_prompts", "arms", "repeats"):
+    chk(f"O3 {_k} matches O2", _mO2.get(_k) == _mO3.get(_k), True)
+
+_same = _diff = 0
+for _arm in _mO2["arms"]:
+    for _rep in range(9):
+        _fa, _fb = f"{_O2}/{_arm}__rep{_rep}.json", f"{_O3}/{_arm}__rep{_rep}.json"
+        if not (os.path.isfile(_fa) and os.path.isfile(_fb)):
+            continue
+        for _xa, _xb in zip(json.load(open(_fa))["rows"], json.load(open(_fb))["rows"]):
+            _ka = json.dumps([_xa.get("tokens"), _xa.get("content"),
+                              _xa.get("reasoning_content")], ensure_ascii=False,
+                             sort_keys=True)
+            _kb = json.dumps([_xb.get("tokens"), _xb.get("content"),
+                              _xb.get("reasoning_content")], ensure_ascii=False,
+                             sort_keys=True)
+            if _ka == _kb:
+                _same += 1
+            else:
+                _diff += 1
+chk("O2 and O3 request-pairs compared", _same + _diff, 810)
+chk("O2 and O3 outputs are byte-identical", _diff, 0)
+
+
+def _rel(d, arm):
+    def _p(a):
+        n = ms = 0
+        for f in glob.glob(f"{d}/{a}__rep*.json"):
+            r = json.load(open(f))
+            if r.get("crashed"):
+                continue
+            n += sum(x["predicted_n"] for x in r["rows"])
+            ms += sum(x["predicted_ms"] for x in r["rows"])
+        return 1000 * n / ms if ms else None
+    return 100 * (_p(arm) / _p("baseline") - 1)
+
+
+_shifts = {a: round(_rel(_O3, a) - _rel(_O2, a), 1)
+           for a in _mO2["arms"] if a != "baseline"}
+chk("O3 shift on spec-dflash-n2 (pp)", _shifts["spec-dflash-n2"], -2.9, 0.05)
+chk("O3: every other arm moves by at most 1.0 pp",
+    sorted(a for a, v in _shifts.items()
+           if a != "spec-dflash-n2" and abs(v) > 1.0), [])
+chk("O3: the DFlash arm moves further than any other",
+    max(_shifts, key=lambda a: abs(_shifts[a])), "spec-dflash-n2")
+_acc_diff = []
+for _arm in _mO2["arms"]:
+    if _arm == "baseline":
+        continue
+    _v = []
+    for _d in (_O2, _O3):
+        _dn = _da = 0
+        for _f in glob.glob(f"{_d}/{_arm}__rep*.json"):
+            for _x in json.load(open(_f))["rows"]:
+                _dn += _x["draft_n"]
+                _da += _x["draft_n_accepted"]
+        _v.append(100 * _da / _dn if _dn else 0.0)
+    _acc_diff.append(abs(_v[0] - _v[1]))
+chk("O3 acceptance matches O2 to a tenth of a point on every arm",
+    round(max(_acc_diff), 2) <= 0.1, True)
+_rmo3 = " ".join(_norm(pathlib.Path(__file__).resolve().parents[1]
+                       .joinpath("README.md").read_text(encoding="utf-8")).split())
+chk("README states the replication", "810 request-pairs are byte-identical" in _rmo3, True)
+# the two intervals A16 says barely overlap
+_pb2 = {a["arm"]: a["ci95_t_pct"] for a in
+        json.load(open(f"{_O2}/paired_blocks.json"))["arms"]}
+_pb3 = {a["arm"]: a["ci95_t_pct"] for a in
+        json.load(open(f"{_O3}/paired_blocks.json"))["arms"]}
+chk("O2's interval on the DFlash arm",
+    [round(x, 1) for x in _pb2["spec-dflash-n2"]], [25.5, 27.1])
+chk("O3's interval on the DFlash arm",
+    [round(x, 1) for x in _pb3["spec-dflash-n2"]], [21.4, 25.6])
+chk("they overlap by less than either is wide",
+    round(min(_pb2["spec-dflash-n2"][1], _pb3["spec-dflash-n2"][1])
+          - max(_pb2["spec-dflash-n2"][0], _pb3["spec-dflash-n2"][0]), 1), 0.1, 0.05)
+chk("ERRATA says they barely overlap",
+    "barely overlap" in _norm(pathlib.Path(__file__).resolve().parents[1]
+                              .joinpath("ERRATA.md").read_text(encoding="utf-8")), True)
 
 
 print("\n=== the balanced design is verified, not declared ===")
@@ -1732,7 +1824,7 @@ for _d in sorted(glob.glob("v4_audit_2026_08_25/data/matrix_*")):
 
 _README = _norm(pathlib.Path(__file__).resolve().parents[1].joinpath("README.md")
                 .read_text(encoding="utf-8"))
-for _tag in ("O", "M1", "O2", "T", "T3"):
+for _tag in ("O", "M1", "O2", "T", "T3", "O3"):
     _v = _comparable.get(_tag, {}).get("spec-dflash-n2")
     chk(f"footnote: run {_tag} spec-dflash-n2 is a real run", _v is not None, True)
     if _v is not None:
@@ -1740,7 +1832,7 @@ for _tag in ("O", "M1", "O2", "T", "T3"):
             _norm(f"{_v:+.1f} %").replace("+", "+") in _README, True)
 
 _dfl = {t: v["spec-dflash-n2"] for t, v in _comparable.items() if "spec-dflash-n2" in v}
-chk("footnote: spec-dflash-n2 was measured in five comparable runs", len(_dfl), 5)
+chk("footnote: spec-dflash-n2 was measured in six comparable runs", len(_dfl), 6)
 _spread = max(_dfl.values()) - min(_dfl.values())
 chk("footnote: the between-run spread (pp)", round(_spread, 1), 6.0, 0.05)
 chk("README quotes that spread", "6.0 pp spread" in _README, True)

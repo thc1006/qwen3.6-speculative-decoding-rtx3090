@@ -1091,10 +1091,39 @@ also points the wrong way for the hypothesis: the run with *more* apparent
 capping is the **faster** one. No thermal slowdown flag is raised on any loaded
 sample of either run.
 
-**The cause is not isolated.** Nothing recorded distinguishes the two runs. What
-is between them is machine history — two rebuilds and a killed rehearsal — which
-changes page cache and allocator state and is not captured by any field here.
-That is a hypothesis, not a finding, and it is written as one.
+**It happened again, on a different pair, and only to that arm.** Run O3 is the
+nine-arm headline matrix repeated five hours after run O2 — same stock
+`libllama-server-impl.so` `a0cbe4d0…`, asserted per arm-run, same models, nine
+balanced blocks each. All **810 of 810 request-pairs are byte-identical** and
+acceptance matches to a tenth of a point on every arm. The changes:
+
+| arm | O2 | O3 | shift |
+|---|---:|---:|---:|
+| `spec-dflash-n2` | +26.3 % | +23.4 % | **−2.9 pp** |
+| `spec-mtp-n2` | +22.7 % | +21.7 % | −1.0 pp |
+| `spec-dflash-n4` | +19.2 % | +18.3 % | −0.9 pp |
+| `ngram-cache` | −19.0 % | −19.7 % | −0.7 pp |
+| `ngram-mod-n24` | −10.9 % | −11.5 % | −0.5 pp |
+| `ngram-map-k4v-m8` | −0.3 % | −0.6 % | −0.3 pp |
+| `spec-draft-n8` | −73.3 % | −73.5 % | −0.2 pp |
+| `spec-draft-n1` | −74.8 % | −75.0 % | −0.2 pp |
+
+Eight arms move by 0.2 to 1.0 pp. `spec-dflash-n2` moves by 2.9. Two independent
+pairs, both on byte-identical output, both singling out the same arm: this is a
+property of that configuration and not a stray measurement. `spec-dflash-n4` —
+the same drafter at twice the draft length — moves a third as far, so it is not
+simply "DFlash".
+
+Ordered by clock, that arm reads 146.66 (M1, 08:00), 145.83 (O, 09:01), 146.16
+(O2, 15:37), 146.48 (T, 18:27), 141.50 (T3, 20:33), 143.79 (O3, 20:44) tok/s
+while its baseline stays inside 115.5–117.3. The two lowest are the two latest,
+which is suggestive of a state change rather than noise — and it is two points,
+so it is not evidence yet.
+
+**The cause is not isolated.** Nothing recorded distinguishes the runs in either
+pair. What sits between T and T3 is machine history — two rebuilds and a killed
+rehearsal — which changes page cache and allocator state and is captured by no
+field here. That is a hypothesis, not a finding, and it is written as one.
 
 **What it means for the numbers.** The arm that [A12](#a12-what-the-checkpoint-path-costs-measured-with-timers-in-the-source)
 attributes is stable across the two runs: `spec-draft-n8` moves 0.11 %, the
@@ -1108,9 +1137,11 @@ The headline DFlash figure does not replicate at that precision.
 repeats are not a between-run error bar; this is that statement applied to the
 headline arm, with the confounds removed one at a time. The 95 % paired-block
 interval on `spec-dflash-n2` in run O2 is `[+25.5 %, +27.1 %]`, a width of
-1.6 pp, and two runs of the same binary on the same data sit 5.2 pp apart. **The
-interval describes the run, not the configuration.** The README quotes the
-between-run range beside it for that reason.
+1.6 pp. Run O3's is `[+21.4 %, +25.6 %]`. **The two intervals barely overlap — by
+0.1 pp, out of widths of 1.6 and 4.2 — on byte-identical output from the same
+binary.** Six runs of the configuration span
++20.7 % to +26.7 %. The interval describes the run, not the configuration, and
+the README quotes the range beside it for that reason.
 
 ### A17. The thinking-off comparisons are not comparisons of the same amount of work
 
@@ -1119,8 +1150,8 @@ metric when the arms generate the same number of tokens and a confounded one
 when they do not, because decode rate falls as the KV cache grows: an arm that
 stops at 187 tokens is being scored on cheaper tokens than one that runs to 300.
 
-With thinking **on**, the question never arises here. All **4674** thinking-on
-requests in the controlled tier, across 28 run directories, returned
+With thinking **on**, the question never arises here. All **5484** thinking-on
+requests in the controlled tier, across 29 run directories, returned
 `finish_reason: length` at exactly their run's `max_tokens`. Not one stopped
 early.
 
@@ -1139,7 +1170,7 @@ generated exactly the same number of tokens. The split is clean:
 
 | run | thinking | prompts | length-matched | largest \|shift\| |
 |---|---|---:|---:|---:|
-| every thinking-on run with a computable comparison (24) | on | 10 or 20 | **all of them** | **0.00 pp** |
+| every thinking-on run with a computable comparison (25) | on | 10 or 20 | **all of them** | **0.00 pp** |
 | `matrix_L_thinkoff` | off | 10 | 5 | **16.79 pp** |
 | `matrix_M3_thinkoff` | off | 10 | 5 | 10.15 pp |
 | `matrix_R_ext_thinkoff` | off | 20 | 6 | 7.49 pp |

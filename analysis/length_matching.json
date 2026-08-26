@@ -736,6 +736,71 @@
       }
     },
     {
+      "run": "matrix_O3_latin_20260826_203251",
+      "think": "on",
+      "ignore_eos": false,
+      "prompts": 10,
+      "length_matched_prompts": 10,
+      "arms": {
+        "spec-draft-n1": {
+          "all_prompts_pct": -74.97,
+          "acceptance_all_prompts": 69.66,
+          "length_matched_pct": -74.97,
+          "shift_pp": 0.0,
+          "acceptance_length_matched": 69.66
+        },
+        "spec-draft-n8": {
+          "all_prompts_pct": -73.53,
+          "acceptance_all_prompts": 29.54,
+          "length_matched_pct": -73.53,
+          "shift_pp": 0.0,
+          "acceptance_length_matched": 29.54
+        },
+        "spec-dflash-n2": {
+          "all_prompts_pct": 23.44,
+          "acceptance_all_prompts": 72.35,
+          "length_matched_pct": 23.44,
+          "shift_pp": 0.0,
+          "acceptance_length_matched": 72.35
+        },
+        "spec-dflash-n4": {
+          "all_prompts_pct": 18.3,
+          "acceptance_all_prompts": 55.17,
+          "length_matched_pct": 18.3,
+          "shift_pp": 0.0,
+          "acceptance_length_matched": 55.17
+        },
+        "spec-mtp-n2": {
+          "all_prompts_pct": 21.7,
+          "acceptance_all_prompts": 78.4,
+          "length_matched_pct": 21.7,
+          "shift_pp": 0.0,
+          "acceptance_length_matched": 78.4
+        },
+        "ngram-cache": {
+          "all_prompts_pct": -19.68,
+          "acceptance_all_prompts": 5.17,
+          "length_matched_pct": -19.68,
+          "shift_pp": 0.0,
+          "acceptance_length_matched": 5.17
+        },
+        "ngram-mod-n24": {
+          "all_prompts_pct": -11.47,
+          "acceptance_all_prompts": 5.03,
+          "length_matched_pct": -11.47,
+          "shift_pp": 0.0,
+          "acceptance_length_matched": 5.03
+        },
+        "ngram-map-k4v-m8": {
+          "all_prompts_pct": -0.58,
+          "acceptance_all_prompts": 50.0,
+          "length_matched_pct": -0.58,
+          "shift_pp": 0.0,
+          "acceptance_length_matched": 50.0
+        }
+      }
+    },
+    {
       "run": "matrix_O_headtohead_20260826_081806",
       "think": "on",
       "ignore_eos": false,
