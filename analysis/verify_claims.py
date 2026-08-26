@@ -1289,21 +1289,22 @@ chk("runs that record which harness ran them", len(_declared) >= 1, True)
 # it actually executed is the one committed at 1b8053a. The two fields are
 # compared, and every disagreement has to be listed here on purpose rather than
 # passing silently. `runner_sha256` is the authoritative one.
-_KNOWN_DECLARED_MISMATCH = {
-    # run -> why the declared commit is not the one holding the runner used
-    "matrix_T3_timers_20260826_203251": "chain script written before the runner was committed",
-    "matrix_O3_latin_20260826_203251": "chain script written before the runner was committed",
-    "matrix_U1_dflashvar_20260826_210153": "driver script edited while waiting",
-    "matrix_U2_dflashvar_20260826_210153": "driver script edited while waiting",
-    "matrix_U3_dflashvar_20260826_210153": "driver script edited while waiting",
-    "matrix_U4_dflashvar_20260826_210153": "driver script edited while waiting",
-    "matrix_U5_dflashvar_20260826_210153": "driver script edited while waiting",
-    "matrix_U6_dflashvar_20260826_210153": "driver script edited while waiting",
-    "matrix_V_freerun_20260826_210956": "same driver, same edit",
-    "matrix_V_hardcap_20260826_210956": "same driver, same edit",
-}
-_mismatch = []
-_resolved = 0
+# `harness_tree_sha` is the caller's word for which commit it ran from. A caller
+# can be wrong, and the commit can also stop existing. Both happened here: run
+# U's driver was edited while it waited, so it declared the commit it was
+# written against rather than the one holding the runner it executed; and the
+# 2026-08-27 identity rewrite gave 50 commits new SHAs, so eight manifests name
+# a commit no longer in this history. The manifests are recorded data and are
+# left as written; data/harness_sha_rewrite_map.json carries the mapping.
+_REWRITE = json.load(open("v4_audit_2026_08_25/data/harness_sha_rewrite_map.json"))
+_RW_MAP = _REWRITE["cause_1_identity_rewrite"]["map"]
+_RW_RUNS = _REWRITE["cause_2_driver_declared_the_wrong_commit"]["runs"]
+chk("the rewrite map names the two commits that moved", len(_RW_MAP), 2)
+chk("and both new SHAs are in this history",
+    sorted(v for v in _RW_MAP.values()
+           if _sp2.run(["git", "-C", str(_repo), "cat-file", "-e", v],
+                       capture_output=True).returncode != 0), [])
+_resolved, _mismatch, _dangling = 0, [], []
 for _d in sorted(glob.glob("v4_audit_2026_08_25/data/*/manifest.json")):
     _m = json.load(open(_d))
     _rn = os.path.basename(os.path.dirname(_d))
@@ -1311,6 +1312,7 @@ for _d in sorted(glob.glob("v4_audit_2026_08_25/data/*/manifest.json")):
     _actual = _m.get("runner_sha256")
     if not (_decl and _actual):
         continue
+    _decl = _RW_MAP.get(_decl, _decl)
     try:
         _blob = _sp2.run(["git", "-C", str(_repo), "show",
                           f"{_decl}:bench/retest_runner.py"],
@@ -1318,18 +1320,18 @@ for _d in sorted(glob.glob("v4_audit_2026_08_25/data/*/manifest.json")):
     except Exception:  # noqa: BLE001
         continue
     if _blob.returncode != 0:
+        _dangling.append(_rn)
         continue
     _resolved += 1
     if hashlib.sha256(_blob.stdout).hexdigest() != _actual:
         _mismatch.append(_rn)
-if _resolved:
-    chk("every declared harness commit contains the runner that ran, or is listed",
-        sorted(set(_mismatch) - set(_KNOWN_DECLARED_MISMATCH)), [])
-    chk("and every listed exception really is one",
-        sorted(set(_KNOWN_DECLARED_MISMATCH) - set(_mismatch)), [])
+if _resolved or _dangling:
+    chk("every declared harness commit resolves, after the rewrite map",
+        sorted(_dangling), [])
+    chk("the runs whose declared commit is not the one that ran",
+        sorted(_mismatch), sorted(_RW_RUNS))
+    chk("and each one says why", sorted(r for r, w in _RW_RUNS.items() if not w), [])
 else:
-    # no git history reachable - a shallow clone, or the mirror the data
-    # mutation harness builds. Skipped rather than passed vacuously.
     print("  ----  declared-vs-actual harness commits: no git history reachable, "
           "skipped")
 if _blobs:

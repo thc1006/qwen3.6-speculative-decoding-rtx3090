@@ -1,0 +1,27 @@
+{
+  "why": "Two separate things make a run's declared harness commit differ from the commit holding the runner it actually executed, and both are recorded here rather than by editing the manifests, which are measurement records.",
+  "authoritative_field": "runner_sha256 - the sha256 of bench/retest_runner.py itself. The identity rewrite did not touch file contents, so it still resolves against this history. harness_tree_sha is what the caller declared, and the manifest labels it 'declared via BENCH_HARNESS_SHA'.",
+  "cause_1_identity_rewrite": {
+    "what": "On 2026-08-27 this branch's 114 commits were rewritten so all carry the repository's configured identity, 84045975+thc1006@users.noreply.github.com, instead of a second address GitHub showed as unlinked. The tree at HEAD is byte-identical before and after; 50 commit objects got new SHAs.",
+    "unchanged_at_and_before": "77ab4dec502d05f23d473334de8795f0dcc3e609",
+    "map": {
+      "842c971b0709c86535b138e041b6b0613f190fa0": "24d7984e67bf9756a1d23284274944fe2756d60f",
+      "8316b04a2373029d71acf4e346e4c6c2b7d2cad4": "bbac5b669517c33bc39cd6badeaa1faf34716c13"
+    }
+  },
+  "cause_2_driver_declared_the_wrong_commit": {
+    "what": "A driver script bakes BENCH_HARNESS_SHA in when it is written and the runner is read when it executes. Where the runner was updated in between - or where the script was edited while it waited for the GPU, so bash kept the already-parsed value - the declared commit is the one the script was written against, not the one holding the runner that ran.",
+    "runs": {
+      "matrix_T3_timers_20260826_203251": "chain script written before the runner it used was committed",
+      "matrix_O3_latin_20260826_203251": "chain script written before the runner it used was committed",
+      "matrix_U1_dflashvar_20260826_210153": "driver script edited while it waited for the GPU",
+      "matrix_U2_dflashvar_20260826_210153": "driver script edited while it waited for the GPU",
+      "matrix_U3_dflashvar_20260826_210153": "driver script edited while it waited for the GPU",
+      "matrix_U4_dflashvar_20260826_210153": "driver script edited while it waited for the GPU",
+      "matrix_U5_dflashvar_20260826_210153": "driver script edited while it waited for the GPU",
+      "matrix_U6_dflashvar_20260826_210153": "driver script edited while it waited for the GPU",
+      "matrix_V_freerun_20260826_210956": "same driver, same edit",
+      "matrix_V_hardcap_20260826_210956": "same driver, same edit"
+    }
+  }
+}
