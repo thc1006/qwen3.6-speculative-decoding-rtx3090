@@ -1091,6 +1091,57 @@ for f, needle, what in DOC_CLAIMS:
 
 _T = "v4_audit_2026_08_25/data/matrix_T_timers_20260826_182639"
 _T3 = "v4_audit_2026_08_25/data/matrix_T3_timers_20260826_203251"
+print("\n=== the harness that ran each run is recoverable ===")
+# `harness_tree_sha` is what the caller declared and is labelled as such; the
+# field that pins the harness exactly is `runner_sha256`, the hash of
+# bench/retest_runner.py as it was when the run started. That is only provenance
+# if the file with that hash still exists somewhere in this repository, so the
+# check is: does some commit's bench/retest_runner.py hash to it?
+import subprocess as _sp
+
+_repo = pathlib.Path(__file__).resolve().parents[1]
+
+
+def _runner_blobs() -> set:
+    """Every version of bench/retest_runner.py in this repository's history."""
+    try:
+        revs = _sp.run(["git", "-C", str(_repo), "rev-list", "--all",
+                        "--", "bench/retest_runner.py"],
+                       capture_output=True, text=True, timeout=120)
+        if revs.returncode != 0:
+            return set()
+        out = set()
+        for rev in revs.stdout.split():
+            blob = _sp.run(["git", "-C", str(_repo), "show",
+                            f"{rev}:bench/retest_runner.py"],
+                           capture_output=True, timeout=60)
+            if blob.returncode == 0:
+                out.add(hashlib.sha256(blob.stdout).hexdigest())
+        return out
+    except Exception:  # noqa: BLE001
+        return set()
+
+
+_blobs = _runner_blobs()
+_declared = {}
+for _d in sorted(glob.glob("v4_audit_2026_08_25/data/*/manifest.json")):
+    _m = json.load(open(_d))
+    if _m.get("runner_sha256"):
+        _declared[os.path.basename(os.path.dirname(_d))] = _m["runner_sha256"]
+chk("runs that record which harness ran them", len(_declared) >= 1, True)
+if _blobs:
+    chk("every recorded harness hash is in this repository's history",
+        sorted(k for k, v in _declared.items() if v not in _blobs), [])
+    # deliberately NOT asserting that the working-tree file is in history: it
+    # is not, until it is committed, and a check that cannot fail is worse than
+    # no check. The assertion above is the one that matters.
+    print(f"  ----  {len(_blobs)} harness version(s) in history, "
+          f"{len(_declared)} run(s) pin one")
+else:
+    print("  SKIP  git history unavailable (shallow clone?); "
+          "runner_sha256 not resolved")
+
+
 print("\n=== A17: are the arms compared on the same amount of work? ===")
 _lm = json.load(open("analysis/length_matching.json"))["runs"]
 _on = [r for r in _lm if r["think"] != "off"]
