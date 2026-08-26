@@ -1432,18 +1432,21 @@ for _needle, _what in _WITHDRAWN.items():
         if _norm(_needle) not in _t:
             continue
         # A mention that says it was withdrawn is fine; a bare restatement is
-        # not. Prose wraps, so the retraction wording is looked for in a window
-        # around the match rather than on its own line.
-        _lines = _t.splitlines()
-        for _i, _line in enumerate(_lines):
-            if _norm(_needle) not in _line:
-                continue
-            _ctx = " ".join(_lines[max(0, _i - 2):_i + 3]).lower()
-            if not any(w in _ctx for w in
+        # not. Prose wraps, so the retraction wording is looked for in the
+        # PARAGRAPH containing the match and within 200 characters of it - a
+        # two-line window let a table row next to a retraction paragraph pass,
+        # which is how the first version of this check failed to fire on a
+        # planted mention.
+        for _m in re.finditer(re.escape(_norm(_needle)), _t):
+            _a = _t.rfind("\n\n", 0, _m.start()) + 2
+            _b = _t.find("\n\n", _m.end())
+            _b = len(_t) if _b < 0 else _b
+            _para = _t[max(_a, _m.start() - 200):min(_b, _m.end() + 200)].lower()
+            if not any(w in _para for w in
                        ("until", "withdraw", "earlier", "was wrong", "retract",
                         "double", "added a second time", "before that correction",
                         "corrected", "both were wrong", "an earlier version")):
-                _hits.append(f"{_f}: {_line.strip()[:60]}")
+                _hits.append(f"{_f}: ...{_t[_m.start() - 40:_m.end() + 20].strip()}...")
     chk(f"withdrawn: {_needle} is only mentioned as withdrawn", _hits, [])
 
 
