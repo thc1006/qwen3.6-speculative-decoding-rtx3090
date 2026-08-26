@@ -151,11 +151,13 @@ planning prose, which is exactly what a drafter predicts well
 ([run L](v4_audit_2026_08_25/README.md#run-l--the-win-is-a-property-of-the-workload-not-of-the-method)).
 
 Across run L's 60 points acceptance and speed-up correlate at **r = +0.946** and
-the line crosses zero near **48 % acceptance**. Pushed out of sample it calls the
-sign **12 / 12 within the DFlash family** — and **fails on the external
-drafter**, at exactly the points that would matter: at `n_max 1` that drafter
-reaches **68.7 % acceptance and is still 74.8 % slower**, at `n_max 2` it is
-60.3 % and −72.2 %. Overall 21 / 23.
+the line crosses zero near **48 % acceptance**. Scored across every arm-run with a matched baseline and enough drafts to define
+a rate — 37 of 44, the seven excluded having drafted 10 to 55 tokens in total —
+it calls the sign **28 / 29 inside the self-speculative families** and **5 / 6
+on the external drafter**, 35 / 37 overall, and the same either way you read
+llama.cpp's two disagreeing acceptance counters. The failures are the
+informative ones: `spec-draft-n1` reaches **69.7 % acceptance** (100.0 % by the
+drafter's own counter) and is **75 % slower**.
 
 So the threshold is not a law about acceptance; it is a property of the drafter.
 The reason is measured rather than argued: a separate draft context forces the

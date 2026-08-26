@@ -116,7 +116,11 @@ for arm,mean,pooled,dn,da,comp in [("baseline",123.0,122.9,0,0,2),("draft-max8-t
 for arm,mean,pooled,dn,da,comp in [("baseline",132.9,133.3,0,0,3),("draft-max8-translate",33.6,32.6,16590,4926,3),("draft-max8-matched",33.7,32.6,16590,4926,3)]:
     m_,p_,d_,a_,c_,n_=stats(B[arm]); chk(f"B {arm} mean",round(m_,1),mean,0.06); chk(f"B {arm} pooled",round(p_,1),pooled,0.06)
     chk(f"B {arm} drafted/accepted",(d_,a_),(dn,da)); chk(f"B {arm} complete",c_,comp)
-chk("B acceptance %", round(100*4926/16590,1), 29.7, 0.06)
+_b_drafted = sum(x["draft_n"] for r in B["draft-max8-matched"] for x in r["rows"])
+_b_acc = sum(x["draft_n_accepted"] for r in B["draft-max8-matched"] for x in r["rows"])
+chk("B drafted tokens", _b_drafted, 16590)
+chk("B accepted tokens", _b_acc, 4926)
+chk("B acceptance %", round(100*_b_acc/_b_drafted, 1), 29.7, 0.05)
 per=defaultdict(lambda: defaultdict(list)); acc={}
 for arm,runs in B.items():
     for r in runs:
@@ -425,6 +429,9 @@ for name, pat, lo, hi, drift, swt in (("I+J", "gpu_telemetry_IJ_*.csv", 55, 73, 
     # SwThermalSlowdown - a software flag, and the one that fires once in the
     # I+J trace. An earlier mask of 0xE0 counted that as hardware and missed
     # HwSlowdown altogether.
+    # assert the source is non-empty first: all() over nothing is True, and a
+    # check that certifies an empty file is worse than no check
+    chk(f"thermal {name}: loaded samples to check", len(ld) > 100, True)
     chk(f"thermal {name}: no hardware throttle flag",
         all(int(r[8], 16) & 0xC8 == 0 for r in ld), True)
     chk(f"thermal {name}: SwThermal (0x20) samples under load",
@@ -492,7 +499,11 @@ for c, delta in ((4, 3.4), (8, -7.6)):
     peaks = sorted({json.load(open(f)).get("max_in_flight")
                     for f in glob.glob(f"v4_audit_2026_08_25/data/matrix_M2_conc{c}_*/*__rep*.json")})
     chk(f"M2 c={c} batch actually formed", peaks, [c])
-chk("M2 MTP at c=8 loses far less than DFlash did", -7.6 > -74.1, True)
+_mtp_c8 = 100*(_agg("matrix_M2_conc8_*", "spec-mtp-n2")["agg"] /
+               _agg("matrix_M2_conc8_*", "baseline")["agg"] - 1)
+_dfl_c8 = 100*(_agg("matrix_K_conc8_*", "spec-dflash-n4")["agg"] /
+               _agg("matrix_K_conc8_*", "baseline")["agg"] - 1)
+chk("M2 MTP at c=8 loses far less than DFlash did", _mtp_c8 > _dfl_c8 + 50, True)
 
 # N: the ngram-map arms never engage
 _bn = _agg("matrix_N_ngrammap_*", "baseline")
@@ -699,9 +710,14 @@ chk("Q the Q4_K_M head beats Q8_0 at BOTH draft lengths at five repeats",
      round(100*(_pl("matrix_Q_q8_*","spec-mtp-n2")["pooled"]/_pl("matrix_Q_q8_*","baseline")["pooled"]-1),1)) and
     (round(100*(_pl("matrix_Q_q4km_*","spec-mtp-n4")["pooled"]/_pl("matrix_Q_q4km_*","baseline")["pooled"]-1),1) >
      round(100*(_pl("matrix_Q_q8_*","spec-mtp-n4")["pooled"]/_pl("matrix_Q_q8_*","baseline")["pooled"]-1),1)), True)
-chk("A14 the non-replicating pair, gap (pp)", round(10.5 - 2.0, 1), 8.5, 0.05)
+def _d(pat, arm="spec-mtp-n4"):
+    b = _pl(pat, "baseline"); v = _pl(pat, arm)
+    return round(100*(v["pooled"]/b["pooled"] - 1), 1)
+_m1, _q8, _pe = _d("matrix_M1_*"), _d("matrix_Q_q8_*"), _d("matrix_P_extended_*")
+chk("A14 the non-replicating pair, gap (pp)", round(_m1 - _q8, 1), 8.5, 0.05)
 chk("A14 spec-mtp-n4 Q8_0 outlier is M1, not run Q",
-    sorted([10.5, 2.0, 2.7])[2], 10.5, 0.05)
+    max([(_m1, "M1"), (_q8, "Q"), (_pe, "P")])[1], "M1")
+chk("A14 the other two cluster within 1 pp", abs(_q8 - _pe) < 1.0, True)
 
 print("\n=== A14: the thermal figures the 'unexplained' claim rests on ===")
 import csv as _csv2, re as _re2
@@ -720,8 +736,12 @@ for lbl, pat, lo, hi, t_, c_ in (("M1", "gpu_telemetry_M_*.csv", "08:00:00", "08
     v = _tel(pat, lo, hi)
     chk(f"A14 {lbl} mean temperature under load (C)", round(st.mean([x[0] for x in v]), 1), t_, 0.05)
     chk(f"A14 {lbl} mean SM clock under load (MHz)", round(st.mean([x[1] for x in v])), c_, 0.5)
-chk("A14 the two windows differ by under 1 C", abs(66.1 - 65.8) < 1.0, True)
-chk("A14 the two windows differ by under 0.5 % in clock", abs(1938 - 1934) / 1938 < 0.005, True)
+_w1 = _tel("gpu_telemetry_M_*.csv", "08:00:00", "08:15:00")
+_w2 = _tel("gpu_telemetry_chain2_*.csv", "11:33:00", "11:52:00")
+_t1, _t2 = st.mean([x[0] for x in _w1]), st.mean([x[0] for x in _w2])
+_c1, _c2 = st.mean([x[1] for x in _w1]), st.mean([x[1] for x in _w2])
+chk("A14 the two windows differ by under 1 C", abs(_t1 - _t2) < 1.0, True)
+chk("A14 the two windows differ by under 0.5 % in clock", abs(_c1 - _c2)/_c1 < 0.005, True)
 # every request in both prompt sets hits the cap, so the sets differ only in prompt length
 for pat in ("matrix_O_headtohead_*", "matrix_P_extended_*"):
     fr = {x.get("finish_reason") for f in glob.glob(f"v4_audit_2026_08_25/data/{pat}/baseline__rep*.json")
@@ -736,6 +756,142 @@ for arm, v1_, ex_ in (("spec-dflash-n2", 72.3, 72.8), ("spec-mtp-n2", 78.4, 77.3
     chk(f"{arm} acceptance, v1 ten", round(_acc("matrix_O_headtohead_*"), 1), v1_, 0.05)
     chk(f"{arm} acceptance, extended", round(_acc("matrix_P_extended_*"), 1), ex_, 0.05)
     chk(f"{arm} the new prompt set does not inflate acceptance", abs(ex_ - v1_) < 1.5, True)
+
+print("\n=== the acceptance threshold, scored over everything, both counters ===")
+_cc2 = {(r["run"], r["arm"]): r for r in
+        json.load(open("v4_audit_2026_08_25/data/acceptance_counter_comparison.json"))}
+def _pl2(run, arm):
+    rs = [json.load(open(f)) for f in glob.glob(f"v4_audit_2026_08_25/data/{run}/{arm}__rep*.json")]
+    rs = [r for r in rs if r.get("rows")]
+    if not rs: return None
+    n = sum(x["predicted_n"] for r in rs for x in r["rows"])
+    ms = sum(x["predicted_ms"] for r in rs for x in r["rows"])
+    return 1000*n/ms
+_BRK = 48.2
+_all, _kept = [], []
+for (run, arm), r in _cc2.items():
+    if "conc4" in run or "conc8" in run: continue
+    b, v = _pl2(run, "baseline"), _pl2(run, arm)
+    if not b or not v: continue
+    fam = ("external" if r["spec_type"] == "draft-simple"
+           else "self" if r["spec_type"] in ("draft-dflash", "draft-mtp") else "ngram")
+    rec = (fam, run, arm, r["server_pct"], r["drafter_pct"], 100*(v/b-1), r["drafter_drafted"])
+    _all.append(rec)
+    if r["drafter_drafted"] >= 100: _kept.append(rec)
+chk("threshold: arm-runs with an acceptance figure and a baseline", len(_all), 44)
+chk("threshold: excluded for drafting under 100 tokens", len(_all) - len(_kept), 7)
+chk("threshold: the excluded ones drafted at most this many tokens",
+    max(x[6] for x in _all if x[6] < 100), 55)
+chk("threshold: the kept ones drafted at least this many",
+    min(x[6] for x in _kept), 586)
+def _sc(rows, idx):
+    from collections import defaultdict as _dd
+    f = _dd(lambda: [0, 0])
+    for x in rows:
+        f[x[0]][0] += (x[idx] >= _BRK) == (x[5] > 0); f[x[0]][1] += 1
+    return f
+for idx, lbl in ((3, "server"), (4, "drafter")):
+    f = _sc(_kept, idx)
+    chk(f"threshold ({lbl}): self-speculative", tuple(f["self"]), (28, 29))
+    chk(f"threshold ({lbl}): drafter-free n-gram", tuple(f["ngram"]), (2, 2))
+    chk(f"threshold ({lbl}): external drafter", tuple(f["external"]), (5, 6))
+    chk(f"threshold ({lbl}): overall",
+        (sum(v[0] for v in f.values()), sum(v[1] for v in f.values())), (35, 37))
+# without the exclusion the two counters disagree, which is why it exists
+chk("threshold: without the exclusion the counters disagree",
+    (sum(v[0] for v in _sc(_all, 3).values()), sum(v[0] for v in _sc(_all, 4).values())), (41, 37))
+# and the two misses are the ones named in the text
+_miss = sorted(f"{x[2]}" for x in _kept if (x[3] >= _BRK) != (x[5] > 0))
+chk("threshold: which arms it gets wrong", _miss, ["spec-draft-n1", "spec-mtp-n4"])
+_m = [x for x in _kept if x[2] == "spec-mtp-n4" and (x[3] >= _BRK) != (x[5] > 0)][0]
+chk("threshold: the near-boundary miss sits just above it (pp)",
+    round(_m[3] - _BRK, 1), 1.3, 0.05)
+
+print("\n=== coverage debt: emphasised figures the checker had never touched ===")
+def _armstat(pat, arm):
+    rs = [json.load(open(f)) for f in glob.glob(f"v4_audit_2026_08_25/data/{pat}/{arm}__rep*.json")]
+    rs = [r for r in rs if r.get("rows")]
+    if not rs: return None
+    n = sum(x["predicted_n"] for r in rs for x in r["rows"])
+    ms = sum(x["predicted_ms"] for r in rs for x in r["rows"])
+    dn = sum(x["draft_n"] for r in rs for x in r["rows"])
+    da = sum(x["draft_n_accepted"] for r in rs for x in r["rows"])
+    return {"pooled": 1000*n/ms, "acc": (100*da/dn) if dn else None,
+            "gen": n, "drafted": dn, "vol": dn/n}
+
+# --- ERRATA A10 / run H: the p_min sweep the falsification rests on ---------
+_h = _armstat("H_pmin_sweep", "spec-draft-n8")
+_hb = _armstat("H_pmin_sweep", "baseline")
+for arm, acc_, pooled_, vol_ in (("spec-draft-n8-pmin75", 80.2, 42.8, 0.61),
+                                 ("spec-draft-n8-pmin90", 88.2, 42.5, 0.46)):
+    v = _armstat("H_pmin_sweep", arm)
+    chk(f"H {arm} acceptance %", round(v["acc"], 1), acc_, 0.05)
+    chk(f"H {arm} pooled", round(v["pooled"], 1), pooled_, 0.05)
+    chk(f"H {arm} draft tokens per generated token", round(v["vol"], 2), vol_, 0.005)
+    chk(f"H {arm} vs baseline (%)", round(100*(v["pooled"]/_hb["pooled"]-1), 1),
+        -65.5 if "75" in arm else -65.6, 0.05)
+_n1 = _armstat("H_pmin_sweep", "spec-draft-n1")
+if _n1:
+    chk("A10 matched-volume pair: n_max 1 p_min 0, draft per token",
+        round(_n1["vol"], 2), 0.50, 0.005)
+
+# --- run E, past the MoESD coverage threshold -------------------------------
+_eb = _armstat("E_past_threshold", "baseline")
+for arm, want in (("spec-draft-n64", None), ("spec-draft-n96", None), ("spec-draft-n128", None)):
+    v = _armstat("E_past_threshold", arm)
+    if not v or not _eb: continue
+    d = 100*(v["pooled"]/_eb["pooled"]-1)
+    chk(f"E {arm} is far below baseline", d < -85.0, True)
+    chk(f"E {arm} drafts more than it generates", v["vol"] > 5.0, True)
+chk("E: throughput keeps falling past the 95-token coverage threshold",
+    _armstat("E_past_threshold", "spec-draft-n128")["pooled"] <
+    _armstat("E_past_threshold", "spec-draft-n64")["pooled"], True)
+
+# --- ERRATA B7: the fp16-KV n-gram control ----------------------------------
+_c1 = _armstat("C_master_matrix_think_on", "ngram-cache")
+_c2 = _armstat("C_master_matrix_think_on", "ngram-cache-kvfp16")
+chk("B7 ngram-cache-kvfp16 vs ngram-cache (%)",
+    round(100*(_c2["pooled"]/_c1["pooled"]-1), 1), -4.2, 0.05)
+
+# --- ERRATA A13: the worst drafter-counter reading --------------------------
+_ccj = {(r["run"], r["arm"]): r for r in
+        json.load(open("v4_audit_2026_08_25/data/acceptance_counter_comparison.json"))}
+_worst = max(_ccj.values(), key=lambda r: r["drafter_pct"] if r["server_pct"] == 0.0 else -1)
+chk("A13 highest drafter reading among arms the server calls 0.0 %",
+    round(_worst["drafter_pct"], 1), 70.0, 0.05)
+
+# --- ERRATA A1 round accounting from the archived verbose log ---------------
+_va = json.load(open("analysis/verbose_accounting.json"))[0]
+chk("A1 verification attempts", _va["verification_attempts"], 53)
+chk("A1 partially accepted and redone", _va["attempts_partially_accepted"], 20)
+chk("A1 fraction of rounds thrown away (%)",
+    round(100*_va["attempts_partially_accepted"]/_va["verification_attempts"], 1), 37.7, 0.05)
+
+# --- ERRATA C4b: the single sw_thermal sample -------------------------------
+import csv as _csv3
+_c4 = list(_csv3.DictReader(open("v4_audit_2026_08_25/data/gpu_telemetry_20260825.csv")))
+def _a(r, k): return (r.get(k) or "").strip() == "Active"
+def _n(r, k):
+    v = (r.get(k) or "").replace("MHz", "").replace("W", "").replace("%", "").replace("MiB", "").strip()
+    try: return float(v)
+    except Exception: return None
+_c4l = [r for r in _c4 if not _a(r, "thr_gpu_idle") and (_n(r, "util_pct") or 0) >= 50]
+chk("C4b rows in the committed trace", len(_c4), 1317)
+chk("C4b rows under load", len(_c4l), 1272)
+_ct = [_n(r, "temp_c") for r in _c4l]; _cg = [_n(r, "gfx_mhz") for r in _c4l]
+chk("C4b temperature range", (int(min(_ct)), int(max(_ct))), (58, 75))
+chk("C4b mean temperature", round(st.mean(_ct), 1), 64.7, 0.05)
+chk("C4b clock range", (int(min(_cg)), int(max(_cg))), (1800, 1965))
+chk("C4b mean clock", round(st.mean(_cg)), 1937, 0.5)
+chk("C4b sw_power_cap samples", sum(1 for r in _c4l if _a(r, "thr_sw_power_cap")), 636)
+chk("C4b sw_thermal samples", sum(1 for r in _c4l if _a(r, "thr_sw_thermal")), 2)
+chk("C4b hw_thermal samples", sum(1 for r in _c4l if _a(r, "thr_hw_thermal")), 1)
+chk("C4b hw_power_brake samples", sum(1 for r in _c4l if _a(r, "thr_hw_power_brake")), 0)
+chk("C4b the thermal flags carried no meaningful downclock",
+    sorted(int(_n(r, "gfx_mhz")) for r in _c4l if _a(r, "thr_sw_thermal") or _a(r, "thr_hw_thermal")),
+    [1935, 1950, 1950])
+chk("C4b power limit is stock and constant",
+    sorted({int(_n(r, "power_limit_w")) for r in _c4l}), [350])
 
 print("\n=== theory (ERRATA E1/E2) ===")
 rho=8/256
@@ -811,6 +967,10 @@ DOC_CLAIMS = [
     ("ERRATA.md",   "19.5 %",    "A12 share of wall clock"),
     ("ERRATA.md",   "68.7 %",    "A12 threshold failure point"),
     ("ERRATA.md",   "0.5 pp",    "A13 no-checkpoint agreement"),
+    ("ERRATA.md",   "636 of 1272", "C4b sw_power_cap, corrected"),
+    ("ERRATA.md",   "2 of 1272", "C4b sw_thermal, corrected"),
+    ("ERRATA.md",   "mean 64.7", "C4b mean temperature, corrected"),
+    ("v4_audit_2026_08_25/README.md", "1935 MHz against a run maximum of 1965", "v4 thermal line, corrected"),
     ("ERRATA.md",   "53.3 pp",   "A13 worst divergence"),
     ("ERRATA.md",   "1639 of 1639", "A13 the drafter counter is also a tautology"),
     ("v4_audit_2026_08_25/README.md", "3271", "N generate() calls"),
@@ -818,12 +978,14 @@ DOC_CLAIMS = [
     ("v4_audit_2026_08_25/README.md", "12.7 %", "P prompt-processing share"),
     ("v4_audit_2026_08_25/README.md", "+20.3 %", "P dflash-n2 on the new set"),
     ("ERRATA.md",   "0.56 pp",   "A14 median between-run spread"),
+    ("v4_audit_2026_08_25/README.md", "35 / 37", "threshold scorecard"),
+    ("v4_audit_2026_08_25/README.md", "28 / 29", "threshold, self-speculative"),
+    ("README.md",   "28 / 29",   "README threshold scorecard"),
     ("ERRATA.md",   "8.5 pp",    "A14 the pair that did not replicate"),
     ("README.md",   "+26.7 %",   "README discloses the same-config replicate"),
     ("v4_audit_2026_08_25/README.md", "292.1 s", "P pooled includes the draft cost"),
     ("v4_audit_2026_08_25/README.md", "72.8 %",  "P acceptance not inflated"),
     ("README.md",   "17.24 s",   "README drafter generate time"),
-    ("README.md",   "12 / 12",   "README threshold within DFlash"),
     ("README.md",   "145.8",     "README head-to-head winner"),
     ("README.md",   "-75.1 %",   "README head-to-head worst row, pooled"),
     ("README.md",   "69.7 %",    "README the falsifying acceptance"),
@@ -841,6 +1003,35 @@ for f, needle, what in DOC_CLAIMS:
     print(f"  {'PASS' if ok else 'FAIL'}  {f:32s} quotes {needle!r:20s} ({what})")
     if not ok:
         FAIL.append(f"{f}:{needle}")
+
+
+print("\n=== the checker audits itself ===")
+# A chk() whose computed side contains no name is comparing one literal with
+# another and can never fail. Six of these were found on 2026-08-26, four of them
+# in the newest ERRATA item, where care had slipped. They read as passes and
+# certify nothing, so the checker now refuses to be one of them.
+import ast as _ast
+import pathlib as _pl2
+_src = _pl2.Path(__file__).read_text(encoding="utf-8")
+_tree = _ast.parse(_src)
+_SAFE = {"round", "abs", "sorted", "len", "max", "min", "sum", "int", "float", "str",
+         "tuple", "list", "set", "True", "False", "None"}
+_literal_only = []
+for _n in _ast.walk(_tree):
+    if not (isinstance(_n, _ast.Call) and isinstance(_n.func, _ast.Name)
+            and _n.func.id == "chk" and len(_n.args) >= 2):
+        continue
+    _got = _n.args[1]
+    _names = {x.id for x in _ast.walk(_got) if isinstance(x, _ast.Name)} \
+           | {x.attr for x in _ast.walk(_got) if isinstance(x, _ast.Attribute)}
+    if not (_names - _SAFE):
+        _label = _n.args[0]
+        _literal_only.append(getattr(_label, "value", None)
+                             or _ast.unparse(_label)[:60])
+chk("checker: no chk() compares literals with literals",
+    (len(_literal_only), _literal_only[:3]), (0, []))
+chk("checker: number of assertions", len([1 for _n in _ast.walk(_tree)
+     if isinstance(_n, _ast.Call) and isinstance(_n.func, _ast.Name) and _n.func.id == "chk"]) > 150, True)
 
 print(f"\n{'='*70}\n{'ALL CLAIMS VERIFIED' if not FAIL else 'FAILURES: ' + ', '.join(FAIL)}\n{'='*70}")
 sys.exit(1 if FAIL else 0)

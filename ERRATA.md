@@ -1111,16 +1111,27 @@ Measured across the audit's own matrix run
 | quantity | observed |
 |---|---|
 | `power.limit` / `power.default_limit` / `power.max_limit` | 350 / 350 / 350 W — **not overclocked** |
-| GPU temperature | 59–75 °C, mean 65.5, against a ~83 °C throttle point |
-| graphics clock | 1815–1950 MHz of a 2100 MHz maximum, mean 1934 |
-| `clocks_throttle_reasons.sw_power_cap` | active on 223 of 343 samples — the normal state for a GeForce card under load |
-| `clocks_throttle_reasons.sw_thermal_slowdown` | active on **1 of 343**, at 64 °C |
-| `clocks_throttle_reasons.hw_thermal_slowdown` | active on **1 of 343**, at 64 °C |
+| GPU temperature | 58–75 °C, mean 64.7, against a ~83 °C throttle point |
+| graphics clock | 1800–1965 MHz of a 2100 MHz maximum, mean 1937 |
+| `clocks_throttle_reasons.sw_power_cap` | active on **636 of 1272** loaded samples — the normal state for a GeForce card under load |
+| `clocks_throttle_reasons.sw_thermal_slowdown` | active on **2 of 1272**, at 64 °C and 65 °C |
+| `clocks_throttle_reasons.hw_thermal_slowdown` | active on **1 of 1272**, at 64 °C |
 | `clocks_throttle_reasons.hw_power_brake_slowdown` | never active |
 | `temperature.memory` | `N/A` — this card does not expose GDDR6X junction temperature through `nvidia-smi`, so the memory junction is not observable here |
 
-Both thermal flags were raised while the clock sat at **1950 MHz, the run's
-maximum**, so neither carried a downclock. And the drift runs the wrong way for
+All three thermal-flag samples were taken with the clock at **1950, 1950 and
+1935 MHz** against a run maximum of 1965, so none of them carried a meaningful
+downclock.
+
+> An earlier version of this table read `223 of 343`, `1 of 343` and `1 of 343`,
+> with temperature 59–75 °C mean 65.5 and clocks 1815–1950 mean 1934, and said
+> "both thermal flags". Every one of those figures was wrong against
+> [`v4_audit_2026_08_25/data/gpu_telemetry_20260825.csv`](v4_audit_2026_08_25/data/gpu_telemetry_20260825.csv),
+> the file this table cites: the trace has 1317 rows and 1272 under load, not
+> 343, and there are three flag samples, not two. The numbers above are derived
+> from that file by `analysis/verify_claims.py` and will now fail the build if
+> they drift again. The conclusion is unchanged — the card is not overclocked,
+> never near its throttle point, and does not downclock across the run. And the drift runs the wrong way for
 a thermal-bias worry: comparing the first half of the trace with the second,
 the clock rose 1929 → 1940 MHz (+0.62 %) while temperature fell 66.9 → 64.0 °C.
 The card got slightly cooler and slightly faster as the run went on.

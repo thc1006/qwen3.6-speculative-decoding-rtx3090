@@ -289,8 +289,9 @@ def plot_acceptance_threshold() -> None:
     plt.tight_layout(rect=[0, 0.06, 1, 1])
     # This figure spans both workloads and five repeats, so the shared footer
     # ("thinking on, three repeats") would be wrong on it.
-    _footer(fig, " Out-of-sample: the sign is right 10 times out of 10; the worst "
-                 "magnitude error is +52.2 pp.",
+    _footer(fig, " Acceptance is llama.cpp's server-side counter; it under-reports on "
+                 "arms that take speculative checkpoints (ERRATA A13), which is every "
+                 "external-drafter point here and none of the fitted ones.",
             base="2026-08-26, llama.cpp 3737e4137, one RTX 3090, "
                  "Qwen3.6-35B-A3B-UD-Q4_K_XL, greedy, ten prompts. Fitted points: run L, "
                  "both workloads, five repeats per arm, per prompt. Out-of-sample points: "

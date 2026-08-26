@@ -250,8 +250,12 @@ workload that favours speculation, and speculation still lost.**
 - `power.limit` = `power.default_limit` = `power.max_limit` = 350 W — **not overclocked**
 - 58–75 °C, mean 64.7, against a ~83 °C throttle point
 - 1800–1965 MHz of a 2100 MHz maximum, mean 1937
-- `hw_thermal_slowdown` and `hw_power_brake` essentially never active; the one
-  `sw_thermal` sample fires at 64 °C with the clock at its run maximum
+- `hw_power_brake` never active; `sw_thermal` fires on **2** samples of 1272 and
+  `hw_thermal` on **1**, at 64–65 °C and with the clock at 1950, 1950 and
+  1935 MHz against a run maximum of 1965 — so none of the three carried a
+  meaningful downclock. (An earlier version of this line said "the one
+  `sw_thermal` sample … at its run maximum". Both halves were wrong; see
+  [ERRATA C4b](../ERRATA.md#c4b-stock-clocks-was-measured-once-before-the-load).)
 
 The baseline is repeated five times across the run, so drift is testable from
 the measurement itself: 126.6, 122.2, 122.6, 121.8, 121.6 tok/s. That is not
@@ -614,12 +618,34 @@ fit that looked excellent in sample was falsified out of it. So this one was
 pushed at runs J and K, which it never saw and which used a different context
 and a different fitter margin:
 
+Scored over **every** arm-run for which both an acceptance figure and a matched
+baseline exist — 44 of them — with one exclusion stated up front: seven
+`ngram-map` arm-runs drafted between **10 and 55 tokens in total**, and a
+percentage computed over ten tokens is not a rate. There is a clean gap in the
+data at that point; every other arm-run drafted at least 586. The remaining 37:
+
 | family | sign predicted correctly |
 |---|---|
-| self-speculative (DFlash) | **12 / 12** |
-| drafter-free (ngram) | 3 / 3 |
-| **external 0.8 B drafter** | **6 / 8** |
-| all | 21 / 23 |
+| self-speculative (DFlash and MTP) | **28 / 29** |
+| drafter-free n-gram | 2 / 2 |
+| **external 0.8 B drafter** | **5 / 6** |
+| all | **35 / 37** |
+
+**And that scorecard does not depend on which acceptance counter you read.**
+A13 shows the server counter under-reports on any path that takes a speculative
+checkpoint. Rescoring with the speculator's own counter gives the same 35 / 37
+and the same two misses. Without the minimum-sample exclusion it does not: the
+score moves from 41/44 to 37/44 and four `ngram-map` verdicts flip, because on
+ten drafted tokens the two counters read 0.0 % and 70.0 % for the same arm-run.
+Excluding them is not tidying — it is refusing to score a rate that has no
+denominator.
+
+The two misses are the informative ones:
+
+| arm | acceptance | measured | why it is interesting |
+|---|---|---|---|
+| `spec-mtp-n4`, thinking off | 49.5 % | −8.2 % | sits **1.3 pp above** the boundary; a threshold that never missed near its own boundary would be suspicious |
+| `spec-draft-n1` | 69.7 % server, **100.0 %** drafter | **−75.1 %** | the external drafter, which is the entire point |
 
 Mean magnitude error +8.1 pp, worst **+52.2 pp**.
 
