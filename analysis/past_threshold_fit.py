@@ -289,7 +289,7 @@ def report(d):
     p("=" * 72)
     p("  the past-threshold sweep, recomputed from the committed data")
     p("=" * 72)
-    p(f"\n  n_max    ms/tok   draft/gen   accept   decode tok/s   wall tok/s   coverage")
+    p("\n  n_max    ms/tok   draft/gen   accept   decode tok/s   wall tok/s   coverage")
     for n in sorted(d["arms"], key=int):
         a = d["arms"][n]
         p(f"  {n:>5} {a['ms_per_token']:9.3f} {a['draft_per_gen']:11.3f} "
@@ -302,7 +302,7 @@ def report(d):
       f"— published as 7.87 until 2026-08-27")
 
     f = d["fit3"]
-    p(f"\n  three-parameter model, fitted on n_max 1..32:")
+    p("\n  three-parameter model, fitted on n_max 1..32:")
     p(f"    ms/tok = {f['per_round_ms']:.2f} x rounds/tok + {f['per_draft_token_ms']:.2f} "
       f"x draft/gen + {f['intercept_ms']:.2f}")
     p(f"    R2 = {f['r2']:.4f}; draft volume alone {f['draft_volume_only_r2']:.4f}, "
@@ -312,15 +312,15 @@ def report(d):
     p(f"    intercept is {f['intercept_over_baseline_pct']:+.0f} % of the measured "
       f"no-speculation cost; regressors r = {f['regressor_r']:.3f}, VIF {f['regressor_vif']:.2f}")
 
-    p(f"\n  registered in advance, then measured:")
-    p(f"    n_max   registered   measured   error     model fed measured inputs")
+    p("\n  registered in advance, then measured:")
+    p("    n_max   registered   measured   error     model fed measured inputs")
     for n in sorted(d["outcome"], key=int):
         o = d["outcome"][n]
         p(f"    {n:>5} {o['registered_tok_s']:11.1f} {o['measured_tok_s']:10.2f} "
           f"{o['error_pct']:+7.1f} % {o['measured_input_over_prediction_pct']:+22.1f} %")
 
     l = d["law"]
-    p(f"\n  one regressor over all nine points:")
+    p("\n  one regressor over all nine points:")
     p(f"    ms/tok = {l['intercept_ms']:.2f} + {l['slope_ms_per_draft_token']:.3f} x draft/gen"
       f"   R2 = {l['r2']:.5f}")
     p(f"    slope is {l['slope_over_baseline']:.3f} of a target step; intercept "
@@ -331,10 +331,10 @@ def report(d):
     p(f"    step at the coverage point: {l['step_pp']:+.2f} percentage points")
 
     a = d["amortisation"]
-    p(f"\n  marginal cost per drafted token (over the no-speculation step):")
+    p("\n  marginal cost per drafted token (over the no-speculation step):")
     p("    " + "  ".join(f"n{n}={a['marginal_ms_per_draft_token'][n]:.1f}"
                          for n in sorted(a["marginal_ms_per_draft_token"], key=int)))
-    p(f"    fitted a+b/n below the threshold, the supra points sit "
+    p("    fitted a+b/n below the threshold, the supra points sit "
       + ", ".join(f"{v:+.1f} %" for v in a["supra_deviation_pct"].values())
       + " off it; fitted on all nine, "
       + ", ".join(f"{v:+.1f} %" for v in a["all_nine_deviation_pct"].values()))
@@ -348,7 +348,7 @@ def report(d):
                          for n in sorted(c["mib_per_generated_token"], key=int))
       + " MiB per generated token")
     p(f"    correlation with cost = {c['correlation_with_cost']:.2f}")
-    p(f"\n  run-to-run SD over the three repeats: "
+    p("\n  run-to-run SD over the three repeats: "
       + ", ".join(f"n{n}={v:.2f}" for n, v in sorted(d['repeat_sd_tok_s'].items())) + " tok/s")
     p("")
 
