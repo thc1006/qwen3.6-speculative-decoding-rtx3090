@@ -87,7 +87,9 @@ echo "convert rc=$rc"
 
 # ---- the key whose absence rejected the archived file ------------------------
 echo "=== does the output carry {arch}.target_layers? ==="
-PYTHONPATH="$LLAMA_REPO/gguf-py" "$CONVERT_VENV/bin/python" - "$TMP_GGUF" <<'PY'
+# `if cmd; then` rather than testing $? afterwards: any command inserted
+# between the two lines would silently break the check.
+if ! PYTHONPATH="$LLAMA_REPO/gguf-py" "$CONVERT_VENV/bin/python" - "$TMP_GGUF" <<'PY'
 import sys
 from gguf import GGUFReader
 r = GGUFReader(sys.argv[1], "r")
@@ -97,7 +99,9 @@ for k in hit:
     print(f"    {k} = {r.fields[k].contents()}")
 sys.exit(0 if hit else 1)
 PY
-[ $? -eq 0 ] || die "converted file still lacks target_layers; master's converter did not write it"
+then
+    die "converted file still lacks target_layers; master's converter did not write it"
+fi
 
 # The file stays at the temp path until the loader has accepted it. Promoting
 # here - which is what this did - defeats the temp path entirely: a drafter that
