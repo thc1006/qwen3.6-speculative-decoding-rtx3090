@@ -1600,6 +1600,26 @@ chk("A16 T3 is position-balanced", _mT3.get("schedule_is_position_balanced"), Tr
 chk("A16 T3 asserted the instrumented library per arm-run",
     (_mT3.get("expect_lib_sha256") or "")[:16], "ce94855f4f2d82ba")
 chk("A16 T3 asserted the commit", _mT3.get("expect_commit"), "3737e4137")
+# `expect_*` is what the caller demanded. What answered is per arm-run, and that
+# is the field worth checking: a manifest can record an expectation that was
+# never met if the marker were written without validation, which is the exact
+# defect A16's run exists after fixing.
+_obs_commit, _obs_lib, _obs_log = set(), [], 0
+for _f in sorted(glob.glob(f"{_T3}/*__rep*.json")):
+    _r = json.load(open(_f))
+    _obs_commit.add(_r.get("server_loaded_commit"))
+    _obs_lib.append((_r.get("server_lib_sha256") or {}).get("libllama-server-impl.so"))
+    if re.fullmatch(r"[0-9a-f]{64}", str(_r.get("server_log_sha256") or "")):
+        _obs_log += 1
+chk("A16 every T3 arm-run reports the commit it was asked for",
+    sorted(_obs_commit), ["3737e4137"])
+chk("A16 every T3 arm-run reports the instrumented library",
+    (len(_obs_lib), sum(1 for x in _obs_lib if (x or "").startswith("ce94855f"))),
+    (9, 9))
+chk("A16 every T3 arm-run carries a hash of its own server log", _obs_log, 9)
+chk("A16 T3's arm-runs and the run's own count agree",
+    len(glob.glob(f"{_T3}/*__rep*.json")),
+    json.load(open(f"{_T3}/RUN_COMPLETE.json"))["observed_arm_runs"])
 for _k in ("target_sha256", "draft_sha256", "dflash_sha256", "server_lib_sha256",
            "common_args", "max_tokens", "seed", "think", "concurrency", "ctx",
            "fit_target", "n_prompts", "arms"):
