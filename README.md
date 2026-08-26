@@ -13,20 +13,29 @@
 > benchmark of all RTX 3090 systems, of all Qwen3.6 quantisations, of all
 > speculative-decoding methods, or of end-to-end voice-agent latency.
 >
-> The **controlled tier** is runs A–T3, collected 2026-08-25/26 on post-merge
+> The **controlled tier** is runs A–V, collected 2026-08-25/26 on post-merge
 > master `3737e4137`: repeated arm-runs with a matched no-speculation baseline
 > inside each run, thinking suppression verified per request rather than
 > assumed, concurrent client requests verified from request timestamps, full per-request text
 > and token ids, and continuous GPU telemetry. Its findings are the ones to
-> cite about current llama.cpp, with two limits stated up front rather than
+> cite **for llama.cpp `3737e4137`**, under the model files, binary, hardware
+> and workload recorded below — not for current master, which has moved and
+> which carries open work on recurrent rollback, output row ordering and
+> hybrid checkpoint invalidation that touches these paths directly
+> ([the upstream table](#upstream-status-at-the-2026-08-25-audit)). Two limits
+> are stated up front rather than
 > buried: the same configuration measured **twelve times in one day spans
 > 9.4 pp**, clustered by run rather than scattered, on byte-identical output
 > ([A16](ERRATA.md#a16-two-runs-identical-in-every-recorded-respect-and-byte-identical-in-output-differ-by-34--on-one-arm)),
 > so quote the range and not the interval; and **every thinking-off comparison
-> here is confounded by output length**
+> that let the arms stop where they liked is confounded by output length**
 > ([A17](ERRATA.md#a17-the-thinking-off-comparisons-are-not-comparisons-of-the-same-amount-of-work)),
-> which flips one published sign. The thinking-on results, which is everything
-> in the table below, are unaffected by the second.
+> which is enough to change one published sign. Run V's hard-cap half is the
+> exception — it forces every request to the same token count — but its two
+> halves were not interleaved, so it measures a difference it cannot
+> attribute. The thinking-on results, which is everything in the
+> table below, are unaffected by the second: all 5724 thinking-on requests ran
+> to the cap.
 >
 > The audit **retracted this repository's headline mechanism.** Earlier versions
 > reported "100 % draft acceptance yet slower, therefore MoE expert-loading
@@ -86,7 +95,34 @@ bootstrap can only ever resample the nine values it has, so at this block count
 it under-covers, and quoting the narrower one would be the wrong direction to
 err in. Both are in each run's `paired_blocks.json`.
 
-| arm | pooled tok/s | change | 95 % CI (t, over blocks) | draft/gen ‡ | acceptance † |
+> [!IMPORTANT]
+> **Read that interval as within-invocation, because that is all it covers.**
+> The nine blocks are nine sequential blocks of one invocation of the driver,
+> in one fixed rotation, in whatever performance regime that invocation was in.
+> The headline arm measured **twelve times in one day** spans **+17.3 % to
+> +26.7 %**, on byte-identical output and identical draft counts, and
+> [A16](ERRATA.md#a16-two-runs-identical-in-every-recorded-respect-and-byte-identical-in-output-differ-by-34--on-one-arm)
+> could not find a recorded field that distinguishes the regimes. So the
+> honest headline for `spec-dflash-n2` is:
+>
+> | | |
+> |---|---|
+> | across repeated invocations | **+17 % to +27 %** |
+> | run O2, point estimate | +26.3 % |
+> | run O2, t interval over its own nine blocks | [+25.5 %, +27.1 %] |
+>
+> The twelve runs are not twelve independent measurements of the configuration
+> either — they mix the stock and instrumented builds, two-, three- and
+> nine-arm matrices, and different neighbouring treatments — so the range is a
+> bound on what was observed, not a confidence interval. Pooling their 43
+> blocks would not fix that: the blocks are nested inside invocations, and the
+> invocation is the level the variation lives at. A design that identifies it
+> needs the invocation as the resampling unit, the build stratified, and the
+> preceding treatment recorded; the fixed rotation used here balances position
+> but not first-order carryover, since each arm's predecessor is nearly always
+> the same arm.
+
+| arm | pooled tok/s | change | 95 % CI (t, blocks within this invocation) | draft/gen ‡ | acceptance † |
 |---|---:|---:|---:|---:|---:|
 | **`spec-dflash-n2`** | **146.2** | **+26.3 %** | [+25.5 %, +27.1 %] | 0.81 | 72.3 % |
 | `spec-mtp-n2` | 141.9 | +22.7 % | [+22.1 %, +23.3 %] | 0.77 | 78.4 % |
@@ -106,7 +142,7 @@ helps nor hurts because it almost never fires. `ngram-mod-n24` and `ngram-cache`
 are the opposite — they draft on a fifth of tokens and have almost all of it
 rejected, which is what a 10–19 % loss is made of.
 
-![Nine methods, one baseline, one matrix](analysis/plot_head_to_head.png)
+![Eight speculative configurations, one baseline, one matrix](analysis/plot_head_to_head.png)
 
 **It was run twice.** Run O3 is the same nine arms, nine balanced blocks, same
 stock binary and same models, five hours later, with the harness asserting the
@@ -203,9 +239,13 @@ every partially accepted round — the server reports 82.079 MiB per checkpoint,
 draft lengths 1 to 16 and MTP zero times at 1 to 8
 ([ERRATA A12](ERRATA.md#a12-what-the-checkpoint-path-costs-measured-with-timers-in-the-source)).
 
-**The three methods v1 benchmarked are the bottom three rows.** The original
-negative finding was right about what it measured. It measured the losing third
-of the available methods.
+**Every arm here that represents a method v1 benchmarked is below baseline.**
+That is four rows, not three: v1 tested an external draft model, `ngram-cache`
+and `ngram-mod`, and the external drafter appears twice — `spec-draft-n8` and
+`spec-draft-n1` are two configurations of one method, with `ngram-cache` and
+`ngram-mod-n24` above them. The original negative finding was right about what
+it measured. What it did not measure is DFlash and MTP, which is where the wins
+are.
 
 **And it is not a property of those ten prompts.** Every number above and every
 number this repository has ever published rests on the same ten. Repeated on a
@@ -291,9 +331,12 @@ full-checkpoint creates and 709 restores in one ten-prompt arm-run**, at a
 reported 82.079 MiB each — a nominal **118.7 GiB** by event count × logged size,
 which is an estimate and not measured memory traffic. DFlash logs none of these
 events at draft lengths 1 to 16 and MTP none at 1 to 8. What that costs in wall
-clock **is** established, by rebuilding llama.cpp with timers around the four
+clock **is** measured, by rebuilding llama.cpp with timers around the four
 calls: **39.07 s of a 71.4 s excess, 54.7 %**, replicated to 54.6 % in a second
-balanced run
+balanced run. That is elapsed time *inside the checkpoint API calls*, which at
+this commit begin with `ctx->synchronize()`, so it includes waiting for queued
+backend work as well as the copying — an attribution to the API boundary rather
+than an isolated measurement of checkpoint memory traffic
 ([A12](ERRATA.md#a12-what-the-checkpoint-path-costs-measured-with-timers-in-the-source)).
 This sentence said "not established here" until 2026-08-26, which was true when
 it was written and stopped being true when run T was measured. And the
@@ -827,9 +870,11 @@ does, over one ten-prompt arm-run of 3000 tokens:
 | drafter `generate()` | 17.27 | 24.2 % |
 | unattributed | 15.05 | 21.1 % |
 
-**More than half of it is state checkpointing** — 39.07 s, reproducible to two
-hundredths of a second across four arm-runs, at a median of 21.9 ms per save and
-22.4 ms per restore. `spec-dflash-n2` on the same prompts performs **zero** of
+**More than half of the excess is spent inside the checkpoint calls** —
+39.07 s, reproducible to two hundredths of a second across four arm-runs, at a
+median of 21.9 ms per save and 22.4 ms per restore. Inside, not on: the state
+APIs synchronise first, so this is the API boundary, not state-copy time alone
+([A12](ERRATA.md#a12-what-the-checkpoint-path-costs-measured-with-timers-in-the-source)). `spec-dflash-n2` on the same prompts performs **zero** of
 these operations, spends 3.41 s drafting, and finishes **5.3 s faster than not
 speculating at all**.
 
@@ -1034,6 +1079,22 @@ Checked against the GitHub API on 2026-08-25.
 
 `bcb5eeb64` was master on 2026-04-22 and is described here as a dated snapshot,
 not as "current master". Future edits should keep using exact tested SHAs.
+
+**And `3737e4137` is one too.** Master has moved, and four open items touch the
+paths measured here. None is a code dependency of this repository; every one is
+a reason its findings are bounded to the tested snapshot. Statuses re-checked
+against the GitHub API on 2026-08-27.
+
+| Open upstream | Status | What it would change here |
+|---|---|---|
+| [#25004](https://github.com/ggml-org/llama.cpp/pull/25004) recurrent: equal splits for recurrent-state rollback | open, last touched 2026-08-08 | Changes concurrent recurrent-rollback batching. The discussion also reports a single-stream regression and proposes a smaller one-slot design, so the upstream answer has not converged. The batching results in run I/I2/M2 are the ones at risk |
+| [#27705](https://github.com/ggml-org/llama.cpp/pull/27705) fix: output reorder index space | open, last touched 2026-08-26 | Token-row versus output-row permutation and a post-decode layout mode flip, with regression tests. It does not claim to fix #27572. If it lands, [A11](ERRATA.md#a11-speculative-decoding-is-not-output-preserving-on-this-build-and-the-engine-is-deterministic-enough-to-prove-it) and the DFlash and MTP output and throughput figures all need a minimal replication |
+| [#27572](https://github.com/ggml-org/llama.cpp/issues/27572) `draft-mtp` acceptance collapses to 0.0 under `-np N` | open | Backend- and workload-dependent, on HIP with long prompts. The discussion has retracted its own first two explanations, so the issue title is not a settled mechanism. The CUDA control on this RTX 3090 does not reproduce the zero acceptance |
+| [#24055](https://github.com/ggml-org/llama.cpp/issues/24055) context checkpoints always invalidated on hybrid/recurrent models | open | The checkpoint machinery [A12](ERRATA.md#a12-what-the-checkpoint-path-costs-measured-with-timers-in-the-source) times |
+
+If any of them lands, the minimum re-measurement is the O3 headline subset, run
+V under a controlled mode order, the run T checkpoint subset, and a long-prompt
+concurrent MTP smoke test.
 
 ---
 

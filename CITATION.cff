@@ -38,8 +38,12 @@ abstract: >-
   between 2026-04-21 and 2026-05-07 at llama.cpp commits 97895129e, bcb5eeb64
   and PR-branch 67cb0d507, one run per cell. A controlled tier collected on
   2026-08-25/26 at commit 3737e4137 adds repeated arm-runs with matched
-  no-speculation baselines, verified thinking suppression, recorded batch
-  width, per-request text and token ids, and continuous GPU telemetry. The
-  repository preserves per-request timings, raw logs, and an audit (ERRATA.md)
-  documenting which of the originally published claims survive re-examination
-  and which do not.
+  no-speculation baselines, verified thinking suppression, recorded concurrent
+  client-request windows, per-request text and token ids, and continuous GPU
+  telemetry. The harness records how many client requests were outstanding at
+  once, which is not the same as the number of sequences sharing a server
+  decode graph. The repository preserves per-request timings and the SHA-256 of
+  every raw server log, and an audit (ERRATA.md) documenting which of the
+  originally published claims survive re-examination and which do not; the raw
+  controlled-tier logs themselves are not published. Findings are bounded to
+  llama.cpp commit 3737e4137 and the recorded configuration.

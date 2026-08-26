@@ -44,7 +44,7 @@ should have used and did not:
 | P0-3 | true acceptance across configurations | **done** — every arm of the matrix carries honest counters on post-merge master |
 | P1-1 | one binary, ABBA, N ≥ 5, full capture | **done** — 13 arms × 5 repeats, 900 requests, hashed manifest |
 | P1-2 | the missing fp16-KV no-speculation control | **done** — closes ERRATA B7 |
-| P1-3 | length-matched long-output comparison | **done — run V.** This turned out to matter more than the entry suggested: with thinking off the *arms* generate different token counts, not just the prompts, and controlling for it moves every model-drafting arm by +2.5 to +16.8 pp and flips one published sign ([A17](ERRATA.md#a17-the-thinking-off-comparisons-are-not-comparisons-of-the-same-amount-of-work)). `BENCH_IGNORE_EOS=on` forces the hard cap, and run V measures it: the same five arms twice in one session, once as the archive did it and once with the cap, moves every arm by 6.31 to 11.90 pp and flips `spec-dflash-n4` from −1.35 % to +10.55 % |
+| P1-3 | length-matched long-output comparison | **partly — run V, and it needs a rerun.** Run V measured it but did not identify it: every freerun block ran before every hard-cap block (22:31:46 against 22:48:08), so the mode is confounded with time and with the invocation effect A16 found on the same drafter, which is the same size as the shift reported. What is still needed is an AB/BA crossover, or randomised mode order, with the session as the resampling unit. This turned out to matter more than the entry suggested: with thinking off the *arms* generate different token counts, not just the prompts, and controlling for it moves every model-drafting arm by +2.5 to +16.8 pp and flips one published sign ([A17](ERRATA.md#a17-the-thinking-off-comparisons-are-not-comparisons-of-the-same-amount-of-work)). `BENCH_IGNORE_EOS=on` forces the hard cap, and run V measures it: the same five arms twice in one session, once as the archive did it and once with the cap, moves every arm by 6.31 to 11.90 pp and flips `spec-dflash-n4` from −1.35 % to +10.55 % |
 | P1-4 | repair the prompt set | **partial** — `zh_hant` relabelled; the extended set carries two genuinely multi-turn exchanges, and the v1 `multi_turn_*` tags keep their names and behaviour so archived joins still work |
 | P1-5 | host isolation, clocks, thermals | **done** — 1317-sample trace, no OC, no meaningful throttling, drift diagnosed as cold-start |
 | P2-1 | build one pinned post-merge binary | **done** — `3737e4137` |
@@ -52,7 +52,7 @@ should have used and did not:
 | P2-3 | `draft-mtp`, the method the vLLM sibling uses | **done** — run M. Nothing was blocking it; stock converter and stock runtime both support it. |
 | P4-1 | does batching rescue speculation, as upstream says? | **done** — run I. No: no-speculation gains +64 % at concurrency 8, the drafter moves −8 %. |
 | P4-2 | where is the draft-length optimum, and does it survive batching? | **done** — run K. A plateau at `n_max` 2–4, a cliff after it, and batching erases it (+0.4 % at 4 in flight, −74.1 % at 8). |
-| P4-3 | does the win survive the workload changing? | **done** — run L. It halves with thinking off and `n_max 4` goes negative; acceptance falls with it. |
+| P4-3 | does the win survive the workload changing? | **done, with the thinking-off figure superseded** — run L. It halves with thinking off. `n_max 4` reads negative there, but that comparison is length-confounded ([A17](ERRATA.md#a17-the-thinking-off-comparisons-are-not-comparisons-of-the-same-amount-of-work)): on the prompts where every arm generated the same number of tokens it is +14.1 %, and under a forced cap it is +10.55 %. Acceptance falls with thinking off either way. |
 | P3-1 | draft-length sweep with cost instrumentation | **done** — 1…32 in run C, 64/96/128 in run E |
 | P3-2 | does the partial-accept fallback still exist upstream | **done** — the abort is gone and the counter is fixed on post-merge master |
 | P3-3 | expert-routing instrumentation | **not done**, and after A7 nothing demands it |
@@ -65,11 +65,15 @@ New work the audit generated that was not on the original list:
   ([`v4_audit_2026_08_25/PREREGISTERED_PREDICTION.md`](v4_audit_2026_08_25/PREREGISTERED_PREDICTION.md))
 - `analysis/verify_claims.py`, `check_links.py`, `matrix_report.py`,
   `thermal_report.py`, `plot_v4_runs.py`, `past_threshold_fit.py` as standing
-  regression checks
+  regression checks, and `rederive_from_logs.py`, which rebuilds the derived
+  JSON from the published raw logs rather than checking it against itself
 - the batching arm the harness could not actually run: `BENCH_CONCURRENCY`
   documented concurrent dispatch and issued the prompts one at a time, so
-  `--parallel N` allocated slots that stayed idle. The achieved batch width is
-  now read back out of request timestamps and asserted.
+  `--parallel N` allocated slots that stayed idle. How many client requests
+  were **outstanding at once** is now read back out of the request timestamps
+  and asserted. That is not the server's decode batch width — how many
+  sequences shared a decode graph is not something the harness observes — and
+  nothing here should be read as measuring it.
 - `bench/stage_mtp_source.py`, which makes the target's own multi-token
   prediction head exportable as a drafter without modifying llama.cpp
 - ERRATA A11: speculation is not output-preserving on this build, established
@@ -166,17 +170,45 @@ requests. Any master comparison must pass `--spec-type` explicitly.
   measured 1639 checkpoints at a server-reported 82.079 MiB in one arm-run of ten 300-token requests; whether
   that is the same bug is untested here.
 
-### Still running / next
+### Still open
 
+> [!NOTE]
+> Runs K, L and M were listed here as "still running / next" long after they
+> were done and written up. They are in the controlled tier and their results
+> are in [`v4_audit_2026_08_25/README.md`](v4_audit_2026_08_25/README.md).
+> This section is what is genuinely still open.
+
+- **Run V, rerun with the mode order controlled.** See P1-3 above: the
+  `ignore_eos` treatment was not interleaved, so the measured shift cannot be
+  separated from the invocation effect in A16. `bench/run_v2_crossover.sh` is
+  written and unrun — four sessions, AB/BA/BA/AB, run V's configuration
+  otherwise verbatim, about three hours on an exclusive card. Analyse it with
+  the session as the block, not the difference of two whole-run point
+  estimates.
+- **Recompute every `request-mean` from `predicted_n` and `predicted_ms`.**
+  [B8](ERRATA.md#b8-every-request-mean-here-counts-one-token-fewer-than-it-timed):
+  llama.cpp's `predicted_per_second` is a rate over `n − 1` tokens divided by
+  the time for `n`, and every request-mean here is the mean of it. On the
+  fixed-300-token runs that is a uniform 0.33 %, so no delta and no conclusion
+  moves; on the thinking-off runs, where arms stop at different lengths, the
+  bias differs per arm. Several dozen published figures would move by 0.33 %
+  and each needs re-verifying, which is why it is here rather than done.
+- **The checkpoint timers, split.** A12's figure is elapsed inside the
+  checkpoint API calls, and those begin with `ctx->synchronize()`. A second
+  timer inside the call — synchronisation and state get/set apart — would say
+  how much of the 54.7 % is copying and how much is waiting.
+- **A design that identifies the A16 invocation effect**: randomised order with
+  the session as the resampling unit, the stock and instrumented builds
+  stratified, and the preceding treatment recorded. The fixed rotation used so
+  far balances position but not first-order carryover.
+- ~~**The raw evidence archive.**~~ Published 2026-08-27 as
+  `raw-evidence-2026-08-27`, with a workflow that re-runs the extractors over
+  it. 526 of the 535 counter rows, and all 24 timer and accounting records,
+  come back identical; the nine that do not belong to three exploratory runs
+  whose arm-run JSON is not committed because they never completed.
 - No-speculation baseline is **~6 % faster on master** than on `bcb5eeb64`
   on the same host (133–137 vs 125–129 tok/s), so absolute rates must not be
   compared across those two binaries.
-- **Run K** — bracket the DFlash draft-length optimum from below and test the
-  winner under batching. Run J puts the peak at or below `n_max 4`.
-- **Run L** — does the DFlash win survive thinking off? Workload shape has moved
-  a result here before: ngram-mod went from −6.8 % to −0.7 % between the
-  think-on and think-off matrices and drafted zero tokens in the latter.
-- **Five repeats for the DFlash headline.** Run J has three.
 - **`draft-mtp` — nothing was blocking it. It had simply never been tried.**
   This line has now been wrong twice. It first said both `draft-eagle3` and
   `draft-mtp` "need head weights this repository does not have"; that was written

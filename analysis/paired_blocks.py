@@ -82,6 +82,78 @@ def observed_schedule(run_dir: Path) -> tuple[dict[str, list[int]], int]:
     return dict(pos), len(per_block)
 
 
+def _betacf(a: float, b: float, x: float) -> float:
+    """Continued fraction for the incomplete beta function (Lentz)."""
+    tiny = 1e-300
+    qab, qap, qam = a + b, a + 1.0, a - 1.0
+    c, d = 1.0, 1.0 - qab * x / qap
+    if abs(d) < tiny:
+        d = tiny
+    d = 1.0 / d
+    h = d
+    for m in range(1, 300):
+        m2 = 2 * m
+        aa = m * (b - m) * x / ((qam + m2) * (a + m2))
+        d = 1.0 + aa * d
+        c = 1.0 + aa / c
+        if abs(d) < tiny:
+            d = tiny
+        if abs(c) < tiny:
+            c = tiny
+        d = 1.0 / d
+        h *= d * c
+        aa = -(a + m) * (qab + m) * x / ((a + m2) * (qap + m2))
+        d = 1.0 + aa * d
+        c = 1.0 + aa / c
+        if abs(d) < tiny:
+            d = tiny
+        if abs(c) < tiny:
+            c = tiny
+        d = 1.0 / d
+        de = d * c
+        h *= de
+        if abs(de - 1.0) < 3e-16:
+            break
+    return h
+
+
+def _betainc(a: float, b: float, x: float) -> float:
+    """Regularised incomplete beta I_x(a, b)."""
+    if x <= 0.0:
+        return 0.0
+    if x >= 1.0:
+        return 1.0
+    lbeta = (math.lgamma(a + b) - math.lgamma(a) - math.lgamma(b)
+             + a * math.log(x) + b * math.log(1.0 - x))
+    front = math.exp(lbeta)
+    if x < (a + 1.0) / (a + b + 2.0):
+        return front * _betacf(a, b, x) / a
+    return 1.0 - front * _betacf(b, a, 1.0 - x) / b
+
+
+def t_critical_975(df: int) -> float:
+    """Two-sided 0.975 Student-t critical value, computed rather than tabulated.
+
+    The table this replaces stopped at df=10 and fell back to 1.96, the NORMAL
+    critical value, for everything above it. Run O2 has nine blocks and was
+    inside the table; anything with twelve or more - and small samples routinely
+    have - silently got a narrower interval than Student's t allows. No scipy:
+    this file has to run in the claims job, which installs nothing.
+    """
+    if df < 1:
+        return float("inf")
+    lo, hi = 0.0, 200.0
+    for _ in range(200):
+        mid = (lo + hi) / 2.0
+        # two-sided tail above +mid
+        tail = _betainc(df / 2.0, 0.5, df / (df + mid * mid))
+        if tail > 0.05:
+            lo = mid
+        else:
+            hi = mid
+    return (lo + hi) / 2.0
+
+
 def bootstrap_ci(log_ratios: list[float], iters: int, seed: int) -> tuple[float, float]:
     rng = random.Random(seed)
     n = len(log_ratios)
@@ -94,14 +166,55 @@ def bootstrap_ci(log_ratios: list[float], iters: int, seed: int) -> tuple[float,
     return lo, hi
 
 
+def is_position_balanced(pos: dict) -> bool:
+    """The runner's definition, verbatim: every arm visits every position the
+    SAME NUMBER OF TIMES. Requiring exactly once is only the special case where
+    the repeat count equals the arm count, and this file used to require it -
+    so a two-arm, four-repeat schedule that the runner accepts as balanced was
+    reported here as unbalanced."""
+    if not pos:
+        return False
+    n = len(pos)
+    per = len(next(iter(pos.values()))) / n
+    if per != int(per) or per < 1:
+        return False
+    want = sorted(list(range(1, n + 1)) * int(per))
+    return all(sorted(v) == want for v in pos.values())
+
+
+def _parse_argv(argv: list[str]) -> tuple[list[str], dict]:
+    """Accept `--opt=value` and `--opt value`. The usage line documented the
+    second spelling and only the first was parsed, so `--iters 2000` silently
+    ran 20000 resamples."""
+    args, opts, i = [], {}, 0
+    while i < len(argv):
+        a = argv[i]
+        if a.startswith("--"):
+            if "=" in a:
+                k, _, v = a.partition("=")
+                opts[k] = v
+            elif a in ("--allow-unbalanced",):
+                opts[a] = "1"
+            elif i + 1 < len(argv) and not argv[i + 1].startswith("--"):
+                opts[a] = argv[i + 1]
+                i += 1
+            else:
+                opts[a] = "1"
+        else:
+            args.append(a)
+        i += 1
+    return args, opts
+
+
 def main() -> None:
-    args = [a for a in sys.argv[1:] if not a.startswith("--")]
-    opts = {a.split("=")[0]: a.split("=")[1] for a in sys.argv[1:] if "=" in a and a.startswith("--")}
+    args, opts = _parse_argv(sys.argv[1:])
     if not args:
-        sys.exit("usage: python analysis/paired_blocks.py <run-dir> [--baseline=ARM] [--iters=N]")
+        sys.exit("usage: python analysis/paired_blocks.py <run-dir> "
+                 "[--baseline ARM] [--iters N] [--allow-unbalanced]")
     run_dir = Path(args[0])
     base = opts.get("--baseline", "baseline")
     iters = int(opts.get("--iters", "20000"))
+    allow_unbalanced = "--allow-unbalanced" in opts
 
     blocks = load_blocks(run_dir)
     if not blocks:
@@ -117,9 +230,7 @@ def main() -> None:
     print(f"{run_dir.name}")
     # verified from the arm-runs themselves, not read off the manifest
     pos, n_blocks = observed_schedule(run_dir)
-    n_arms = len(pos)
-    balanced = bool(pos) and all(sorted(v) == list(range(1, n_arms + 1))
-                                 for v in pos.values())
+    balanced = is_position_balanced(pos)
     declared = man.get("schedule_is_position_balanced")
     print(f"  ordering: {man.get('order_mode', '?')}"
           f"{' (position-balanced)' if balanced else ' (NOT position-balanced)'}"
@@ -138,6 +249,14 @@ def main() -> None:
               "time within the interval below")
         for a, v in sorted(pos.items())[:4]:
             print(f"      {a}: positions {v}")
+        # Printing a warning and writing the same JSON is how a warning gets
+        # lost: `paired_blocks.json` looks identical whether the schedule
+        # balanced or not, and it is the file the documents quote. Refuse,
+        # unless the caller says in the command line that they know.
+        if not allow_unbalanced:
+            sys.exit("  refusing to write an interval for an unbalanced "
+                     "schedule; pass --allow-unbalanced to override, and say so "
+                     "wherever the number is published")
     if len(complete) < len(blocks):
         print(f"  ! {len(blocks) - len(complete)} block(s) dropped for missing arms")
     if len(complete) < 3:
@@ -163,8 +282,7 @@ def main() -> None:
         sd = st.stdev(lr) if len(lr) > 1 else 0.0
         # Student t, two-sided 0.975, for 8 df (nine blocks). Table value, since
         # this file must not pull in scipy.
-        tcrit = {2: 4.303, 3: 3.182, 4: 2.776, 5: 2.571, 6: 2.447, 7: 2.365,
-                 8: 2.306, 9: 2.262, 10: 2.228}.get(len(lr) - 1, 1.96)
+        tcrit = t_critical_975(len(lr) - 1)
         half = tcrit * sd / math.sqrt(len(lr))
         t_lo, t_hi = st.mean(lr) - half, st.mean(lr) + half
         print(f"  {a:20s} {100*(point-1):+8.1f}%  "
@@ -184,7 +302,15 @@ def main() -> None:
           f"CV {100*st.stdev(bvals)/st.mean(bvals):.2f} %")
     dest = run_dir / "paired_blocks.json"
     dest.write_text(json.dumps({"baseline": base, "blocks": len(complete),
-                                "bootstrap_iters": iters, "arms": out}, indent=2) + "\n",
+                                "bootstrap_iters": iters,
+                                "schedule_position_balanced": balanced,
+                                "unbalanced_override": allow_unbalanced,
+                                "t_critical_975": round(t_critical_975(len(complete) - 1), 4),
+                                "interval_scope": "blocks within one invocation "
+                                                  "of the driver; it does not cover "
+                                                  "invocation-to-invocation variation "
+                                                  "(ERRATA A16)",
+                                "arms": out}, indent=2) + "\n",
                     encoding="utf-8")
     print(f"  wrote {dest.relative_to(Path.cwd()) if dest.is_relative_to(Path.cwd()) else dest}")
 

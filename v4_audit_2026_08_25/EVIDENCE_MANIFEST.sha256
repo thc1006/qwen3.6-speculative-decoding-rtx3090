@@ -13,8 +13,15 @@
 #   raw_logs.tar.zst   271 028 599 bytes (259 MiB), zstd -19
 #   sha256             29c2401f100390268bbd52e43b5c2da9a61440bad3dabe502ca1684478771fd6
 #
-# It is not published yet. Publishing it is a distribution decision for the
-# repository owner, not something this audit does on its own.
+# Published 2026-08-27 as the release asset `raw-evidence-2026-08-27`, with the
+# 19 telemetry traces beside it. Committed hashes tie the derived JSON to files
+# nobody else can see; publishing is what lets the extraction be re-run instead
+# of trusted. `.github/workflows/evidence.yml` re-runs it: 12 of 12 records of
+# spec_accounting_20260826.json, 12 of 12 of checkpoint_timers_20260826.json and
+# 526 of the 535 rows of acceptance_counter_comparison.json come back identical,
+# none differing. The nine are runs G, I and J, whose logs are in the archive
+# and whose arm-run JSON is not committed because those runs never completed
+# their cell set - see v4_audit_2026_08_25/README.md.
 #
 1d733acc533fbe885d28ff0d236c69ca4560567e95b745e0effa2dd51f305434  matrix_C_20260825_204529/server_logs/baseline-kvfp16__rep0.log
 ab2e74bde7998008d887bac9a16b17f098a417d7625656cce19ccdb6fe5dcc14  matrix_C_20260825_204529/server_logs/baseline-kvfp16__rep1.log

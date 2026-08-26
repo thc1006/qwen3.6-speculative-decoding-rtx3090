@@ -103,41 +103,71 @@ DFLASH = os.environ.get("MODEL_DFLASH", "")
 # it had simply never been run here. See RETEST_TODO.
 MTP = os.environ.get("MODEL_MTP", "")
 GPU = os.environ.get("BENCH_GPU", "0")
-PORT = int(os.environ.get("BENCH_PORT", "18131"))
 OUT = Path(os.environ.get("BENCH_OUT", "retest_out"))
-REPEATS = int(os.environ.get("BENCH_REPEATS", "3"))
-MAX_TOKENS = int(os.environ.get("BENCH_MAX_TOKENS", "300"))
-# Accept the obvious spellings. A silent mismatch here would put thinking back
-# on without saying so, which is exactly the failure mode that made v2, v3 and
-# Exp 2 unauditable (ERRATA D2) - so normalise, and record the result in the
-# manifest and per request.
-IGNORE_EOS = os.environ.get("BENCH_IGNORE_EOS", "off").strip().lower() in (
-    "on", "1", "true", "yes")
-_THINK_RAW = os.environ.get("BENCH_THINK", "on").strip().lower()
-_THINK_OFF = {"off", "0", "false", "no", "think_off", "disabled", "none"}
-_THINK_ON = {"on", "1", "true", "yes", "enabled"}
-# Fail closed. Mapping every unrecognised string to "on" is exactly the silent
-# mismatch this was written to prevent: BENCH_THINK=of or =disabledd would have
-# quietly left thinking enabled and produced a plausible-looking matrix.
-if _THINK_RAW in _THINK_OFF:
-    THINK = "off"
-elif _THINK_RAW in _THINK_ON:
-    THINK = "on"
-else:
-    sys.exit(f"BENCH_THINK={_THINK_RAW!r} is not recognised; use one of "
-             f"{sorted(_THINK_ON)} or {sorted(_THINK_OFF)}")
-CONCURRENCY = max(1, int(os.environ.get("BENCH_CONCURRENCY", "1")))
-_ORDER_RAW = os.environ.get("BENCH_ORDER", "latin").strip().lower()
-if _ORDER_RAW not in ("latin", "cyclic", "mirrored"):
-    sys.exit("BENCH_ORDER must be 'latin', 'cyclic' or 'mirrored'")
-ORDER_MODE = _ORDER_RAW
+# Every environment variable that changes what is measured is parsed here, and
+# every one of them fails CLOSED. BENCH_THINK was given this treatment first,
+# because a silent mismatch there is what made v2, v3 and Exp 2 unauditable
+# (ERRATA D2). The rest kept `in ("on", "1", ...)`, which is the same defect
+# with a different name: `BENCH_IGNORE_EOS=oen` selected off, an unknown
+# BENCH_FLAVOR selected master, and BENCH_CONCURRENCY=0 was clamped to 1. A
+# typo must stop the run before any GPU work, not produce a plausible matrix
+# of the wrong treatment.
+_TRUE = {"on", "1", "true", "yes", "enabled", "think_on"}
+_FALSE = {"off", "0", "false", "no", "disabled", "none", "think_off"}
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    v = raw.strip().lower()
+    if v in _TRUE:
+        return True
+    if v in _FALSE:
+        return False
+    sys.exit(f"{name}={raw!r} is not a recognised boolean; use one of "
+             f"{sorted(_TRUE)} or {sorted(_FALSE)}")
+
+
+def _env_int(name: str, default: int, low: int, high: int | None = None) -> int:
+    raw = os.environ.get(name)
+    if raw is None or raw.strip() == "":
+        v = default
+    else:
+        try:
+            v = int(raw.strip())
+        except ValueError:
+            sys.exit(f"{name}={raw!r} is not an integer")
+    if v < low or (high is not None and v > high):
+        sys.exit(f"{name}={v} is out of range "
+                 f"[{low}, {'inf' if high is None else high}]")
+    return v
+
+
+def _env_choice(name: str, default: str, allowed: tuple[str, ...]) -> str:
+    v = os.environ.get(name, default).strip().lower()
+    if v not in allowed:
+        sys.exit(f"{name}={v!r} is not one of {sorted(allowed)}")
+    return v
+
+
+PORT = _env_int("BENCH_PORT", 18131, 1, 65535)
+REPEATS = _env_int("BENCH_REPEATS", 3, 1)
+MAX_TOKENS = _env_int("BENCH_MAX_TOKENS", 300, 1)
+IGNORE_EOS = _env_bool("BENCH_IGNORE_EOS", False)
+# the raw string is kept for the manifest: "what was asked for" and "what was
+# run" are different records, and D2 was a mismatch between them
+_THINK_RAW = os.environ.get("BENCH_THINK", "on")
+THINK = "on" if _env_bool("BENCH_THINK", True) else "off"
+CONCURRENCY = _env_int("BENCH_CONCURRENCY", 1, 1)
+ORDER_MODE = _env_choice("BENCH_ORDER", "latin", ("latin", "cyclic", "mirrored"))
 # Pinning -ngl 999 makes llama.cpp's memory fitter abort ("n_gpu_layers already
 # set by user to 999, abort") instead of adjusting the parameters the caller
 # left unset. That is why the BF16 DFlash drafter appeared not to fit: with -ngl
 # unset the same drafter loads at the full 16384 context. BENCH_FIT=on drops the
 # pin for EVERY arm in a run, so the placement policy stays constant across the
 # comparison instead of differing between the arm that needed it and the rest.
-FIT = os.environ.get("BENCH_FIT", "off").strip().lower() in ("on", "1", "true", "yes")
+FIT = _env_bool("BENCH_FIT", False)
 
 # v1's fixed server flags, kept verbatim so the retest stays comparable.
 # Context is a run-level control, not a constant. With the BF16 DFlash drafter
@@ -163,8 +193,7 @@ COMMON_ARGS_PINNED = [
 ]
 COMMON_ARGS = ([a for i, a in enumerate(COMMON_ARGS_PINNED)
                 if not (a == "-ngl" or (i > 0 and COMMON_ARGS_PINNED[i - 1] == "-ngl"))]
-               if os.environ.get("BENCH_FIT", "off").strip().lower() in ("on", "1", "true", "yes")
-               else COMMON_ARGS_PINNED)
+               if FIT else COMMON_ARGS_PINNED)
 
 # The BOS key the draft GGUF never received: Qwen/Qwen3.5-0.8B has no
 # generation_config.json upstream (HTTP 404), so convert_hf_to_gguf wrote no
@@ -207,7 +236,7 @@ PROMPTS: list[tuple[str, str, str]] = [
 # llama.cpp renamed the speculative arguments after bcb5eeb64:
 #   --draft-max -> --spec-draft-n-max ,  --draft-min -> --spec-draft-n-min
 # BENCH_FLAVOR selects the spelling. `-md` and `-ngld` are accepted by both.
-FLAVOR = os.environ.get("BENCH_FLAVOR", "legacy")
+FLAVOR = _env_choice("BENCH_FLAVOR", "legacy", ("legacy", "master"))
 _NMAX, _NMIN = (("--draft-max", "--draft-min") if FLAVOR == "legacy"
                 else ("--spec-draft-n-max", "--spec-draft-n-min"))
 # On post-merge master `--spec-type` defaults to `none`: passing `-md` alone
@@ -536,7 +565,13 @@ def harness_tree_sha() -> dict:
 # run aborts on the first that does not. Without it a binary swapped between
 # arms is invisible: `server_lib_sha256` is taken once, at run start.
 EXPECT_COMMIT = os.environ.get("BENCH_EXPECT_COMMIT", "").strip()
-EXPECT_LIB = os.environ.get("BENCH_EXPECT_LIB_SHA256", "").strip()
+EXPECT_LIB = os.environ.get("BENCH_EXPECT_LIB_SHA256", "").strip().lower()
+if EXPECT_LIB and not re.fullmatch(r"[0-9a-f]{64}", EXPECT_LIB):
+    sys.exit(f"BENCH_EXPECT_LIB_SHA256={EXPECT_LIB!r} must be a full 64-character "
+             f"sha256; a prefix would accept a library it was never checked against")
+
+# The map every arm-run is compared against, taken from the first one.
+_LIB_BASELINE: dict | None = None
 
 
 def check_identity(arm: str, rep: int, ident: dict, libs: dict) -> list[str]:
@@ -549,9 +584,39 @@ def check_identity(arm: str, rep: int, ident: dict, libs: dict) -> list[str]:
                        f"BENCH_EXPECT_COMMIT={EXPECT_COMMIT!r}")
     if EXPECT_LIB:
         impl = libs.get("libllama-server-impl.so", "")
-        if not impl.startswith(EXPECT_LIB):
+        if impl != EXPECT_LIB:
             bad.append(f"{arm} rep{rep}: libllama-server-impl.so is {impl[:16]!r}, "
                        f"BENCH_EXPECT_LIB_SHA256={EXPECT_LIB[:16]!r}")
+    # What answered must have loaded the model the manifest names. The log line
+    # and /props are two independent reads of the same fact; both are compared
+    # when present, and neither is required, because a server that never
+    # reached the loader has neither and the crash is the finding.
+    for src, got in (("startup log", ident.get("model_path")),
+                     ("/props", (ident.get("props") or {}).get("model_path"))):
+        if got and TARGET and os.path.realpath(got) != os.path.realpath(TARGET):
+            bad.append(f"{arm} rep{rep}: {src} says the target is {got!r}, "
+                       f"MODEL_TARGET={TARGET!r}")
+    # `libllama-server-impl.so` is the server's own code, but it is not the only
+    # thing that decides what a decode does: `libllama.so`, `libggml-cuda.so`
+    # and `libggml-base.so` are all loaded, and swapping any of them between
+    # arms changes the measurement while leaving the impl hash alone. The whole
+    # map is pinned to the first arm-run of the run, so a mid-run rebuild fails
+    # the arm that sees it rather than being averaged into the result.
+    global _LIB_BASELINE
+    if not libs:
+        # a crashed arm-run never got far enough to hash anything; it is
+        # already a failure and must not become the baseline for the rest
+        return bad
+    if _LIB_BASELINE is None:
+        _LIB_BASELINE = dict(libs)
+    elif libs != _LIB_BASELINE:
+        added = sorted(set(libs) - set(_LIB_BASELINE))
+        gone = sorted(set(_LIB_BASELINE) - set(libs))
+        moved = sorted(k for k in set(libs) & set(_LIB_BASELINE)
+                       if libs[k] != _LIB_BASELINE[k])
+        bad.append(f"{arm} rep{rep}: the loaded shared libraries changed since "
+                   f"the first arm-run of this run - "
+                   f"different: {moved}, added: {added}, removed: {gone}")
     return bad
 
 
@@ -634,10 +699,42 @@ def server_identity(log_path: Path) -> dict:
     if m := re.search(r"\bbuild\s+(\d+)\s+\(([0-9a-f]{7,40})\)", text):
         out["build"] = m.group(1)
         out["commit"] = m.group(2)
-    for key, pat in (("model_path", r"llama_model_loader: loaded meta data from ([^\s]+)"),
+    # `llama_model_loader: loaded meta data with 45 key-value pairs and 579
+    # tensors from /path/to.gguf (version GGUF V3 (latest))`. The first version
+    # of this looked for "loaded meta data from", which is not what llama.cpp
+    # has ever printed, so `model_path` was silently absent from every arm-run
+    # identity ever recorded and nothing noticed - the field was only ever read
+    # when it was present.
+    for key, pat in (("model_path",
+                      r"llama_model_loader: loaded meta data with .*? tensors "
+                      r"from (.+?) \(version"),
                      ("arch", r"general\.architecture\s*(?:str|=)\s*=?\s*(\w+)")):
         if m := re.search(pat, text):
-            out[key] = m.group(1)
+            out[key] = m.group(1).strip()
+    return out
+
+
+def server_props(port: int) -> dict:
+    """Ask the server what it loaded, rather than trusting the command line.
+
+    argv says what was requested. `/props` says what answered, and the two can
+    differ - a stale server on the port, a symlink that moved, a path the
+    fitter rewrote. `model_path` is in the props payload
+    (`server-context.cpp:4489`), so there is no reason to infer it.
+    """
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/props", timeout=10) as r:
+            d = json.loads(r.read().decode())
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e)}
+    out = {}
+    for k in ("model_path", "n_ctx", "chat_template"):
+        if k in d:
+            out[k] = d[k] if k != "chat_template" else hashlib.sha256(
+                str(d[k]).encode()).hexdigest()
+    dm = d.get("default_generation_settings") or {}
+    if isinstance(dm, dict) and "model" in dm:
+        out.setdefault("model_path", dm["model"])
     return out
 
 
@@ -724,7 +821,8 @@ def gpu_mem_used_mib() -> int | None:
 
 
 def stop_server(proc: subprocess.Popen, baseline_mib: int | None = None,
-                headroom_mib: int = 2048, settle_timeout: float = 60.0) -> dict:
+                headroom_mib: int = 128, settle_timeout: float = 60.0,
+                consecutive: int = 3) -> dict:
     """Kill the server AND wait for the driver to hand the memory back.
 
     Reaping the process is not the same as the CUDA context being torn down.
@@ -751,17 +849,39 @@ def stop_server(proc: subprocess.Popen, baseline_mib: int | None = None,
     # using the GPU - another project's server on a shared box - made every
     # arm-run report an unsettled teardown and fail the run. The comparison is
     # against what was in use before this server started.
+    # The headroom was 2048 MiB, which is not a tolerance - it is most of the
+    # margin the fitter works in. The docstring above says a 120 MiB allocation
+    # was enough to kill the next arm, so the tolerance is now 128 MiB, and it
+    # has to hold for `consecutive` readings in a row: one sample can catch the
+    # driver mid-release and read low.
     ceiling = headroom_mib if baseline_mib is None else baseline_mib + headroom_mib
     t0 = time.perf_counter()
+    ok = 0
+    used = None
+    readings = 0
     while time.perf_counter() - t0 < settle_timeout:
         used = gpu_mem_used_mib()
-        if used is None or used <= ceiling:
-            return {"settled": True, "mib_after": used, "mib_before": baseline_mib,
+        readings += 1
+        if used is None:
+            # An unreadable card used to count as settled. That makes the one
+            # instrument this check depends on optional, and a run with no
+            # telemetry passed the same gate as a clean one.
+            return {"settled": False, "mib_after": None, "mib_before": baseline_mib,
                     "ceiling_mib": ceiling,
                     "wait_s": round(time.perf_counter() - t0, 2),
-                    "readable": used is not None}
+                    "readable": False, "readings": readings,
+                    "why": "nvidia-smi did not answer, so the teardown is unverified"}
+        if used <= ceiling:
+            ok += 1
+            if ok >= consecutive:
+                return {"settled": True, "mib_after": used, "mib_before": baseline_mib,
+                        "ceiling_mib": ceiling, "consecutive": consecutive,
+                        "readings": readings,
+                        "wait_s": round(time.perf_counter() - t0, 2),
+                        "readable": True}
+        else:
+            ok = 0
         time.sleep(1.0)
-    used = gpu_mem_used_mib()
     print(f"    ! GPU still reports {used} MiB in use {settle_timeout:.0f}s after "
           f"the server was killed, against {baseline_mib} MiB before it started",
           flush=True)
@@ -770,7 +890,7 @@ def stop_server(proc: subprocess.Popen, baseline_mib: int | None = None,
     # the failure lands on the *following* arm and looks like that arm's fault.
     # Recorded per arm-run and treated as a run-level failure below.
     return {"settled": False, "mib_after": used, "mib_before": baseline_mib,
-            "ceiling_mib": ceiling,
+            "ceiling_mib": ceiling, "readings": readings,
             "wait_s": round(time.perf_counter() - t0, 2), "readable": True}
 
 
@@ -1031,6 +1151,7 @@ def run_arm(arm: str, rep: int) -> dict:
     try:
         try:
             ready_s = wait_health(PORT, proc=proc)
+            props = server_props(PORT)
         except Exception as e:  # noqa: BLE001 - bad flags / OOM / model rejected
             return {"arm": arm, "repeat": rep, "ready_s": None,
                     "argv": proc._cmd,  # type: ignore[attr-defined]
@@ -1078,7 +1199,7 @@ def run_arm(arm: str, rep: int) -> dict:
             "arm": arm, "repeat": rep, "ready_s": ready_s,
             # who actually answered, read back from the server's own startup log
             "server_pid": proc.pid,
-            "server_identity": server_identity(log_path),
+            "server_identity": dict(server_identity(log_path), props=props),
             # Taken per arm-run, not once per run: the run-level hash cannot
             # see a binary replaced between two arms.
             "server_lib_sha256": _server_lib_hashes(),
@@ -1128,7 +1249,7 @@ def validate_run(out: Path, arms: list[str], repeats: int,
         problems += check_identity(arm, rep, res.get("server_identity") or {},
                                    res.get("server_lib_sha256") or {})
         td = res.get("teardown") or {}
-        if td.get("readable") and not td.get("settled"):
+        if not td.get("settled"):
             problems.append(f"arm-run {arm} rep{rep}: the GPU held "
                             f"{td.get('mib_after')} MiB {td.get('wait_s')}s after "
                             f"teardown against {td.get('mib_before')} before the "
@@ -1194,11 +1315,6 @@ def main() -> None:
         sys.exit(f"BENCH_OUT={OUT} already contains {len(stale)} arm-run files "
                  f"(e.g. {stale[0].name}). Refusing to write into it: the analysis "
                  f"cannot tell the two runs apart. Use a fresh directory.")
-    if REPEATS < 1:
-        # `range(REPEATS)` is empty, the arm loop never runs, and the directory
-        # gets a RUN_COMPLETE.json attesting to nothing. An empty run is not a
-        # complete one.
-        sys.exit(f"BENCH_REPEATS={REPEATS} would run no arm-runs at all")
     wanted = os.environ.get("BENCH_ARMS")
     arms = [a.strip() for a in wanted.split(",")] if wanted else list(ARMS)
     for a in arms:

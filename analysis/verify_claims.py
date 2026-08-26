@@ -1717,9 +1717,27 @@ _v4r = pathlib.Path(__file__).resolve().parents[1] / "v4_audit_2026_08_25" / "RE
 chk("the archive hash is recorded in both places",
     all("29c2401f100390268bbd52e43b5c2da9a61440bad3dabe502ca1684478771fd6" in t
         for t in (_man.read_text(encoding="utf-8"), _v4r.read_text(encoding="utf-8"))), True)
-chk("and both say it is not published",
-    all("not published" in t for t in
+chk("and both record that it is published, and where",
+    all("raw-evidence-2026-08-27" in t for t in
         (_man.read_text(encoding="utf-8"), _v4r.read_text(encoding="utf-8"))), True)
+# What the release buys is a re-runnable extraction, so the counts it
+# reproduces are a claim like any other and are checked against the dumps.
+_acc_rows = json.loads((pathlib.Path(__file__).resolve().parents[1]
+                        / "v4_audit_2026_08_25" / "data"
+                        / "acceptance_counter_comparison.json").read_text(encoding="utf-8"))
+_unreproducible = {"matrix_G_dflash_20260826_000124",
+                   "matrix_I_conc1_20260826_012917",
+                   "matrix_J_dflash_fit_20260826_014308"}
+chk("the rows the archive alone cannot regenerate",
+    sum(1 for r in _acc_rows if r["run"] in _unreproducible), 9)
+chk("and the rest, which the workflow re-derives",
+    sum(1 for r in _acc_rows if r["run"] not in _unreproducible), 526)
+chk("the three runs are named where the count is",
+    all(r in _v4r.read_text(encoding="utf-8") for r in _unreproducible), True)
+chk("and none of them is a committed run directory",
+    sorted(r for r in _unreproducible
+           if (pathlib.Path(__file__).resolve().parents[1] / "v4_audit_2026_08_25"
+               / "data" / r).is_dir()), [])
 # Every committed run's logs should appear in the manifest. Four of the earliest
 # were renamed when they were archived, so the committed directory and the one
 # the logs live in differ; the mapping is written out rather than exempted,
@@ -1780,6 +1798,100 @@ for _f, (_ncnv, _nthink, _ndraft) in _HISTORICAL.items():
         [l.strip() for l in _t.splitlines()
          if re.match(r'^[A-Z_]+="?/home/[a-z]', l.strip())], [])
 
+
+print("\n=== the same measurement, stored twice, must agree ===")
+# Every arm-run row carries `predicted_ms`, `predicted_n` and
+# `predicted_per_second` at the top level AND inside `timings`, and different
+# analyses read different copies: paired_blocks.py, matrix_report.py, plot.py
+# and plot_v4_runs.py take the top-level one, past_threshold_fit.py the nested
+# one. Nothing compared them, so a change to one was invisible to whatever read
+# the other - which is how a planted 5 % change to one request's decode time
+# survived the whole perturbation suite.
+_DUP = ("predicted_ms", "predicted_n", "predicted_per_second")
+_armruns = sorted((pathlib.Path(__file__).resolve().parents[1] / "v4_audit_2026_08_25"
+                   / "data").glob("*/*__rep*.json"))
+_rows_seen = 0
+_disagree = []
+for _f in _armruns:
+    for _r in json.loads(_f.read_text(encoding="utf-8")).get("rows") or []:
+        _rows_seen += 1
+        _t = _r.get("timings") or {}
+        for _k in _DUP:
+            if _k in _r and _k in _t and _r[_k] != _t[_k]:
+                _disagree.append(f"{_f.parent.name}/{_f.name}: {_k} "
+                                 f"{_r[_k]!r} at the top level, {_t[_k]!r} in timings")
+chk("arm-run files scanned", len(_armruns) > 600, True)
+chk("request rows scanned", _rows_seen > 7000, True)
+chk("the two copies of every measurement agree", _disagree[:3], [])
+
+# B8: `predicted_per_second` is llama.cpp's own field and it reports a rate over
+# n-1 tokens divided by the time for n. Every request-mean in this repository is
+# the mean of it, so the relationship is pinned here rather than left to drift.
+_nm1 = _nn = _neither = 0
+for _f in _armruns:
+    for _r in json.loads(_f.read_text(encoding="utf-8")).get("rows") or []:
+        _t = _r.get("timings") or {}
+        if not _t.get("predicted_ms") or "predicted_per_second" not in _t:
+            continue
+        _n, _ms, _ps = _t["predicted_n"], _t["predicted_ms"], _t["predicted_per_second"]
+        if _n < 2:
+            continue
+        if abs(_ps - 1000 * (_n - 1) / _ms) < 1e-6 * max(1.0, 1000 * (_n - 1) / _ms):
+            _nm1 += 1
+        elif abs(_ps - 1000 * _n / _ms) < 1e-6 * max(1.0, 1000 * _n / _ms):
+            _nn += 1
+        else:
+            _neither += 1
+chk("B8 rows where the server reports 1000*(n-1)/ms", _nm1, 7120)
+chk("B8 rows where it reports 1000*n/ms", _nn, 44)
+chk("B8 rows matching neither", _neither, 0)
+chk("B8 the 44 are the legacy binary's",
+    sorted({_f.parent.name for _f in _armruns
+            if any(abs((_r.get("timings") or {}).get("predicted_per_second", 0)
+                       - 1000 * (_r["timings"]["predicted_n"])
+                       / _r["timings"]["predicted_ms"]) < 1e-9
+                   for _r in json.loads(_f.read_text(encoding="utf-8")).get("rows") or []
+                   if (_r.get("timings") or {}).get("predicted_ms")
+                   and _r["timings"]["predicted_n"] > 1)}),
+    ["A_bcb5eeb64_legacy"])
+chk("ERRATA carries B8",
+    "### B8. Every `request-mean` here counts one token fewer"
+    in (pathlib.Path(__file__).resolve().parents[1] / "ERRATA.md")
+    .read_text(encoding="utf-8"), True)
+
+print("\n=== every published interval says what it covers ===")
+# `paired_blocks.json` looked identical whether the schedule balanced or not,
+# and it is the file the documents quote. Two of the seven came from schedules
+# that are not position-balanced - run T rotates three arms over four repeats,
+# and the head-to-head run has three blocks of a nine-arm design - and neither
+# file said so. They record it now, and the tool refuses to write one without
+# --allow-unbalanced.
+_pbs = sorted((pathlib.Path(__file__).resolve().parents[1] / "v4_audit_2026_08_25"
+               / "data").glob("*/paired_blocks.json"))
+chk("paired-block files on disk", len(_pbs), 7)
+_pbj = {f.parent.name: json.loads(f.read_text(encoding="utf-8")) for f in _pbs}
+chk("every one records whether its schedule balanced",
+    sorted(k for k, v in _pbj.items() if "schedule_position_balanced" not in v), [])
+chk("every one records the scope of its interval",
+    sorted(k for k, v in _pbj.items()
+           if "invocation" not in (v.get("interval_scope") or "")), [])
+chk("the unbalanced ones are exactly these two, and they say so",
+    sorted(k for k, v in _pbj.items() if not v["schedule_position_balanced"]),
+    ["matrix_O_headtohead_20260826_081806", "matrix_T_timers_20260826_182639"])
+chk("and each of those was written with the override, not silently",
+    all(v["unbalanced_override"] for v in _pbj.values()
+        if not v["schedule_position_balanced"]), True)
+# the t critical value each file used, against the value for its block count
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import paired_blocks as _pb
+for _name, _v in sorted(_pbj.items()):
+    chk(f"t critical for {_name} ({_v['blocks']} blocks)",
+        round(_pb.t_critical_975(_v["blocks"] - 1), 4), _v["t_critical_975"], 0.0005)
+# The tabulated fallback was wrong above df=10. No committed run reaches it, so
+# no published interval moved when it was replaced - which is worth asserting
+# rather than assuming.
+chk("no committed run has enough blocks to have hit the 1.96 fallback",
+    max(v["blocks"] for v in _pbj.values()) - 1 <= 10, True)
 
 print("\n=== the past-threshold pre-registration ===")
 # Until 2026-08-27 this was the only analysis in the repository with no
@@ -2363,8 +2475,12 @@ for _a in _pb["arms"]:
     _blo, _bhi = _a["ci95_boot_pct"]
     chk(f"t is the wider interval for {_a['arm']}",
         (_hi - _lo) >= (_bhi - _blo) - 1e-9, True)
-chk("README names the interval it publishes",
-    "95 % CI (t, over blocks)" in _README0, True)
+chk("README names the interval it publishes, and its scope",
+    "95 % CI (t, blocks within this invocation)" in _README0, True)
+# A16 shows the interval does not cover invocation-to-invocation variation, so
+# the column must not read as though it were a configuration-level interval.
+chk("README does not call it a plain 95 % CI over blocks",
+    "95 % CI (t, over blocks)" in _README0, False)
 
 
 print("\n=== run O3: the headline matrix, replicated with full provenance ===")
@@ -2787,9 +2903,32 @@ for _arm, _cells in _vt.items():
 
 _er_v = " ".join(_norm(pathlib.Path(__file__).resolve().parents[1]
                        .joinpath("ERRATA.md").read_text(encoding="utf-8")).split())
-chk("ERRATA reports run V", "Run V measures it instead of subsetting" in _er_v, True)
+chk("ERRATA reports run V",
+    "Run V is a fixed-order sensitivity analysis" in _er_v, True)
 chk("and says the two methods agree in direction, not magnitude",
     "agree in direction and not in magnitude" in _er_v, True)
+# The order confound the third review found: both halves are position-balanced
+# internally, and the mode itself was not interleaved at all.
+chk("A17 states that the two halves were not interleaved",
+    "were not interleaved" in _er_v, True)
+chk("A17 gives both start stamps",
+    "22:31:46" in _er_v and "22:48:08" in _er_v, True)
+chk("A17 names the A16 effect it cannot separate from",
+    "9.26 pp" in _er_v and "9.4 pp" in _er_v, True)
+# The comparator that matches run V's design is not the full-day span but the
+# closest pair of invocations, which is tighter and worse.
+_uvals = {"U1": 22.3, "U2": 24.2, "U3": 17.3, "U4": 19.9, "U5": 25.6, "U6": 24.3}
+chk("A17 uses the closest-pair comparator",
+    "six minutes apart and differ by 8.30 pp" in re.sub(r"\s+", " ", _er_v), True)
+chk("and that gap is what runs U3 and U5 actually differ by",
+    round(_uvals["U5"] - _uvals["U3"], 2), 8.30, 0.005)
+chk("A17 shows the two halves could not have overlapped",
+    "938 s" in _er_v and "982 s gap" in re.sub(r"\s+", " ", _er_v), True)
+chk("A17 no longer claims to close P1-3",
+    "does **not** close" in _er_v, True)
+chk("A17 separates the two estimands",
+    "answer different questions" in _er_v, True)
+
 
 
 print("\n=== the balanced design is verified, not declared ===")

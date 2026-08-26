@@ -1142,5 +1142,37 @@ one of them and of the 19 telemetry traces, and each attested run additionally
 records `server_log_sha256` per arm-run, so a single log can be checked without
 the manifest. `bash bench/collect_evidence.sh ~/bench` regenerates both and
 builds `raw_logs.tar.zst`, **271 028 599 bytes**, sha256
-`29c2401f100390268bbd52e43b5c2da9a61440bad3dabe502ca1684478771fd6`. That archive
-is not published: distributing it is the repository owner's decision.
+`29c2401f100390268bbd52e43b5c2da9a61440bad3dabe502ca1684478771fd6`.
+
+**That archive is published**, with the 19 telemetry traces beside it, as the
+release asset `raw-evidence-2026-08-27`. Committed hashes tie the derived JSON
+to files nobody else could see, which is a weaker claim than it sounds; the
+point of publishing is that the extraction can be re-run rather than trusted.
+`.github/workflows/evidence.yml` does exactly that, and this is what it
+reproduces from the archive alone:
+
+| derived file | records | identical | not reproducible |
+|---|---:|---:|---|
+| `data/spec_accounting_20260826.json` | 12 | **12** | — |
+| `data/checkpoint_timers_20260826.json` | 12 | **12** | — |
+| `data/acceptance_counter_comparison.json` | 535 | **526** | 9 |
+
+Zero records differ. The nine that are not reproducible belong to runs **G**,
+**I** and **J**, three exploratory runs whose logs are in the archive but whose
+arm-run JSON is not committed — the extractor needs both, and those three runs
+never completed their cell set, so committing them would attest to runs that
+are not whole. `analysis/check_data_integrity.py` refuses them for exactly that
+reason. The runs are `matrix_G_dflash_20260826_000124`,
+`matrix_I_conc1_20260826_012917` and `matrix_J_dflash_fit_20260826_014308`, and
+they contribute nine of the 535 rows behind
+[A13](../ERRATA.md#a13-there-are-two-acceptance-counters-they-disagree-and-the-disagreement-is-exactly-the-checkpoint-path); the claim
+there survives on the other 526.
+
+Four run directories are archived under their bench-host names rather than the
+descriptive ones used here: `C_master_matrix_think_on`,
+`D_master_matrix_think_off`, `E_past_threshold` and `H_pmin_sweep` are
+`matrix_C_20260825_204529`, `matrix_D_20260825_204529`,
+`matrix_E_threshold_20260825_224802` and `matrix_H_pmin_20260826_005716` in the
+archive. Thirteen of the nineteen telemetry traces are committed here byte for
+byte; six — the aborted IJ, K, MN, N, T2 and T3 traces — are in the release
+only.

@@ -801,6 +801,26 @@ first.** Run T repeats three of run O2's arms with the same configuration:
 The timers cost nothing measurable, so the attribution below is not paying for
 its own instrumentation.
 
+> [!IMPORTANT]
+> **What the boundary is.** The timers surround `ckpt.update_tgt`,
+> `ckpt.update_dft`, `ckpt.load_tgt` and `ckpt.load_dft`, and those call
+> `llama_state_seq_get_data_ext` / `set_data_ext`, which at `3737e4137` begin
+> with `ctx->synchronize()` — verified in the tested tree, `llama-context.cpp`
+> lines 4083–4092. So every figure in this section is **elapsed time inside the
+> instrumented checkpoint API calls**, and that includes waiting for backend
+> work queued before the call to finish, as well as the serialisation, the
+> host/device copying, the container resize and the API's own bookkeeping.
+>
+> It is not isolated state-copy time, and **54.7 % is an attribution to the API
+> boundary, not a measurement of checkpoint memory traffic.** Some of the
+> synchronisation wait would be paid elsewhere on a path with no checkpoints
+> rather than disappearing, so the counterfactual saving is at most this figure
+> and plausibly less. Separating them needs a second timer inside the call —
+> `synchronize()` and the state get/set timed apart, or `AUDIT_US sync=` and
+> `AUDIT_US serialize=` emitted from `llama_state_seq_*_ext` itself — which is
+> a rebuild and a re-run that has not been done. Until it is, read every number
+> below as API-call elapsed.
+
 **The accounting.** One ten-prompt arm-run, 3000 generated tokens, decode time
 only, mean of four:
 
@@ -1311,7 +1331,8 @@ and the [A12](#a12-what-the-checkpoint-path-costs-measured-with-timers-in-the-so
 checkpoint attribution are all thinking-on, all at 300 tokens on every request,
 and all shift by 0.00 pp under the same test.
 
-**Run V measures it instead of subsetting.** `BENCH_IGNORE_EOS=on` sends
+**Run V is a fixed-order sensitivity analysis, not an identified effect.**
+`BENCH_IGNORE_EOS=on` sends
 `ignore_eos` with every request, so each arm generates exactly
 `BENCH_MAX_TOKENS` wherever it would have stopped. Run V is the same five arms,
 five balanced blocks, thinking off, run twice back to back in one session — once
@@ -1329,19 +1350,60 @@ half rounds is not something a published table should depend on.
 | `spec-dflash-n4` | **−1.35 %** | **+10.55 %** | **+11.90 pp, and the sign flips** |
 | `spec-draft-n8` | −76.76 % | −70.45 % | +6.31 pp |
 
-**`spec-dflash-n4` is the arm A17 was written about**, and its sign flips under
-the designed control exactly as the subset restriction predicted. Every arm
-moves in the direction the subsetting indicated, by 6.31 to 11.90 pp.
+**`spec-dflash-n4` is the arm A17 was written about**, and it changes sign
+between the two halves. Every arm moves in the direction the subsetting
+indicated, by 6.31 to 11.90 pp.
 
 The two methods agree in direction and not in magnitude: restricting the
 freerun half to its own length-matched prompts gives +21.25, +17.55, +12.67 and
-−73.74 against the hard cap's +20.60, +21.18, +10.55 and −70.45. The subset is half
-the prompts and the biased half, which is the caveat stated above; the hard cap
-is the measurement.
+−73.74 against the hard cap's +20.60, +21.18, +10.55 and −70.45.
 
-This closes [`RETEST_TODO.md`](RETEST_TODO.md) P1-3. The archived thinking-off
-runs stay as they are; what they measured is now stated, and what they would
-have measured is now known.
+> [!WARNING]
+> **The two halves were not interleaved, so this run does not identify the
+> effect of `ignore_eos`.** Every freerun block ran before every hard-cap
+> block. The runner stamps `created` before the first server starts, so the
+> freerun matrix began at `2026-08-26T22:31:46+0800` and the hard-cap matrix at
+> `22:48:08`; the freerun half's own measured work — 565 s of decode plus 373 s
+> of server startup, 938 s — fits inside that 982 s gap, so the two halves did
+> not overlap and could not have been interleaved. Each half carries its own
+> position-balanced schedule, but the *mode* is confounded with sixteen minutes
+> of elapsed time and with whatever differs between two invocations of the
+> driver.
+>
+> That is not a hypothetical here. [A16](#a16-two-runs-identical-in-every-recorded-respect-and-byte-identical-in-output-differ-by-34--on-one-arm)
+> establishes an unexplained, DFlash-specific invocation effect on this very
+> drafter, with no recorded field distinguishing the states. Its full-day span
+> is **9.4 pp**, but the comparator that matches Run V's design is tighter and
+> worse: runs **U3 and U5 are six minutes apart and differ by 8.30 pp**,
+> +17.3 % against +25.6 %, on the same binary, the same models and the same
+> prompts. Run V's two halves are sixteen minutes apart and the shift it reports
+> for `spec-dflash-n2` is **9.26 pp**. The design cannot separate `ignore_eos`
+> from that. The `spec-dflash-n4` sign change must not be attributed to the hard
+> cap alone.
+>
+> What Run V does establish is that an equal-token-count measurement and a
+> natural-stop measurement of the same five arms differ materially, in the
+> direction and roughly the magnitude the length-matched subset predicted.
+> Identifying the cause needs the mode randomised or run AB/BA across several
+> sessions, with the session as the resampling unit rather than the difference
+> of two whole-run point estimates. **That run has not been done**;
+> `bench/run_v2_crossover.sh` is the design, four sessions in AB/BA/BA/AB order
+> with run V's configuration otherwise verbatim, and it is about three hours on
+> an exclusive card.
+>
+> **The two halves also answer different questions**, and neither is the
+> corrected version of the other. Freerun is natural-completion latency, which
+> is what a user actually experiences. The hard cap is an equal-generated-token
+> microbenchmark: forcing generation past a natural stop is not a workload
+> anyone runs, and the token streams, the experts routed, the draft candidates
+> and the acceptance profile all differ from the freerun half. Equal token
+> counts are not equal computation.
+
+This does **not** close [`RETEST_TODO.md`](RETEST_TODO.md) P1-3, which stays
+open for the crossover. The archived thinking-off runs stay as they are; what
+they measured is now stated, and a second measurement of the same five arms
+under a forced cap exists to compare against — a difference this design cannot
+attribute, not a bound on the confound.
 
 ---
 
@@ -1472,6 +1534,60 @@ speculative fp16-KV row against a non-speculative q8_0-KV row and attributing
 the whole difference to speculation.
 
 ---
+
+### B8. Every `request-mean` here counts one token fewer than it timed
+
+`predicted_per_second` is llama.cpp's own field, and every table in this
+repository with a **request-mean** column is the arithmetic mean of it —
+`analysis/matrix_report.py`, `analysis/plot.py` and `analysis/plot_v4_runs.py`
+all read it rather than dividing tokens by time themselves.
+
+Across all **7164** request rows of all **687** committed arm-run files:
+
+| what the server reported | rows |
+|---|---:|
+| `1000 × (n − 1) / predicted_ms` | **7120** |
+| `1000 × n / predicted_ms` | 44 |
+| neither | **0** |
+
+So the reported rate is a decode rate over `n − 1` tokens divided by the time
+for `n`, and every request-mean in this repository inherits it. The bias is
+exactly `(n − 1) / n`, so it depends on output length:
+
+| tokens generated | understated by |
+|---:|---:|
+| 20 | 5.00 % |
+| 187 | 0.53 % |
+| 300 | **0.33 %** |
+| 1000 | 0.10 % |
+
+**What this does not touch.** Every headline figure and every published *delta*
+is a **pooled** rate — `1000 × Σn / Σms`, computed from the two raw fields — so
+none of them contains this. And on a run where every request hits the same cap,
+the bias is identical on every arm: run O2's baseline, `spec-dflash-n2` and
+`spec-draft-n8` request-means are each **0.33 %** low, so the ratios between
+them are exact.
+
+**What it does touch.** Two things, both small and both previously unnamed:
+
+- **The thinking-off runs, again.** Where arms stop at different lengths the
+  bias differs per arm. In run R, `spec-mtp-n2` averages 20-token completions on
+  some prompts and is **0.91 %** low while its 300-token baseline is 0.33 % low,
+  so that request-mean delta is about 0.6 pp off. It is the same length
+  mechanism as [A17](#a17-the-thinking-off-comparisons-are-not-comparisons-of-the-same-amount-of-work),
+  riding on a different field.
+- **Comparability across binaries.** The 44 rows that report `1000 × n / ms` are
+  the legacy `bcb5eeb64` runs. The definition changed between the archival and
+  controlled tiers, so request-means from the two are not comparable at this
+  precision — pooled rates are.
+
+**Not corrected here.** Recomputing the request-mean from `predicted_n` and
+`predicted_ms` would move several dozen published figures by 0.33 % and change
+nothing any conclusion rests on, and each would need re-verifying. The
+relationship is asserted instead, in `analysis/verify_claims.py`, so it cannot
+change without failing the build, and recomputation is listed in
+[`RETEST_TODO.md`](RETEST_TODO.md).
+
 
 ## C — artefact and scope naming
 

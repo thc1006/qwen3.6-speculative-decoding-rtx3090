@@ -31,30 +31,13 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SIDECAR = ROOT / ".mutate-in-progress"
-
-
-def _restore_from_sidecar() -> bool:
-    """Put back a file a previous run was killed in the middle of mutating.
-
-    `finally` does not run when the process is killed, and this script edits
-    source files in place. A run interrupted by SIGKILL - `timeout`, a `pkill`,
-    a CI cancellation - leaves the tree MUTATED, and the mutation is then
-    committed by whoever commits next. That happened: `body["ignore_eos"] = True`
-    was committed as `body.pop("ignore_eos", None)`, and only the
-    fix-presence test noticed.
-
-    So the original is written to a sidecar before each mutation and removed
-    after. If the sidecar exists at startup, a previous run died: restore and
-    say so.
-    """
-    if not SIDECAR.exists():
-        return False
-    rel, _, body = SIDECAR.read_text(encoding="utf-8").partition("\n")
-    (ROOT / rel).write_text(body, encoding="utf-8")
-    SIDECAR.unlink()
-    print(f"  recovered {rel} from an interrupted run")
-    return True
+# There is no sidecar any more. Mutations run in a mirror under a temporary
+# directory, so an interrupted run leaves the real checkout untouched and there
+# is nothing to recover. The recovery path that used to live here read a
+# relative path out of `.mutate-in-progress` and wrote it under ROOT without
+# resolving it first, which a stale or crafted `../..` entry could have used to
+# write outside the repository - a fail-open recovery for a failure mode the
+# mirror removed.
 
 # (description, file, correct fragment, defect to restore, test that must fail)
 MUTATIONS = [
@@ -74,12 +57,63 @@ MUTATIONS = [
      """        try:
             with urllib.request.urlopen(url, timeout=3) as r:""",
      "tests.test_harness_invariants.PortMustBeFreeBeforeSpawn"),
-    ("BENCH_THINK maps unrecognised values to on",
+    ("a treatment boolean maps unrecognised values to the default",
      "bench/retest_runner.py",
-     '''    sys.exit(f"BENCH_THINK={_THINK_RAW!r} is not recognised; use one of "
-             f"{sorted(_THINK_ON)} or {sorted(_THINK_OFF)}")''',
-     '    THINK = "on"',
+     '''    sys.exit(f"{name}={raw!r} is not a recognised boolean; use one of "
+             f"{sorted(_TRUE)} or {sorted(_FALSE)}")''',
+     "    return default",
      "tests.test_harness_invariants.ConfigMustFailClosed"),
+    ("a treatment choice maps unrecognised values to the default",
+     "bench/retest_runner.py",
+     '        sys.exit(f"{name}={v!r} is not one of {sorted(allowed)}")',
+     "        return default",
+     "tests.test_harness_invariants.ConfigMustFailClosed"),
+    ("an out-of-range integer is clamped instead of refused",
+     "bench/retest_runner.py",
+     '''        sys.exit(f"{name}={v} is out of range "
+                 f"[{low}, {\'inf\' if high is None else high}]")''',
+     "        v = low",
+     "tests.test_harness_invariants.ConfigMustFailClosed"),
+    ("a prefix is accepted as the expected library digest",
+     "bench/retest_runner.py",
+     'if EXPECT_LIB and not re.fullmatch(r"[0-9a-f]{64}", EXPECT_LIB):',
+     "if False:",
+     "tests.test_harness_invariants.ConfigMustFailClosed"),
+    ("only the server impl library is compared between arms",
+     "bench/retest_runner.py",
+     "    elif libs != _LIB_BASELINE:",
+     "    elif False:",
+     "tests.test_harness_invariants.TheWholeLibraryMapIsPinned"),
+    ("an unreadable GPU counts as a settled teardown",
+     "bench/retest_runner.py",
+     '''            return {"settled": False, "mib_after": None, "mib_before": baseline_mib,''',
+     '''            return {"settled": True, "mib_after": None, "mib_before": baseline_mib,''',
+     "tests.test_harness_invariants.TeardownMustNotContaminateTheNextArm"),
+    ("one low reading settles the teardown",
+     "bench/retest_runner.py",
+     "            if ok >= consecutive:",
+     "            if True:",
+     "tests.test_harness_invariants.TeardownMustNotContaminateTheNextArm"),
+    ("the analysis goes back to its own definition of balanced",
+     "analysis/paired_blocks.py",
+     "    want = sorted(list(range(1, n + 1)) * int(per))",
+     "    want = list(range(1, n + 1))",
+     "tests.test_harness_invariants.PairedBlocksAgreesWithTheRunner"),
+    ("the t critical value falls back to the normal one",
+     "analysis/paired_blocks.py",
+     "        tail = _betainc(df / 2.0, 0.5, df / (df + mid * mid))",
+     "        tail = 0.05 if mid >= 1.959964 else 1.0",
+     "tests.test_harness_invariants.PairedBlocksAgreesWithTheRunner"),
+    ("only the --opt=value spelling is parsed",
+     "analysis/paired_blocks.py",
+     "            elif i + 1 < len(argv) and not argv[i + 1].startswith(\"--\"):",
+     "            elif False:",
+     "tests.test_harness_invariants.PairedBlocksAgreesWithTheRunner"),
+    ("staging accepts more than one safetensors index",
+     "bench/stage_mtp_source.py",
+     "    if len(idx_files) > 1:",
+     "    if False:",
+     "tests.test_harness_invariants.StagingMustNotDestroyItsSource"),
     ("mirrored ordering stops rejecting odd repeats",
      "bench/retest_runner.py",
      '    if ORDER_MODE == "mirrored" and REPEATS % 2 == 1:',
@@ -137,7 +171,7 @@ MUTATIONS = [
      'tests.test_harness_invariants.ProvenanceMustIdentifyWhatRan'),
     ('an unsettled teardown is only printed, not recorded',
      'bench/retest_runner.py',
-     '        if td.get("readable") and not td.get("settled"):',
+     '        if not td.get("settled"):',
      '        if False:',
      'tests.test_harness_invariants.TeardownMustNotContaminateTheNextArm'),
     ('ignore_eos is recorded but never sent',
@@ -155,11 +189,6 @@ MUTATIONS = [
      '    want = sorted(list(range(1, n + 1)) * int(per))',
      '    want = list(range(1, n + 1))',
      'tests.test_harness_invariants.LatinSquareMustBeBalancedOrNotCalledLatin'),
-    ('a run with no arm-runs stops being refused',
-     'bench/retest_runner.py',
-     '    if REPEATS < 1:',
-     '    if False:',
-     'tests.test_harness_invariants.AnEmptyRunIsNotACompleteRun'),
     ('a repeated arm name stops being refused',
      'bench/retest_runner.py',
      '    if dupes:',
@@ -185,6 +214,28 @@ MUTATIONS = [
      "    if stale:",
      "    if False:",
      "tests.test_harness_invariants.OutputDirectoryMustBeFresh"),
+    ("the re-derivation tolerates records that changed",
+     "analysis/rederive_from_logs.py",
+     "    if differing:",
+     "    if False:",
+     "tests.test_harness_invariants.RederivationMustNotForgive"),
+    ("the re-derivation tolerates records that vanished",
+     "analysis/rederive_from_logs.py",
+     "    if len(missing) != expected_gap:",
+     "    if False:",
+     "tests.test_harness_invariants.RederivationMustNotForgive"),
+
+    ("the model the server loaded stops being compared",
+     "bench/retest_runner.py",
+     "        if got and TARGET and os.path.realpath(got) != os.path.realpath(TARGET):",
+     "        if False:",
+     "tests.test_harness_invariants.WhatAnsweredMustHaveLoadedTheRightModel"),
+    ("the model path pattern goes back to one that never matched",
+     "bench/retest_runner.py",
+     'r"llama_model_loader: loaded meta data with .*? tensors "',
+     'r"llama_model_loader: loaded meta data "',
+     "tests.test_harness_invariants.WhatAnsweredMustHaveLoadedTheRightModel"),
+
 ]
 
 
@@ -210,7 +261,6 @@ def mirror(into: Path) -> Path:
 
 
 def main() -> None:
-    _restore_from_sidecar()          # clean up after any older in-place run
     print(f"  {'mutation':52s} guarding test")
     escaped = []
     with tempfile.TemporaryDirectory() as tmp:

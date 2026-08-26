@@ -11,6 +11,7 @@ No GPU, no network, no third-party packages. `python -m unittest discover tests`
 """
 from __future__ import annotations
 
+import re
 import itertools
 import json
 import os
@@ -72,7 +73,58 @@ class ConfigMustFailClosed(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             r = run_runner({"BENCH_THINK": "of"}, Path(d) / "out")
         self.assertNotEqual(r.returncode, 0)
-        self.assertIn("not recognised", r.stdout + r.stderr)
+        self.assertIn("is not a recognised boolean", r.stdout + r.stderr)
+
+    def test_every_treatment_variable_fails_closed(self):
+        """BENCH_THINK was strict and the rest were not, which is the same
+        defect under a different name: `BENCH_IGNORE_EOS=oen` selected off,
+        an unknown BENCH_FLAVOR selected master, and BENCH_CONCURRENCY=0 was
+        clamped to 1. A typo must stop the run before any GPU work."""
+        for var, bad, needle in (("BENCH_IGNORE_EOS", "oen", "recognised boolean"),
+                                 ("BENCH_FIT", "onn", "recognised boolean"),
+                                 ("BENCH_FLAVOR", "mater", "is not one of"),
+                                 ("BENCH_CONCURRENCY", "0", "out of range"),
+                                 ("BENCH_CONCURRENCY", "-2", "out of range"),
+                                 ("BENCH_MAX_TOKENS", "0", "out of range"),
+                                 ("BENCH_PORT", "70000", "out of range"),
+                                 ("BENCH_PORT", "0", "out of range"),
+                                 ("BENCH_REPEATS", "notanumber", "is not an integer")):
+            with self.subTest(var=var, value=bad), tempfile.TemporaryDirectory() as d:
+                r = run_runner({var: bad}, Path(d) / "out")
+                self.assertNotEqual(r.returncode, 0, f"{var}={bad} was accepted")
+                self.assertIn(needle, r.stdout + r.stderr)
+
+    def test_a_spelling_a_committed_run_used_is_still_accepted(self):
+        """`matrix_L_thinkoff` records `think_env: "think_off"`. A strict parser
+        that drops it cannot reproduce a run this repository published, which is
+        a worse failure than the one it was written to prevent."""
+        for value, want in (("think_off", "off"), ("think_on", "on")):
+            with self.subTest(value=value):
+                env = dict(os.environ, BENCH_THINK=value)
+                r = subprocess.run(
+                    [sys.executable, "-c",
+                     "import sys; sys.argv=['x']; "
+                     "exec(open('bench/retest_runner.py').read().split('def main')[0]); "
+                     "print(THINK)"],
+                    env=env, cwd=ROOT, capture_output=True, text=True)
+                self.assertEqual(r.returncode, 0, r.stderr[-300:])
+                self.assertEqual(r.stdout.strip().splitlines()[-1], want)
+
+    def test_the_good_values_still_work(self):
+        for var, good in (("BENCH_IGNORE_EOS", "on"), ("BENCH_IGNORE_EOS", "off"),
+                          ("BENCH_FIT", "true"), ("BENCH_FLAVOR", "master"),
+                          ("BENCH_FLAVOR", "legacy"), ("BENCH_CONCURRENCY", "8")):
+            with self.subTest(var=var, value=good), tempfile.TemporaryDirectory() as d:
+                r = run_runner({var: good}, Path(d) / "out")
+                for n in ("recognised boolean", "is not one of", "out of range"):
+                    self.assertNotIn(n, r.stdout + r.stderr, f"{var}={good}")
+
+    def test_expect_lib_sha_must_be_a_whole_digest(self):
+        """A prefix comparison accepts a library the caller never checked."""
+        with tempfile.TemporaryDirectory() as d:
+            r = run_runner({"BENCH_EXPECT_LIB_SHA256": "ce94855f"}, Path(d) / "out")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("64-character", r.stdout + r.stderr)
 
     def test_recognised_think_values_are_accepted(self):
         for v in ("off", "on", "0", "true"):
@@ -509,8 +561,14 @@ class RunnerMustNotAttestAFailedRun(unittest.TestCase):
             out = Path(t) / "ident"
             self._run(out, {"FAKE_BUILD": "12345", "FAKE_COMMIT": "abc1234"})
             body = json.loads((out / "baseline__rep0.json").read_text())
-            self.assertEqual(body["server_identity"],
-                             {"build": "12345", "commit": "abc1234"})
+            ident = body["server_identity"]
+            self.assertEqual(ident["build"], "12345")
+            self.assertEqual(ident["commit"], "abc1234")
+            # /props is a second, independent read of what answered. The fake
+            # server does not serve it, and the failure is recorded rather than
+            # dropped - an absent props read must be visible in the record.
+            self.assertIn("props", ident)
+            self.assertIn("error", ident["props"])
 
 
 class ProvenanceMustIdentifyWhatRan(unittest.TestCase):
@@ -660,11 +718,67 @@ class TeardownMustNotContaminateTheNextArm(unittest.TestCase):
         rr.os.getpgid = lambda p: 1
         td = rr.stop_server(proc, baseline_mib=16600)
         self.assertTrue(td["settled"])
-        self.assertEqual(td["ceiling_mib"], 16600 + 2048)
+        # 2048 MiB was not a tolerance, it was most of the margin the fitter
+        # works in, and the docstring beside it says a 120 MiB allocation was
+        # enough to kill the next arm.
+        self.assertEqual(td["ceiling_mib"], 16600 + 128)
+        self.assertEqual(td["consecutive"], 3)
 
-    def test_a_host_without_nvidia_smi_is_not_treated_as_a_failure(self):
-        """`readable` false means the reading was unavailable, not that the GPU
-        held memory; CI has no GPU and must not fail on that."""
+    def test_one_low_reading_is_not_enough(self):
+        """The driver can be caught mid-release and read low once. Counting the
+        readings, not echoing the parameter: `consecutive` is an argument and
+        comes back in the dict whether or not it was honoured."""
+        rr = self._rr()
+        import types
+        seq = iter([16700, 18000, 16700, 16700, 16700])
+        rr.gpu_mem_used_mib = lambda: next(seq, 16700)
+        proc = types.SimpleNamespace(pid=1, returncode=0, poll=lambda: 0,
+                                     wait=lambda timeout=None: 0)
+        rr.os.killpg = lambda *a, **k: None
+        rr.os.getpgid = lambda p: 1
+        rr.time.sleep = lambda *_a: None
+        td = rr.stop_server(proc, baseline_mib=16600)
+        self.assertTrue(td["settled"])
+        # 16700 low, 18000 high, then three low: five readings, and settling on
+        # the first would be settling on a reading the driver had not finished.
+        self.assertEqual(td["readings"], 5)
+
+    def test_a_clean_teardown_still_needs_three_readings(self):
+        rr = self._rr()
+        import types
+        rr.gpu_mem_used_mib = lambda: 16650
+        proc = types.SimpleNamespace(pid=1, returncode=0, poll=lambda: 0,
+                                     wait=lambda timeout=None: 0)
+        rr.os.killpg = lambda *a, **k: None
+        rr.os.getpgid = lambda p: 1
+        rr.time.sleep = lambda *_a: None
+        td = rr.stop_server(proc, baseline_mib=16600)
+        self.assertTrue(td["settled"])
+        self.assertEqual(td["readings"], 3)
+
+    def test_an_unreadable_gpu_is_a_failure_not_a_pass(self):
+        """`used is None` used to return settled=True, and the validator
+        deliberately ignored unreadable teardowns - so the one instrument this
+        check depends on was optional, and a run with no telemetry passed the
+        same gate as a clean one. stop_server is only ever called on the bench
+        host, where nvidia-smi answering is part of the measurement."""
+        rr = self._rr()
+        import types
+        rr.gpu_mem_used_mib = lambda: None
+        proc = types.SimpleNamespace(pid=1, returncode=0, poll=lambda: 0,
+                                     wait=lambda timeout=None: 0)
+        rr.os.killpg = lambda *a, **k: None
+        rr.os.getpgid = lambda p: 1
+        td = rr.stop_server(proc, baseline_mib=16600)
+        self.assertFalse(td["settled"])
+        self.assertFalse(td["readable"])
+        res = [{"arm": "a", "repeat": 0, "rows": [], "crashed": None,
+                "teardown": td}]
+        with tempfile.TemporaryDirectory() as t:
+            probs = rr.validate_run(Path(t), ["a"], 1, res)
+        self.assertTrue([x for x in probs if "teardown" in x], probs)
+
+    def _unused_a_host_without_nvidia_smi(self):
         rr = self._rr()
         res = [{"arm": "a", "repeat": 0, "rows": [], "crashed": None,
                 "teardown": {"settled": True, "mib_after": None,
@@ -729,6 +843,290 @@ class ArmsMustGenerateTheSameAmountOfWork(unittest.TestCase):
             self.assertFalse(man["ignore_eos"])
 
 
+class TheWholeLibraryMapIsPinned(unittest.TestCase):
+    """`libllama-server-impl.so` is the server's own code, but `libllama.so`,
+    `libggml-cuda.so` and `libggml-base.so` all decide what a decode does.
+    Swapping any of them between arms changed the measurement while the impl
+    hash stayed put, and the arm still produced a completion marker."""
+
+    def _rr(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("rr_libs", RUNNER)
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        return m
+
+    def test_a_changed_sibling_library_fails_the_arm(self):
+        rr = self._rr()
+        rr._LIB_BASELINE = None
+        first = {"libllama-server-impl.so": "a" * 64, "libggml-cuda.so": "b" * 64}
+        self.assertEqual(rr.check_identity("arm", 0, {}, first), [])
+        moved = {"libllama-server-impl.so": "a" * 64, "libggml-cuda.so": "c" * 64}
+        bad = rr.check_identity("arm", 1, {}, moved)
+        self.assertTrue(bad)
+        self.assertIn("libggml-cuda.so", bad[0])
+
+    def test_an_added_or_removed_library_fails_the_arm(self):
+        rr = self._rr()
+        base = {"libllama.so": "a" * 64, "libggml.so": "b" * 64}
+        rr._LIB_BASELINE = None
+        rr.check_identity("arm", 0, {}, base)
+        # one gone
+        self.assertTrue(rr.check_identity("arm", 1, {}, {"libllama.so": "a" * 64}))
+        # one added
+        self.assertTrue(rr.check_identity("arm", 2, {},
+                                          dict(base, libextra_so="d" * 64)))
+        # and an EMPTY map is not "every library vanished", it is an arm-run
+        # that never hashed anything - the crash is the finding, and cascading
+        # a library complaint onto every later arm hides it
+        self.assertEqual(rr.check_identity("crashed", 3, {}, {}), [])
+
+    def test_a_crashed_arm_run_does_not_become_the_baseline(self):
+        """A crashed arm-run never hashed anything. Seeding the baseline from
+        its empty map made every later arm-run report that the libraries had
+        changed, so one crash failed the whole run for the wrong reason."""
+        rr = self._rr()
+        rr._LIB_BASELINE = None
+        self.assertEqual(rr.check_identity("crashed", 0, {}, {}), [])
+        self.assertIsNone(rr._LIB_BASELINE)
+        real = {"libllama-server-impl.so": "a" * 64}
+        self.assertEqual(rr.check_identity("arm", 0, {}, real), [])
+        self.assertEqual(rr._LIB_BASELINE, real)
+        self.assertEqual(rr.check_identity("crashed", 1, {}, {}), [])
+
+    def test_an_unchanged_map_passes(self):
+        rr = self._rr()
+        rr._LIB_BASELINE = None
+        same = {"libllama-server-impl.so": "a" * 64, "libggml.so": "b" * 64}
+        rr.check_identity("arm", 0, {}, same)
+        self.assertEqual(rr.check_identity("arm", 1, {}, dict(same)), [])
+
+
+class PairedBlocksAgreesWithTheRunner(unittest.TestCase):
+    """The two files defined "balanced" differently, so a schedule the runner
+    accepted was reported here as unbalanced - and the analysis carried on and
+    wrote the same JSON either way."""
+
+    def _pb(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "pb", ROOT / "analysis" / "paired_blocks.py")
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        return m
+
+    def _rr(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("rr_pb", RUNNER)
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        return m
+
+    def test_the_two_definitions_agree_on_every_small_schedule(self):
+        """The definition is duplicated - paired_blocks.py cannot import the
+        runner, whose module body exits on a bad environment - so the copy is
+        checked against the original rather than assumed to match. Exhaustively,
+        over every schedule of 2 or 3 arms and up to 4 rounds."""
+        import itertools
+        pb, rr = self._pb(), self._rr()
+        checked = 0
+        for n_arms in (2, 3):
+            positions = list(range(1, n_arms + 1))
+            for rounds in (1, 2, 3, 4):
+                length = n_arms * rounds
+                # every assignment of positions to arms, capped so this stays a
+                # test rather than a benchmark
+                space = list(itertools.product(positions, repeat=length))
+                step = max(1, len(space) // 400)
+                for pick in space[::step]:
+                    sched = {f"a{i}": list(pick) for i in range(n_arms)}
+                    # and a rotated variant, which is what real schedules are
+                    rot = {f"a{i}": [positions[(j + i) % n_arms]
+                                     for j in range(length)]
+                           for i in range(n_arms)}
+                    for c in (sched, rot):
+                        self.assertEqual(pb.is_position_balanced(c),
+                                         rr.is_position_balanced(c), c)
+                        checked += 1
+        self.assertGreater(checked, 500)
+
+    def test_the_two_definitions_agree(self):
+        pb, rr = self._pb(), self._rr()
+        cases = [
+            {"a": [1, 2], "b": [2, 1]},                        # 2 arms, 1 round
+            {"a": [1, 2, 1, 2], "b": [2, 1, 2, 1]},            # 2 arms, 2 rounds
+            {"a": [1, 2, 3], "b": [2, 3, 1], "c": [3, 1, 2]},  # 3 arms, 1 round
+            {"a": [1, 2, 3, 1], "b": [2, 3, 1, 2],
+             "c": [3, 1, 2, 3]},                               # the run T rotation
+            {"a": [1, 1], "b": [2, 2]},                        # never rotates
+            {},
+        ]
+        for c in cases:
+            with self.subTest(schedule=c):
+                self.assertEqual(pb.is_position_balanced(c),
+                                 rr.is_position_balanced(c))
+
+    def test_four_repeats_of_two_arms_is_balanced(self):
+        """The old check required every position exactly once, so this - which
+        the runner accepts and which run K used - was reported unbalanced."""
+        self.assertTrue(self._pb().is_position_balanced(
+            {"a": [1, 2, 1, 2], "b": [2, 1, 2, 1]}))
+
+    def test_t_critical_matches_the_published_table(self):
+        """The table stopped at df=10 and fell back to 1.96 - the NORMAL value -
+        for everything above, which silently narrows every interval with twelve
+        or more blocks."""
+        pb = self._pb()
+        for df, want in ((1, 12.706), (2, 4.303), (4, 2.776), (8, 2.306),
+                         (10, 2.228), (11, 2.201), (12, 2.179), (20, 2.086),
+                         (30, 2.042), (60, 2.000), (120, 1.980)):
+            with self.subTest(df=df):
+                self.assertAlmostEqual(pb.t_critical_975(df), want, places=2)
+        self.assertGreater(pb.t_critical_975(11), 1.96)
+
+    def test_both_option_spellings_parse(self):
+        pb = self._pb()
+        a1, o1 = pb._parse_argv(["dir", "--iters=2000", "--baseline=x"])
+        a2, o2 = pb._parse_argv(["dir", "--iters", "2000", "--baseline", "x"])
+        self.assertEqual((a1, o1), (a2, o2))
+        self.assertEqual(o1["--iters"], "2000")
+
+
+class TheMutationRunnerNeverTouchesTheRealTree(unittest.TestCase):
+    """It committed one of its own mutations once. The mirror fixed that; the
+    sidecar recovery path that wrote into ROOT without resolving the path it
+    read is gone with it."""
+
+    def test_no_sidecar_recovery_remains(self):
+        src = (ROOT / "tests" / "mutate.py").read_text(encoding="utf-8")
+        code = "\n".join(l for l in src.splitlines()
+                         if not l.lstrip().startswith("#"))
+        for gone in ("_restore_from_sidecar(", "SIDECAR ="):
+            self.assertNotIn(gone, code, f"{gone} is still executable")
+
+    def test_it_writes_only_under_a_temporary_directory(self):
+        src = (ROOT / "tests" / "mutate.py").read_text(encoding="utf-8")
+        self.assertIn("mirror(", src)
+        self.assertIn("TemporaryDirectory", src)
+        for w in re.findall(r"\(ROOT / [^)]*\)\.write_text", src):
+            self.fail(f"writes into the real tree: {w}")
+
+
+class WhatAnsweredMustHaveLoadedTheRightModel(unittest.TestCase):
+    """argv says what was asked for. The manifest recorded that and nothing
+    else: the log-line pattern for the model path was `loaded meta data from`,
+    which llama.cpp has never printed, so `model_path` was silently absent from
+    every arm-run identity and the field was only read when present."""
+
+    def _rr(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("rr_model", RUNNER)
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        return m
+
+    LINE = ("llama_model_loader: loaded meta data with 45 key-value pairs and "
+            "579 tensors from /models/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf "
+            "(version GGUF V3 (latest))")
+
+    def test_the_model_path_is_read_out_of_the_startup_log(self):
+        rr = self._rr()
+        with tempfile.TemporaryDirectory() as t:
+            lg = Path(t) / "s.log"
+            lg.write_text("common_params_print_info: build 10622 (3737e4137) with x\n"
+                          + self.LINE + "\n", encoding="utf-8")
+            ident = rr.server_identity(lg)
+        self.assertEqual(ident.get("commit"), "3737e4137")
+        self.assertEqual(ident.get("model_path"),
+                         "/models/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf")
+
+    def test_a_different_model_fails_the_arm(self):
+        rr = self._rr()
+        rr._LIB_BASELINE = None
+        rr.TARGET = "/models/right.gguf"
+        bad = rr.check_identity("arm", 0, {"model_path": "/models/wrong.gguf"}, {})
+        self.assertTrue(bad)
+        self.assertIn("wrong.gguf", bad[0])
+
+    def test_props_is_compared_too(self):
+        rr = self._rr()
+        rr._LIB_BASELINE = None
+        rr.TARGET = "/models/right.gguf"
+        bad = rr.check_identity("arm", 0,
+                                {"props": {"model_path": "/models/other.gguf"}}, {})
+        self.assertTrue(bad)
+        self.assertIn("/props", bad[0])
+
+    def test_the_right_model_passes_on_both_reads(self):
+        rr = self._rr()
+        rr._LIB_BASELINE = None
+        rr.TARGET = "/models/right.gguf"
+        self.assertEqual(
+            rr.check_identity("arm", 0,
+                              {"model_path": "/models/right.gguf",
+                               "props": {"model_path": "/models/right.gguf"}}, {}),
+            [])
+
+
+class RederivationMustNotForgive(unittest.TestCase):
+    """`analysis/rederive_from_logs.py` is the only thing that ties the derived
+    JSON to the logs it came from. A re-derivation that reports success when a
+    record changed, or when one stopped being produced, proves nothing."""
+
+    def _mod(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "rederive", ROOT / "analysis" / "rederive_from_logs.py")
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        m.FAIL.clear()
+        real = m.compare
+
+        def quiet(*a, **k):          # compare() reports as it goes; not here
+            import contextlib, io
+            with contextlib.redirect_stdout(io.StringIO()):
+                return real(*a, **k)
+
+        m.compare = quiet
+        return m
+
+    def test_a_changed_record_fails(self):
+        m = self._mod()
+        m.FAIL.clear()
+        pub = [{"k": 1, "v": "a"}, {"k": 2, "v": "b"}]
+        got = [{"k": 1, "v": "a"}, {"k": 2, "v": "CHANGED"}]
+        m.compare("t", got, pub, lambda r: r["k"])
+        self.assertTrue(m.FAIL, "a differing record was accepted")
+
+    def test_a_vanished_record_fails(self):
+        m = self._mod()
+        m.FAIL.clear()
+        pub = [{"k": 1}, {"k": 2}]
+        m.compare("t", [{"k": 1}], pub, lambda r: r["k"])
+        self.assertTrue(m.FAIL, "a record that stopped being produced was accepted")
+
+    def test_the_documented_gap_is_allowed_and_only_that(self):
+        m = self._mod()
+        m.FAIL.clear()
+        pub = [{"k": 1}, {"k": 2}]
+        m.compare("t", [{"k": 1}], pub, lambda r: r["k"], expected_gap=1)
+        self.assertFalse(m.FAIL, m.FAIL)
+        m.FAIL.clear()
+        m.compare("t", [], pub, lambda r: r["k"], expected_gap=1)
+        self.assertTrue(m.FAIL, "a wider gap than documented was accepted")
+
+    def test_an_unexpected_record_fails(self):
+        m = self._mod()
+        m.FAIL.clear()
+        m.compare("t", [{"k": 1}, {"k": 9}], [{"k": 1}], lambda r: r["k"])
+        self.assertTrue(m.FAIL)
+
+    def test_the_three_unreproducible_runs_are_not_committed(self):
+        for r in self._mod().NOT_REPRODUCIBLE:
+            self.assertFalse((ROOT / "v4_audit_2026_08_25" / "data" / r).is_dir(),
+                             f"{r} is committed, so its rows should regenerate")
+
+
 class AnEmptyRunIsNotACompleteRun(unittest.TestCase):
     """`range(0)` is empty, so the arm loop never runs and the completeness
     validation has nothing to object to. The directory then carries a
@@ -740,7 +1138,10 @@ class AnEmptyRunIsNotACompleteRun(unittest.TestCase):
             out = Path(t) / "zero"
             r = run_runner({"BENCH_REPEATS": "0"}, out)
             self.assertNotEqual(r.returncode, 0)
-            self.assertIn("no arm-runs at all", r.stdout + r.stderr)
+            # refused by the range check now, before a server is started at all,
+            # rather than by the completeness validation after the empty loop
+            self.assertIn("out of range", r.stdout + r.stderr)
+            self.assertFalse(out.exists(), "nothing should have been written")
             self.assertFalse((out / "RUN_COMPLETE.json").exists())
 
     def test_negative_repeats_is_refused(self):
@@ -838,7 +1239,32 @@ class EveryPublishedFixIsStillHere(unittest.TestCase):
          "the teardown ceiling is relative to the pre-run reading"),
         ("bench/retest_runner.py", 'body["ignore_eos"] = True',
          "the hard cap reaches the server"),
-        ("bench/retest_runner.py", "if REPEATS < 1", "an empty run is refused"),
+        # superseded 2026-08-27: `_env_int("BENCH_REPEATS", 3, 1)` refuses it
+        # before a server starts, so the later `if REPEATS < 1` was unreachable
+        ("bench/retest_runner.py", 'REPEATS = _env_int("BENCH_REPEATS", 3, 1)',
+         "an empty run is refused"),
+        ("bench/retest_runner.py", "is not a recognised boolean",
+         "a mistyped treatment boolean stops the run"),
+        ("bench/retest_runner.py", "is not one of {sorted(allowed)}",
+         "a mistyped treatment choice stops the run"),
+        ("bench/retest_runner.py", 'r"[0-9a-f]{64}", EXPECT_LIB',
+         "the expected library digest must be whole"),
+        ("bench/retest_runner.py", "elif libs != _LIB_BASELINE:",
+         "the whole shared-library map is pinned"),
+        ("bench/retest_runner.py", "nvidia-smi did not answer",
+         "an unreadable teardown is a failure"),
+        ("bench/retest_runner.py", "if ok >= consecutive:",
+         "a teardown needs consecutive low readings"),
+        ("analysis/paired_blocks.py", "def is_position_balanced",
+         "the analysis shares the runner's balance definition"),
+        ("analysis/paired_blocks.py", "def t_critical_975",
+         "the t critical value is computed, not tabulated to df=10"),
+        ("analysis/paired_blocks.py", "refusing to write an interval",
+         "an unbalanced schedule does not silently get an interval"),
+        ("bench/stage_mtp_source.py", "safetensors indexes in",
+         "staging refuses more than one index"),
+        ("bench/stage_mtp_source.py", ".staging.",
+         "staging builds in a fresh directory and renames"),
         ("bench/retest_runner.py", "each arm may appear once",
          "a repeated arm is refused"),
         ("bench/retest_runner.py", 'res["server_log_sha256"] = sha256',
@@ -900,6 +1326,88 @@ class StagingMustNotDestroyItsSource(unittest.TestCase):
             r = subprocess.run([sys.executable, str(ROOT / "bench" / "stage_mtp_source.py")],
                                env=env, capture_output=True, text=True)
             self.assertNotEqual(r.returncode, 0)
+
+    @staticmethod
+    def _checkpoint(src, shards, index_name="model.safetensors.index.json",
+                    extra=()):
+        """A minimal AWQ-shaped checkpoint whose --mtp export set is BF16."""
+        import struct
+        src.mkdir(parents=True, exist_ok=True)
+        (src / "config.json").write_text(
+            json.dumps({"quantization_config": {"quant_method": "awq"}}),
+            encoding="utf-8")
+        weight_map = {}
+        for i, shard in enumerate(shards):
+            keys = {"mtp.layer.weight" if i == 0 else f"mtp.layer{i}.weight":
+                    {"dtype": "BF16", "shape": [1], "data_offsets": [0, 2]}}
+            if i == 0:
+                keys["model.norm.weight"] = {"dtype": "BF16", "shape": [1],
+                                             "data_offsets": [2, 4]}
+            hdr = json.dumps(keys).encode()
+            with (src / shard).open("wb") as fh:
+                fh.write(struct.pack("<Q", len(hdr)))
+                fh.write(hdr)
+                fh.write(b"\0" * 4)
+            for k in keys:
+                weight_map[k] = shard
+        (src / index_name).write_text(json.dumps({"weight_map": weight_map}),
+                                      encoding="utf-8")
+        for f in extra:
+            (src / f).write_text("stale", encoding="utf-8")
+
+    def _stage(self, src, stage):
+        env = dict(os.environ, MTP_SRC=str(src), MTP_STAGE=str(stage))
+        return subprocess.run(
+            [sys.executable, str(ROOT / "bench" / "stage_mtp_source.py")],
+            env=env, capture_output=True, text=True)
+
+    def test_two_indexes_are_refused_rather_than_sorted(self):
+        """Taking the first by sort order silently picks a checkpoint
+        generation, which is not a detail a conversion should decide."""
+        with tempfile.TemporaryDirectory() as t:
+            src, stage = Path(t) / "ckpt", Path(t) / "stage"
+            self._checkpoint(src, ["a.safetensors"])
+            (src / "old.index.json").write_text(
+                json.dumps({"weight_map": {}}), encoding="utf-8")
+            r = self._stage(src, stage)
+            self.assertNotEqual(r.returncode, 0)
+            self.assertIn("safetensors indexes", r.stdout + r.stderr)
+            self.assertFalse(stage.exists())
+
+    def test_a_shard_the_index_does_not_reference_is_refused(self):
+        with tempfile.TemporaryDirectory() as t:
+            src, stage = Path(t) / "ckpt", Path(t) / "stage"
+            self._checkpoint(src, ["a.safetensors"], extra=("older.safetensors",))
+            r = self._stage(src, stage)
+            self.assertNotEqual(r.returncode, 0)
+            self.assertIn("does not", r.stdout + r.stderr)
+            self.assertFalse(stage.exists())
+
+    def test_a_missing_shard_is_refused(self):
+        with tempfile.TemporaryDirectory() as t:
+            src, stage = Path(t) / "ckpt", Path(t) / "stage"
+            self._checkpoint(src, ["a.safetensors"])
+            (src / "a.safetensors").unlink()
+            r = self._stage(src, stage)
+            self.assertNotEqual(r.returncode, 0)
+            self.assertIn("not there", r.stdout + r.stderr)
+
+    def test_a_stale_stage_does_not_survive_a_restage(self):
+        """The stage used to be reused, so shards the source no longer has
+        stayed behind and the conversion read two generations."""
+        with tempfile.TemporaryDirectory() as t:
+            src, stage = Path(t) / "ckpt", Path(t) / "stage"
+            self._checkpoint(src, ["a.safetensors", "b.safetensors"])
+            self.assertEqual(self._stage(src, stage).returncode, 0, )
+            stage.mkdir(exist_ok=True)
+            (stage / "ghost.safetensors").write_text("stale", encoding="utf-8")
+            (src / "b.safetensors").unlink()
+            self._checkpoint(src, ["a.safetensors"])
+            r = self._stage(src, stage)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertFalse((stage / "ghost.safetensors").exists())
+            self.assertFalse((stage / "b.safetensors").exists())
+            self.assertTrue((stage / "a.safetensors").exists())
 
 
 class CoverageMustBePerFamily(unittest.TestCase):

@@ -2,6 +2,10 @@
   "baseline": "baseline",
   "blocks": 4,
   "bootstrap_iters": 20000,
+  "schedule_position_balanced": false,
+  "unbalanced_override": true,
+  "t_critical_975": 3.1824,
+  "interval_scope": "blocks within one invocation of the driver; it does not cover invocation-to-invocation variation (ERRATA A16)",
   "arms": [
     {
       "arm": "spec-dflash-n2",

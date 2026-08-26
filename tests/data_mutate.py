@@ -68,6 +68,17 @@ def scale_row(rel: str, field: str, factor: float):
     return go
 
 
+def scale_timing(rel: str, field: str, factor: float):
+    """Perturb the copy inside `timings` rather than the top-level one."""
+    def go(m: Path):
+        p = m / rel
+        d = _rows(p)
+        d["rows"][0]["timings"][field] = d["rows"][0]["timings"][field] * factor
+        _write(p, d)
+    go.touches = (rel,)
+    return go
+
+
 def set_row(rel: str, field: str, value):
     def go(m: Path):
         p = m / rel
@@ -111,8 +122,15 @@ def zero_length_shifts(m: Path):
 zero_length_shifts.touches = ("analysis/length_matching.json",)
 
 
+# This had no `touches` until 2026-08-27, so the restore loop skipped it and the
+# mirror kept a telemetry trace 5 C warmer for the rest of the run. Every
+# perturbation after it then ran against a tree the checker was ALREADY failing
+# on, so `returncode != 0` proved nothing about the perturbation itself.
+_WARM_TELEMETRY_FILE = "v4_audit_2026_08_25/data/gpu_telemetry_T_20260826_182639.csv"
+
+
 def warm_telemetry(m: Path):
-    p = m / "v4_audit_2026_08_25/data/gpu_telemetry_T_20260826_182639.csv"
+    p = m / _WARM_TELEMETRY_FILE
     out = []
     for i, line in enumerate(p.read_text(encoding="utf-8").splitlines()):
         if i == 0:
@@ -122,6 +140,9 @@ def warm_telemetry(m: Path):
             cols[3] = str(int(cols[3]) + 5)          # temp
         out.append(",".join(cols))
     p.write_text("\n".join(out) + "\n", encoding="utf-8")
+
+
+warm_telemetry.touches = (_WARM_TELEMETRY_FILE,)
 
 
 def edit_doc(rel: str, old: str, new: str):
@@ -139,6 +160,17 @@ def edit_doc(rel: str, old: str, new: str):
         if old not in t:
             raise AssertionError(f"anchor not found in {rel}: {old[:40]!r}")
         p.write_text(t.replace(old, new, 1), encoding="utf-8")
+    go.touches = (rel,)
+    return go
+
+
+def edit_json(rel: str, mutate):
+    """Perturb a committed derived JSON in place in the mirror."""
+    def go(m: Path):
+        f = m / rel
+        d = json.loads(f.read_text(encoding="utf-8"))
+        mutate(d)
+        f.write_text(json.dumps(d, indent=2) + "\n", encoding="utf-8")
     go.touches = (rel,)
     return go
 
@@ -238,8 +270,12 @@ MUTATIONS = [
      edit_doc("ERRATA.md", "1800\u20131965 MHz of a 2100 MHz maximum, mean 1937",
               "1800\u20131965 MHz of a 2100 MHz maximum, mean 1947")),
     # --- the pre-registration, which had no code path until 2026-08-27 -------
+    # scales the TOP-LEVEL copy only, which is the point: `timings` carries the
+    # same number and different analyses read different copies
     ("E past-threshold decode time on one request +5 %",
      scale_row(f"{E}/spec-draft-n96__rep0.json", "predicted_ms", 1.05)),
+    ("the nested copy of a decode time is changed instead",
+     scale_timing(f"{E}/spec-draft-n96__rep1.json", "predicted_ms", 1.05)),
     ("E past-threshold draft volume on one request doubled",
      scale_row(f"{E}/spec-draft-n128__rep0.json", "draft_n", 2)),
     ("E past-threshold acceptance on one request halved",
@@ -296,10 +332,33 @@ MUTATIONS = [
      edit_doc("README.md", "| `n_max` 8, `p_min` 0.90 | **88.2 %** | 42.5 | \u221265.6 % |",
               "| `n_max` 8, `p_min` 0.90 | **88.2 %** | 43.5 | \u221265.6 % |")),
 
+    ("an interval file stops recording its schedule balance",
+     edit_json(f"{O2}/paired_blocks.json",
+               lambda d: d.pop("schedule_position_balanced", None))),
+    ("an unbalanced schedule is recorded as balanced",
+     edit_json("v4_audit_2026_08_25/data/matrix_T_timers_20260826_182639/"
+               "paired_blocks.json",
+               lambda d: d.__setitem__("schedule_position_balanced", True))),
+    ("an interval file stops saying what it covers",
+     edit_json(f"{O2}/paired_blocks.json",
+               lambda d: d.__setitem__("interval_scope", "everything"))),
+    ("an interval file records the wrong t critical value",
+     edit_json(f"{O2}/paired_blocks.json",
+               lambda d: d.__setitem__("t_critical_975", 1.96))),
+
 ]
 
 
 def main() -> None:
+    # Every perturbation must say which files it touched, because the restore
+    # loop only puts back what is declared. One of them did not, and the mirror
+    # kept a 5 C warmer telemetry trace for the rest of the run - so every
+    # perturbation after it ran against a tree the checker was already failing
+    # on and was reported "caught" without its own guard ever firing.
+    undeclared = [n for n, fn in MUTATIONS if not getattr(fn, "touches", None)]
+    if undeclared:
+        sys.exit("  perturbation(s) with no restore declaration, which would "
+                 "leak into every later one: " + "; ".join(undeclared))
     print(f"  {'perturbation':52s} verdict")
     survived = []
     with tempfile.TemporaryDirectory() as tmp:
@@ -339,6 +398,17 @@ def main() -> None:
                 dst = work / rel
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(pristine / rel, dst)
+        # The mirror must be pristine again. If it is not, some perturbation
+        # leaked and every result after it is worthless - which is exactly what
+        # happened while one of them declared no `touches`.
+        r = subprocess.run([sys.executable, "analysis/verify_claims.py"],
+                           cwd=work, capture_output=True, text=True, timeout=900)
+        if r.returncode != 0:
+            sys.exit("  the mirror does not pass after the last restore, so a "
+                     "perturbation leaked and the results above cannot be "
+                     "trusted:\n" + r.stdout[-1500:])
+        print("  mirror verified clean after the last restore")
+
     print()
     if survived:
         sys.exit(f"  {len(survived)} perturbation(s) survived: " + "; ".join(survived))

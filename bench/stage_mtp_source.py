@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import struct
 import sys
 from collections import Counter
@@ -69,7 +70,23 @@ def main() -> None:
     idx_files = sorted(SRC.glob("*.index.json"))
     if not idx_files:
         sys.exit(f"no safetensors index in {SRC}")
+    if len(idx_files) > 1:
+        # Taking the first by sort order silently picks a checkpoint
+        # generation. Which one is not a detail a conversion should decide.
+        sys.exit(f"{len(idx_files)} safetensors indexes in {SRC}: "
+                 f"{[f.name for f in idx_files]}. Leave exactly one.")
     index = json.loads(idx_files[0].read_text())["weight_map"]
+    shards = sorted(set(index.values()))
+    missing = [f for f in shards if not (SRC / f).exists()]
+    if missing:
+        sys.exit(f"the index names {len(missing)} shard(s) that are not there: "
+                 f"{missing[:4]}")
+    stray = sorted(f.name for f in SRC.glob("*.safetensors")
+                   if f.name not in set(shards))
+    if stray:
+        sys.exit(f"{len(stray)} safetensors in {SRC} that the index does not "
+                 f"reference: {stray[:4]}. That is two checkpoint generations "
+                 f"in one directory; the conversion would read a mixture.")
 
     keys = export_set(index)
     if not any(k.startswith("mtp.") for k in keys):
@@ -87,23 +104,40 @@ def main() -> None:
     if removed is None:
         print("  note: config.json had no quantization_config; staging is a no-op copy")
 
-    STAGE.mkdir(parents=True, exist_ok=True)
+    # Build beside the destination and rename into place. Reusing the stage
+    # directory left behind whatever the previous source had and the current one
+    # does not, so a stage could hold shards from two checkpoint generations
+    # while looking freshly written.
+    STAGE.parent.mkdir(parents=True, exist_ok=True)
+    tmp = STAGE.parent / (STAGE.name + f".staging.{os.getpid()}")
+    if tmp.exists():
+        shutil.rmtree(tmp)
+    tmp.mkdir(parents=True)
     for f in SRC.iterdir():
-        dst = STAGE / f.name
         if f.name == "config.json":
             continue
-        if dst.is_symlink() or dst.exists():
-            dst.unlink()
-        dst.symlink_to(f.resolve())
-    (STAGE / "config.json").write_text(json.dumps(cfg, indent=2) + "\n")
-    (STAGE / "STAGING_NOTE.txt").write_text(
+        (tmp / f.name).symlink_to(f.resolve())
+    (tmp / "config.json").write_text(json.dumps(cfg, indent=2) + "\n")
+    (tmp / "STAGING_NOTE.txt").write_text(
         "Symlinks to " + str(SRC) + " with one change: config.json has\n"
         "quantization_config removed (was quant_method=" 
         + str((removed or {}).get("quant_method")) + ").\n"
         "Justified because all " + str(len(keys)) + " tensors in the --mtp export set\n"
         "are BF16; the AWQ guard in conversion/base.py dispatches on the config key,\n"
         "not on the tensors being exported. llama.cpp itself is unmodified.\n")
-    print(f"  staged {STAGE}  (quantization_config removed: {bool(removed)})")
+    staged = sorted(f.name for f in tmp.glob("*.safetensors"))
+    if staged != shards:
+        shutil.rmtree(tmp, ignore_errors=True)
+        sys.exit(f"the stage holds {len(staged)} shards and the index names "
+                 f"{len(shards)}; refusing to promote it")
+    old = STAGE.parent / (STAGE.name + f".previous.{os.getpid()}")
+    if STAGE.exists() or STAGE.is_symlink():
+        STAGE.rename(old)
+    tmp.rename(STAGE)
+    if old.exists():
+        shutil.rmtree(old, ignore_errors=True)
+    print(f"  staged {STAGE}  ({len(shards)} shards, "
+          f"quantization_config removed: {bool(removed)})")
 
 
 if __name__ == "__main__":
