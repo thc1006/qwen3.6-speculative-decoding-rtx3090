@@ -136,12 +136,12 @@ these, and for `spec-mtp-n2` its +21.8 % falls **outside** the interval above.
 
 † This table is run O2, and **the intervals in it describe run O2, not the
 configuration.** `spec-dflash-n2` was measured six times under this memory
-policy on 2026-08-26 — M1 **+26.7 %** (08:00), O **+24.6 %** (09:01), O2
-**+26.3 %** (15:37), T **+25.9 %** (18:27), T3 **+20.7 %** (20:33), O3
+policy on 2026-08-26 — M1 **+26.7 %** (07:59), O **+24.6 %** (09:00), O2
+**+26.3 %** (15:37), T **+25.9 %** (18:26), T3 **+20.7 %** (20:32), O3
 **+23.4 %** (20:44) — a 6.0 pp spread, the second largest in the dataset after
 `spec-mtp-n4` (8.6 pp). The paired-block interval above is 1.6 pp wide; the
-between-run range is nearly four times that. Two of those six pairs ran the same
-binary on the same models and produced **byte-identical output** — T against T3,
+between-run range is nearly four times that. Two **pairs** among those six ran the same
+binary on the same models and produced **byte-identical output**: T against T3,
 5.2 pp apart, and O2 against O3, 2.9 pp apart on 810 of 810 identical
 request-pairs. That is
 [ERRATA A16](ERRATA.md#a16-two-runs-identical-in-every-recorded-respect-and-byte-identical-in-output-differ-by-34--on-one-arm);

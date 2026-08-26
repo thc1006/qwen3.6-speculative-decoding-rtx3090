@@ -1381,6 +1381,66 @@ chk("no run directory carries a failure marker",
     sorted(d.name for d in _dirs if (d / "RUN_FAILED.json").is_file()), [])
 
 
+print("\n=== the headline table, parsed cell by cell ===")
+# Greping the document for a computed value proves the string exists somewhere,
+# not that the row is right: changing the headline's "+26.3 %" to "+26.9 %"
+# passed every check here, because "+26.3 %" still appeared in the replication
+# table below it. The table is parsed and compared row by row instead.
+_readme_lines = pathlib.Path(__file__).resolve().parents[1] \
+    .joinpath("README.md").read_text(encoding="utf-8").splitlines()
+_hdr = next(i for i, l in enumerate(_readme_lines)
+            if l.startswith("| arm | pooled tok/s | change |"))
+_table = {}
+for _l in _readme_lines[_hdr + 2:]:
+    if not _l.startswith("|"):
+        break
+    _c = [x.strip().strip("*").strip().strip("`").strip("*") for x in _l.strip("|").split("|")]
+    if len(_c) < 6:
+        continue
+    _table[_c[0].replace("**", "").strip("`")] = _c[1:6]
+chk("headline table rows parsed", len(_table), 9)
+
+
+def _cell_pct(x):
+    return float(_norm(x).replace("%", "").replace(" ", ""))
+
+
+def _pooled_arm(d, a):
+    n = ms = 0
+    for f in glob.glob(f"{d}/{a}__rep*.json"):
+        r = json.load(open(f))
+        if r.get("crashed"):
+            continue
+        n += sum(x["predicted_n"] for x in r["rows"])
+        ms += sum(x["predicted_ms"] for x in r["rows"])
+    return 1000 * n / ms
+
+
+_pb_o2 = {a["arm"]: a for a in json.load(open(f"{_O2}/paired_blocks.json"))["arms"]}
+_base_o2 = _pooled_arm(_O2, "baseline")
+for _arm, _cells in _table.items():
+    _key = "baseline" if _arm.startswith("no speculation") else _arm
+    _dn = _da = _ng = 0
+    for _f in glob.glob(f"{_O2}/{_key}__rep*.json"):
+        for _x in json.load(open(_f))["rows"]:
+            _dn += _x["draft_n"]
+            _da += _x["draft_n_accepted"]
+            _ng += _x["predicted_n"]
+    chk(f"table row {_arm}: pooled", round(_pooled_arm(_O2, _key), 1),
+        float(_cells[0]), 0.05)
+    chk(f"table row {_arm}: draft/gen", round(_dn / _ng, 2), float(_cells[3]), 0.005)
+    if _key == "baseline":
+        continue
+    chk(f"table row {_arm}: change",
+        round(_pb_o2[_key]["point_pct"], 1), _cell_pct(_cells[1]), 0.05)
+    _lo, _hi = [_cell_pct(x) for x in
+                _norm(_cells[2]).strip("[]").split(",")]
+    chk(f"table row {_arm}: interval",
+        [round(x, 1) for x in _pb_o2[_key]["ci95_t_pct"]], [_lo, _hi], 0.05)
+    chk(f"table row {_arm}: acceptance",
+        round(100 * _da / _dn, 1), _cell_pct(_cells[4]), 0.05)
+
+
 print("\n=== the headline draft/gen column ===")
 # Acceptance without draft volume reads as success for an arm that never fires:
 # ngram-map-k4v-m8 shows 50.0 % from 216 draft tokens over 27 000 generated.
@@ -1525,6 +1585,58 @@ chk("they overlap by less than either is wide",
 chk("ERRATA says they barely overlap",
     "barely overlap" in _norm(pathlib.Path(__file__).resolve().parents[1]
                               .joinpath("ERRATA.md").read_text(encoding="utf-8")), True)
+
+
+print("\n=== the O2/O3 replication table and the footnote, parsed ===")
+# Same weakness as the headline table had: greping for a value proves the string
+# exists, not that the row says it. Both are parsed.
+_rl = pathlib.Path(__file__).resolve().parents[1].joinpath("README.md") \
+    .read_text(encoding="utf-8").splitlines()
+_rh = next(i for i, l in enumerate(_rl) if l.startswith("| arm | O2 | O3 | shift |"))
+_rep_rows = {}
+for _l in _rl[_rh + 2:]:
+    if not _l.startswith("|"):
+        break
+    _c = [x.strip().strip("*").strip().strip("`").strip("*").strip()
+          for x in _l.strip("|").split("|")]
+    if len(_c) >= 4:
+        _rep_rows[_c[0]] = _c[1:4]
+chk("replication table rows parsed", len(_rep_rows), 9)
+
+
+def _num(x):
+    return float(_norm(x).replace("%", "").replace("pp", "").replace(" ", ""))
+
+
+for _arm, _c in _rep_rows.items():
+    if _arm.startswith("no speculation"):
+        chk("replication table: O2 baseline pooled",
+            round(_pooled_arm(_O2, "baseline"), 1), _num(_c[0]), 0.05)
+        chk("replication table: O3 baseline pooled",
+            round(_pooled_arm(_O3, "baseline"), 1), _num(_c[1]), 0.05)
+        chk("replication table: baseline change (%)",
+            round(100 * (_pooled_arm(_O3, "baseline") / _pooled_arm(_O2, "baseline") - 1), 1),
+            _num(_c[2]), 0.05)
+        continue
+    chk(f"replication table {_arm}: O2", round(_rel(_O2, _arm), 1), _num(_c[0]), 0.05)
+    chk(f"replication table {_arm}: O3", round(_rel(_O3, _arm), 1), _num(_c[1]), 0.05)
+    chk(f"replication table {_arm}: shift",
+        round(_rel(_O3, _arm) - _rel(_O2, _arm), 1), _num(_c[2]), 0.05)
+
+# the footnote's six measurements, each against the run it names
+_TAGDIR = {}
+for _d in sorted(glob.glob("v4_audit_2026_08_25/data/matrix_*")):
+    _mp = os.path.join(_d, "manifest.json")
+    if os.path.isfile(_mp):
+        _TAGDIR[os.path.basename(_d).split("_")[1]] = _d
+_foot = " ".join(_norm(" ".join(_rl)).split())
+_fn = re.findall(r"(O2|O3|M1|T3|O|T) \*\*([+-][0-9.]+) %\*\* \((\d\d:\d\d)\)", _foot)
+chk("footnote measurements parsed", len(_fn), 6)
+for _tag, _val, _clock in _fn:
+    chk(f"footnote {_tag}: the value it prints",
+        round(_rel(_TAGDIR[_tag], "spec-dflash-n2"), 1), float(_val), 0.05)
+    chk(f"footnote {_tag}: the clock time it prints",
+        json.load(open(f"{_TAGDIR[_tag]}/manifest.json"))["created"][11:16], _clock)
 
 
 print("\n=== the balanced design is verified, not declared ===")

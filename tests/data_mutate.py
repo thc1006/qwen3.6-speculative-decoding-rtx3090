@@ -112,6 +112,24 @@ def warm_telemetry(m: Path):
     p.write_text("\n".join(out) + "\n", encoding="utf-8")
 
 
+def edit_doc(rel: str, old: str, new: str):
+    """Perturb a published FIGURE rather than a measurement.
+
+    Greping a document for a computed value proves the string exists somewhere,
+    not that the row that should carry it does. Changing the headline table's
+    "+26.3 %" to "+26.9 %" passed every check here, because "+26.3 %" still
+    appeared in the replication table below it. These require the tables to be
+    parsed rather than searched.
+    """
+    def go(m: Path):
+        p = m / rel
+        t = p.read_text(encoding="utf-8")
+        if old not in t:
+            raise AssertionError(f"anchor not found in {rel}: {old[:40]!r}")
+        p.write_text(t.replace(old, new, 1), encoding="utf-8")
+    return go
+
+
 O2 = "v4_audit_2026_08_25/data/matrix_O2_latin_20260826_153711"
 O3 = "v4_audit_2026_08_25/data/matrix_O3_latin_20260826_203251"
 T3 = "v4_audit_2026_08_25/data/matrix_T3_timers_20260826_203251"
@@ -138,6 +156,33 @@ MUTATIONS = [
     ("the length-matching shift on run L is zeroed", zero_length_shifts),
     ("run T's telemetry runs 5 C warmer", warm_telemetry),
     ("T3 loses one arm-run", drop(f"{T3}/baseline__rep2.json")),
+
+    # published figures, not measurements
+    ("headline table: the DFlash change becomes +26.9 %",
+     edit_doc("README.md", "| **+26.3 %** | [+25.5 %, +27.1 %] | 0.81 |",
+              "| **+26.9 %** | [+25.5 %, +27.1 %] | 0.81 |")),
+    ("headline table: an acceptance cell becomes 82.3 %",
+     edit_doc("README.md", "| 0.81 | 72.3 % |", "| 0.81 | 82.3 % |")),
+    ("headline table: a draft/gen cell becomes 1.96",
+     edit_doc("README.md", "| 1.86 | 29.5 % |", "| 1.96 | 29.5 % |")),
+    ("headline table: the baseline's pooled rate becomes 116.7",
+     edit_doc("README.md", "| **no speculation** | **115.7**",
+              "| **no speculation** | **116.7**")),
+    ("replication table: O3's DFlash figure becomes +24.4 %",
+     edit_doc("README.md", "| +26.3 % | **+23.4 %** | **\u22122.9 pp** |",
+              "| +26.3 % | **+24.4 %** | **\u22122.9 pp** |")),
+    ("replication table: a shift becomes -1.0 pp",
+     edit_doc("README.md", "| +22.7 % | +21.7 % | \u22121.0 pp |",
+              "| +22.7 % | +21.7 % | \u22122.0 pp |")),
+    ("footnote: run M1's figure becomes +27.7 %",
+     edit_doc("README.md", "M1 **+26.7 %** (07:59)", "M1 **+27.7 %** (07:59)")),
+    ("footnote: a run's clock time is wrong by a minute",
+     edit_doc("README.md", "**+23.4 %** (20:44)", "**+23.4 %** (20:45)")),
+    ("A12: the checkpoint total becomes 39.80 s",
+     edit_doc("ERRATA.md", "| **speculative checkpoint, total** | **39.08** |",
+              "| **speculative checkpoint, total** | **39.80** |")),
+    ("A12: run T's nominal volume becomes 131.27 GiB",
+     edit_doc("ERRATA.md", "| **121.27** |", "| **131.27** |")),
 ]
 
 
