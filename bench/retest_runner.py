@@ -723,8 +723,8 @@ def gpu_mem_used_mib() -> int | None:
         return None
 
 
-def stop_server(proc: subprocess.Popen, settle_mib: int = 2048,
-                settle_timeout: float = 60.0) -> dict:
+def stop_server(proc: subprocess.Popen, baseline_mib: int | None = None,
+                headroom_mib: int = 2048, settle_timeout: float = 60.0) -> dict:
     """Kill the server AND wait for the driver to hand the memory back.
 
     Reaping the process is not the same as the CUDA context being torn down.
@@ -746,22 +746,31 @@ def stop_server(proc: subprocess.Popen, settle_mib: int = 2048,
             proc.wait(timeout=15)
         except Exception:  # noqa: BLE001
             pass
+    # Settled means THIS run gave its memory back, not that the card is idle.
+    # The first version compared against an absolute 2048 MiB, so anything else
+    # using the GPU - another project's server on a shared box - made every
+    # arm-run report an unsettled teardown and fail the run. The comparison is
+    # against what was in use before this server started.
+    ceiling = headroom_mib if baseline_mib is None else baseline_mib + headroom_mib
     t0 = time.perf_counter()
     while time.perf_counter() - t0 < settle_timeout:
         used = gpu_mem_used_mib()
-        if used is None or used <= settle_mib:
-            return {"settled": True, "mib_after": used,
+        if used is None or used <= ceiling:
+            return {"settled": True, "mib_after": used, "mib_before": baseline_mib,
+                    "ceiling_mib": ceiling,
                     "wait_s": round(time.perf_counter() - t0, 2),
                     "readable": used is not None}
         time.sleep(1.0)
     used = gpu_mem_used_mib()
-    print(f"    ! GPU still reports {used} MiB in use "
-          f"{settle_timeout:.0f}s after the server was killed", flush=True)
+    print(f"    ! GPU still reports {used} MiB in use {settle_timeout:.0f}s after "
+          f"the server was killed, against {baseline_mib} MiB before it started",
+          flush=True)
     # Printing this and carrying on is what the first version did. The next arm
     # then sizes itself with `-fit on` against a stale free-memory reading, so
     # the failure lands on the *following* arm and looks like that arm's fault.
     # Recorded per arm-run and treated as a run-level failure below.
-    return {"settled": False, "mib_after": used,
+    return {"settled": False, "mib_after": used, "mib_before": baseline_mib,
+            "ceiling_mib": ceiling,
             "wait_s": round(time.perf_counter() - t0, 2), "readable": True}
 
 
@@ -1017,6 +1026,7 @@ def run_arm(arm: str, rep: int) -> dict:
     # 100 % utilisation. The continuous trace from bench/gpu_telemetry.sh is the
     # authority for GPU state; these two snapshots are a convenience.
     gpu_before = nvidia_smi()
+    mem_before = gpu_mem_used_mib()
     proc = start_server(extra, log_path, args_of_arm=extra)
     try:
         try:
@@ -1088,7 +1098,7 @@ def run_arm(arm: str, rep: int) -> dict:
             "rows": rows,
         }
     finally:
-        TEARDOWN[(arm, rep)] = stop_server(proc)
+        TEARDOWN[(arm, rep)] = stop_server(proc, baseline_mib=mem_before)
 
 
 def validate_run(out: Path, arms: list[str], repeats: int,
@@ -1119,10 +1129,11 @@ def validate_run(out: Path, arms: list[str], repeats: int,
                                    res.get("server_lib_sha256") or {})
         td = res.get("teardown") or {}
         if td.get("readable") and not td.get("settled"):
-            problems.append(f"arm-run {arm} rep{rep}: the GPU still held "
+            problems.append(f"arm-run {arm} rep{rep}: the GPU held "
                             f"{td.get('mib_after')} MiB {td.get('wait_s')}s after "
-                            f"teardown, so the next arm sized itself against a "
-                            f"stale reading")
+                            f"teardown against {td.get('mib_before')} before the "
+                            f"server started, so the next arm sized itself "
+                            f"against a stale reading")
         if res.get("crashed"):
             c = res["crashed"]
             problems.append(f"arm-run {arm} rep{rep} crashed at "

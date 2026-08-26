@@ -613,6 +613,39 @@ class TeardownMustNotContaminateTheNextArm(unittest.TestCase):
             probs = rr.validate_run(Path(t), ["a"], 1, res)
         self.assertFalse([x for x in probs if "teardown" in x], probs)
 
+    def test_another_process_using_the_gpu_is_not_this_run_failing(self):
+        """`settled` means THIS run gave its memory back, not that the card is
+        idle. The first version compared against an absolute 2048 MiB, so a
+        second project's server on the same box made every arm-run report an
+        unsettled teardown - which is how the suite started failing on a
+        developer machine while passing in CI."""
+        rr = self._rr()
+        res = [{"arm": "a", "repeat": 0, "rows": [], "crashed": None,
+                "teardown": {"settled": True, "mib_after": 16700,
+                             "mib_before": 16600, "ceiling_mib": 18648,
+                             "wait_s": 0.1, "readable": True}}]
+        with tempfile.TemporaryDirectory() as t:
+            probs = rr.validate_run(Path(t), ["a"], 1, res)
+        self.assertFalse([x for x in probs if "teardown" in x], probs)
+
+    def test_the_ceiling_is_the_pre_run_reading_plus_headroom(self):
+        rr = self._rr()
+        import types
+        calls = []
+
+        def fake_mem():
+            calls.append(1)
+            return 16700 if len(calls) > 1 else 16700
+
+        rr.gpu_mem_used_mib = fake_mem
+        proc = types.SimpleNamespace(pid=1, returncode=0, poll=lambda: 0,
+                                     wait=lambda timeout=None: 0)
+        rr.os.killpg = lambda *a, **k: None
+        rr.os.getpgid = lambda p: 1
+        td = rr.stop_server(proc, baseline_mib=16600)
+        self.assertTrue(td["settled"])
+        self.assertEqual(td["ceiling_mib"], 16600 + 2048)
+
     def test_a_host_without_nvidia_smi_is_not_treated_as_a_failure(self):
         """`readable` false means the reading was unavailable, not that the GPU
         held memory; CI has no GPU and must not fail on that."""
@@ -784,6 +817,9 @@ class EveryPublishedFixIsStillHere(unittest.TestCase):
          "the port is free before spawning"),
         ("bench/retest_runner.py", "TEARDOWN[(arm, rep)]",
          "teardown is recorded, not printed"),
+        ("bench/retest_runner.py",
+         "ceiling = headroom_mib if baseline_mib is None else baseline_mib + headroom_mib",
+         "the teardown ceiling is relative to the pre-run reading"),
         ("bench/retest_runner.py", 'body["ignore_eos"] = True',
          "the hard cap reaches the server"),
         ("bench/retest_runner.py", "if REPEATS < 1", "an empty run is refused"),

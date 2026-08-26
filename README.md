@@ -264,13 +264,26 @@ refitting without the confound moves the crossing to **46.5 %** on the
 length-matched prompts and **45.4 %** on the thinking-on half alone, while the
 slope moves nearly three times as far in relative terms. The threshold is the
 stable quantity and the slope is not, which is the same thing A10 found out of
-sample. Read it as **45–48 %**, not as 48. Scored across every arm-run with a matched baseline and enough drafts to define
-a rate — 37 of 44, the seven excluded having drafted 10 to 55 tokens in total —
-it calls the sign **28 / 29 inside the self-speculative families** and **5 / 6
-on the external drafter**, 35 / 37 overall, and the same either way you read
-llama.cpp's two disagreeing acceptance counters. The failures are the
-informative ones: `spec-draft-n1` reaches **69.7 % acceptance** (100.0 % by the
-drafter's own counter) and is **75 % slower**.
+sample. Read it as **45–48 %**, not as 48. Scored across every (run, arm) with a matched baseline and enough drafts to
+define a rate — 86 of 90, the four excluded having drafted at most 45 tokens in
+total against at least 132 for the rest — it calls the sign **57 / 59 inside the
+self-speculative families**, **13 / 16 on the external drafter** and **8 / 11 on
+the drafter-free n-gram arms**: **78 / 86 overall**, or 79 / 86 read through
+llama.cpp's other acceptance counter.
+
+The eight it misses are the informative part, and they are two kinds. Three are
+`spec-draft-n1`, which reaches **69.7 % acceptance** (100.0 % by the drafter's
+own counter) and is **75 % slower** — the same arm in runs O, O2 and O3, and the
+structural failure this section is about. The other five sit **within 2 pp of
+the boundary**: `ngram-map-k4v-m8` at 50.0 % three times while moving −0.3 to
+−0.8 %, `spec-mtp-n4` at 49.5 % and −8.2 %, and run V's `spec-dflash-n4` at
+47.9 % and **+10.6 %**. A threshold is uninformative at its own boundary; that
+is what those five say.
+
+> Published as **35 / 37** until 2026-08-27. That scorecard came from
+> `analysis/compare_acceptance_counters.py`, which read only `*__rep0.log` and
+> predated runs O2, O3, T, T3, U and V. Over every repeat of every run the base
+> grows from 37 to 86 and the hit rate falls from 94.6 % to 90.7 %.
 
 So the threshold is not a law about acceptance; it tracks the drafter. What is
 measured is that a separate draft context makes this hybrid target log **772

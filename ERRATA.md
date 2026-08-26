@@ -881,15 +881,26 @@ counter and prints it one line away in the `-v` log — the speculator's own
 `statistics <type>: #gen tokens / #acc tokens`. Until 2026-08-26 nobody here had
 compared them.
 
-Across **73 single-request arm-runs** for which both survive, the split is
+Across **517 single-request arm-runs** for which both survive, the split is
 absolute and there are no exceptions either way:
 
 | | arm-runs | largest / smallest gap between the two counters |
 |---|---|---|
-| speculative checkpoints **never taken** | 31 | agree to within **0.5 pp** |
-| speculative checkpoints **taken** | 42 | disagree by at least **1.0 pp** |
+| speculative checkpoints **never taken** | 248 | agree to within **0.80 pp** |
+| speculative checkpoints **taken** | 269 | disagree by at least **1.00 pp** |
 
-The two groups do not overlap. Representative rows:
+The two groups do not overlap, by 0.20 pp.
+
+> This was first published over **73** arm-runs, at 0.5 pp against 1.0 pp — a
+> 0.5 pp separation. The comparison script read only `*__rep0.log`, so each arm
+> contributed one arm-run however many repeats it had, and it predated runs
+> O2, O3, T, T3, U and V entirely. Over every repeat of every run the split
+> survives on seven times the data and the margin narrows to 0.20 pp: the widest
+> agreement is `matrix_V_hardcap`'s `spec-dflash-n2` at 0.80 pp with no
+> checkpoints, and the narrowest disagreement is run E's `spec-draft-n128` at
+> 1.00 pp with 737 of them.
+
+Representative rows:
 
 | arm | server counter | drafter's own counter | gap | checkpoints |
 |---|---|---|---|---|

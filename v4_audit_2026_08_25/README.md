@@ -643,23 +643,23 @@ and a different fitter margin:
 
 Scored over **every** arm-run for which both an acceptance figure and a matched
 baseline exist — 44 of them — with one exclusion stated up front: seven
-`ngram-map` arm-runs drafted between **10 and 55 tokens in total**, and a
-percentage computed over ten tokens is not a rate. There is a clean gap in the
-data at that point; every other arm-run drafted at least 586. The remaining 37:
+`ngram-map` arm-runs drafted at most **45 tokens in total**, and a percentage
+computed over ten tokens is not a rate. There is a clean gap in the data at that
+point; every other (run, arm) drafted at least 132. The remaining 86:
 
 | family | sign predicted correctly |
 |---|---|
-| self-speculative (DFlash and MTP) | **28 / 29** |
-| drafter-free n-gram | 2 / 2 |
-| **external 0.8 B drafter** | **5 / 6** |
-| all | **35 / 37** |
+| self-speculative (DFlash and MTP) | **57 / 59** |
+| drafter-free n-gram | 8 / 11 |
+| **external 0.8 B drafter** | **13 / 16** |
+| all | **78 / 86** |
 
-**And that scorecard does not depend on which acceptance counter you read.**
+**And that scorecard barely depends on which acceptance counter you read.**
 A13 shows the server counter under-reports on any path that takes a speculative
-checkpoint. Rescoring with the speculator's own counter gives the same 35 / 37
-and the same two misses. Without the minimum-sample exclusion it does not: the
-score moves from 41/44 to 37/44 and four `ngram-map` verdicts flip, because on
-ten drafted tokens the two counters read 0.0 % and 70.0 % for the same arm-run.
+checkpoint. Rescoring with the speculator's own counter gives **79 / 86** against
+78 / 86 — one arm-run changes side. Without the minimum-sample exclusion it does not: the
+score moves from 82/90 to 79/90 and `ngram-map` verdicts flip, because on ten
+drafted tokens the two counters read 0.0 % and 70.0 % for the same arm-run.
 Excluding them is not tidying — it is refusing to score a rate that has no
 denominator.
 

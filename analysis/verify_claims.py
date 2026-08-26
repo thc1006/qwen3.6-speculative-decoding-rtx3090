@@ -627,15 +627,18 @@ for n, acc, delta in ((1, 68.7, -74.8), (2, 60.3, -72.2)):
 print("\n=== ERRATA A13: the two acceptance counters ===")
 _cc = json.load(open("v4_audit_2026_08_25/data/acceptance_counter_comparison.json"))
 _seq = [r for r in _cc if "conc4" not in r["run"] and "conc8" not in r["run"]]
-chk("A13 single-request arm-runs with both counters", len(_seq), 73)
+chk("A13 single-request arm-runs with both counters", len(_seq), 517)
 _z = [r for r in _seq if r["checkpoints_created"] == 0]
 _n = [r for r in _seq if r["checkpoints_created"] > 0]
-chk("A13 arm-runs that take no checkpoint", len(_z), 31)
-chk("A13 arm-runs that do", len(_n), 42)
+chk("A13 arm-runs that take no checkpoint", len(_z), 248)
+chk("A13 arm-runs that do", len(_n), 269)
 chk("A13 no-checkpoint: largest gap between the counters (pp)",
-    round(max(abs(r["server_pct"] - r["drafter_pct"]) for r in _z), 1), 0.5, 0.05)
+    round(max(abs(r["server_pct"] - r["drafter_pct"]) for r in _z), 2), 0.80, 0.005)
 chk("A13 checkpointing: smallest gap between the counters (pp)",
-    round(min(abs(r["server_pct"] - r["drafter_pct"]) for r in _n), 1), 1.0, 0.05)
+    round(min(abs(r["server_pct"] - r["drafter_pct"]) for r in _n), 2), 1.00, 0.005)
+chk("A13 every repeat is present, not just rep0",
+    sorted({r.get("repeat") for r in _cc if r["run"].startswith("matrix_O2")}),
+    [0, 1, 2, 3, 4, 5, 6, 7, 8])
 chk("A13 the two groups do not overlap",
     max(abs(r["server_pct"] - r["drafter_pct"]) for r in _z) <
     min(abs(r["server_pct"] - r["drafter_pct"]) for r in _n), True)
@@ -764,8 +767,26 @@ for arm, v1_, ex_ in (("spec-dflash-n2", 72.3, 72.8), ("spec-mtp-n2", 78.4, 77.3
     chk(f"{arm} the new prompt set does not inflate acceptance", abs(ex_ - v1_) < 1.5, True)
 
 print("\n=== the acceptance threshold, scored over everything, both counters ===")
-_cc2 = {(r["run"], r["arm"]): r for r in
-        json.load(open("v4_audit_2026_08_25/data/acceptance_counter_comparison.json"))}
+# Aggregated across repeats, not keyed by (run, arm). Keyed, the dict kept
+# whichever repeat the file listed last - which was harmless while the source
+# held one row per arm and became an arbitrary choice the moment it held nine.
+# The throughput below is pooled over the same repeats, so the counters are too.
+_cc2: dict = {}
+for _r in json.load(open("v4_audit_2026_08_25/data/acceptance_counter_comparison.json")):
+    _k = (_r["run"], _r["arm"])
+    _acc2 = _cc2.setdefault(_k, {"spec_type": _r["spec_type"], "server_drafted": 0,
+                                 "server_accepted": 0, "drafter_drafted": 0,
+                                 "drafter_accepted": 0, "checkpoints_created": 0,
+                                 "repeats": 0})
+    for _f2 in ("server_drafted", "server_accepted", "drafter_drafted",
+                "drafter_accepted", "checkpoints_created"):
+        _acc2[_f2] += _r[_f2]
+    _acc2["repeats"] += 1
+for _k, _v2 in _cc2.items():
+    _v2["server_pct"] = (round(100 * _v2["server_accepted"] / _v2["server_drafted"], 1)
+                         if _v2["server_drafted"] else None)
+    _v2["drafter_pct"] = (round(100 * _v2["drafter_accepted"] / _v2["drafter_drafted"], 1)
+                          if _v2["drafter_drafted"] else None)
 def _pl2(run, arm):
     rs = [json.load(open(f)) for f in glob.glob(f"v4_audit_2026_08_25/data/{run}/{arm}__rep*.json")]
     rs = [r for r in rs if r.get("rows")]
@@ -784,12 +805,12 @@ for (run, arm), r in _cc2.items():
     rec = (fam, run, arm, r["server_pct"], r["drafter_pct"], 100*(v/b-1), r["drafter_drafted"])
     _all.append(rec)
     if r["drafter_drafted"] >= 100: _kept.append(rec)
-chk("threshold: arm-runs with an acceptance figure and a baseline", len(_all), 44)
-chk("threshold: excluded for drafting under 100 tokens", len(_all) - len(_kept), 7)
+chk("threshold: (run, arm) pairs with an acceptance figure and a baseline", len(_all), 90)
+chk("threshold: excluded for drafting under 100 tokens", len(_all) - len(_kept), 4)
 chk("threshold: the excluded ones drafted at most this many tokens",
-    max(x[6] for x in _all if x[6] < 100), 55)
+    max(x[6] for x in _all if x[6] < 100), 45)
 chk("threshold: the kept ones drafted at least this many",
-    min(x[6] for x in _kept), 586)
+    min(x[6] for x in _kept), 132)
 def _sc(rows, idx):
     from collections import defaultdict as _dd
     f = _dd(lambda: [0, 0])
@@ -798,17 +819,29 @@ def _sc(rows, idx):
     return f
 for idx, lbl in ((3, "server"), (4, "drafter")):
     f = _sc(_kept, idx)
-    chk(f"threshold ({lbl}): self-speculative", tuple(f["self"]), (28, 29))
-    chk(f"threshold ({lbl}): drafter-free n-gram", tuple(f["ngram"]), (2, 2))
-    chk(f"threshold ({lbl}): external drafter", tuple(f["external"]), (5, 6))
+    chk(f"threshold ({lbl}): self-speculative", tuple(f["self"]),
+        (57, 59) if lbl == "server" else (58, 59))
+    chk(f"threshold ({lbl}): drafter-free n-gram", tuple(f["ngram"]), (8, 11))
+    chk(f"threshold ({lbl}): external drafter", tuple(f["external"]), (13, 16))
     chk(f"threshold ({lbl}): overall",
-        (sum(v[0] for v in f.values()), sum(v[1] for v in f.values())), (35, 37))
+        (sum(v[0] for v in f.values()), sum(v[1] for v in f.values())),
+        (78, 86) if lbl == "server" else (79, 86))
 # without the exclusion the two counters disagree, which is why it exists
 chk("threshold: without the exclusion the counters disagree",
-    (sum(v[0] for v in _sc(_all, 3).values()), sum(v[0] for v in _sc(_all, 4).values())), (41, 37))
+    (sum(v[0] for v in _sc(_all, 3).values()), sum(v[0] for v in _sc(_all, 4).values())),
+    (82, 79))
 # and the two misses are the ones named in the text
 _miss = sorted(f"{x[2]}" for x in _kept if (x[3] >= _BRK) != (x[5] > 0))
-chk("threshold: which arms it gets wrong", _miss, ["spec-draft-n1", "spec-mtp-n4"])
+chk("threshold: which arms it gets wrong", sorted(set(_miss)),
+    ["ngram-map-k4v-m8", "spec-dflash-n4", "spec-draft-n1", "spec-mtp-n4"])
+chk("threshold: how many misses", len(_miss), 8)
+# five of the eight sit within 2 pp of the boundary, where a threshold cannot
+# be informative; the other three are spec-draft-n1 in three different runs
+chk("threshold: misses that are spec-draft-n1",
+    sum(1 for m in _miss if m == "spec-draft-n1"), 3)
+chk("threshold: the rest are all within 2 pp of the boundary",
+    sorted({abs(x[3] - _BRK) <= 2.0 for x in _kept
+            if (x[3] >= _BRK) != (x[5] > 0) and x[2] != "spec-draft-n1"}), [True])
 _m = [x for x in _kept if x[2] == "spec-mtp-n4" and (x[3] >= _BRK) != (x[5] > 0)][0]
 chk("threshold: the near-boundary miss sits just above it (pp)",
     round(_m[3] - _BRK, 1), 1.3, 0.05)
@@ -1068,9 +1101,9 @@ DOC_CLAIMS = [
     ("v4_audit_2026_08_25/README.md", "12.7 %", "P prompt-processing share"),
     ("v4_audit_2026_08_25/README.md", "+20.3 %", "P dflash-n2 on the new set"),
     ("ERRATA.md",   "0.56 pp",   "A14 median between-run spread"),
-    ("v4_audit_2026_08_25/README.md", "35 / 37", "threshold scorecard"),
-    ("v4_audit_2026_08_25/README.md", "28 / 29", "threshold, self-speculative"),
-    ("README.md",   "28 / 29",   "README threshold scorecard"),
+    ("v4_audit_2026_08_25/README.md", "78 / 86", "threshold scorecard"),
+    ("v4_audit_2026_08_25/README.md", "57 / 59", "threshold, self-speculative"),
+    ("README.md",   "57 / 59",   "README threshold scorecard"),
     ("ERRATA.md",   "8.5 pp",    "A14 the pair that did not replicate"),
     ("README.md",   "+26.7 %",   "README discloses the same-config replicate"),
     ("v4_audit_2026_08_25/README.md", "292.1 s", "P pooled includes the draft cost"),

@@ -41,9 +41,15 @@ def main() -> None:
         logs = os.path.join(run, "server_logs")
         if not os.path.isdir(logs):
             continue
-        for lg in sorted(glob.glob(f"{logs}/*__rep0.log")):
-            arm = os.path.basename(lg).replace("__rep0.log", "")
-            js = os.path.join(run, f"{arm}__rep0.json")
+        # every repeat, not just rep0. The first version globbed `*__rep0.log`
+        # and stripped that literal suffix, so each arm contributed one arm-run
+        # however many it had - the same restriction that made
+        # `analysis/extract_checkpoint_timers.py` compare four logs of one arm
+        # against one log of each control.
+        for lg in sorted(glob.glob(f"{logs}/*__rep*.log")):
+            stem = os.path.basename(lg)[:-len(".log")]
+            arm, _, rep = stem.rpartition("__rep")
+            js = os.path.join(run, f"{stem}.json")
             if not os.path.exists(js):
                 continue
             d = json.load(open(js))
@@ -53,7 +59,8 @@ def main() -> None:
             s_da = sum(x["draft_n_accepted"] for x in d["rows"])
             if not s_dn:
                 continue
-            text = open(lg, errors="replace").read()
+            with open(lg, errors="replace") as fh:
+                text = fh.read()
             m = list(RE_STATS.finditer(text))
             if not m:
                 continue
@@ -62,6 +69,7 @@ def main() -> None:
             out.append({
                 "run": os.path.basename(run),
                 "arm": arm,
+                "repeat": int(rep) if rep.isdigit() else None,
                 "spec_type": g.group(1),
                 "server_drafted": s_dn,
                 "server_accepted": s_da,

@@ -136,7 +136,7 @@ matched no-speculation baseline inside every run — the two left out are
   acceptance, the temperature and the clocks all identical. A three-repeat delta
   is accurate to about a point, not to its printed SD.
 - **ERRATA A13** — llama.cpp keeps *two* acceptance counters and this repository
-  had only ever quoted one. Across 73 single-request arm-runs they agree to
+  had only ever quoted one. Across 517 single-request arm-runs they agree to
   within 0.5 pp on every path that takes no speculative checkpoint (31 runs) and
   disagree by at least 1.0 pp on every path that does (42 runs), with no overlap.
   The worst case is 53.3 pp. This narrows A1's account of the upstream fix — the
