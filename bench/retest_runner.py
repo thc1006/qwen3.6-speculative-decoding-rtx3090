@@ -959,6 +959,25 @@ def position_counts(schedule: list[list[str]]) -> dict[str, list[int]]:
     return pos
 
 
+def is_position_balanced(pos: dict[str, list[int]]) -> bool:
+    """Every arm visits every position the same number of times.
+
+    Not "exactly once": that is the special case `repeats == len(arms)`, and
+    requiring it rejected designs that are balanced. Two arms over four repeats
+    puts each arm in each position twice, which is balanced; the first version
+    of this refused it and would have pushed the caller to an unbalanced
+    `cyclic` run instead.
+    """
+    if not pos:
+        return False
+    n = len(pos)
+    per = len(next(iter(pos.values()))) / n
+    if per != int(per) or per < 1:
+        return False
+    want = sorted(list(range(1, n + 1)) * int(per))
+    return all(sorted(v) == want for v in pos.values())
+
+
 def build_schedule(arms: list[str], repeats: int, mode: str) -> list[list[str]]:
     """Build the arm order for every block, and refuse to call it balanced
     unless it is.
@@ -978,14 +997,14 @@ def build_schedule(arms: list[str], repeats: int, mode: str) -> list[list[str]]:
         sched = [arms[(r * step) % n:] + arms[:(r * step) % n] for r in range(repeats)]
     if mode == "latin":
         pos = position_counts(sched)
-        balanced = all(sorted(v) == list(range(1, n + 1)) for v in pos.values())
-        if not balanced:
+        if not is_position_balanced(pos):
             sys.exit(
                 f"BENCH_ORDER=latin asks for a position-balanced schedule and "
-                f"{n} arms over {repeats} repeats cannot give one: "
+                f"{n} arms over {repeats} repeats does not give one: "
                 + "; ".join(f"{a} at {v}" for a, v in list(pos.items())[:3])
-                + f". Use BENCH_REPEATS={n} for a full cyclic Latin square, or "
-                f"BENCH_ORDER=cyclic to run the rotation without claiming balance.")
+                + f". Use a repeat count that is a multiple of {n} - "
+                f"{n}, {2 * n}, {3 * n} - or BENCH_ORDER=cyclic to run the "
+                f"rotation without claiming balance.")
     return sched
 
 
@@ -1215,9 +1234,8 @@ def main() -> None:
         "order_mode": ORDER_MODE,
         "schedule": SCHEDULE,
         "schedule_position_counts": position_counts(SCHEDULE) if SCHEDULE else {},
-        "schedule_is_position_balanced": bool(SCHEDULE) and all(
-            sorted(v) == list(range(1, len(SCHEDULE[0]) + 1))
-            for v in position_counts(SCHEDULE).values()),
+        "schedule_is_position_balanced": bool(SCHEDULE) and is_position_balanced(
+            position_counts(SCHEDULE)),
         "prompt_set": PROMPT_SET_NAME, "n_prompts": len(PROMPTS),
         "prompt_tags": [t for t, _, _ in PROMPTS],
         "fit_target": FIT_TARGET or None,

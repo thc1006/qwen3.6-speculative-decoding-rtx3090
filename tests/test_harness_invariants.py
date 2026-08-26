@@ -333,13 +333,30 @@ class LatinSquareMustBeBalancedOrNotCalledLatin(unittest.TestCase):
     def test_three_arms_over_four_repeats_is_refused_as_latin(self):
         with self.assertRaises(SystemExit) as cm:
             self._build("abc", 4, "latin")
-        self.assertIn("cannot give one", str(cm.exception))
+        self.assertIn("does not give one", str(cm.exception))
 
     def test_the_same_shape_runs_as_cyclic(self):
         rr, sched = self._build("abc", 4, "cyclic")
         self.assertEqual(len(sched), 4)
         pos = rr.position_counts(sched)
         self.assertNotEqual(sorted(pos["a"]), [1, 2, 3, 4])
+
+    def test_balance_means_equal_visits_not_exactly_one(self):
+        """Two arms over four repeats puts each arm in each position twice.
+        That is balanced, and the first version of this refused it, which would
+        have pushed a caller wanting four blocks onto an unbalanced `cyclic`
+        run instead."""
+        rr, sched = self._build("ab", 4, "latin")
+        pos = rr.position_counts(sched)
+        self.assertEqual(sorted(pos["a"]), [1, 1, 2, 2])
+        self.assertTrue(rr.is_position_balanced(pos))
+        rr2, sched2 = self._build("abc", 6, "latin")
+        self.assertTrue(rr2.is_position_balanced(rr2.position_counts(sched2)))
+
+    def test_a_repeat_count_that_is_not_a_multiple_is_still_refused(self):
+        with self.assertRaises(SystemExit) as cm:
+            self._build("ab", 3, "latin")
+        self.assertIn("does not give one", str(cm.exception))
 
     def test_a_square_schedule_is_balanced(self):
         rr, sched = self._build("abc", 3, "latin")
