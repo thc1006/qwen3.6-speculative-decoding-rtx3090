@@ -10,6 +10,15 @@
 > thinking control that did not work, this is an exploratory historical
 > datapoint, not a DFlash effect estimate. The mechanism claims below have been
 > removed. See [`../ERRATA.md`](../ERRATA.md) items D4, D6, F1, F3, F4.
+>
+> **The A/B was run properly on 2026-08-26, and the sign reverses.** On one
+> binary, one placement policy and three repeats per arm, DFlash at
+> `--spec-draft-n-max 4` is **+18.7 % faster** than no speculation, not slower.
+> The archived direction reappears only at longer draft windows — −14.8 % at
+> `n_max 8`, −47.4 % at 16 — and the `06_dflash_max8` row below is `n_max 8`.
+> What this directory measured at short windows was the binary change. Details
+> and controls:
+> [`../v4_audit_2026_08_25/README.md`](../v4_audit_2026_08_25/README.md#run-j--the-first-configuration-that-is-actually-faster).
 
 ## What this directory is
 

@@ -48,7 +48,11 @@ should have used and did not:
 | P1-4 | repair the prompt set | **partial** — `zh_hant` relabelled; `multi_turn_*` are still two single-turn requests |
 | P1-5 | host isolation, clocks, thermals | **done** — 1317-sample trace, no OC, no meaningful throttling, drift diagnosed as cold-start |
 | P2-1 | build one pinned post-merge binary | **done** — `3737e4137` |
-| P2-2 | DFlash off vs on, one binary | **blocked then unblocked** — the archived drafter GGUF lacks `target_layers`; `bench/convert_dflash.sh` re-converts it, queued behind the matrix |
+| P2-2 | DFlash off vs on, one binary | **done** — run J. The archived drafter GGUF lacks `target_layers`; `bench/convert_dflash.sh` re-converts it. **The sign reverses**: +18.7 % at `n_max 4`. |
+| P2-3 | `draft-mtp`, the method the vLLM sibling uses | **done** — run M. Nothing was blocking it; stock converter and stock runtime both support it. |
+| P4-1 | does batching rescue speculation, as upstream says? | **done** — run I. No: no-speculation gains +64 % at concurrency 8, the drafter moves −8 %. |
+| P4-2 | where is the draft-length optimum, and does it survive batching? | **done** — run K. A plateau at `n_max` 2–4, a cliff after it, and batching erases it (+0.4 % at 4 in flight, −74.1 % at 8). |
+| P4-3 | does the win survive the workload changing? | **done** — run L. It halves with thinking off and `n_max 4` goes negative; acceptance falls with it. |
 | P3-1 | draft-length sweep with cost instrumentation | **done** — 1…32 in run C, 64/96/128 in run E |
 | P3-2 | does the partial-accept fallback still exist upstream | **done** — the abort is gone and the counter is fixed on post-merge master |
 | P3-3 | expert-routing instrumentation | **not done**, and after A7 nothing demands it |
@@ -60,7 +64,17 @@ New work the audit generated that was not on the original list:
 - the pre-registered past-threshold prediction and its test
   ([`v4_audit_2026_08_25/PREREGISTERED_PREDICTION.md`](v4_audit_2026_08_25/PREREGISTERED_PREDICTION.md))
 - `analysis/verify_claims.py`, `check_links.py`, `matrix_report.py`,
-  `thermal_report.py` as standing regression checks
+  `thermal_report.py`, `plot_v4_runs.py` as standing regression checks
+- the batching arm the harness could not actually run: `BENCH_CONCURRENCY`
+  documented concurrent dispatch and issued the prompts one at a time, so
+  `--parallel N` allocated slots that stayed idle. The achieved batch width is
+  now read back out of request timestamps and asserted.
+- `bench/stage_mtp_source.py`, which makes the target's own multi-token
+  prediction head exportable as a drafter without modifying llama.cpp
+- ERRATA A11: speculation is not output-preserving on this build, established
+  against a determinism control that holds in every run
+- the acceptance threshold — around 48 % — and, more importantly, the
+  out-of-sample test showing that the threshold transfers and the slope does not
 
 
 ---

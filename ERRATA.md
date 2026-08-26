@@ -1205,7 +1205,16 @@ host-specific path.
   `v3_dflash_2026_05_07/data/` are byte-identical to the published releases.
 - Every v1, v2, v3, and Exp 2 aggregate was re-derived from the raw files
   during the audit and reproduced exactly. The arithmetic was never the problem.
-- The narrow negative observation survives: under the exact conditions
-  archived here, no tested condition that recorded speculative activity beat
-  its matched no-speculation reference in aggregate. What does not survive is
-  the acceptance anomaly, the mechanism, and the generality.
+- The narrow negative observation survives **inside its own scope**: under the
+  exact conditions archived here, no tested condition that recorded speculative
+  activity beat its matched no-speculation reference in aggregate. What does not
+  survive is the acceptance anomaly, the mechanism, and the generality.
+- That scope turned out to matter. Every method v1 tested drives an **external**
+  drafter, and every one of them still loses on the controlled tier — batching
+  included, which widens the gap rather than closing it. Methods that draft from
+  the target's *own* layers were never in the archive, and they win: see
+  [D4](#d4-v3-dflash-compares-two-different-binaries) and the run J, K and L
+  sections of
+  [`v4_audit_2026_08_25/README.md`](v4_audit_2026_08_25/README.md). "Speculative
+  decoding loses on this hardware" was a statement about a regime this
+  repository had not separated, not about the hardware.
