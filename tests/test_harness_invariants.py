@@ -11,6 +11,7 @@ No GPU, no network, no third-party packages. `python -m unittest discover tests`
 """
 from __future__ import annotations
 
+import math as _math
 import re
 import itertools
 import json
@@ -1179,6 +1180,178 @@ class TimerExtractionMustNotDependOnFieldOrder(unittest.TestCase):
         """The failure this class exists for: a field inserted in the middle."""
         r = self._run("AUDIT_US load_tgt=100 sync_lt=90 load_dft=10 sync_ld=9\n")
         self.assertEqual(r["restores"], 1)
+
+
+class TheLengthModeAnalysisMustReadBothDesigns(unittest.TestCase):
+    """`analysis/length_mode.py`'s crossover path is validated against the
+    published run V, which it reproduces to the hundredth of a point. Its
+    within-invocation path had never run on anything, so this builds a run of
+    the shape `run_v3_within.sh` produces and checks the arithmetic against
+    hand-computed values."""
+
+    def _mod(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "lm", ROOT / "analysis" / "length_mode.py")
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        return m
+
+    @staticmethod
+    def _arm_run(d: Path, arm: str, rep: int, tok_s: float, n_per_req: int,
+                 n_req: int = 10):
+        """One arm-run at an exact pooled rate."""
+        ms = 1000.0 * n_per_req / tok_s
+        rows = [{"tag": f"p{i}", "predicted_n": n_per_req,
+                 "predicted_ms": ms, "predicted_per_second": tok_s,
+                 "timings": {"predicted_n": n_per_req, "predicted_ms": ms,
+                             "predicted_per_second": tok_s},
+                 "wall_ms": ms + 5.0, "draft_n": 0, "draft_n_accepted": 0}
+                for i in range(n_req)]
+        (d / f"{arm}__rep{rep}.json").write_text(
+            json.dumps({"arm": arm, "repeat": rep, "rows": rows}), encoding="utf-8")
+
+    def _build(self, root: Path, rates):
+        """rates: {arm: (freerun tok/s, hardcap tok/s)}"""
+        root.mkdir(parents=True, exist_ok=True)
+        arms = []
+        for arm, (fr, cp) in rates.items():
+            for rep in range(2):
+                self._arm_run(root, arm, rep, fr, 120)
+                self._arm_run(root, arm + "-cap", rep, cp, 300)
+            arms += [arm, arm + "-cap"]
+        (root / "manifest.json").write_text(json.dumps({
+            "order_mode": "latin", "schedule_is_position_balanced": True,
+            "repeats": 2, "hardcap_suffix": "-cap",
+            "hardcap_arms": sorted(a for a in arms if a.endswith("-cap")),
+            "arms": {a: [] for a in arms}}), encoding="utf-8")
+        (root / "RUN_COMPLETE.json").write_text("{}", encoding="utf-8")
+
+    def test_the_within_design_is_read_and_the_shift_is_right(self):
+        import io, contextlib
+        m = self._mod()
+        with tempfile.TemporaryDirectory() as t:
+            d = Path(t) / "matrix_V3_s1_20260827_120000"
+            # baseline is the same in both modes; the arm gains 10 % under the cap
+            self._build(d, {"baseline": (100.0, 100.0),
+                            "spec-dflash-n2": (110.0, 121.0)})
+            out = {}
+            with contextlib.redirect_stdout(io.StringIO()) as buf:
+                m.report_within([str(d)], out)
+            text = buf.getvalue()
+        # free: 110/100 -> +10.00 %   cap: 121/100 -> +21.00 %   shift +11.00 pp
+        self.assertIn("+10.00%", text)
+        self.assertIn("+21.00%", text)
+        shift = out["within"][0]["shift_pp"]["spec-dflash-n2"]
+        self.assertAlmostEqual(shift, 11.0, places=6)
+        self.assertTrue(out["within"][0]["complete"])
+
+    def test_a_baseline_that_moves_is_divided_out(self):
+        """The contrast is a ratio to the baseline IN THE SAME MODE, so a whole
+        -invocation shift that moves every arm equally must cancel."""
+        import io, contextlib
+        m = self._mod()
+        with tempfile.TemporaryDirectory() as t:
+            d = Path(t) / "matrix_V3_s1_20260827_120000"
+            # everything 20 % slower under the cap, including the baseline
+            self._build(d, {"baseline": (100.0, 80.0),
+                            "spec-dflash-n2": (110.0, 88.0)})
+            out = {}
+            with contextlib.redirect_stdout(io.StringIO()):
+                m.report_within([str(d)], out)
+        self.assertAlmostEqual(out["within"][0]["shift_pp"]["spec-dflash-n2"],
+                               0.0, places=6)
+        # and the log form of the same contrast. This case is the one that can
+        # tell the two apart: with the baseline equal in both modes,
+        # log(cap_a/cap_base) - log(free_a/free_base) and log(cap_a/free_a) are
+        # numerically identical, so a test built on that case cannot see a
+        # contrast that stopped dividing out its baseline.
+        self.assertAlmostEqual(out["within"][0]["log_delta"]["spec-dflash-n2"],
+                               0.0, places=9)
+        c = m.contrast({"baseline": 100.0, "spec-dflash-n2": 110.0},
+                       {"baseline": 80.0, "spec-dflash-n2": 88.0})
+        self.assertAlmostEqual(c["spec-dflash-n2"]["log_delta"], 0.0, places=9)
+
+    def test_the_contrast_is_computed_in_exactly_one_place(self):
+        """`delta()` returned a log ratio and each report recomputed the
+        percentage-point shift from the rates directly - the same quantity, two
+        formulas, two places, and the log value was never read. Breaking one of
+        them changed nothing, which is how two mutations survived. Both reports
+        read `contrast()` now, so breaking it breaks both."""
+        m = self._mod()
+        c = m.contrast({"baseline": 100.0, "a": 110.0},
+                       {"baseline": 100.0, "a": 121.0})["a"]
+        self.assertAlmostEqual(c["free_pct"], 10.0, places=6)
+        self.assertAlmostEqual(c["cap_pct"], 21.0, places=6)
+        self.assertAlmostEqual(c["shift_pp"], 11.0, places=6)
+        # the log form of the same contrast, which is what averages properly.
+        # This case cannot distinguish the two formulas - see
+        # test_a_baseline_that_moves_is_divided_out, which can.
+        self.assertAlmostEqual(c["log_delta"],
+                               _math.log(1.21) - _math.log(1.10), places=9)
+        # and a change to it must reach the reported shift
+        import io, contextlib
+        with tempfile.TemporaryDirectory() as t:
+            d = Path(t) / "matrix_V3_s1_20260827_120000"
+            self._build(d, {"baseline": (100.0, 100.0), "a": (110.0, 121.0)})
+            out = {}
+            with contextlib.redirect_stdout(io.StringIO()):
+                m.report_within([str(d)], out)
+            self.assertAlmostEqual(out["within"][0]["shift_pp"]["a"],
+                                   c["shift_pp"], places=9)
+            self.assertAlmostEqual(out["within"][0]["log_delta"]["a"],
+                                   c["log_delta"], places=9)
+
+    def test_a_session_missing_one_half_is_dropped(self):
+        """The crossover contrast needs both halves of the same session. Using
+        a session with one of them silently compares across invocations, which
+        is the thing the design exists to avoid."""
+        import io, contextlib
+        m = self._mod()
+        with tempfile.TemporaryDirectory() as t:
+            root = Path(t)
+            halves = []
+            for mode, cap in (("freerun", False), ("hardcap", True)):
+                for sess in (1, 2):
+                    if sess == 2 and mode == "hardcap":
+                        continue                       # session 2 is a stump
+                    d = root / f"matrix_V2_s{sess}_{mode}_20260827_120000"
+                    d.mkdir()
+                    for arm, rate in (("baseline", 100.0), ("a", 121.0 if cap else 110.0)):
+                        for rep in range(2):
+                            self._arm_run(d, arm, rep, rate, 300 if cap else 120)
+                    (d / "manifest.json").write_text(json.dumps(
+                        {"ignore_eos": cap, "created": f"2026-08-27T0{sess}:0"
+                                                       f"{0 if mode == 'freerun' else 5}:00+0800"}),
+                        encoding="utf-8")
+                    (d / "RUN_COMPLETE.json").write_text("{}", encoding="utf-8")
+                    halves.append(str(d))
+            out = {}
+            with contextlib.redirect_stdout(io.StringIO()) as buf:
+                m.report_crossover(m.classify(halves)[1], out)
+            text = buf.getvalue()
+        self.assertIn("1 of 2", text)
+        self.assertIn("dropped s2", text)
+        self.assertEqual(out["crossover"]["a"]["sessions"], 1)
+
+    def test_several_invocations_get_an_interval(self):
+        import io, contextlib
+        m = self._mod()
+        with tempfile.TemporaryDirectory() as t:
+            dirs = []
+            for i, cap in enumerate((121.0, 122.0, 120.0), 1):
+                d = Path(t) / f"matrix_V3_s{i}_20260827_120000"
+                self._build(d, {"baseline": (100.0, 100.0),
+                                "spec-dflash-n2": (110.0, cap)})
+                dirs.append(str(d))
+            out = {}
+            with contextlib.redirect_stdout(io.StringIO()):
+                m.report_within(dirs, out)
+        s = out["within_summary"]["spec-dflash-n2"]
+        self.assertEqual(s["n"], 3)
+        self.assertAlmostEqual(s["mean_pp"], 11.0, places=2)
+        self.assertLess(s["lo"], s["mean_pp"])
+        self.assertGreater(s["hi"], s["mean_pp"])
 
 
 class ARunScriptMustSetEveryFieldItClaimsToReproduce(unittest.TestCase):

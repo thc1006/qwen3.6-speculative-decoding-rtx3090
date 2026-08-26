@@ -284,6 +284,23 @@ MUTATIONS = [
      'export BENCH_IGNORE_EOS=on',
      "tests.test_harness_invariants.ARunScriptMustSetEveryFieldItClaimsToReproduce"),
 
+    ("the mode contrast stops dividing out its own baseline",
+     "analysis/length_mode.py",
+     '        cap_pct = 100.0 * (cap_rates[a] / cap_rates[base] - 1.0)',
+     '        cap_pct = 100.0 * (cap_rates[a] / free_rates[a] - 1.0)',
+     "tests.test_harness_invariants.TheLengthModeAnalysisMustReadBothDesigns"),
+    ("the log form of the contrast drifts from the percentage form",
+     "analysis/length_mode.py",
+     """                  "log_delta": (math.log(cap_rates[a] / cap_rates[base])
+                                - math.log(free_rates[a] / free_rates[base]))}""",
+     """                  "log_delta": math.log(cap_rates[a] / free_rates[a])}""",
+     "tests.test_harness_invariants.TheLengthModeAnalysisMustReadBothDesigns"),
+    ("a session with one half missing is used anyway",
+     "analysis/length_mode.py",
+     "        if set(halves_) == {\"freerun\", \"hardcap\"} and all(",
+     "        if True or set(halves_) == {\"freerun\", \"hardcap\"} and all(",
+     "tests.test_harness_invariants.TheLengthModeAnalysisMustReadBothDesigns"),
+
 ]
 
 

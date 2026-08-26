@@ -81,16 +81,34 @@ def complete(run_dir):
     return os.path.exists(os.path.join(run_dir, "RUN_COMPLETE.json"))
 
 
-def delta(free_rates, cap_rates, base="baseline"):
-    """log(a_cap / base_cap) - log(a_free / base_free), per configuration."""
+def contrast(free_rates, cap_rates, base="baseline"):
+    """Everything the two reports say about one configuration, computed once.
+
+    The first version of this had `delta()` returning a log ratio and each
+    report recomputing the percentage-point shift from the rates directly - the
+    same quantity by two formulas, in two places, and the log value was never
+    actually used. That is the defect ERRATA B8 is about, written into the
+    analysis of the run that was meant to settle A17. One definition now, and
+    both reports read it.
+
+      change_pct   how much faster than the baseline MEASURED IN THE SAME MODE
+      shift_pp     the hard-cap change minus the freerun change, which is what
+                   A17's table publishes
+      log_delta    the same contrast as a log ratio, which is what averages
+                   properly across sessions
+    """
+    if base not in free_rates or base not in cap_rates:
+        return {}
     out = {}
     for a in sorted(free_rates):
         if a == base or a not in cap_rates:
             continue
-        if base not in free_rates or base not in cap_rates:
-            return {}
-        out[a] = (math.log(cap_rates[a] / cap_rates[base])
-                  - math.log(free_rates[a] / free_rates[base]))
+        free_pct = 100.0 * (free_rates[a] / free_rates[base] - 1.0)
+        cap_pct = 100.0 * (cap_rates[a] / cap_rates[base] - 1.0)
+        out[a] = {"free_pct": free_pct, "cap_pct": cap_pct,
+                  "shift_pp": cap_pct - free_pct,
+                  "log_delta": (math.log(cap_rates[a] / cap_rates[base])
+                                - math.log(free_rates[a] / free_rates[base]))}
     return out
 
 
@@ -152,23 +170,21 @@ def report_within(dirs, out):
               f"complete={complete(d)}  order={man.get('order_mode')}  "
               f"balanced={man.get('schedule_is_position_balanced')}  "
               f"repeats={man.get('repeats')}")
-        d_ = delta(free, cap)
-        if not d_:
+        c = contrast(free, cap)
+        if not c:
             print("    no usable baseline pair in this run")
             continue
         print(f"    {'configuration':<22} {'freerun':>9} {'hard cap':>10} "
               f"{'shift':>9}")
-        for a, v in sorted(d_.items(), key=lambda kv: -kv[1]):
-            fr = 100 * (free[a] / free["baseline"] - 1)
-            cp = 100 * (cap[a] / cap["baseline"] - 1)
-            print(f"    {a:<22} {fr:+8.2f}% {cp:+9.2f}% {cp - fr:+8.2f} pp")
-            per_arm[a].append(cp - fr)
+        for a, v in sorted(c.items(), key=lambda kv: -kv[1]["shift_pp"]):
+            print(f"    {a:<22} {v['free_pct']:+8.2f}% {v['cap_pct']:+9.2f}% "
+                  f"{v['shift_pp']:+8.2f} pp")
+            per_arm[a].append(v["shift_pp"])
         out.setdefault("within", []).append(
             {"dir": os.path.basename(d.rstrip("/")), "complete": complete(d),
              "freerun_tok_s": free, "hardcap_tok_s": cap,
-             "shift_pp": {a: 100 * (cap[a] / cap["baseline"] - 1)
-                          - 100 * (free[a] / free["baseline"] - 1)
-                          for a in d_}})
+             "shift_pp": {a: v["shift_pp"] for a, v in c.items()},
+             "log_delta": {a: v["log_delta"] for a, v in c.items()}})
     if per_arm:
         print(f"\n  across {len(dirs)} invocation(s):")
         out["within_summary"] = {}
@@ -211,31 +227,32 @@ def report_crossover(halves, out):
         first_mode[s] = "freerun" if tf and tc and tf < tc else "hardcap"
         fr = {a: pooled(f, a)["tok_s"] for a in arms_of(f) if pooled(f, a)}
         cp = {a: pooled(c, a)["tok_s"] for a in arms_of(c) if pooled(c, a)}
-        for a, v in delta(fr, cp).items():
-            deltas[a][s] = (v, 100 * (fr[a] / fr["baseline"] - 1),
-                            100 * (cp[a] / cp["baseline"] - 1))
+        for a, v in contrast(fr, cp).items():
+            deltas[a][s] = v
 
     print(f"\n  {'configuration':<22} {'mean shift':>11} {'95 % t over sessions':>24}"
           f" {'sessions':>9}")
     out["crossover"] = {}
     for a in sorted(deltas, key=lambda k: -st.mean(
-            [100 * (v[2] - v[1]) / 100 for v in deltas[k].values()])):
-        shifts = [v[2] - v[1] for v in deltas[a].values()]
+            [v["shift_pp"] for v in deltas[k].values()])):
+        shifts = [v["shift_pp"] for v in deltas[a].values()]
         m, lo, hi, n = interval(shifts)
         rng = "" if lo is None else f"[{lo:+.2f} pp, {hi:+.2f} pp]"
         print(f"  {a:<22} {m:+10.2f} pp {rng:>24} {n:>9}")
         out["crossover"][a] = {"mean_shift_pp": m, "lo": lo, "hi": hi,
                                "sessions": n,
-                               "per_session": {s: v[2] - v[1]
-                                               for s, v in deltas[a].items()}}
+                               "per_session": {s: v["shift_pp"]
+                                               for s, v in deltas[a].items()},
+                               "log_delta": {s: v["log_delta"]
+                                             for s, v in deltas[a].items()}}
 
     print("\n  does the order matter? the same shift, split by which mode ran first")
     print(f"  {'configuration':<22} {'freerun first':>14} {'hard cap first':>15}"
           f" {'difference':>12}")
     out["order_contrast"] = {}
     for a in sorted(deltas):
-        ff = [v[2] - v[1] for s, v in deltas[a].items() if first_mode[s] == "freerun"]
-        hf = [v[2] - v[1] for s, v in deltas[a].items() if first_mode[s] == "hardcap"]
+        ff = [v["shift_pp"] for s, v in deltas[a].items() if first_mode[s] == "freerun"]
+        hf = [v["shift_pp"] for s, v in deltas[a].items() if first_mode[s] == "hardcap"]
         if not ff or not hf:
             continue
         print(f"  {a:<22} {st.mean(ff):+13.2f} {st.mean(hf):+14.2f} "
