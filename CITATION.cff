@@ -1,6 +1,6 @@
 cff-version: 1.2.0
 title: >-
-  Historical benchmark: llama.cpp speculative decoding for
+  Archived and re-measured: llama.cpp speculative decoding for
   Qwen3.6-35B-A3B UD-Q4_K_XL on one RTX 3090
 message: >-
   If you cite this dataset, state which release you are citing. Releases

@@ -8,6 +8,10 @@ publication point with its own data set.
 
 ## [v4.1] — 2026-08-26 · the controlled tier, and a reversal
 
+The title loses the word "Historical": it was added by the v4.0 audit to stop
+readers taking v1 as current, and it stopped being true the moment this
+repository grew a controlled tier on post-merge master.
+
 v4.0 audited what this repository had published. v4.1 measures what it had never
 run. Nine of master's eleven `--spec-type` methods, on one card, against a
 matched no-speculation baseline inside every run. The headline reverses.
@@ -37,8 +41,17 @@ matched no-speculation baseline inside every run. The headline reverses.
   19.266 MiB of draft state on every partially accepted round: 772 saves and 709
   restores per arm-run, ≈133 GiB of state traffic, ≈19.5 % of the wall clock.
   DFlash and MTP do it **zero** times at every draft length from 1 to 16.
+- **ERRATA A13** — llama.cpp keeps *two* acceptance counters and this repository
+  had only ever quoted one. Across 73 single-request arm-runs they agree to
+  within 0.5 pp on every path that takes no speculative checkpoint (31 runs) and
+  disagree by at least 1.0 pp on every path that does (42 runs), with no overlap.
+  The worst case is 53.3 pp. This narrows A1's account of the upstream fix — the
+  denominator moved, the early return did not — and it discredits the drafter's
+  counter too: `spec-draft-n1` reports 1639 of 1639 accepted on an arm running at
+  a quarter of baseline.
 - `analysis/plot_v4_runs.py`, `analysis/extract_spec_accounting.py`,
-  `bench/stage_mtp_source.py`, and four new charts.
+  `analysis/compare_acceptance_counters.py`, `bench/stage_mtp_source.py`, and
+  four new charts.
 
 ### Changed
 
@@ -69,6 +82,10 @@ matched no-speculation baseline inside every run. The headline reverses.
   slower**. Scored per family it is 21/23, and both failures are at the
   high-acceptance end. The threshold is a property of the drafter, not of
   acceptance — see A12.
+- **Run N's "0.0 % acceptance".** Written and corrected the same day. The server
+  counter reads 0.0 %; the speculator's own counter reads up to 70.0 %. What is
+  measurable without either is that `generate()` was called 3271 times and
+  returned a draft twice.
 - **v3's DFlash direction.** What v3 measured at short draft windows was a
   binary change, not a DFlash penalty.
 - **"vLLM MTP remains the only positive-yield speculative decoding path on this

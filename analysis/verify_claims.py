@@ -609,6 +609,41 @@ for n, acc, delta in ((1, 68.7, -74.8), (2, 60.3, -72.2)):
     chk(f"threshold failure: spec-draft-n{n} vs baseline (%)",
         round(100*(v[0]/_b[0]-1), 1), delta, 0.05)
 
+print("\n=== ERRATA A13: the two acceptance counters ===")
+_cc = json.load(open("v4_audit_2026_08_25/data/acceptance_counter_comparison.json"))
+_seq = [r for r in _cc if "conc4" not in r["run"] and "conc8" not in r["run"]]
+chk("A13 single-request arm-runs with both counters", len(_seq), 73)
+_z = [r for r in _seq if r["checkpoints_created"] == 0]
+_n = [r for r in _seq if r["checkpoints_created"] > 0]
+chk("A13 arm-runs that take no checkpoint", len(_z), 31)
+chk("A13 arm-runs that do", len(_n), 42)
+chk("A13 no-checkpoint: largest gap between the counters (pp)",
+    round(max(abs(r["server_pct"] - r["drafter_pct"]) for r in _z), 1), 0.5, 0.05)
+chk("A13 checkpointing: smallest gap between the counters (pp)",
+    round(min(abs(r["server_pct"] - r["drafter_pct"]) for r in _n), 1), 1.0, 0.05)
+chk("A13 the two groups do not overlap",
+    max(abs(r["server_pct"] - r["drafter_pct"]) for r in _z) <
+    min(abs(r["server_pct"] - r["drafter_pct"]) for r in _n), True)
+_pick = lambda a: next(r for r in _seq if r["arm"] == a)
+for arm, srv, drf, ck in (("spec-dflash-n2", 72.8, 73.0, 0),
+                          ("spec-mtp-n2",    78.4, 78.6, 0),
+                          ("spec-draft-n8",  29.7, 41.3, 772),
+                          ("ngram-cache",     1.8, 19.1, 236),
+                          ("ngram-map-k4v-m8", 0.0, 53.3, 2),
+                          ("spec-draft-n1",  68.7, 100.0, 1639)):
+    r = _pick(arm)
+    chk(f"A13 {arm} server counter (%)", r["server_pct"], srv, 0.05)
+    chk(f"A13 {arm} drafter counter (%)", r["drafter_pct"], drf, 0.05)
+    chk(f"A13 {arm} checkpoints", r["checkpoints_created"], ck)
+# the row that discredits BOTH counters
+chk("A13 spec-draft-n1 drafter counter is exactly 1.0",
+    _pick("spec-draft-n1")["drafter_drafted"] == _pick("spec-draft-n1")["drafter_accepted"], True)
+# ngram-map barely fires at all, on the one quantity no counter can distort
+for arm in ("ngram-map-k", "ngram-map-k4v"):
+    r = _pick(arm)
+    chk(f"A13 {arm} generate() calls", r["drafter_calls_generate"], 3271)
+    chk(f"A13 {arm} drafts actually produced", r["drafter_drafts"], 2)
+
 print("\n=== theory (ERRATA E1/E2) ===")
 rho=8/256
 chk("rho", round(rho,5), 0.03125, 1e-9)
@@ -682,6 +717,10 @@ DOC_CLAIMS = [
     ("ERRATA.md",   "133 GiB",   "A12 total state moved"),
     ("ERRATA.md",   "19.5 %",    "A12 share of wall clock"),
     ("ERRATA.md",   "68.7 %",    "A12 threshold failure point"),
+    ("ERRATA.md",   "0.5 pp",    "A13 no-checkpoint agreement"),
+    ("ERRATA.md",   "53.3 pp",   "A13 worst divergence"),
+    ("ERRATA.md",   "1639 of 1639", "A13 the drafter counter is also a tautology"),
+    ("v4_audit_2026_08_25/README.md", "3271", "N generate() calls"),
     ("README.md",   "17.24 s",   "README drafter generate time"),
     ("README.md",   "12 / 12",   "README threshold within DFlash"),
     ("README.md",   "145.8",     "README head-to-head winner"),

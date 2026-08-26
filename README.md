@@ -1,4 +1,4 @@
-# Historical benchmark: llama.cpp speculative decoding for Qwen3.6-35B-A3B UD-Q4_K_XL on one RTX 3090
+# Archived and re-measured: llama.cpp speculative decoding for Qwen3.6-35B-A3B UD-Q4_K_XL on one RTX 3090
 
 [![DOI](https://zenodo.org/badge/1216484498.svg)](https://doi.org/10.5281/zenodo.19776558)
 
@@ -62,7 +62,7 @@ exist.
 matrix, under one memory policy — pooled decode throughput, three repeats,
 thinking on:
 
-| arm | pooled tok/s | Δ pooled | aggregate tok/s | Δ aggregate | acceptance | draft tokens |
+| arm | pooled tok/s | Δ pooled | aggregate tok/s | Δ aggregate | acceptance † | draft tokens |
 |---|---:|---:|---:|---:|---:|---:|
 | **`spec-dflash-n2`** — self-speculative | **145.8** | **+24.6 %** | 126.6 | +21.1 % | 72.3 % | 7 323 |
 | `spec-mtp-n2` — the target's own MTP head | 142.5 | +21.8 % | 122.8 | +17.5 % | 78.4 % | 6 972 |
@@ -75,6 +75,12 @@ thinking on:
 | `spec-draft-n1` — same drafter, one token | 29.1 | **−75.1 %** | 28.2 | −73.0 % | **69.7 %** | 4 470 |
 
 ![Nine methods, one baseline, one matrix](analysis/plot_head_to_head.png)
+
+† Server-side acceptance counter. It agrees with llama.cpp's other counter to
+0.5 pp on the self-speculative rows and under-reports on the rest — the divergence
+tracks the speculative-checkpoint path exactly
+([ERRATA A13](ERRATA.md#a13-there-are-two-acceptance-counters-they-disagree-and-the-disagreement-is-exactly-the-checkpoint-path)).
+No throughput figure depends on either counter.
 
 A factor of five separates the top from the bottom, and the divide is not
 acceptance, not draft length, and not model-versus-n-gram. It is **whether the

@@ -760,23 +760,35 @@ available test of whether "short drafts win" is about draft volume or about
 DFlash in particular. Six arms, at the upstream default `size_m 48` and at 8
 and 4:
 
-| arm | aggregate | vs baseline | draft tokens over 30 requests | acceptance |
+| arm | aggregate | vs baseline | draft tokens over 30 requests | acceptance (server / drafter) |
 |---|---|---|---|---|
 | no speculation | 109.4 | — | 0 | — |
-| `ngram-map-k` (default `m48`) | 107.6 | −1.6 % | 144 | 0.0 % |
-| `ngram-map-k-m8` | 107.6 | −1.6 % | 24 | 0.0 % |
-| `ngram-map-k-m4` | 107.5 | −1.7 % | 12 | 0.0 % |
-| `ngram-map-k4v` (default) | 107.3 | −1.9 % | 144 | 0.0 % |
-| `ngram-map-k4v-m8` | 108.6 | −0.7 % | 24 | 0.0 % |
-| `ngram-map-k4v-m4` | 108.0 | −1.2 % | 12 | 0.0 % |
+| `ngram-map-k` (default `m48`) | 107.6 | −1.6 % | 144 | 0.0 % / 14.5 % |
+| `ngram-map-k-m8` | 107.6 | −1.6 % | 24 | 0.0 % / 53.3 % |
+| `ngram-map-k-m4` | 107.5 | −1.7 % | 12 | 0.0 % / 70.0 % |
+| `ngram-map-k4v` (default) | 107.3 | −1.9 % | 144 | 0.0 % / 14.5 % |
+| `ngram-map-k4v-m8` | 108.6 | −0.7 % | 24 | 0.0 % / 53.3 % |
+| `ngram-map-k4v-m4` | 108.0 | −1.2 % | 12 | 0.0 % / 70.0 % |
 
-**They never engage.** 144 draft tokens across thirty requests is three lookup
-hits — `144/48`, `24/8`, `12/4` all give exactly three — and none of them is
-accepted. The draft-length question cannot be asked of a method that does not
-draft, so run N answers a different question than it was designed to: on this
-workload the ngram-map families are a no-op that costs one to two per cent. That
-is a clean negative result for two of the eleven `--spec-type` values and it
-closes the coverage question, but it contributes nothing to the volume argument.
+**They almost never engage**, and that is measured on the one quantity here that
+neither counter can distort. The speculator's `generate()` is called **3271
+times** across the thirty requests and returns a draft **twice**. The 144 draft
+tokens are three lookup hits — `144/48`, `24/8`, `12/4` all give exactly three.
+
+The acceptance column carries two numbers because the two counters disagree, and
+this arm is the worst case in the repository: the server reports **0.0 %** and
+the drafter's own counter reports up to **70.0 %**. That divergence is not
+specific to ngram-map — it appears on every path that takes a speculative
+checkpoint and on none that does not
+([A13](../ERRATA.md#a13-there-are-two-acceptance-counters-they-disagree-and-the-disagreement-is-exactly-the-checkpoint-path)).
+An earlier version of this section reported the 0.0 % alone and called it
+"acceptance"; that was wrong.
+
+The draft-length question cannot be asked of a method that drafts twice in 3271
+opportunities, so run N answers a different question than it was designed to: on
+this workload the ngram-map families are a no-op costing one to two per cent.
+That is a clean negative for two of the eleven `--spec-type` values and it closes
+the coverage question, but it contributes nothing to the volume argument.
 
 ---
 
@@ -788,7 +800,7 @@ from deltas. This is the within-run comparison: nine arms, one baseline measured
 beside all of them, `-c 8192`, `--fit-target 3072`, ABBA ordering, three
 repeats, thinking on.
 
-| arm | pooled tok/s | Δ pooled | aggregate tok/s | Δ aggregate | acceptance | draft tokens |
+| arm | pooled tok/s | Δ pooled | aggregate tok/s | Δ aggregate | acceptance † | draft tokens |
 |---|---:|---:|---:|---:|---:|---:|
 | **`spec-dflash-n2`** — self-speculative | **145.8** | **+24.6 %** | 126.6 | +21.1 % | 72.3 % | 7 323 |
 | `spec-mtp-n2` — the target's own MTP head | 142.5 | +21.8 % | 122.8 | +17.5 % | 78.4 % | 6 972 |
@@ -799,6 +811,13 @@ repeats, thinking on.
 | `ngram-cache` | 93.9 | −19.7 % | 85.9 | −17.8 % | 5.2 % | 1 566 |
 | `spec-draft-n8` — external 0.8 B drafter | 30.8 | −73.7 % | 29.8 | −71.5 % | 29.5 % | 16 704 |
 | `spec-draft-n1` — same drafter, one token | 29.1 | **−75.1 %** | 28.2 | −73.0 % | **69.7 %** | 4 470 |
+
+† Server-side counter. It agrees with the speculator's own counter to within
+0.5 pp on the three self-speculative rows, which take no speculative
+checkpoints, and under-reports on the four rows that do — `spec-draft-n1` reads
+69.7 % here and 100.0 % from the drafter, `ngram-map-k4v-m8` 50.0 % against
+77.3 %. See [A13](../ERRATA.md#a13-there-are-two-acceptance-counters-they-disagree-and-the-disagreement-is-exactly-the-checkpoint-path).
+No throughput figure in this table depends on either counter.
 
 Three things this table settles that no earlier table could.
 

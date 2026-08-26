@@ -134,6 +134,14 @@ reaches the numerator with `n_accepted = 4`, decrements to 3 for the replay, and
 the ratio is 3/8. That is the honest quantity, and it is why master reports
 values like 29.7 % where `97895129e` could only ever report 1.00000.
 
+**That fix is narrower than it looks, and [A13](#a13-there-are-two-acceptance-counters-they-disagree-and-the-disagreement-is-exactly-the-checkpoint-path)
+measures how narrow.** The denominator moved; the early return did not. A round
+that takes the checkpoint branch still leaves the numerator alone, so on paths
+where that branch fires the server counter under-counts — by 11.6 pp for
+`spec-draft-n8`, by 53.3 pp for `ngram-map-k4v-m8`. Where it never fires, at
+every DFlash and MTP arm measured here, the server counter and the drafter's own
+counter agree to within 0.5 pp across 31 arm-runs.
+
 ---
 
 ### A2. The draft model was **not** vocabulary-compatible; the run used the token-translation fallback
@@ -796,6 +804,70 @@ against 2.73–3.43 s for a head that reuses the target's layers.
 counts and the volumes are exact; the 19.5 % is a log-timestamp attribution and
 should be read as an estimate of that path's share, not a profile. Nothing here
 measures expert routing, and nothing here needs to.
+
+---
+
+### A13. There are two acceptance counters, they disagree, and the disagreement is exactly the checkpoint path
+
+Every acceptance figure this repository has ever published comes from the
+server's `timings.draft_n_accepted / timings.draft_n`. llama.cpp keeps a second
+counter and prints it one line away in the `-v` log — the speculator's own
+`statistics <type>: #gen tokens / #acc tokens`. Until 2026-08-26 nobody here had
+compared them.
+
+Across **73 single-request arm-runs** for which both survive, the split is
+absolute and there are no exceptions either way:
+
+| | arm-runs | largest / smallest gap between the two counters |
+|---|---|---|
+| speculative checkpoints **never taken** | 31 | agree to within **0.5 pp** |
+| speculative checkpoints **taken** | 42 | disagree by at least **1.0 pp** |
+
+The two groups do not overlap. Representative rows:
+
+| arm | server counter | drafter's own counter | gap | checkpoints |
+|---|---|---|---|---|
+| `spec-dflash-n2` | 72.8 % | 73.0 % | 0.2 pp | 0 |
+| `spec-mtp-n2` | 78.4 % | 78.6 % | 0.2 pp | 0 |
+| `spec-draft-n8` | 29.7 % | 41.3 % | 11.6 pp | 772 |
+| `ngram-cache` | 1.8 % | 19.1 % | 17.3 pp | 236 |
+| `ngram-map-k4v-m8` | **0.0 %** | **53.3 %** | 53.3 pp | 2 |
+| `spec-draft-n1` | 68.7 % | **100.0 %** | 31.3 pp | 1639 |
+
+**This narrows what A1 says about the upstream fix.** A1 records that master
+moved the denominator out from behind the early `continue`, and it did — for
+rounds that reach the counters. Rounds that take the checkpoint-and-restore
+branch still return before the numerator, so on any path where that branch fires
+the server counter is an under-count, and the size of the under-count is the
+size of that branch.
+
+**And the drafter's counter is not the answer either.** `spec-draft-n1` reports
+**100.0 % — 1639 of 1639 —** on an arm that runs at a quarter of the
+no-speculation baseline. A ratio of exactly 1.0 on an arm that slow is not a
+measurement; it is the same signature A1 identified, relocated. Neither counter
+survives contact with that row.
+
+**What this changes, and what it does not.**
+
+- Every DFlash and MTP acceptance figure in this repository is on a path that
+  takes no checkpoints, where the two counters agree to 0.5 pp. Those numbers
+  stand.
+- Every external-drafter and n-gram acceptance figure is on a path that does.
+  Those numbers are quoted from the server counter throughout, they are
+  under-counts of unknown size, and they should not be read as measurements of
+  how often the target agreed with the drafter. Where it matters they are now
+  reported alongside the drafter's counter.
+- It does **not** touch any throughput number. Tokens generated and wall-clock
+  are measured independently of both counters.
+- It strengthens rather than weakens the falsification in run O: `spec-draft-n1`
+  is 75 % slower at a *server-reported* 68.7 % acceptance, and its own drafter
+  claims 100 %. Whichever is closer to the truth, no acceptance rate rescues
+  that arm.
+
+Committed evidence:
+[`v4_audit_2026_08_25/data/acceptance_counter_comparison.json`](v4_audit_2026_08_25/data/acceptance_counter_comparison.json),
+produced by
+[`analysis/compare_acceptance_counters.py`](analysis/compare_acceptance_counters.py).
 
 ---
 
