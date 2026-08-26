@@ -703,6 +703,40 @@ chk("A14 the non-replicating pair, gap (pp)", round(10.5 - 2.0, 1), 8.5, 0.05)
 chk("A14 spec-mtp-n4 Q8_0 outlier is M1, not run Q",
     sorted([10.5, 2.0, 2.7])[2], 10.5, 0.05)
 
+print("\n=== A14: the thermal figures the 'unexplained' claim rests on ===")
+import csv as _csv2, re as _re2
+def _tel(pat, lo, hi):
+    out = []
+    for f in glob.glob(f"v4_audit_2026_08_25/data/{pat}"):
+        for r in _csv2.reader(open(f)):
+            if len(r) != 9 or not r[1].isdigit():
+                continue
+            m = _re2.search(r"(\d{2}):(\d{2}):(\d{2})", r[0])
+            if m and lo <= m.group(0) <= hi and int(r[1]) > 50:
+                out.append((int(r[3]), int(r[5])))
+    return out
+for lbl, pat, lo, hi, t_, c_ in (("M1", "gpu_telemetry_M_*.csv", "08:00:00", "08:15:00", 66.1, 1938),
+                                 ("Q",  "gpu_telemetry_chain2_*.csv", "11:33:00", "11:52:00", 65.8, 1934)):
+    v = _tel(pat, lo, hi)
+    chk(f"A14 {lbl} mean temperature under load (C)", round(st.mean([x[0] for x in v]), 1), t_, 0.05)
+    chk(f"A14 {lbl} mean SM clock under load (MHz)", round(st.mean([x[1] for x in v])), c_, 0.5)
+chk("A14 the two windows differ by under 1 C", abs(66.1 - 65.8) < 1.0, True)
+chk("A14 the two windows differ by under 0.5 % in clock", abs(1938 - 1934) / 1938 < 0.005, True)
+# every request in both prompt sets hits the cap, so the sets differ only in prompt length
+for pat in ("matrix_O_headtohead_*", "matrix_P_extended_*"):
+    fr = {x.get("finish_reason") for f in glob.glob(f"v4_audit_2026_08_25/data/{pat}/baseline__rep*.json")
+          for x in json.load(open(f))["rows"]}
+    chk(f"{pat.rstrip('_*')} every request reaches the token cap", sorted(fr), ["length"])
+# the new set does not inflate acceptance
+for arm, v1_, ex_ in (("spec-dflash-n2", 72.3, 72.8), ("spec-mtp-n2", 78.4, 77.3)):
+    def _acc(pat):
+        rs = [json.load(open(f)) for f in glob.glob(f"v4_audit_2026_08_25/data/{pat}/{arm}__rep*.json")]
+        dn = sum(x["draft_n"] for r in rs for x in r["rows"]); da = sum(x["draft_n_accepted"] for r in rs for x in r["rows"])
+        return 100*da/dn
+    chk(f"{arm} acceptance, v1 ten", round(_acc("matrix_O_headtohead_*"), 1), v1_, 0.05)
+    chk(f"{arm} acceptance, extended", round(_acc("matrix_P_extended_*"), 1), ex_, 0.05)
+    chk(f"{arm} the new prompt set does not inflate acceptance", abs(ex_ - v1_) < 1.5, True)
+
 print("\n=== theory (ERRATA E1/E2) ===")
 rho=8/256
 chk("rho", round(rho,5), 0.03125, 1e-9)
@@ -785,6 +819,9 @@ DOC_CLAIMS = [
     ("v4_audit_2026_08_25/README.md", "+20.3 %", "P dflash-n2 on the new set"),
     ("ERRATA.md",   "0.56 pp",   "A14 median between-run spread"),
     ("ERRATA.md",   "8.5 pp",    "A14 the pair that did not replicate"),
+    ("README.md",   "+26.7 %",   "README discloses the same-config replicate"),
+    ("v4_audit_2026_08_25/README.md", "292.1 s", "P pooled includes the draft cost"),
+    ("v4_audit_2026_08_25/README.md", "72.8 %",  "P acceptance not inflated"),
     ("README.md",   "17.24 s",   "README drafter generate time"),
     ("README.md",   "12 / 12",   "README threshold within DFlash"),
     ("README.md",   "145.8",     "README head-to-head winner"),

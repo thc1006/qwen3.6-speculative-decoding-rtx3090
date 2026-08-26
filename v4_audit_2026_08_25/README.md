@@ -892,6 +892,22 @@ written up on aggregate it would have read "the win halves on a different prompt
 set", which is false and would have been a metric artefact of exactly the kind
 this repository exists to catch.
 
+Three things were checked before trusting that comparison, because "use the
+other metric" is the sort of move that can be made to say anything:
+
+- **`predicted_ms` contains the draft cost**, so pooled does not quietly exclude
+  the thing being measured. Decode plus prompt accounts for 96–99 % of
+  wall-clock in every arm, and `spec-draft-n8` spends **292.1 s** of decode
+  against the baseline's 76.9 s — if drafting sat outside `predicted_ms` that arm
+  would look faster, not four times slower.
+- **Every request in both sets reaches the 300-token cap** (`finish_reason:
+  length`, 30/30 and 60/60), so the two sets generate identical token counts and
+  differ only in how much prompt precedes them.
+- **The new prompts do not inflate acceptance.** `spec-dflash-n2` accepts 72.3 %
+  on the v1 ten and 72.8 % on the extended twenty; `spec-mtp-n2`, 78.4 % and
+  77.3 %. A set written by the same hand that wrote the analysis could have been
+  tuned to be predictable; measurably it is not.
+
 The workload control repeats on the new set too. Thinking off, pooled:
 
 | arm | v1 ten (run M3) | extended twenty (run R) |

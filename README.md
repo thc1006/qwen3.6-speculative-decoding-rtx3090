@@ -76,6 +76,12 @@ thinking on:
 
 ![Nine methods, one baseline, one matrix](analysis/plot_head_to_head.png)
 
+† This table is run O. The same configuration was measured again in run M1 and
+`spec-dflash-n2` read **+26.7 %** there against +24.6 % here — a 2.1 pp
+between-run spread, the second largest in the dataset. The lower of the two is
+quoted. What a three-repeat delta is actually worth is measured in
+[ERRATA A14](ERRATA.md#a14-within-run-repeats-are-not-an-error-bar).
+
 † Server-side acceptance counter. It agrees with llama.cpp's other counter to
 0.5 pp on the self-speculative rows and under-reports on the rest — the divergence
 tracks the speculative-checkpoint path exactly
