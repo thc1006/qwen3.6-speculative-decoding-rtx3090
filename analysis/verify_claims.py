@@ -1814,7 +1814,7 @@ chk("README contrasts the steady reference with the moving arm",
     True)
 
 
-print("\n=== A16: two levels, not noise ===")
+print("\n=== A16: how the 43 block measurements are distributed ===")
 # Every block of every comparable run, for the one arm that moves.
 _lvl, _lvl_meta = [], []
 for _d in _comparable_dirs:
