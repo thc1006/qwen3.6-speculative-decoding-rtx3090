@@ -99,6 +99,10 @@ def arm_stats(runs, n_prompts):
     }
 
 
+STRICT = False
+FAILED: list[str] = []
+
+
 def report(run_dir: Path) -> None:
     arms, man = load(run_dir)
     if not arms:
@@ -113,8 +117,43 @@ def report(run_dir: Path) -> None:
         print(f"  gpu at start: {man.get('nvidia_smi','?')}")
     print("=" * 108)
 
-    n_prompts = max((len(r["rows"]) for runs in arms.values() for r in runs), default=0)
-    print(f"  prompt set size inferred from the data: {n_prompts}")
+    # Completeness must come from the manifest, not from the data. Inferring it
+    # as "the largest row count seen here" marks every arm complete when every
+    # arm is truncated the same way, which is exactly the case that matters.
+    n_prompts = man.get("n_prompts")
+    expected_tags = set(man.get("prompt_tags") or [])
+    if n_prompts is None:
+        n_prompts = max((len(r["rows"]) for runs in arms.values() for r in runs), default=0)
+        print(f"  ! manifest carries no n_prompts; falling back to the largest row "
+              f"count seen ({n_prompts}). Runs written before that field existed "
+              f"cannot be checked for uniform truncation.")
+    else:
+        print(f"  prompt set size from the manifest: {n_prompts}"
+              + (f" ({man.get('prompt_set')})" if man.get("prompt_set") else ""))
+    if not (run_dir / "RUN_COMPLETE.json").exists():
+        print("  ! no RUN_COMPLETE.json: this directory may hold a run that was "
+              "interrupted, or files from more than one run")
+    if STRICT:
+        bad = []
+        for a, runs in arms.items():
+            for r in runs:
+                tags = [x["tag"] for x in r["rows"]]
+                if r.get("crashed"):
+                    bad.append(f"{a} rep{r['repeat']}: crashed at {r['crashed']['tag']}")
+                elif len(tags) != n_prompts:
+                    bad.append(f"{a} rep{r['repeat']}: {len(tags)} rows, expected {n_prompts}")
+                elif len(set(tags)) != len(tags):
+                    bad.append(f"{a} rep{r['repeat']}: duplicate prompt tags")
+                elif expected_tags and set(tags) != expected_tags:
+                    bad.append(f"{a} rep{r['repeat']}: tag set differs from the manifest")
+        if not (run_dir / "RUN_COMPLETE.json").exists():
+            bad.append("no RUN_COMPLETE.json")
+        if bad:
+            print("\n  STRICT: refusing to aggregate")
+            for b in bad[:12]:
+                print(f"    {b}")
+            FAILED.append(str(run_dir))
+            return
     stats = {a: arm_stats(r, n_prompts) for a, r in arms.items()}
     base = stats.get("baseline")
     hdr = (f"{'arm':22s} {'reps':>4s} {'req-mean':>9s} {'pooled':>8s} {'vs base':>8s} "
@@ -219,11 +258,17 @@ def report(run_dir: Path) -> None:
 
 
 def main() -> None:
-    dirs = [Path(a) for a in sys.argv[1:]]
+    global STRICT
+    args = [a for a in sys.argv[1:] if a != "--strict"]
+    STRICT = "--strict" in sys.argv[1:]
+    dirs = [Path(a) for a in args]
     if not dirs:
-        sys.exit("usage: python analysis/matrix_report.py <run-dir> [<run-dir> ...]")
+        sys.exit("usage: python analysis/matrix_report.py [--strict] <run-dir> [...]")
     for d in dirs:
         report(d)
+    if STRICT and FAILED:
+        sys.exit(f"\n{len(FAILED)} run directory/ies failed the strict check: "
+                 + ", ".join(Path(f).name for f in FAILED))
 
 
 if __name__ == "__main__":

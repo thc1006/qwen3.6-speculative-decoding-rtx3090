@@ -81,6 +81,8 @@ from __future__ import annotations
 import hashlib
 import concurrent.futures as cf
 import json
+import re
+import socket
 import os
 import signal
 import subprocess
@@ -110,9 +112,23 @@ MAX_TOKENS = int(os.environ.get("BENCH_MAX_TOKENS", "300"))
 # Exp 2 unauditable (ERRATA D2) - so normalise, and record the result in the
 # manifest and per request.
 _THINK_RAW = os.environ.get("BENCH_THINK", "on").strip().lower()
-THINK = "off" if _THINK_RAW in ("off", "0", "false", "no", "think_off",
-                                "disabled", "none") else "on"
+_THINK_OFF = {"off", "0", "false", "no", "think_off", "disabled", "none"}
+_THINK_ON = {"on", "1", "true", "yes", "enabled"}
+# Fail closed. Mapping every unrecognised string to "on" is exactly the silent
+# mismatch this was written to prevent: BENCH_THINK=of or =disabledd would have
+# quietly left thinking enabled and produced a plausible-looking matrix.
+if _THINK_RAW in _THINK_OFF:
+    THINK = "off"
+elif _THINK_RAW in _THINK_ON:
+    THINK = "on"
+else:
+    sys.exit(f"BENCH_THINK={_THINK_RAW!r} is not recognised; use one of "
+             f"{sorted(_THINK_ON)} or {sorted(_THINK_OFF)}")
 CONCURRENCY = max(1, int(os.environ.get("BENCH_CONCURRENCY", "1")))
+_ORDER_RAW = os.environ.get("BENCH_ORDER", "latin").strip().lower()
+if _ORDER_RAW not in ("latin", "mirrored"):
+    sys.exit("BENCH_ORDER must be 'latin' or 'mirrored'")
+ORDER_MODE = _ORDER_RAW
 # Pinning -ngl 999 makes llama.cpp's memory fitter abort ("n_gpu_layers already
 # set by user to 999, abort") instead of adjusting the parameters the caller
 # left unset. That is why the BF16 DFlash drafter appeared not to fit: with -ngl
@@ -493,6 +509,36 @@ def nvidia_smi() -> str:
         return f"unavailable: {e}"
 
 
+def port_is_free(port: int) -> bool:
+    """True if nothing is listening on the port.
+
+    Checked before every spawn. Without it a stale server left on the configured
+    port answers /health, `wait_health` returns before it ever looks at the
+    process it just started, and the whole arm-run is measured against the wrong
+    binary and the wrong model while the manifest records the intended ones.
+    """
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sk:
+        sk.settimeout(1.0)
+        return sk.connect_ex(("127.0.0.1", port)) != 0
+
+
+def server_identity(log_path: Path) -> dict:
+    """Read back who actually answered, from the server's own startup log."""
+    out: dict = {}
+    try:
+        text = log_path.read_text(errors="replace")[:400_000]
+    except Exception:  # noqa: BLE001
+        return out
+    if m := re.search(r"build\s*[:=]\s*(\d+)\s*\(([0-9a-f]+)\)", text):
+        out["build"] = m.group(1)
+        out["commit"] = m.group(2)
+    for key, pat in (("model_path", r"llama_model_loader: loaded meta data from ([^\s]+)"),
+                     ("arch", r"general\.architecture\s*(?:str|=)\s*=?\s*(\w+)")):
+        if m := re.search(pat, text):
+            out[key] = m.group(1)
+    return out
+
+
 def wait_health(port: int, timeout: float = 300.0,
                 proc: subprocess.Popen | None = None) -> float:
     """Block until /health answers, the server exits, or the timeout expires.
@@ -507,6 +553,12 @@ def wait_health(port: int, timeout: float = 300.0,
     t0 = time.perf_counter()
     url = f"http://127.0.0.1:{port}/health"
     while time.perf_counter() - t0 < timeout:
+        # Liveness BEFORE readiness. The other order accepts a 200 from whatever
+        # happens to own the port, including a server this run did not start.
+        if proc is not None and proc.poll() is not None:
+            raise RuntimeError(
+                f"llama-server exited with code {proc.returncode} after "
+                f"{time.perf_counter() - t0:.1f}s without becoming healthy")
         try:
             with urllib.request.urlopen(url, timeout=3) as r:
                 if r.status == 200:
@@ -547,6 +599,11 @@ def start_server(extra: list[str], log_path: Path,
                      .replace("{MTP}", MTP)
                      for a in extra]
     log_path.parent.mkdir(parents=True, exist_ok=True)
+    if not port_is_free(PORT):
+        raise RuntimeError(
+            f"port {PORT} already has a listener. Refusing to start: a stale "
+            f"server there would answer /health and this arm-run would measure "
+            f"it while the manifest recorded the binary and models below.")
     proc = subprocess.Popen(cmd, env=env, stdout=log_path.open("w"),
                             stderr=subprocess.STDOUT, preexec_fn=os.setsid)
     proc._cmd = cmd  # type: ignore[attr-defined]
@@ -732,14 +789,24 @@ def run_prompt_set(arm: str, rep: int,
     return rows, crashed, wall_s
 
 
-def max_in_flight(rows: list[dict]) -> int:
-    """Largest number of requests whose windows overlapped at any instant.
+def max_client_requests_in_flight(rows: list[dict]) -> int:
+    """Largest number of CLIENT requests outstanding at any instant.
 
-    This is the check the previous revision lacked. `--parallel N` on the
-    server and N worker threads in the client are both necessary and neither is
-    sufficient - the server can serialise the slots, or a single busy slot can
-    starve the rest - so the batch width is read back out of the timestamps
-    rather than assumed from the configuration.
+    This is not the server's decode batch width and must never be reported as
+    one. It is computed from when the client sent each request and when it
+    received the complete response, so a server that processes every request
+    strictly serially still shows all of their HTTP windows overlapping while
+    the later ones sit in its queue. An earlier version of this file called it
+    `max_in_flight` and described it as reading the batch width "back out of
+    the timestamps", which it cannot do.
+
+    What it does establish is the negative case: if this is 1 while N were
+    requested, the client never had more than one request outstanding and the
+    run measures nothing about concurrency. That is the failure it was written
+    to catch, and it remains valid for that.
+
+    Measuring the achieved batch width needs server-side instrumentation of
+    active sequences and batch/ubatch token counts per decode.
     """
     events = []
     for r in rows:
@@ -806,21 +873,25 @@ def run_arm(arm: str, rep: int) -> dict:
         rows, crashed, wall_s = run_prompt_set(arm, rep, proc)
         n_tok = sum(r["predicted_n"] for r in rows)
         agg = n_tok / wall_s if wall_s > 0 else float("nan")
-        peak = max_in_flight(rows)
+        peak = max_client_requests_in_flight(rows)
         print(f"    [{arm} rep{rep} {'AGGREGATE':13s}] {n_tok:>4d}tok in "
               f"{wall_s:6.1f}s = {agg:6.1f} tok/s aggregate  "
-              f"(c={CONCURRENCY}, peak in flight {peak})", flush=True)
+              f"(c={CONCURRENCY}, peak client requests in flight {peak})", flush=True)
         if peak < CONCURRENCY:
-            print(f"    [{arm} rep{rep}] WARNING: asked for {CONCURRENCY} in "
-                  f"flight, only ever observed {peak}. This arm-run does NOT "
-                  f"measure batching.", flush=True)
+            print(f"    [{arm} rep{rep}] WARNING: asked for {CONCURRENCY} client "
+                  f"requests in flight, only ever observed {peak}. This arm-run "
+                  f"does NOT measure concurrency.", flush=True)
         return {
             "arm": arm, "repeat": rep, "ready_s": ready_s,
+            # who actually answered, read back from the server's own startup log
+            "server_pid": proc.pid,
+            "server_identity": server_identity(log_path),
             # system-level metric, valid at every concurrency level
             "concurrency": CONCURRENCY,
             "wall_s": wall_s,
             "aggregate_tok_s": agg,
-            "max_in_flight": peak,
+            "max_client_requests_in_flight": peak,
+            "max_in_flight": peak,  # deprecated alias, runs A-R used this name
             "argv": proc._cmd,  # type: ignore[attr-defined]
             "gpu_before": gpu_before, "gpu_after": nvidia_smi(),
             "server_log": str(log_path.relative_to(OUT)),
@@ -835,6 +906,18 @@ def main() -> None:
     missing = [n for n, v in (("LLAMA_SERVER_BIN", SERVER), ("MODEL_TARGET", TARGET)) if not v]
     if missing:
         sys.exit(f"set {', '.join(missing)}")
+    if ORDER_MODE == "mirrored" and REPEATS % 2 == 1:
+        sys.exit(f"BENCH_ORDER=mirrored with BENCH_REPEATS={REPEATS} is not balanced: "
+                 f"the arm order runs forward/reverse/forward and the first arm never "
+                 f"leaves position 1 on the odd repeats. Use an even repeat count, or "
+                 f"BENCH_ORDER=latin.")
+    # A directory that already holds results will be globbed by the analysis as
+    # if it belonged to this run. Refuse rather than mix two runs together.
+    stale = sorted(OUT.glob("*__rep*.json")) if OUT.exists() else []
+    if stale:
+        sys.exit(f"BENCH_OUT={OUT} already contains {len(stale)} arm-run files "
+                 f"(e.g. {stale[0].name}). Refusing to write into it: the analysis "
+                 f"cannot tell the two runs apart. Use a fresh directory.")
     wanted = os.environ.get("BENCH_ARMS")
     arms = [a.strip() for a in wanted.split(",")] if wanted else list(ARMS)
     for a in arms:
@@ -867,9 +950,13 @@ def main() -> None:
         "repeats": REPEATS, "max_tokens": MAX_TOKENS,
         "temperature": 0.0, "seed": 42, "think": THINK, "think_env": _THINK_RAW,
         "concurrency": CONCURRENCY, "fit": FIT, "ctx": CTX,
+        "order_mode": ORDER_MODE,
         "prompt_set": PROMPT_SET_NAME, "n_prompts": len(PROMPTS),
+        "prompt_tags": [t for t, _, _ in PROMPTS],
         "fit_target": FIT_TARGET or None,
-        "ordering": "ABBA: arm order is reversed on odd repeats",
+        "ordering": ("latin: arm order rotated by repeat index, step N/repeats"
+                     if ORDER_MODE == "latin" else
+                     "mirrored: arm order reversed on odd repeats; balanced only for even repeats"),
         "gpu_fields": GPU_FIELDS,
         "nvidia_smi": nvidia_smi(),
     }
@@ -878,9 +965,26 @@ def main() -> None:
 
     results = []
     for rep in range(REPEATS):
-        # ABBA: reverse the arm order on odd repeats so any monotone drift
-        # (thermal, clock, cache) cannot alias onto the arm contrast.
-        order = arms if rep % 2 == 0 else list(reversed(arms))
+        # Arm position is confounded with time unless it is balanced. Reversing
+        # the list on odd repeats - what this called "ABBA" - only balances when
+        # the repeat count is even, and with three repeats it runs
+        # forward/reverse/forward, leaving the first arm at positions 1, N, 1.
+        #
+        #   latin     rotate by the repeat index. Each arm occupies `repeats`
+        #             distinct positions, advancing uniformly; with repeats == N
+        #             it is a full cyclic Latin square. This is the default.
+        #   mirrored  the old forward/reverse alternation, kept for continuity
+        #             with runs A-R. Rejected for odd repeats, where it is not
+        #             balanced at all.
+        if ORDER_MODE == "mirrored":
+            order = arms if rep % 2 == 0 else list(reversed(arms))
+        else:
+            # step by N/R so `repeats` blocks spread across the positions rather
+            # than crowding adjacent ones: nine arms in three repeats puts each
+            # arm at positions 1, 4 and 7 rather than 1, 9 and 8.
+            step = max(1, len(arms) // max(1, REPEATS))
+            k = (rep * step) % len(arms)
+            order = arms[k:] + arms[:k]
         print(f"\n=== repeat {rep}  order: {' -> '.join(order)} ===", flush=True)
         for arm in order:
             res = run_arm(arm, rep)
@@ -891,6 +995,12 @@ def main() -> None:
     (OUT / "all_results.json").write_text(
         json.dumps(results, indent=2, ensure_ascii=False) + "\n")
     print(f"\n=== wrote {OUT}/ ({len(results)} arm-runs) ===")
+    (OUT / "RUN_COMPLETE.json").write_text(json.dumps({
+        "completed_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "arms": arms, "repeats": REPEATS, "prompt_set": PROMPT_SET_NAME,
+        "n_prompts": len(PROMPTS),
+        "expected_arm_runs": len(arms) * REPEATS,
+    }, indent=2) + "\n", encoding="utf-8")
 
 
 if __name__ == "__main__":

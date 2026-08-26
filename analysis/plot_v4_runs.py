@@ -5,7 +5,7 @@ Two figures, and the choice of quantity in each is the point.
   plot_batching.png      aggregate throughput - generated tokens over the
                          wall-clock of the whole prompt set - because at
                          concurrency > 1 a per-request rate is not system
-                         throughput. The achieved batch width is read out of the
+                         throughput. The number of concurrent CLIENT requests is read out of the
                          request timestamps and printed on the chart, so a run
                          that asked for eight and got one cannot be mistaken for
                          a batching measurement.
@@ -81,7 +81,8 @@ def plot_batching() -> None:
         levels.append(c)
         m, s = agg(arms["baseline"]);      base_y.append(m); base_e.append(s)
         m, s = agg(arms["spec-draft-n8"]); spec_y.append(m); spec_e.append(s)
-        seen = {r.get("max_in_flight") for r in arms["baseline"] + arms["spec-draft-n8"]}
+        seen = {r.get("max_client_requests_in_flight", r.get("max_in_flight"))
+                for r in arms["baseline"] + arms["spec-draft-n8"]}
         widths.append(sorted(x for x in seen if x is not None))
 
     fig, ax = plt.subplots(figsize=(9.2, 5.4))
@@ -107,14 +108,15 @@ def plot_batching() -> None:
 
     ax.set_xlim(-0.35, len(levels) - 0.65)
     ax.set_xticks(list(x))
-    ax.set_xticklabels([f"{c}\nbatch width observed: "
+    ax.set_xticklabels([f"{c}\nclient requests in flight: "
                         f"{', '.join(str(w) for w in widths[i])}"
                         for i, c in enumerate(levels)], fontsize=9)
     ax.set_xlabel("requests in flight")
     ax.set_ylabel("aggregate throughput (generated tokens / wall-clock second)")
     ax.set_ylim(0, max(base_y) * 1.18)
-    ax.set_title("Batching helps the target and does nothing for the drafter\n"
-                 "so the gap widens: 0.28x at one request in flight, 0.16x at eight",
+    ax.set_title("Aggregate throughput against concurrent client requests\n"
+                 "the no-speculation arm gains, the external-drafter arm does not: "
+                 "0.28x at one, 0.16x at eight",
                  fontsize=11.5)
     # Below the axes: the only large empty region is where the c=1 labels sit.
     ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.16), ncol=2,
@@ -122,7 +124,9 @@ def plot_batching() -> None:
     ax.grid(axis="y", color="#dcdcdc", lw=0.6)
     ax.set_axisbelow(True)
     plt.tight_layout(rect=[0, 0.075, 1, 1])
-    _footer(fig, " Error bars are the run-to-run SD of three repeats.")
+    _footer(fig, " Error bars are the run-to-run SD of three repeats. The x axis is "
+                 "CONCURRENT CLIENT REQUESTS, verified from request timestamps; the "
+                 "server's decode batch width was not instrumented.")
     plt.savefig(OUT / "plot_batching.png", dpi=150, bbox_inches="tight")
     plt.close()
     print(f"  wrote {(OUT / 'plot_batching.png').relative_to(ROOT)}")
@@ -315,10 +319,12 @@ def plot_head_to_head() -> None:
         print("  no run O data - skipping head-to-head chart")
         return
     base = pooled(arms["baseline"])
+    # Grouped by what the draft path IS, not by a causal claim: all three load a
+    # separate drafter GGUF through -md.
     FAMILY = {
-        "spec-dflash": ("self-speculative (target's own layers)", C_DFLASH),
-        "spec-mtp":    ("self-speculative (target's own MTP head)", "#2f7d5a"),
-        "spec-draft":  ("external draft model", C_ACTIVE),
+        "spec-dflash": ("DFlash draft head (purpose-built for this target)", C_DFLASH),
+        "spec-mtp":    ("MTP draft head (exported from the target)", "#2f7d5a"),
+        "spec-draft":  ("general-purpose 0.8 B draft model", C_ACTIVE),
         "ngram":       ("drafter-free n-gram", C_INACTIVE),
         "baseline":    ("no speculation", C_REF),
     }
@@ -349,9 +355,10 @@ def plot_head_to_head() -> None:
             fontsize=8.8, va="top", ha="left")
     ax.set_xlim(0, max(r[1] for r in rows) * 1.34)
     ax.set_xlabel("pooled decode throughput (tokens / second)  -  higher is faster")
-    ax.set_title("Nine methods, one baseline, one matrix, one memory policy\n"
-                 "the divide is whether the drafter is a second model - not acceptance, "
-                 "not draft length",
+    ax.set_title("Eight speculative configurations and one baseline, "
+                 "one matrix, one memory policy\n"
+                 "an observational ranking: these arms differ in several ways at once, "
+                 "so no single cause is isolated",
                  fontsize=11.5)
     handles = [plt.Rectangle((0, 0), 1, 1, color=v[1], label=v[0])
                for v in FAMILY.values()]

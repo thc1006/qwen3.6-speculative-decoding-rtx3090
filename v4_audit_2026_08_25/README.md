@@ -279,20 +279,27 @@ nothing. `BENCH_CONCURRENCY` passed `--parallel N -cb` to the server, which
 allocated N slots, and then the client issued the ten prompts one at a time, so
 N−1 slots sat idle. The tell was in the data before any code was read: the c=4
 arm-runs took 44 s and 118 s against c=1's 44 s and 116 s. Four times the
-nominal batch width at identical wall-clock is a batch size of one. That
+nominal concurrency at identical wall-clock is a client batch size of one. That
 attempt is discarded, not reported.
 
-The runner now dispatches through a thread pool **and reads the achieved width
-back out of the request timestamps**, because `--parallel` on the server and N
-worker threads in the client are each necessary and neither is sufficient. Every
-arm-run below records `max_in_flight`, and it equals the configured level in all
-eighteen:
+The runner now dispatches through a thread pool and records how many **client**
+requests were outstanding at once, derived from the request timestamps. That is
+**not** the server's decode batch width and is not offered as one: a server that
+processed every request serially would still show all of their HTTP windows
+overlapping while the later ones sat in its queue. What it does establish is the
+negative case this run was re-done for — a value of 1 would mean the client
+never had more than one request outstanding. It equals the configured level in
+all eighteen arm-runs:
 
-| level | requested | observed `max_in_flight` |
+| level | requested | observed client requests in flight |
 |---|---|---|
 | c=1 | 1 | 1, 1, 1, 1, 1, 1 |
 | c=4 | 4 | 4, 4, 4, 4, 4, 4 |
 | c=8 | 8 | 8, 8, 8, 8, 8, 8 |
+
+Measuring what the server actually batched needs instrumentation of active
+sequences and batch/ubatch token counts per decode, which is queued in
+[`../RETEST_TODO.md`](../RETEST_TODO.md) and not done here.
 
 Aggregate throughput — 3000 generated tokens divided by wall-clock over the
 ten-prompt set, mean of three repeats:
@@ -861,10 +868,20 @@ No throughput figure in this table depends on either counter.
 
 Three things this table settles that no earlier table could.
 
-**Self-speculation wins and external speculation loses, on the same card in the
-same hour.** The spread is 145.8 down to 29.1 pooled — a factor of five — and
-the divide is not acceptance, not draft length and not the n-gram/model
-distinction. It is whether the drafter is a second model.
+**The purpose-built draft paths win and the general-purpose external drafter
+loses, on the same card in the same hour.** The spread is 145.8 down to 29.1
+pooled, a factor of five, and it is not explained by acceptance, by draft length
+or by the n-gram/model distinction.
+
+It is also **not** explained by "whether the drafter is a second model", which an
+earlier version of this section claimed. All three families load a separate
+drafter GGUF through `-md`, and upstream describes MTP as a distinct model with
+its own context and KV cache even when it is exported from the target's own
+checkpoint. These arms differ at once in architecture, quantisation, parameters
+activated per proposed token, reuse of the target's hidden states, rollback
+behaviour, full-checkpoint policy and acceptance profile. Run O varies none of
+those one at a time, so it establishes an **observational ranking for this
+setup** and does not isolate a cause.
 
 **The acceptance threshold is falsified inside a single matrix.**
 `spec-draft-n1` sits at **69.7 % acceptance**, higher than every winning arm

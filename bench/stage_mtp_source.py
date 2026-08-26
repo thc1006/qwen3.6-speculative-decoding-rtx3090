@@ -58,6 +58,14 @@ def dtypes_of(keys: list[str], index: dict[str, str]) -> Counter:
 
 
 def main() -> None:
+    # Refuse before touching anything. The loop below unlinks every destination
+    # entry before symlinking; pointed at the source it would delete the
+    # checkpoint and replace it with self-referential links.
+    src_r, stage_r = SRC.resolve(), STAGE.resolve()
+    if stage_r == src_r or src_r in stage_r.parents or stage_r in src_r.parents:
+        sys.exit(f"MTP_STAGE ({stage_r}) must be outside MTP_SRC ({src_r}); "
+                 f"staging into or onto the source would destroy it")
+
     idx_files = sorted(SRC.glob("*.index.json"))
     if not idx_files:
         sys.exit(f"no safetensors index in {SRC}")

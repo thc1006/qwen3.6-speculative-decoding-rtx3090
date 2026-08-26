@@ -915,6 +915,44 @@ chk("A12 most of the excess is NOT attributed", (_exc-_gen)/_exc > 0.5, True)
 chk("A12 DFlash is faster than no speculation on the same prompts (s)",
     round(_dd - _db, 1), -4.6, 0.05)
 
+print("\n=== harness invariants the external review asked for ===")
+import ast as _ast3, pathlib as _pl3, importlib.util as _iu
+_rs = _pl3.Path("bench/retest_runner.py").read_text(encoding="utf-8")
+# #4 liveness must be checked before a health response is accepted
+_wh = _rs[_rs.index("def wait_health"):]
+_wh = _wh[:_wh.index("\ndef ", 1)]
+chk("harness: wait_health checks proc.poll() before accepting a 200",
+    _wh.index("proc.poll()") < _wh.index("return time.perf_counter"), True)
+chk("harness: the spawn path refuses an occupied port",
+    "if not port_is_free(PORT):" in _rs, True)
+chk("harness: the arm result records who answered",
+    '"server_identity": server_identity(log_path),' in _rs, True)
+# #5 ordering
+chk("harness: mirrored ordering is rejected for odd repeat counts",
+    'ORDER_MODE == "mirrored" and REPEATS % 2 == 1' in _rs, True)
+chk("harness: the default ordering is the balanced one",
+    'os.environ.get("BENCH_ORDER", "latin")' in _rs, True)
+# #9 naming
+chk("harness: the client-side metric is named for what it measures",
+    "def max_client_requests_in_flight" in _rs, True)
+chk("harness: nothing still calls it the batch width",
+    "batch width is read back" in _rs, False)
+# fail-closed config, stale output, completion marker, tag set
+chk("harness: BENCH_THINK fails closed", "is not recognised; use one of" in _rs, True)
+chk("harness: a non-empty output directory is refused",
+    "already contains {len(stale)} arm-run files" in _rs, True)
+chk("harness: a completion marker is written last", "RUN_COMPLETE.json" in _rs, True)
+chk("harness: the manifest records the exact prompt tag set",
+    '"prompt_tags": [t for t, _, _ in PROMPTS],' in _rs, True)
+# analysis
+_mr = _pl3.Path("analysis/matrix_report.py").read_text(encoding="utf-8")
+chk("analysis: completeness comes from the manifest, not the largest row count",
+    'n_prompts = man.get("n_prompts")' in _mr, True)
+chk("analysis: --strict exists and can fail the run", "sys.exit(f\"\\n{len(FAILED)}" in _mr, True)
+_st = _pl3.Path("bench/stage_mtp_source.py").read_text(encoding="utf-8")
+chk("staging: refuses to stage onto or inside the source",
+    "must be outside MTP_SRC" in _st, True)
+
 print("\n=== theory (ERRATA E1/E2) ===")
 rho=8/256
 chk("rho", round(rho,5), 0.03125, 1e-9)

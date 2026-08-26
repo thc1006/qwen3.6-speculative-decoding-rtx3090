@@ -16,7 +16,7 @@
 > The **controlled tier** is runs A–M, collected 2026-08-25/26 on post-merge
 > master `3737e4137`: repeated arm-runs with a matched no-speculation baseline
 > inside each run, thinking suppression verified per request rather than
-> assumed, batch width read back from request timestamps, full per-request text
+> assumed, concurrent client requests verified from request timestamps, full per-request text
 > and token ids, and continuous GPU telemetry. Its findings are the ones to
 > cite about current llama.cpp.
 >
@@ -88,9 +88,19 @@ tracks the speculative-checkpoint path exactly
 ([ERRATA A13](ERRATA.md#a13-there-are-two-acceptance-counters-they-disagree-and-the-disagreement-is-exactly-the-checkpoint-path)).
 No throughput figure depends on either counter.
 
-A factor of five separates the top from the bottom, and the divide is not
-acceptance, not draft length, and not model-versus-n-gram. It is **whether the
-drafter is a second model**. `spec-draft-n1` accepts 69.7 % of its drafts —
+A factor of five separates the top from the bottom, and it is **not** explained
+by acceptance, by draft length, or by model-versus-n-gram. What it is explained
+by, this matrix cannot say: the purpose-built DFlash and MTP draft paths and the
+general-purpose 0.8 B drafter differ simultaneously in architecture,
+quantisation, parameters activated per proposed token, reuse of the target's
+hidden states, rollback behaviour, full-checkpoint policy and acceptance
+profile, and nothing here varies them one at a time.
+
+All three are separately loaded draft models — the harness passes `-md <GGUF>`
+for every one of them, and upstream describes MTP as a distinct model with its
+own context and KV cache even when it comes from the same file. An earlier
+version of this section said the divide was "whether the drafter is a second
+model"; that is simply false of these arms. `spec-draft-n1` accepts 69.7 % of its drafts —
 more than every winning arm but one — and is 75 % slower, because a separate
 draft context makes this hybrid target save and restore a full checkpoint on
 every partially accepted round — the server reports 82.079 MiB per checkpoint,
@@ -200,7 +210,7 @@ The v4 runs, and what each one is for:
 | C / D | thirteen arms, thinking on and verifiably off | 13 arms × 10 prompts × 3 repeats, twice |
 | E | is there anything past MoESD's 95-token coverage threshold? | `n_max` 64 / 96 / 128 |
 | H | is `p_min` the lever, not draft length? | `p_min` 0 / 0.50 / 0.75 / 0.90 sweep |
-| I | does batching rescue speculation, as upstream says it should? | concurrency 1 / 4 / 8, batch width verified from timestamps |
+| I | does concurrency rescue speculation, as upstream says it should? | 1 / 4 / 8 concurrent client requests, verified from timestamps; server-side batch width not instrumented |
 | J | DFlash off vs on, one binary — the A/B v3 never had | 5 arms × 3 repeats, `-fit on` on every arm |
 | K | where is the draft-length optimum, and does it survive batching? | `n_max` 1–8 sweep, then the winner at concurrency 4 / 8 |
 | L | does the win survive the workload changing? | same 5 arms twice, thinking on and off, 5 repeats |
@@ -763,7 +773,7 @@ export MODEL_TARGET=.../Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf
 export MODEL_DRAFT=.../Qwen3.5-0.8B-Q4_K_M.gguf
 export BENCH_FLAVOR=master BENCH_GPU=0 BENCH_MAX_TOKENS=300
 
-# run I - batching. The batch width is read back from request timestamps;
+# run I - concurrency. Client requests in flight are read back from timestamps;
 # --parallel alone allocates slots that an unmodified client never uses.
 for C in 1 4 8; do
   BENCH_CONCURRENCY=$C BENCH_REPEATS=3 BENCH_THINK=on \
@@ -835,7 +845,7 @@ python analysis/plot_v4_runs.py
 | `v4_audit_2026_08_25/data/A_*`, `B_*` | `bcb5eeb64` against post-merge master, 30 requests each |
 | `v4_audit_2026_08_25/data/C_*`, `D_*` | the thirteen-arm matrix, thinking on and verifiably off |
 | `v4_audit_2026_08_25/data/E_*`, `H_*` | past the MoESD coverage threshold; the `p_min` sweep |
-| `v4_audit_2026_08_25/data/matrix_I2_conc{1,4,8}_*` | batching, with the achieved batch width recorded |
+| `v4_audit_2026_08_25/data/matrix_I2_conc{1,4,8}_*` | concurrency, with the client requests in flight recorded |
 | `v4_audit_2026_08_25/data/matrix_J2_*` | DFlash off vs on, one binary |
 | `v4_audit_2026_08_25/data/matrix_K*` | the draft-length sweep and the winner under batching |
 | `v4_audit_2026_08_25/data/matrix_L_think{on,off}_*` | the same arms under both workloads |
