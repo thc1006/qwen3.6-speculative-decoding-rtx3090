@@ -1002,7 +1002,7 @@ model, and recording the full `BENCH_*` configuration), one
 | [`analysis/check_links.py`](analysis/check_links.py) | relative links and heading anchors |
 | [`analysis/matrix_report.py`](analysis/matrix_report.py) | per-arm request-mean, pooled, repeat SD, acceptance, drift, activation |
 | [`analysis/thermal_report.py`](analysis/thermal_report.py) | throttle flags and clock drift from a telemetry trace |
-| [`analysis/plot_v4_runs.py`](analysis/plot_v4_runs.py) | the batching, draft-length and acceptance-threshold charts |
+| [`analysis/plot_v4_runs.py`](analysis/plot_v4_runs.py) | the batching, draft-length, acceptance-threshold, head-to-head and two-level charts, and `plot_data.json`, which `--check` compares against the data |
 
 ---
 

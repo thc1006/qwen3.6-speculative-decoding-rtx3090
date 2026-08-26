@@ -1874,6 +1874,15 @@ chk("A16 the same drafter at twice the draft length (%)",
     round(_others["spec-dflash-n4"], 2), 1.01, 0.005)
 chk("A16 the dip is at least four times the next largest excursion",
     round(max(abs(x) for x in _dip) / max(_others.values()), 1) >= 3.7, True)
+_tl = json.load(open("analysis/plot_data.json"))["two_levels"]
+chk("the chart plots the same 43 blocks", _tl["n"], len(_lvl))
+chk("the chart's high group matches", (_tl["high_n"], round(_tl["high_mean"], 2)),
+    (len(_hi), round(st.mean(_hi), 2)))
+chk("the chart's low group matches", (_tl["low_n"], round(_tl["low_mean"], 2)),
+    (len(_lo), round(st.mean(_lo), 2)))
+chk("ERRATA shows the chart",
+    "analysis/plot_two_levels.png" in pathlib.Path(__file__).resolve().parents[1]
+    .joinpath("ERRATA.md").read_text(encoding="utf-8"), True)
 chk("ERRATA states the correction to the between-invocation framing",
     "This corrects the framing above" in _norm(
         pathlib.Path(__file__).resolve().parents[1].joinpath("ERRATA.md")

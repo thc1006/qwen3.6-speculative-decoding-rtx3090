@@ -521,6 +521,122 @@ def plot_head_to_head() -> None:
         print(f"  wrote {(OUT / 'plot_head_to_head.png').relative_to(ROOT)}")
 
 
+# ------------------------------------------------------- runs M1-U6 ----
+def plot_two_levels() -> None:
+    """The A16 finding, which had no figure.
+
+    Every block of every comparable run, for the one arm that moves. Left: the
+    43 values, ordered by clock, coloured by which level they sit in. Right:
+    run O3 alone, where the transition happens inside one run and no other arm
+    goes with it.
+    """
+    TGT = "707a55a8a4397ecde44de0c499d3e68c1ad1d240d1da65826b4949d1043f4450"
+    runs = []
+    for d in sorted(glob.glob(str(DATA / "matrix_*"))):
+        mp = os.path.join(d, "manifest.json")
+        if not os.path.isfile(mp):
+            continue
+        m = json.load(open(mp, encoding="utf-8"))
+        if not (m.get("think") == "on" and m.get("concurrency") == 1
+                and m.get("prompt_set", "v1") == "v1" and str(m.get("ctx")) == "8192"
+                and str(m.get("fit_target")) == "3072"
+                and m.get("target_sha256") == TGT
+                and "spec-dflash-n2" in (m.get("arms") or {})):
+            continue
+        runs.append((m["created"], os.path.basename(d)))
+    if not runs:
+        print("  no comparable runs - skipping the two-level chart")
+        return
+    runs.sort()
+
+    def blocks(run, arm):
+        out = {}
+        for f in glob.glob(str(DATA / run / f"{arm}__rep*.json")):
+            r = json.load(open(f, encoding="utf-8"))
+            out[r["repeat"]] = (1000 * sum(x["predicted_n"] for x in r["rows"])
+                                / sum(x["predicted_ms"] for x in r["rows"]))
+        return out
+
+    xs, ys, tags = [], [], []
+    for created, run in runs:
+        b, a = blocks(run, "baseline"), blocks(run, "spec-dflash-n2")
+        tag = run.split("_")[1]
+        for k in sorted(b):
+            if k in a:
+                xs.append(len(xs))
+                ys.append(100 * (a[k] / b[k] - 1))
+                tags.append(f"{tag}")
+    SPLIT = 23.0
+    hi = [y for y in ys if y >= SPLIT]
+    lo = [y for y in ys if y < SPLIT]
+    record("two_levels", n=len(ys), split=SPLIT,
+           high_n=len(hi), high_mean=st.mean(hi), high_sd=st.stdev(hi),
+           low_n=len(lo), low_mean=st.mean(lo), low_sd=st.stdev(lo),
+           values=[round(y, 3) for y in ys], tags=tags)
+
+    fig, (ax, ax2) = plt.subplots(1, 2, figsize=(12.2, 5.4),
+                                  gridspec_kw={"width_ratios": [2.05, 1]})
+    C_HI, C_LO = "#2f7d5a", "#c0504d"
+    for x, y, t in zip(xs, ys, tags):
+        ax.scatter(x, y, s=46, color=(C_HI if y >= SPLIT else C_LO),
+                   edgecolor="white", linewidth=0.6, zorder=3)
+    for val, c, lab in ((st.mean(hi), C_HI, f"high, {len(hi)} blocks, mean {st.mean(hi):+.1f} %"),
+                        (st.mean(lo), C_LO, f"low, {len(lo)} blocks, mean {st.mean(lo):+.1f} %")):
+        ax.axhline(val, color=c, ls="--", lw=1.2, alpha=0.8, label=lab)
+    seen, ticks, labels = set(), [], []
+    for x, t in zip(xs, tags):
+        if t not in seen:
+            seen.add(t); ticks.append(x); labels.append(t)
+    ax.set_xticks(ticks)
+    ax.set_xticklabels(labels, fontsize=8.4)
+    ax.set_xlabel("block, ordered by clock; ticks mark the first block of each run")
+    ax.set_ylabel("spec-dflash-n2 against the baseline in the same block (%)")
+    ax.set_title(f"One arm, {len(ys)} blocks, one day: two levels {st.mean(hi)-st.mean(lo):.1f} pp apart\n"
+                 f"draft_n is 2441 and acceptance 72.3 % in every one of them",
+                 fontsize=11.5)
+    ax.legend(loc="lower left", fontsize=8.8, frameon=False)
+    ax.grid(axis="y", color="#dcdcdc", lw=0.6)
+    ax.set_axisbelow(True)
+
+    o3 = sorted(glob.glob(str(DATA / "matrix_O3_latin_*")))
+    if o3:
+        run = Path(o3[-1]).name
+        man = json.load(open(DATA / run / "manifest.json", encoding="utf-8"))
+        for arm in man["arms"]:
+            v = blocks(run, arm)
+            if 0 not in v:
+                continue
+            rel = [100 * (v[k] / v[0] - 1) for k in sorted(v)]
+            focus = arm == "spec-dflash-n2"
+            ax2.plot(sorted(v), rel, marker="o" if focus else ".",
+                     lw=2.0 if focus else 0.9,
+                     color=C_LO if focus else "#b8b8c0",
+                     zorder=3 if focus else 1,
+                     label="spec-dflash-n2" if focus else None)
+        ax2.axhline(0, color="#8a8a92", lw=0.8)
+        ax2.set_xlabel("block within run O3")
+        ax2.set_ylabel("change from that arm's own first block (%)")
+        ax2.set_title("O3: the transition happens inside one run,\nand no other arm goes with it",
+                      fontsize=11)
+        ax2.legend(loc="lower left", fontsize=8.8, frameon=False)
+        ax2.grid(color="#dcdcdc", lw=0.6)
+        ax2.set_axisbelow(True)
+    plt.tight_layout(rect=[0, 0.07, 1, 1])
+    _footer(fig,
+            base="2026-08-26, llama.cpp 3737e4137, one RTX 3090, "
+                 "Qwen3.6-35B-A3B-UD-Q4_K_XL, greedy, thinking on, ten prompts, "
+                 "--fit-target 3072. Every block is one arm-run of the arm against "
+                 "the no-speculation arm-run in the same block. ERRATA A16.",
+            extra=" The no-speculation baseline over these runs holds 115.72-117.25 "
+                  "tok/s, a CV of 0.42 %. Every run produced byte-identical output. "
+                  "The split at +23 % is drawn where the gap is, not fitted.")
+    if not CHECK:
+        plt.savefig(OUT / "plot_two_levels.png", dpi=150, bbox_inches="tight")
+    plt.close()
+    if not CHECK:
+        print(f"  wrote {(OUT / 'plot_two_levels.png').relative_to(ROOT)}")
+
+
 def main() -> None:
     check = "--check" in sys.argv
     if check:
@@ -532,6 +648,7 @@ def main() -> None:
     plot_dflash_sweep()
     plot_acceptance_threshold()
     plot_head_to_head()
+    plot_two_levels()
     ref = ROOT / "analysis" / "plot_data.json"
     if check:
         if not ref.exists():

@@ -1139,6 +1139,8 @@ computed inside one run can see it.
 comparable run — 43 measurements of this one arm on 2026-08-26, same policy,
 same models, same prompts:
 
+![One arm, 43 blocks, two levels](analysis/plot_two_levels.png)
+
 | | n | mean | SD |
 |---|---:|---:|---:|
 | high | 30 | **+25.70 %** | 1.18 |
