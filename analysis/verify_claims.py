@@ -130,6 +130,38 @@ mx,my=st.mean(xs),st.mean(ys)
 r_=sum((x-mx)*(y-my) for x,y in zip(xs,ys))/((sum((x-mx)**2 for x in xs)*sum((y-my)**2 for y in ys))**0.5)
 chk("Pearson r(acceptance, tok/s)", round(r_,3), 0.998, 0.001)
 
+print("\n=== figures the coverage audit found unpinned ===")
+# the fp16-KV control (ERRATA B7): the one row in run C that is NOT a
+# speculation effect, and the reason the v1 kv-fp16 row could not be read
+_C = "v4_audit_2026_08_25/data/C_master_matrix_think_on/%s__rep*.json"
+def _cpool(arm):
+    rs = [json.load(open(f)) for f in glob.glob(_C % arm)]
+    n = sum(x["predicted_n"] for r in rs for x in r["rows"])
+    ms = sum(x["predicted_ms"] for r in rs for x in r["rows"])
+    return 1000 * n / ms if ms else float("nan")
+_b, _f = _cpool("baseline"), _cpool("baseline-kvfp16")
+chk("C baseline pooled", round(_b, 1), 123.4, 0.05)
+chk("C baseline-kvfp16 pooled", round(_f, 1), 125.7, 0.05)
+chk("C fp16-KV vs q8_0 KV, no speculation either side (%)",
+    round(100 * (_f / _b - 1), 1), 1.9, 0.05)
+
+# the run-to-run SD quoted beside run J's headline
+_j = [json.load(open(f))["aggregate_tok_s"]
+      for f in glob.glob("v4_audit_2026_08_25/data/matrix_J2_*/spec-dflash-n4__rep*.json")]
+chk("J dflash-n4 aggregate run-to-run SD", round(st.stdev(_j), 2), 1.21, 0.005)
+
+# a few more v1 config rows, so the table in README is derived and not just typed
+_v1 = defaultdict(list)
+for _r in csv.DictReader(open("analysis/summary.csv")):
+    _v1[_r["config"]].append(_r)
+# No `if cfg in _v1` guard: a check that silently skips when its subject is
+# missing is worse than no check, because it reads as a pass.
+for _cfg, _want in (("ngcache-kv-fp16", 113.7), ("ngcache-1000tok", 98.9)):
+    chk(f"v1 {_cfg} present in summary.csv", _cfg in _v1, True)
+    _n = sum(int(float(x["predicted_n"])) for x in _v1[_cfg])
+    _ms = sum(float(x["predicted_ms"]) for x in _v1[_cfg])
+    chk(f"v1 {_cfg} pooled", round(1000 * _n / _ms, 1), _want, 0.05)
+
 print("\n=== runs I and J (2026-08-26) ===")
 def _arm(pat):
     """(mean aggregate, SD, pooled, drafted, accepted) over the arm-runs matching pat."""

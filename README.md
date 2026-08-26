@@ -3,29 +3,42 @@
 [![DOI](https://zenodo.org/badge/1216484498.svg)](https://doi.org/10.5281/zenodo.19776558)
 
 > [!IMPORTANT]
-> **Audited 2026-08-25.** This repository preserves benchmark runs collected
-> between 2026-04-21 and 2026-05-07. The primary result is a historical,
-> single-request decode microbenchmark for the exact model files, llama.cpp
-> commits, hardware, prompts, and flags listed below. It is not a benchmark of
-> current llama.cpp master, of all RTX 3090 systems, of all Qwen3.6
-> quantisations, of all speculative-decoding methods, or of end-to-end
-> voice-agent latency.
+> **Audited 2026-08-25, extended 2026-08-26.** This repository now holds two
+> tiers, and they must not be read as one body of evidence.
 >
-> The audit **retracted this repository's headline mechanism.** Earlier
-> versions reported "100 % draft acceptance yet slower, therefore MoE
-> expert-loading overhead". That 100 % is an artefact of how llama.cpp counts
-> acceptance on this model class, not a measurement — see
+> The **archival tier** is the published v1/v2/v3 runs, collected 2026-04-21 to
+> 2026-05-07 at llama.cpp `97895129e`, `bcb5eeb64` and PR-branch `67cb0d507`,
+> one run per cell. It is a single-request decode microbenchmark for exactly the
+> model files, commits, hardware, prompts and flags listed below. It is not a
+> benchmark of all RTX 3090 systems, of all Qwen3.6 quantisations, of all
+> speculative-decoding methods, or of end-to-end voice-agent latency.
+>
+> The **controlled tier** is runs A–M, collected 2026-08-25/26 on post-merge
+> master `3737e4137`: repeated arm-runs with a matched no-speculation baseline
+> inside each run, thinking suppression verified per request rather than
+> assumed, batch width read back from request timestamps, full per-request text
+> and token ids, and continuous GPU telemetry. Its findings are the ones to
+> cite about current llama.cpp.
+>
+> The audit **retracted this repository's headline mechanism.** Earlier versions
+> reported "100 % draft acceptance yet slower, therefore MoE expert-loading
+> overhead". That 100 % is an artefact of how llama.cpp counts acceptance on
+> this model class, not a measurement — see
 > [The "100 % acceptance" retraction](#the-100--acceptance-retraction). Three
-> further defects turned up that no earlier version noticed: the draft model
-> was never actually vocabulary-compatible, three quarters of the v1 requests
+> further defects turned up that no earlier version noticed: the draft model was
+> never actually vocabulary-compatible, three quarters of the v1 requests
 > returned truncated thinking rather than answers, and `llama-server` plus a
 > draft model aborts on this model at `bcb5eeb64`. Every corrected item, with
-> the evidence that settles it, is in [`ERRATA.md`](ERRATA.md); the work queue
-> that closes what is still open is [`RETEST_TODO.md`](RETEST_TODO.md).
+> the evidence that settles it, is in [`ERRATA.md`](ERRATA.md); the queue that
+> closes what is still open is [`RETEST_TODO.md`](RETEST_TODO.md).
 >
-> The narrow negative observation survives all of it — and, after the
-> vocabulary defect was fixed and re-measured, it is now on firmer ground than
-> when it was published.
+> **The negative observation survives for the methods v1 tested, and only for
+> those.** With an external draft model, speculation still loses badly here, and
+> batching widens the gap rather than closing it. With the target's *own* layers
+> as the drafter — DFlash, and the model's built-in multi-token-prediction head
+> — it wins, by roughly a fifth, at short draft windows and one request at a
+> time. "Speculative decoding loses on this hardware" was a statement about a
+> regime this repository had not separated.
 
 ## Result in one sentence
 
@@ -685,6 +698,66 @@ after `bcb5eeb64` (`--draft-max` → `--spec-draft-n-max`) and that `--spec-type
 now defaults to `none`, so `-md` alone loads a draft model and never
 speculates; the runner's `BENCH_FLAVOR` switch handles both spellings.
 
+### Reproducing the 2026-08-26 runs
+
+Every setting below is recorded in the corresponding `manifest.json`, so this
+recipe is checkable against the committed data rather than trusted.
+
+```bash
+git clone https://github.com/ggml-org/llama.cpp.git && cd llama.cpp
+git checkout 3737e41370da1830a44c663f9929a0f27591ffa6      # the audit binary
+cmake -S . -B build -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=86 && cmake --build build -j
+
+export LLAMA_SERVER_BIN=$PWD/build/bin/llama-server
+export MODEL_TARGET=.../Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf
+export MODEL_DRAFT=.../Qwen3.5-0.8B-Q4_K_M.gguf
+export BENCH_FLAVOR=master BENCH_GPU=0 BENCH_MAX_TOKENS=300
+
+# run I - batching. The batch width is read back from request timestamps;
+# --parallel alone allocates slots that an unmodified client never uses.
+for C in 1 4 8; do
+  BENCH_CONCURRENCY=$C BENCH_REPEATS=3 BENCH_THINK=on \
+  BENCH_ARMS=baseline,spec-draft-n8 BENCH_OUT=out/I_conc$C python bench/retest_runner.py
+done
+
+# runs J / K / L / M - speculation methods. -fit on is REQUIRED: the BF16
+# drafters only load with -ngl unset, and it is applied to every arm including
+# the baseline so placement policy never differs between an arm and its control.
+BENCH_FIT=on BENCH_CTX=8192 BENCH_FIT_TARGET=2048 BENCH_REPEATS=3 \
+MODEL_DFLASH=.../qwen36-dflash-master.gguf \
+BENCH_ARMS=baseline,spec-dflash-n1,spec-dflash-n2,spec-dflash-n4,spec-dflash-n8 \
+BENCH_OUT=out/K1 python bench/retest_runner.py
+```
+
+The two drafters that are not off-the-shelf downloads:
+
+```bash
+# DFlash - the archived v3 GGUF lacks `target_layers` and master rejects it
+bash bench/convert_dflash.sh
+
+# MTP - export the target's own multi-token-prediction head as a drafter.
+# Stock llama.cpp: `supports_mtp_export` is already True for this architecture
+# and LLM_ARCH_QWEN35MOE already declares the NEXTN tensors. The staging step
+# exists only because conversion/base.py's AWQ guard dispatches on config.json's
+# quant_method rather than on the tensors being exported, and every tensor in
+# the --mtp export set is unquantised. The script verifies that and refuses if
+# it is ever untrue.
+python bench/stage_mtp_source.py
+python convert_hf_to_gguf.py ~/models/qwen36-mtp-src --mtp --outtype bf16 \
+       --outfile qwen36-mtp-bf16.gguf
+./build/bin/llama-quantize qwen36-mtp-bf16.gguf qwen36-mtp-q8_0.gguf Q8_0
+```
+
+Then check the numbers against the documents:
+
+```bash
+python analysis/verify_claims.py     # re-derives every quoted figure, exits non-zero on drift
+python analysis/check_links.py       # relative links and heading anchors
+python analysis/matrix_report.py v4_audit_2026_08_25/data/matrix_*
+python analysis/thermal_report.py v4_audit_2026_08_25/data/gpu_telemetry_*.csv
+python analysis/plot_v4_runs.py
+```
+
 ---
 
 ## Data map
@@ -701,8 +774,41 @@ speculates; the runner's `BENCH_FLAVOR` switch handles both spellings.
 | [`v2_3090_followup/v2_*/`](v2_3090_followup/) | 62 v2 raw `llama-cli` logs + one `--verbose` trace |
 | [`v2_3090_followup/exp2_codejson_n3/`](v2_3090_followup/exp2_codejson_n3/) | Exp 2 aggregates and script |
 | [`v3_dflash_2026_05_07/`](v3_dflash_2026_05_07/) | DFlash logs, tables, script |
-| [`BENCHMARK_ENV.md`](BENCHMARK_ENV.md) | hardware, software, commits, hashes for v1/v2/v3 |
-| [`bench/retest_runner.py`](bench/retest_runner.py) | corrected protocol, never executed |
+| [`BENCHMARK_ENV.md`](BENCHMARK_ENV.md) | hardware, software, commits, hashes for v1/v2/v3, and the v4 memory-policy table |
+
+### The 2026-08-25/26 controlled runs
+
+| Path | Contents |
+|---|---|
+| [`v4_audit_2026_08_25/README.md`](v4_audit_2026_08_25/README.md) | what each run asked, what it measured, and every control |
+| [`v4_audit_2026_08_25/PREREGISTERED_PREDICTION.md`](v4_audit_2026_08_25/PREREGISTERED_PREDICTION.md) | predictions committed to git before the data existed |
+| `v4_audit_2026_08_25/data/A_*`, `B_*` | `bcb5eeb64` against post-merge master, 30 requests each |
+| `v4_audit_2026_08_25/data/C_*`, `D_*` | the thirteen-arm matrix, thinking on and verifiably off |
+| `v4_audit_2026_08_25/data/E_*`, `H_*` | past the MoESD coverage threshold; the `p_min` sweep |
+| `v4_audit_2026_08_25/data/matrix_I2_conc{1,4,8}_*` | batching, with the achieved batch width recorded |
+| `v4_audit_2026_08_25/data/matrix_J2_*` | DFlash off vs on, one binary |
+| `v4_audit_2026_08_25/data/matrix_K*` | the draft-length sweep and the winner under batching |
+| `v4_audit_2026_08_25/data/matrix_L_think{on,off}_*` | the same arms under both workloads |
+| `v4_audit_2026_08_25/data/gpu_telemetry_*.csv` | continuous 5 s GPU traces covering every run |
+| `v4_audit_2026_08_25/data/smoke_*` | the gate runs that decide a matrix is safe to start |
+
+Each run directory holds one `manifest.json` (hashing the binary and every
+model, and recording the full `BENCH_*` configuration), one
+`<arm>__rep<N>.json` per arm-run with full per-request capture, and an
+`all_results.json` that is the same content concatenated for convenience.
+
+### Tooling
+
+| Path | Contents |
+|---|---|
+| [`bench/retest_runner.py`](bench/retest_runner.py) | the controlled harness; it produced every v4 measurement |
+| [`bench/convert_dflash.sh`](bench/convert_dflash.sh) | re-converts the DFlash drafter with post-merge master |
+| [`bench/stage_mtp_source.py`](bench/stage_mtp_source.py) | stages the checkpoint so `--mtp` can export the MTP head, and verifies the export set is unquantised before doing so |
+| [`analysis/verify_claims.py`](analysis/verify_claims.py) | re-derives every quoted figure from committed data **and** greps the documents for it; exits non-zero on any drift |
+| [`analysis/check_links.py`](analysis/check_links.py) | relative links and heading anchors |
+| [`analysis/matrix_report.py`](analysis/matrix_report.py) | per-arm request-mean, pooled, repeat SD, acceptance, drift, activation |
+| [`analysis/thermal_report.py`](analysis/thermal_report.py) | throttle flags and clock drift from a telemetry trace |
+| [`analysis/plot_v4_runs.py`](analysis/plot_v4_runs.py) | the batching, draft-length and acceptance-threshold charts |
 
 ---
 
