@@ -1410,6 +1410,43 @@ chk("ERRATA quotes the sign flip", "-2.7 %" in _norm(
              .joinpath("ERRATA.md").read_text(encoding="utf-8").split())), True)
 
 
+print("\n=== withdrawn figures must not reappear ===")
+# Every number this repository retracted, and the one place each is allowed to
+# be mentioned: inside the entry that retracts it. A13's 101.3 MiB survived in
+# the upstream-issues table for eleven days after A12 withdrew it, because the
+# correction was propagated by searching for the numbers it changed rather than
+# for the number it removed.
+_WITHDRAWN = {
+    "101.3 MiB": "the checkpoint size with the draft component added twice (A12)",
+    "133.2 GiB": "the nominal volume before that correction (A12)",
+    "76.4 GiB": "the written half of it (A12)",
+    "19.5 % of the wall": "the log-interval wall-clock share (A12)",
+}
+_ALLOWED = ("ERRATA.md",)          # the entries that retract them
+for _needle, _what in _WITHDRAWN.items():
+    _hits = []
+    for _f in ("README.md", "CHANGELOG.md", "RETEST_TODO.md", "BENCHMARK_ENV.md",
+               "v4_audit_2026_08_25/README.md", "ERRATA.md"):
+        _t = _norm(pathlib.Path(__file__).resolve().parents[1]
+                   .joinpath(_f).read_text(encoding="utf-8"))
+        if _norm(_needle) not in _t:
+            continue
+        # A mention that says it was withdrawn is fine; a bare restatement is
+        # not. Prose wraps, so the retraction wording is looked for in a window
+        # around the match rather than on its own line.
+        _lines = _t.splitlines()
+        for _i, _line in enumerate(_lines):
+            if _norm(_needle) not in _line:
+                continue
+            _ctx = " ".join(_lines[max(0, _i - 2):_i + 3]).lower()
+            if not any(w in _ctx for w in
+                       ("until", "withdraw", "earlier", "was wrong", "retract",
+                        "double", "added a second time", "before that correction",
+                        "corrected", "both were wrong", "an earlier version")):
+                _hits.append(f"{_f}: {_line.strip()[:60]}")
+    chk(f"withdrawn: {_needle} is only mentioned as withdrawn", _hits, [])
+
+
 print("\n=== the file inventory is counted, not typed ===")
 # The v4 Files table listed two of the run directories and called itself the
 # file list. Counts in prose go stale silently; these are derived.
