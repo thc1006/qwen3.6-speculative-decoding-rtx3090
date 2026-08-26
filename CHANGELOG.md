@@ -6,6 +6,82 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning is not strictly semver — each numbered release is a public
 publication point with its own data set.
 
+## [Unreleased] — the review pass
+
+Two external reviews of the pull request. Every specific accusation in the
+second was verified against the code before anything was changed, and all four
+were correct.
+
+### Added
+
+- **Run T3** — run T repeated at three **balanced** blocks on the same
+  instrumented build, with the library hash asserted per arm-run rather than
+  once per run. The checkpoint attribution replicates: 785 creates and 728
+  restores in every arm-run of both runs, 39.159 s against 39.075 s, 54.6 % of
+  the excess against 54.7 %.
+- **ERRATA A16** — and run T3 also produced **byte-identical output** to run T
+  on all three arms and all ten prompts, with identical acceptance, identical
+  fit and identical GPU thermal and clock state, while running the DFlash arm
+  **3.4 % slower on every prompt**. The cause is not isolated. The consequence
+  is that the 1.6 pp paired-block interval on the headline arm describes the
+  run, not the configuration: five runs of it span +20.7 % to +26.7 %, and the
+  README now says so beside the table.
+- `tests/fake_llama_server.py` — enough of the llama.cpp HTTP surface to drive
+  the runner end to end in a second without a GPU. The guards that fire after
+  the arm loop had no test because reaching them needed a 20 GiB model, and a
+  mutation that deleted the completeness check survived the whole suite.
+- `bench/collect_evidence.sh`, `requirements-plot.lock`, `analysis/plot_data.json`,
+  and the SHA-256 manifest of the twelve run T logs.
+
+### Fixed
+
+- `BENCH_ORDER=latin` generated a cyclic rotation for any (arms, repeats) pair
+  and labelled the result balanced. Three arms over four repeats rotates
+  0, 1, 2, 0 — which is what run T did, while its manifest recorded `latin`. The
+  schedule is now built and validated before the first server starts, the
+  unbalanced rotation is named `cyclic`, and the manifest carries the schedule
+  and the verified balance. `analysis/paired_blocks.py` re-derives the schedule
+  from each arm-run's monotonic timestamps and warns when the design does not
+  hold, rather than trusting the label.
+- `RUN_COMPLETE.json` was written unconditionally when the arm loop returned, so
+  a run with a crashed arm still carried the marker every consumer reads as
+  "this is a whole run". Gated on validation; failures write `RUN_FAILED.json`.
+- `analysis/extract_checkpoint_timers.py` stripped only the literal
+  `__rep0.log`, so repeats 1–3 were filed under separate arm names and the
+  controls rested on one log each. Fixing it exposed the same class of defect in
+  `analysis/verify_claims.py`, where the timer records were keyed by arm and
+  four arm-runs collapsed into one.
+- `analysis/check_data_integrity.py` counted arm-runs instead of checking the
+  exact (arm, repeat) product, so rep0 twice and no rep3 passed. It now also
+  checks each filename against the `arm`/`repeat` inside it, and validates
+  `RUN_COMPLETE.json` against the directory it attests to.
+- The headline footnote quoted run O's **+24.6 %** as though it were run O2's
+  own figure. It was written when run O *was* the headline table and was not
+  updated when O2 replaced it. The footnote is now derived from the data and
+  asserted against the README text.
+- The headline table's "95 % CI" column is the Student-t interval while the
+  prose above it described a block bootstrap. Both are computed and both are in
+  `paired_blocks.json`; the column is now labelled, and t is the wider of the
+  two on every row.
+- `stop_server` printed a warning when the driver had not handed the memory back
+  and carried on, so the failure landed on the *next* arm. It is a run-level
+  failure now.
+- `bench/convert_dflash.sh` promoted the converted drafter to its final path
+  before the load check, leaving a file the loader refuses where the next run
+  would pick it up.
+- `DATA_LICENSE` did not name `v4_audit_2026_08_25/data/**`, leaving 601
+  committed measurement files without a stated licence, and `CITATION.cff`
+  listed MIT alone for a dataset whose measurements are CC0.
+- Provenance: `runner_sha256`, `harness_tree_sha`, `prompt_set_sha256` (over the
+  prompts, not their label), and per-arm-run `server_lib_sha256`,
+  `server_loaded_commit` and `server_log_sha256`. `BENCH_EXPECT_COMMIT` and
+  `BENCH_EXPECT_LIB_SHA256` fail the run on the first arm that disagrees.
+- CI pins every action to a commit SHA, installs the chart dependencies from a
+  hash-pinned lockfile, checks the committed charts against the committed data,
+  and aggregates every attested run under `--strict`.
+
+---
+
 ## [v4.1] — 2026-08-26 · the controlled tier, and a reversal
 
 The title loses the word "Historical": it was added by the v4.0 audit to stop

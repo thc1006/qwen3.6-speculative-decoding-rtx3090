@@ -50,8 +50,36 @@ def load_blocks(run_dir: Path) -> dict[int, dict[str, float]]:
         r = json.loads(Path(f).read_text(encoding="utf-8"))
         if not r.get("rows") or r.get("crashed"):
             continue
+        if r["arm"] in blocks[r["repeat"]]:
+            # two files claiming the same cell: whichever sorted last would win
+            # silently, and the block would look complete either way
+            sys.exit(f"{Path(f).name}: {r['arm']} rep{r['repeat']} is already "
+                     f"loaded. Two files claim the same cell; run "
+                     f"analysis/check_data_integrity.py on this directory.")
         blocks[r["repeat"]][r["arm"]] = pooled(r["rows"])
     return dict(blocks)
+
+
+def observed_schedule(run_dir: Path) -> tuple[dict[str, list[int]], int]:
+    """Rebuild the order the arms actually ran in, from the data.
+
+    `t_start` on each request is `time.perf_counter()` inside the one driver
+    process, so it is monotonic across the whole run and orders the arm-runs
+    within a block without needing the driver log. This is the difference
+    between verifying the design and reading the label the manifest recorded:
+    run T's manifest says `latin` and its arms sit at positions [1,3,2,1].
+    """
+    per_block: dict[int, list[tuple[float, str]]] = defaultdict(list)
+    for f in glob.glob(str(run_dir / "*__rep*.json")):
+        r = json.loads(Path(f).read_text(encoding="utf-8"))
+        if not r.get("rows"):
+            continue
+        per_block[r["repeat"]].append((min(x["t_start"] for x in r["rows"]), r["arm"]))
+    pos: dict[str, list[int]] = defaultdict(list)
+    for rep in sorted(per_block):
+        for i, (_, arm) in enumerate(sorted(per_block[rep])):
+            pos[arm].append(i + 1)
+    return dict(pos), len(per_block)
 
 
 def bootstrap_ci(log_ratios: list[float], iters: int, seed: int) -> tuple[float, float]:
@@ -87,8 +115,29 @@ def main() -> None:
 
     complete = [b for b, v in blocks.items() if base in v and all(a in v for a in arms)]
     print(f"{run_dir.name}")
-    print(f"  ordering: {man.get('order_mode', '?')}   blocks on disk: {len(blocks)}   "
-          f"complete blocks used: {len(complete)}")
+    # verified from the arm-runs themselves, not read off the manifest
+    pos, n_blocks = observed_schedule(run_dir)
+    n_arms = len(pos)
+    balanced = bool(pos) and all(sorted(v) == list(range(1, n_arms + 1))
+                                 for v in pos.values())
+    declared = man.get("schedule_is_position_balanced")
+    print(f"  ordering: {man.get('order_mode', '?')}"
+          f"{' (position-balanced)' if balanced else ' (NOT position-balanced)'}"
+          f"   blocks on disk: {len(blocks)}   complete blocks used: {len(complete)}")
+    if declared is not None and declared != balanced:
+        print(f"  ! the manifest records schedule_is_position_balanced="
+              f"{declared} and the arm-runs say {balanced}")
+    if not balanced:
+        # A block interval is still a block interval, but arm position is
+        # confounded with time when the schedule does not balance it, and the
+        # name `latin` in a manifest is not evidence that it does: run T
+        # recorded `latin` for three arms over four repeats, which rotates
+        # 0,1,2,0.
+        print("  ! this run's schedule does not put every arm in every position "
+              "an equal number of times, so arm position is confounded with "
+              "time within the interval below")
+        for a, v in sorted(pos.items())[:4]:
+            print(f"      {a}: positions {v}")
     if len(complete) < len(blocks):
         print(f"  ! {len(blocks) - len(complete)} block(s) dropped for missing arms")
     if len(complete) < 3:

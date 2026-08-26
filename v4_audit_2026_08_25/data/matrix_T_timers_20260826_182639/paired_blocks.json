@@ -1,0 +1,33 @@
+{
+  "baseline": "baseline",
+  "blocks": 4,
+  "bootstrap_iters": 2000,
+  "arms": [
+    {
+      "arm": "spec-dflash-n2",
+      "point_pct": 25.91,
+      "ci95_boot_pct": [
+        25.22,
+        26.48
+      ],
+      "ci95_t_pct": [
+        24.65,
+        27.17
+      ],
+      "blocks": 4
+    },
+    {
+      "arm": "spec-draft-n8",
+      "point_pct": -73.48,
+      "ci95_boot_pct": [
+        -73.66,
+        -73.34
+      ],
+      "ci95_t_pct": [
+        -73.79,
+        -73.17
+      ],
+      "blocks": 4
+    }
+  ]
+}

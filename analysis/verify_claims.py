@@ -1089,9 +1089,93 @@ for f, needle, what in DOC_CLAIMS:
         FAIL.append(f"{f}:{needle}")
 
 
-print("\n=== A16: run T against run T3 ===")
 _T = "v4_audit_2026_08_25/data/matrix_T_timers_20260826_182639"
 _T3 = "v4_audit_2026_08_25/data/matrix_T3_timers_20260826_203251"
+print("\n=== the file inventory is counted, not typed ===")
+# The v4 Files table listed two of the run directories and called itself the
+# file list. Counts in prose go stale silently; these are derived.
+_root = pathlib.Path(__file__).resolve().parents[1]
+_dirs = sorted(d for d in (_root / "v4_audit_2026_08_25" / "data").iterdir() if d.is_dir())
+_armruns = sorted((_root / "v4_audit_2026_08_25" / "data").glob("*/*__rep*.json"))
+_v4 = " ".join(_norm((_root / "v4_audit_2026_08_25" / "README.md")
+                     .read_text(encoding="utf-8")).split())
+chk("v4 README states the run-directory count",
+    f"{len(_dirs)} directories, {len(_armruns)} arm-runs" in _v4, True)
+chk("every run directory carries a manifest",
+    sorted(d.name for d in _dirs if not (d / "manifest.json").is_file()), [])
+_attested = [d for d in _dirs if (d / "RUN_COMPLETE.json").is_file()]
+chk("attested runs carry the completeness marker", len(_attested) >= 3, True)
+chk("no run directory carries a failure marker",
+    sorted(d.name for d in _dirs if (d / "RUN_FAILED.json").is_file()), [])
+
+
+print("\n=== the headline interval column is the t interval, and says so ===")
+# The table quoted the Student-t interval while the prose above it described a
+# block bootstrap. Both are computed; only one is published, and which one is
+# now stated and asserted.
+_pb = json.load(open(f"{_O2}/paired_blocks.json"))
+_README0 = " ".join(_norm(pathlib.Path(__file__).resolve().parents[1]
+                          .joinpath("README.md").read_text(encoding="utf-8")).split())
+for _a in _pb["arms"]:
+    _lo, _hi = _a["ci95_t_pct"]
+    _txt = f"[{_lo:+.1f} %, {_hi:+.1f} %]".replace("+0.0", "+0.0")
+    chk(f"README quotes the t interval for {_a['arm']}",
+        _norm(_txt) in _README0, True)
+    _blo, _bhi = _a["ci95_boot_pct"]
+    chk(f"t is the wider interval for {_a['arm']}",
+        (_hi - _lo) >= (_bhi - _blo) - 1e-9, True)
+chk("README names the interval it publishes",
+    "95 % CI (t, over blocks)" in _README0, True)
+
+
+print("\n=== the balanced design is verified, not declared ===")
+# The README says run O2's Latin square was "verified from the execution log,
+# not from the design", and nothing here re-derived it. `t_start` is
+# `time.perf_counter()` inside the single driver process, so it is monotonic
+# across the whole run and recovers the order the arms actually ran in from the
+# committed arm-runs alone.
+
+
+def _observed_positions(d):
+    per_block: dict = {}
+    for f in glob.glob(f"{d}/*__rep*.json"):
+        r = json.load(open(f))
+        if not r.get("rows"):
+            continue
+        per_block.setdefault(r["repeat"], []).append(
+            (min(x["t_start"] for x in r["rows"]), r["arm"]))
+    pos: dict = {}
+    for rep in sorted(per_block):
+        for i, (_, arm) in enumerate(sorted(per_block[rep])):
+            pos.setdefault(arm, []).append(i + 1)
+    return pos, len(per_block)
+
+
+def _is_balanced(pos):
+    n = len(pos)
+    return bool(pos) and all(sorted(v) == list(range(1, n + 1)) for v in pos.values())
+
+
+_o2pos, _o2blocks = _observed_positions(_O2)
+chk("O2 blocks recovered from the monotonic clock", _o2blocks, 9)
+chk("O2 arms recovered", len(_o2pos), 9)
+chk("O2 is a full cyclic Latin square, verified from the arm-runs",
+    _is_balanced(_o2pos), True)
+chk("O2 every arm visits every position exactly once",
+    sorted({tuple(sorted(v)) for v in _o2pos.values()}), [tuple(range(1, 10))])
+
+_t3pos, _t3blocks = _observed_positions(_T3)
+chk("T3 is position-balanced, verified from the arm-runs", _is_balanced(_t3pos), True)
+chk("T3 blocks", _t3blocks, 3)
+
+_tpos, _tblocks = _observed_positions(_T)
+chk("T is NOT position-balanced, which is why T3 exists", _is_balanced(_tpos), False)
+chk("T's baseline sits twice in position 1", _tpos["baseline"], [1, 3, 2, 1])
+chk("T's manifest nonetheless recorded `latin`",
+    json.load(open(f"{_T}/manifest.json")).get("order_mode"), "latin")
+
+
+print("\n=== A16: run T against run T3 ===")
 
 
 def _pool(d, arm):

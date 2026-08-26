@@ -67,9 +67,16 @@ matrix under one memory policy, as a **balanced Latin square**: nine blocks, eac
 arm appearing exactly once per block and visiting every position exactly once —
 verified from the execution log, not from the design. Each change below is
 paired against the baseline measured **inside the same block**, and the interval
-is over blocks, which is the unit of replication and of resampling:
+is over blocks, which is the unit of replication and of resampling.
 
-| arm | pooled tok/s | change | 95 % CI | acceptance † |
+`analysis/paired_blocks.py` computes two of them: a percentile bootstrap that
+resamples whole blocks, and a Student-t interval on the log ratios. **The column
+below is the t interval**, which is the wider of the two on every row here — the
+bootstrap can only ever resample the nine values it has, so at this block count
+it under-covers, and quoting the narrower one would be the wrong direction to
+err in. Both are in each run's `paired_blocks.json`.
+
+| arm | pooled tok/s | change | 95 % CI (t, over blocks) | acceptance † |
 |---|---:|---:|---:|---:|
 | **`spec-dflash-n2`** | **146.2** | **+26.3 %** | [+25.5 %, +27.1 %] | 72.3 % |
 | `spec-mtp-n2` | 141.9 | +22.7 % | [+22.1 %, +23.3 %] | 78.4 % |

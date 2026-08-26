@@ -1098,9 +1098,23 @@ on `bcb5eeb64` on the same host.
 
 ## Files
 
+This table listed two of the run directories and the harness. There are 32.
+
 | Path | Contents |
 |---|---|
+| `data/<run>/` | one directory per run — `manifest.json`, one `<arm>__rep<n>.json` per arm-run, and `RUN_COMPLETE.json` on the runs the harness validated. 32 directories, 532 arm-runs. |
+| `data/matrix_O2_latin_*/` | the balanced nine-arm matrix the README leads with, and its `paired_blocks.json` |
+| `data/matrix_T_timers_*/`, `data/matrix_T3_timers_*/` | the two source-timed checkpoint runs behind [ERRATA A12](../ERRATA.md#a12-what-the-checkpoint-path-costs-measured-with-timers-in-the-source) and [A16](../ERRATA.md#a16-two-runs-identical-in-every-recorded-respect-and-byte-identical-in-output-differ-by-34--on-one-arm), with `checkpoint_timers.json` and the SHA-256 of every log they were extracted from |
+| `data/checkpoint_timers_20260826.json` | run T's twelve timer records, four repeats per arm |
+| `data/acceptance_counter_comparison.json` | the two acceptance counters, side by side ([A13](../ERRATA.md#a13-there-are-two-acceptance-counters-they-disagree-and-the-disagreement-is-exactly-the-checkpoint-path)) |
 | `data/A_bcb5eeb64_legacy/` | manifests and per-request JSON, run A |
 | `data/B_master_3737e4137/` | manifests and per-request JSON, run B |
 | `data/abort_evidence_bcb5eeb64.txt` | the CUDA abort in context, both arms |
+| `patches/checkpoint_timers.patch` | the only non-stock binary in this repository, with the reasoning beside it |
 | `../bench/retest_runner.py` | the harness |
+| `../bench/collect_evidence.sh` | builds the SHA-256 manifest and archive for the ~3 GB of server logs, which are too large to commit |
+| `../analysis/` | the checkers: `verify_claims.py`, `check_data_integrity.py`, `paired_blocks.py`, `matrix_report.py`, `plot_v4_runs.py` |
+
+The server logs themselves are **not** committed — 3.1 GB across 37 run
+directories. Each attested run records `server_log_sha256` per arm-run, so a
+published archive can be tied back to these files byte for byte.
