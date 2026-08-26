@@ -563,7 +563,23 @@ fitter margin, differing only in `enable_thinking`. **Pooled** throughput is the
 metric here: with thinking off the outputs are shorter *and differ in length by
 arm* — median 96 tokens for the baseline against 83 for `dflash-n4` — because
 speculation changes the generated text (A11), and aggregate throughput would mix
-decode rate with output length. Pooled is tokens over decode time and does not.
+decode rate with output length.
+
+> [!WARNING]
+> **This section used to continue "Pooled is tokens over decode time and does
+> not", and that is wrong.** Pooled removes the *wall-clock* dependence on
+> output length; it does not make two arms comparable when they generated
+> different numbers of tokens, because decode rate falls as the KV cache grows.
+> Restricting run L's thinking-off comparison to the five prompts where every
+> arm generated exactly 300 tokens moves `spec-dflash-n4` from **−2.7 %** to
+> **+14.1 %** — the sign below flips — and moves every other model-drafting arm
+> in the four thinking-off runs by +2.5 pp to +16.8 pp.
+> [ERRATA A17](../ERRATA.md#a17-the-thinking-off-comparisons-are-not-comparisons-of-the-same-amount-of-work)
+> has the full table and `analysis/length_matching.py` recomputes it. The
+> thinking-**on** columns are unaffected: every request there generated exactly
+> 300 tokens, and the same restriction moves them by 0.00 pp. The harness now
+> has `BENCH_IGNORE_EOS` to force the hard cap; the numbers below predate it and
+> are left as measured.
 
 | arm | thinking ON | | thinking OFF | |
 |---|---|---|---|---|

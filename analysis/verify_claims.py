@@ -1188,6 +1188,28 @@ for _f in glob.glob("v4_audit_2026_08_25/data/*/*__rep*.json"):
 chk("A17 no thinking-on request stopped before the cap",
     dict(_stops["on"]), {"length": 4674})
 chk("A17 thinking-off requests that stopped early", _stops["off"]["stop"], 696)
+# the second reading A17 overturns: acceptance, not only throughput
+_D = [r for r in _lm if r["run"].startswith("D_master")][0]
+_Con = [r for r in _lm if r["run"] == "C_master_matrix_think_on"][0]
+chk("A17 draft model acceptance, thinking on",
+    _Con["arms"]["spec-draft-n8"]["acceptance_all_prompts"], 29.67, 0.005)
+chk("A17 draft model acceptance, thinking off, all prompts",
+    _D["arms"]["spec-draft-n8"]["acceptance_all_prompts"], 23.09, 0.005)
+chk("A17 draft model acceptance, thinking off, length-matched",
+    _D["arms"]["spec-draft-n8"]["acceptance_length_matched"], 30.26, 0.005)
+chk("A17 the acceptance fall is the short outputs, not the workload",
+    _D["arms"]["spec-draft-n8"]["acceptance_length_matched"]
+    > _Con["arms"]["spec-draft-n8"]["acceptance_all_prompts"], True)
+chk("A17 ngram-cache acceptance returns to its thinking-on value",
+    _D["arms"]["ngram-cache"]["acceptance_length_matched"], 1.85, 0.02)
+chk("A17 ngram-mod really does stop drafting with thinking off",
+    _D["arms"]["ngram-mod-n24"]["acceptance_all_prompts"], None)
+_readme_txt = " ".join(pathlib.Path(__file__).resolve().parents[1]
+                       .joinpath("README.md").read_text(encoding="utf-8").split())
+chk("README no longer states the reading A17 overturns",
+    "reasoning traces are *easier* for a 0.8 B drafter" in _readme_txt, False)
+chk("README shows the length-matched acceptance instead",
+    "30.3 %" in _readme_txt, True)
 chk("ERRATA quotes the sign flip", "-2.7 %" in _norm(
     " ".join(pathlib.Path(__file__).resolve().parents[1]
              .joinpath("ERRATA.md").read_text(encoding="utf-8").split())), True)

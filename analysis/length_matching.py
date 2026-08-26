@@ -43,19 +43,28 @@ def analyse(run_dir: Path) -> dict | None:
         if r.get("crashed"):
             continue
         for x in r.get("rows") or []:
-            rows[x["tag"]][r["arm"]].append((x["predicted_n"], x["predicted_ms"]))
+            rows[x["tag"]][r["arm"]].append(
+                (x["predicted_n"], x["predicted_ms"], x["draft_n"], x["draft_n_accepted"]))
     arms = [a for a in man["arms"] if a != "baseline"]
     present = [t for t, d in rows.items()
                if "baseline" in d and all(a in d for a in arms)]
     if not present or not arms:
         return None
     matched = [t for t in present
-               if len({n for a in rows[t] for n, _ in rows[t][a]}) == 1]
+               if len({r[0] for a in rows[t] for r in rows[t][a]}) == 1]
 
     def pooled(tags: list[str], arm: str) -> float | None:
-        n = sum(x for t in tags for x, _ in rows[t][arm])
-        ms = sum(y for t in tags for _, y in rows[t][arm])
+        n = sum(r[0] for t in tags for r in rows[t][arm])
+        ms = sum(r[1] for t in tags for r in rows[t][arm])
         return 1000 * n / ms if ms else None
+
+    def acceptance(tags: list[str], arm: str) -> float | None:
+        """Acceptance is a ratio, so it looks length-independent, and is not:
+        it varies along the sequence, and a short generation is all early
+        tokens. Reported both ways for the same reason throughput is."""
+        d = sum(r[2] for t in tags for r in rows[t][arm])
+        a = sum(r[3] for t in tags for r in rows[t][arm])
+        return round(100 * a / d, 2) if d else None
 
     out = {
         "run": run_dir.name,
@@ -69,13 +78,15 @@ def analyse(run_dir: Path) -> dict | None:
         pa, pb = pooled(present, a), pooled(present, "baseline")
         if not pa or not pb:
             continue
-        rec = {"all_prompts_pct": round(100 * (pa / pb - 1), 2)}
+        rec = {"all_prompts_pct": round(100 * (pa / pb - 1), 2),
+               "acceptance_all_prompts": acceptance(present, a)}
         if matched:
             qa, qb = pooled(matched, a), pooled(matched, "baseline")
             if qa and qb:
                 rec["length_matched_pct"] = round(100 * (qa / qb - 1), 2)
                 rec["shift_pp"] = round(rec["length_matched_pct"]
                                         - rec["all_prompts_pct"], 2)
+            rec["acceptance_length_matched"] = acceptance(matched, a)
         out["arms"][a] = rec
     return out
 

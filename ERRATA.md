@@ -1104,9 +1104,11 @@ stops at 187 tokens is being scored on cheaper tokens than one that runs to 300.
 With thinking **on**, the question never arises here. All **4674** thinking-on
 requests in the controlled tier, across 28 run directories, returned
 `finish_reason: length` at exactly their run's `max_tokens`. Not one stopped
-early. Of the 940 thinking-off requests, **696 did**. With thinking **off** it does arise, and it is
-[A11](#a11-speculative-decoding-is-not-output-preserving-on-this-build-and-the-engine-is-deterministic-enough-to-prove-it)
-that causes it: speculation is not output-preserving on this build, so the arms
+early.
+
+With thinking **off** it does arise, and 696 of the 940 thinking-off requests
+stopped before the cap. What causes it is
+[A11](#a11-speculative-decoding-is-not-output-preserving-on-this-build-and-the-engine-is-deterministic-enough-to-prove-it): speculation is not output-preserving on this build, so the arms
 produce different text and stop in different places. In run R the baseline
 generates **300** tokens on `code_bash` where every speculative arm generates
 **187**, and **203** on `code_rust` where every speculative arm generates

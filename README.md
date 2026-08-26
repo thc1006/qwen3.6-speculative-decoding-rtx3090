@@ -558,9 +558,37 @@ and verifiably off, 5 repeats each, `thinking_suppressed` recorded per request:
 
 With thinking off `ngram-mod` stops drafting entirely and its cost nearly
 vanishes; a chain-of-thought trace is the repetitive text an n-gram lookup
-feeds on, a direct answer is not. For the draft model the effect reverses —
-acceptance falls from 29.7 % to 23.0 %, so reasoning traces are *easier* for a
-0.8 B drafter than real answers.
+feeds on, a direct answer is not. That one is length-independent — zero draft
+tokens is zero however long the output — and it stands.
+
+> [!WARNING]
+> **The rest of this table is confounded by output length, and one reading of
+> it does not survive.** With thinking off the arms stop in different places
+> (ERRATA A11), so this compares arms that generated different numbers of
+> tokens; with thinking on every request here ran to exactly 300. On the five
+> prompts where every arm generated the same 300 tokens:
+>
+> | | thinking on | thinking off, as above | thinking off, length-matched |
+> |---|---:|---:|---:|
+> | draft model `n_max 8` | −74.0 % | −76.4 % | **−72.7 %** |
+> | its acceptance | 29.7 % | 23.1 % | **30.3 %** |
+> | `ngram-cache` | −40.0 % | −32.6 % | **−39.0 %** |
+> | its acceptance | 1.8 % | 1.4 % | **1.8 %** |
+>
+> This paragraph used to read "for the draft model the effect reverses —
+> acceptance falls from 29.7 % to 23.0 %, so reasoning traces are *easier* for a
+> 0.8 B drafter than real answers". On the length-matched half, acceptance is
+> **30.3 %** against 29.7 % with thinking on, and the throughput cost is
+> *smaller* with thinking off, not larger. The fall was the short outputs, not
+> the workload: acceptance varies along the sequence and a short generation is
+> all early tokens.
+>
+> The matched half is five prompts of ten and not a random five — they are the
+> ones long enough that every arm hit the cap — so this is not a corrected value
+> either. What it establishes is that the original reading was not supported.
+> [ERRATA A17](ERRATA.md#a17-the-thinking-off-comparisons-are-not-comparisons-of-the-same-amount-of-work),
+> `analysis/length_matching.py`, and `BENCH_IGNORE_EOS` in the harness for
+> measuring it properly next time.
 
 What that implies splits by family, so it cannot be said in one sentence.
 Draft-model speculation was measured on its *favourable* workload — thinking

@@ -103,7 +103,7 @@ matched no-speculation baseline inside every run. The headline reverses.
   | I | does batching rescue speculation, as upstream says? | no — no-speculation gains +64 % at eight in flight, the drafter −8 % |
   | J | DFlash off vs on, one binary — the A/B v3 never had | **+18.7 %**, and it reverses v3's sign |
   | K | where is the optimum, and does it survive batching? | a plateau at `n_max` 2–4, a cliff after; batching erases it |
-  | L | does the win survive the workload changing? | it halves with thinking off, and `n_max 4` goes negative |
+  | L | does the win survive the workload changing? | it halves with thinking off, and `n_max 4` goes negative — **see [ERRATA A17](ERRATA.md#a17-the-thinking-off-comparisons-are-not-comparisons-of-the-same-amount-of-work): that comparison is confounded by output length and `n_max 4` is +14.1 % on the length-matched prompts** |
   | M | `draft-mtp` — the method the vLLM sibling uses | **+17.5 to +21.8 %**; nothing was blocking it, it had never been run |
   | N | `ngram-map-k` / `k4v`, never run here | they never engage: 0.0 % acceptance, three lookup hits in thirty requests |
   | O | every method, one baseline, one matrix, one policy | a factor of five, split by drafter architecture |
