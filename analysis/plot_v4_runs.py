@@ -247,7 +247,7 @@ def plot_acceptance_threshold() -> None:
     looked excellent in sample and was falsified out of it, so the chart has to
     show the test, not just the fit.
     """
-    def series(pattern, only=None):
+    def series(pattern, only=None, length_matched=False):
         """Per-prompt (acceptance, delta-vs-baseline) points.
 
         The baseline arm has to be loaded even when it is not plotted, because
@@ -255,14 +255,20 @@ def plot_acceptance_threshold() -> None:
         broke the first version of this function.
         """
         per, acc = defaultdict(lambda: defaultdict(list)), defaultdict(lambda: defaultdict(lambda: [0, 0]))
+        lens: dict = defaultdict(lambda: defaultdict(set))
         for f in glob.glob(str(DATA / pattern)):
             r = json.load(open(f, encoding="utf-8"))
             for x in r["rows"]:
                 per[x["tag"]][r["arm"]].append(x["predicted_per_second"])
                 a = acc[x["tag"]][r["arm"]]; a[0] += x["draft_n_accepted"]; a[1] += x["draft_n"]
+                lens[x["tag"]][r["arm"]].add(x["predicted_n"])
         out = []
         for t in per:
             if "baseline" not in per[t]:
+                continue
+            # ERRATA A17: with thinking off the arms stop in different places,
+            # so a point built from them compares different amounts of work
+            if length_matched and len({n for a in lens[t] for n in lens[t][a]}) > 1:
                 continue
             for arm in per[t]:
                 if arm == "baseline" or not acc[t][arm][1]:
@@ -308,9 +314,22 @@ def plot_acceptance_threshold() -> None:
                edgecolor="#3f3f46", linewidth=1.4, marker="D",
                label=f"runs J and K, whole arms ({len(oos)} points, NOT fitted)")
 
+    # the same fit restricted to prompts where every arm ran to the same length
+    xs_lm, ys_lm = [], []
+    for label, pat, colour in fit:
+        for a, b in series(pat, only="dflash", length_matched=True):
+            xs_lm.append(a)
+            ys_lm.append(b)
+    mxl, myl = st.mean(xs_lm), st.mean(ys_lm)
+    slope_lm = (sum((a - mxl) * (b - myl) for a, b in zip(xs_lm, ys_lm))
+                / sum((a - mxl) ** 2 for a in xs_lm))
+    brk_lm = -(myl - slope_lm * mxl) / slope_lm
+
     record("acceptance_threshold", fitted=sorted(zip(xs, ys)),
            out_of_sample=sorted(oos), slope=slope, intercept=inter,
-           break_even=brk, r=num / den)
+           break_even=brk, r=num / den,
+           break_even_length_matched=brk_lm, slope_length_matched=slope_lm,
+           n_fitted=len(xs), n_fitted_length_matched=len(xs_lm))
 
     lo, hi = 15, 95
     ax.plot([lo, hi], [slope * lo + inter, slope * hi + inter], color="#7a7a82",
@@ -333,7 +352,11 @@ def plot_acceptance_threshold() -> None:
     # ("thinking on, three repeats") would be wrong on it.
     _footer(fig, " Acceptance is llama.cpp's server-side counter; it under-reports on "
                  "arms that take speculative checkpoints (ERRATA A13), which is every "
-                 "external-drafter point here and none of the fitted ones.",
+                 "external-drafter point here and none of the fitted ones. "
+                 "Half the fitted points are run L's thinking-off half, where the arms "
+                 "generated DIFFERENT numbers of tokens (ERRATA A17): refitting without "
+                 "that confound moves the crossing to 46.5 %, and the thinking-on half "
+                 "alone gives 45.4 %. Read the threshold as 45-48 %.",
             base="2026-08-26, llama.cpp 3737e4137, one RTX 3090, "
                  "Qwen3.6-35B-A3B-UD-Q4_K_XL, greedy, ten prompts. Fitted points: run L, "
                  "both workloads, five repeats per arm, per prompt. Out-of-sample points: "

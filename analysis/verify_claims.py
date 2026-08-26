@@ -1150,6 +1150,13 @@ chk("threshold: it moves less than the slope does",
 _rm = " ".join(_norm(pathlib.Path(__file__).resolve().parents[1]
                      .joinpath("README.md").read_text(encoding="utf-8")).split())
 chk("README reports the threshold as a range", "45-48 %" in _rm, True)
+_pd = json.load(open("analysis/plot_data.json"))["acceptance_threshold"]
+chk("the chart's fit matches the checker's", round(_pd["break_even"], 1),
+    round(_br_pub, 1), 0.05)
+chk("the chart records the length-matched fit too",
+    round(_pd["break_even_length_matched"], 1), round(_br_lm, 1), 0.05)
+chk("the chart records how many points each fit used",
+    (_pd["n_fitted"], _pd["n_fitted_length_matched"]), (60, 45))
 chk("README no longer says the checkpoint wall clock is not established",
     "How much wall clock that costs is **not** established here" in _rm, False)
 

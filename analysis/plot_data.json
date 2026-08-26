@@ -1,6 +1,7 @@
 {
   "acceptance_threshold": {
     "break_even": 48.1654,
+    "break_even_length_matched": 46.502,
     "fitted": [
       [
         9.5238,
@@ -244,6 +245,8 @@
       ]
     ],
     "intercept": -57.6652,
+    "n_fitted": 60,
+    "n_fitted_length_matched": 45,
     "out_of_sample": [
       [
         21.3786,
@@ -287,7 +290,8 @@
       ]
     ],
     "r": 0.9459,
-    "slope": 1.1972
+    "slope": 1.1972,
+    "slope_length_matched": 1.0941
   },
   "batching": {
     "base_e": [
