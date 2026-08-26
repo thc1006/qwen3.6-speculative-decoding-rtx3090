@@ -188,6 +188,22 @@ MUTATIONS = [
               "| **speculative checkpoint, total** | **39.80** |")),
     ("A12: run T's nominal volume becomes 131.27 GiB",
      edit_doc("ERRATA.md", "| **121.27** |", "| **131.27** |")),
+    ("A12 table: a component's seconds become 18.34",
+     edit_doc("ERRATA.md", "| `update_tgt` \u2014 785 checkpoint creates | 17.34 |",
+              "| `update_tgt` \u2014 785 checkpoint creates | 18.34 |")),
+    ("A12 table: a component's share becomes 25.3 %",
+     edit_doc("ERRATA.md", "| 17.34 | 24.3 % |", "| 17.34 | 25.3 % |")),
+    ("A12 table: the excess becomes 74.4 s",
+     edit_doc("ERRATA.md", "| **excess to account for** | **71.4** |",
+              "| **excess to account for** | **74.4** |")),
+    ("A13 table: a server counter becomes 39.7 %",
+     edit_doc("ERRATA.md", "| `spec-draft-n8` | 29.7 % | 41.3 % |",
+              "| `spec-draft-n8` | 39.7 % | 41.3 % |")),
+    ("A13 table: a checkpoint count becomes 872",
+     edit_doc("ERRATA.md", "| 11.6 pp | 772 |", "| 11.6 pp | 872 |")),
+    ("C4b: the clock mean becomes 1947",
+     edit_doc("ERRATA.md", "1800\u20131965 MHz of a 2100 MHz maximum, mean 1937",
+              "1800\u20131965 MHz of a 2100 MHz maximum, mean 1947")),
 ]
 
 

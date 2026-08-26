@@ -1410,6 +1410,96 @@ chk("ERRATA quotes the sign flip", "-2.7 %" in _norm(
              .joinpath("ERRATA.md").read_text(encoding="utf-8").split())), True)
 
 
+print("\n=== ERRATA's tables, parsed cell by cell ===")
+# Same lesson as the README's: the values are computed and asserted, and the
+# TABLES were not. Six of eight planted perturbations in A12, A13 and C4b passed
+# every check before this section existed.
+_ER_LINES = pathlib.Path(__file__).resolve().parents[1].joinpath("ERRATA.md") \
+    .read_text(encoding="utf-8").splitlines()
+
+
+def _md_table(header_startswith):
+    i = next(i for i, l in enumerate(_ER_LINES) if l.startswith(header_startswith))
+    rows = []
+    for l in _ER_LINES[i + 2:]:
+        if not l.startswith("|"):
+            break
+        rows.append([c.strip().strip("*`").replace("`", "").strip("* ").strip()
+                     for c in l.strip("|").split("|")])
+    return rows
+
+
+def _f(x):
+    return float(_norm(x).replace("%", "").replace("pp", "").replace(" ", ""))
+
+
+# --- A12's accounting: seconds and shares of the excess -------------------
+_acc = {r[0]: r[1:] for r in _md_table("| | seconds | share of the excess |")}
+chk("A12 table rows parsed", len(_acc), 9)
+_excess = _f(_acc["excess to account for"][0])
+chk("A12 table: the excess equals the two decode rows",
+    round(_f(_acc["spec-draft-n8, decode"][0]) - _f(_acc["no speculation, decode"][0]), 1),
+    round(_excess, 1), 0.05)
+_parts = {"update_tgt \u2014 785 checkpoint creates": "update_tgt_s",
+          "load_tgt \u2014 728 restores": "load_tgt_s",
+          "load_dft \u2014 728 restores": "load_dft_s"}
+for _label, _field in _parts.items():
+    chk(f"A12 table: {_field} seconds",
+        round(st.mean([r[_field] for r in _ext]), 2), _f(_acc[_label][0]), 0.005)
+    chk(f"A12 table: {_field} share of the excess (%)",
+        round(100 * st.mean([r[_field] for r in _ext]) / _excess, 1),
+        _f(_acc[_label][1]), 0.05)
+chk("A12 table: the checkpoint total is the sum of its three parts",
+    round(sum(_f(_acc[k][0]) for k in _parts), 2),
+    _f(_acc["speculative checkpoint, total"][0]), 0.005)
+chk("A12 table: and its share",
+    round(100 * _f(_acc["speculative checkpoint, total"][0]) / _excess, 1),
+    _f(_acc["speculative checkpoint, total"][1]), 0.05)
+chk("A12 table: the rows add up to the excess",
+    round(sum(_f(_acc[k][0]) for k in
+              ("speculative checkpoint, total", "drafter generate()", "unattributed")), 2),
+    round(_excess, 2), 0.05)
+chk("A12 table: the shares add up to 100 %",
+    round(sum(_f(_acc[k][1]) for k in
+              ("speculative checkpoint, total", "drafter generate()", "unattributed")), 1),
+    100.0, 0.15)
+
+# --- A13's counter comparison --------------------------------------------
+_a13 = {r[0]: r[1:] for r in
+        _md_table("| arm | server counter | drafter's own counter | gap | checkpoints |")}
+chk("A13 table rows parsed", len(_a13), 6)
+_ccmap = {}
+for _r in _cc:
+    _ccmap.setdefault(_r["arm"], []).append(_r)
+for _arm, _cells in _a13.items():
+    _cands = [r for r in _ccmap.get(_arm, [])
+              if round(r["server_pct"], 1) == _f(_cells[0])]
+    chk(f"A13 table {_arm}: the row matches a measured arm-run", bool(_cands), True)
+    if not _cands:
+        continue
+    _r0 = _cands[0]
+    chk(f"A13 table {_arm}: drafter counter",
+        round(_r0["drafter_pct"], 1), _f(_cells[1]), 0.05)
+    chk(f"A13 table {_arm}: the gap is the difference",
+        round(abs(_r0["server_pct"] - _r0["drafter_pct"]), 1), _f(_cells[2]), 0.05)
+    chk(f"A13 table {_arm}: checkpoint count",
+        _r0["checkpoints_created"], int(_f(_cells[3])))
+
+# --- C4b's clock line, which the thermal checks did not cover -------------
+_c4b = " ".join(_norm(" ".join(_ER_LINES)).split())
+_c4b_report = _sp2.run(
+    [_sys2.executable, str(pathlib.Path(__file__).resolve().parents[1]
+                           / "analysis" / "thermal_report.py"),
+     "v4_audit_2026_08_25/data/gpu_telemetry_20260825.csv"],
+    capture_output=True, text=True, timeout=120).stdout
+chk("C4b quotes the clock range and mean",
+    "1800-1965 MHz of a 2100 MHz maximum, mean 1937" in _c4b, True)
+chk("and thermal_report computes exactly that",
+    "1800-1965 MHz of 2100 MHz, mean 1937" in _norm(_c4b_report), True)
+chk("C4b quotes the temperature range and mean",
+    "58-75 C, mean 64.7" in _norm(_c4b_report), True)
+
+
 print("\n=== withdrawn figures must not reappear ===")
 # Every number this repository retracted, and the one place each is allowed to
 # be mentioned: inside the entry that retracts it. A13's 101.3 MiB survived in
