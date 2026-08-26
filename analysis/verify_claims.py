@@ -1029,7 +1029,8 @@ DOC_CLAIMS = [
     ("v4_audit_2026_08_25/README.md", "+0.946",  "L acceptance correlation"),
     ("v4_audit_2026_08_25/README.md", "48.2 %",  "L break-even acceptance"),
     ("v4_audit_2026_08_25/README.md", "+52.2 pp", "L worst out-of-sample error"),
-    ("README.md",   "48 % acceptance", "README acceptance threshold"),
+    ("README.md",   "48.2 % acceptance", "README acceptance threshold, as fitted"),
+    ("README.md",   "45-48 %", "README reports it as a range, not a point"),
     ("ERRATA.md",   "85 / 200",  "A11 think-off identical streams"),
     ("ERRATA.md",   "70.8 %",    "A11 long-output divergence"),
     ("v4_audit_2026_08_25/README.md", "-0.24 %", "L clock drift"),
@@ -1091,6 +1092,68 @@ for f, needle, what in DOC_CLAIMS:
 
 _T = "v4_audit_2026_08_25/data/matrix_T_timers_20260826_182639"
 _T3 = "v4_audit_2026_08_25/data/matrix_T3_timers_20260826_203251"
+print("\n=== the acceptance threshold, refitted without the length confound ===")
+# Half of run L's 60 fitted points are its thinking-off half, where the arms
+# generated different numbers of tokens (A17). Both coordinates of those points
+# - acceptance and the delta - move when that is controlled, so the threshold
+# quoted from them carries a sensitivity that was not reported.
+
+
+def _thr_series(pattern, only=None, length_matched=False):
+    per = defaultdict(lambda: defaultdict(list))
+    acc = defaultdict(lambda: defaultdict(lambda: [0, 0]))
+    lens = defaultdict(lambda: defaultdict(set))
+    for f in glob.glob(f"v4_audit_2026_08_25/data/{pattern}"):
+        r = json.load(open(f))
+        for x in r["rows"]:
+            per[x["tag"]][r["arm"]].append(x["predicted_per_second"])
+            a = acc[x["tag"]][r["arm"]]
+            a[0] += x["draft_n_accepted"]
+            a[1] += x["draft_n"]
+            lens[x["tag"]][r["arm"]].add(x["predicted_n"])
+    out = []
+    for t in per:
+        if "baseline" not in per[t]:
+            continue
+        if length_matched and len({n for a in lens[t] for n in lens[t][a]}) > 1:
+            continue
+        for arm in per[t]:
+            if arm == "baseline" or not acc[t][arm][1]:
+                continue
+            if only and only not in arm:
+                continue
+            out.append((100 * acc[t][arm][0] / acc[t][arm][1],
+                        100 * (st.mean(per[t][arm]) / st.mean(per[t]["baseline"]) - 1)))
+    return out
+
+
+def _thr_fit(pts):
+    xs = [p[0] for p in pts]
+    ys = [p[1] for p in pts]
+    mx, my = st.mean(xs), st.mean(ys)
+    sl = sum((a - mx) * (b - my) for a, b in zip(xs, ys)) / sum((a - mx) ** 2 for a in xs)
+    return sl, -(my - sl * mx) / sl, len(pts)
+
+
+_on = _thr_series("matrix_L_thinkon_*/*__rep*.json", only="dflash")
+_off = _thr_series("matrix_L_thinkoff_*/*__rep*.json", only="dflash")
+_offm = _thr_series("matrix_L_thinkoff_*/*__rep*.json", only="dflash", length_matched=True)
+_sl_pub, _br_pub, _n_pub = _thr_fit(_on + _off)
+_sl_lm, _br_lm, _n_lm = _thr_fit(_on + _offm)
+_sl_on, _br_on, _n_on = _thr_fit(_on)
+chk("threshold: fitted points as published", _n_pub, 60)
+chk("threshold: break-even as published (%)", round(_br_pub, 1), 48.2, 0.05)
+chk("threshold: break-even on the length-matched fit (%)", round(_br_lm, 1), 46.5, 0.05)
+chk("threshold: break-even on the thinking-on half (%)", round(_br_on, 1), 45.4, 0.05)
+chk("threshold: it moves less than the slope does",
+    abs(_br_lm - _br_pub) / _br_pub < abs(_sl_lm - _sl_pub) / _sl_pub, True)
+_rm = " ".join(_norm(pathlib.Path(__file__).resolve().parents[1]
+                     .joinpath("README.md").read_text(encoding="utf-8")).split())
+chk("README reports the threshold as a range", "45-48 %" in _rm, True)
+chk("README no longer says the checkpoint wall clock is not established",
+    "How much wall clock that costs is **not** established here" in _rm, False)
+
+
 print("\n=== the memory-policy table names every run ===")
 # The table in BENCHMARK_ENV.md exists to say which runs are comparable, and it
 # stopped at run L while most of the repository - the headline included - ran

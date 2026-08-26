@@ -197,7 +197,14 @@ planning prose, which is exactly what a drafter predicts well
 ([run L](v4_audit_2026_08_25/README.md#run-l--the-win-is-a-property-of-the-workload-not-of-the-method)).
 
 Across run L's 60 points acceptance and speed-up correlate at **r = +0.946** and
-the line crosses zero near **48 % acceptance**. Scored across every arm-run with a matched baseline and enough drafts to define
+the line crosses zero at **48.2 % acceptance**. Half those points come from run
+L's thinking-off half, where the arms generated different numbers of tokens
+([ERRATA A17](ERRATA.md#a17-the-thinking-off-comparisons-are-not-comparisons-of-the-same-amount-of-work));
+refitting without the confound moves the crossing to **46.5 %** on the
+length-matched prompts and **45.4 %** on the thinking-on half alone, while the
+slope moves nearly three times as far in relative terms. The threshold is the
+stable quantity and the slope is not, which is the same thing A10 found out of
+sample. Read it as **45–48 %**, not as 48. Scored across every arm-run with a matched baseline and enough drafts to define
 a rate — 37 of 44, the seven excluded having drafted 10 to 55 tokens in total —
 it calls the sign **28 / 29 inside the self-speculative families** and **5 / 6
 on the external drafter**, 35 / 37 overall, and the same either way you read
@@ -210,9 +217,13 @@ measured is that a separate draft context makes this hybrid target log **772
 full-checkpoint creates and 709 restores in one ten-prompt arm-run**, at a
 reported 82.079 MiB each — a nominal **118.7 GiB** by event count × logged size,
 which is an estimate and not measured memory traffic. DFlash logs none of these
-events at draft lengths 1 to 16 and MTP none at 1 to 8. How much wall clock that
-costs is **not** established here
-([A12](ERRATA.md#a12-what-the-checkpoint-path-costs-measured-with-timers-in-the-source)). And the
+events at draft lengths 1 to 16 and MTP none at 1 to 8. What that costs in wall
+clock **is** established, by rebuilding llama.cpp with timers around the four
+calls: **39.08 s of a 71.4 s excess, 54.7 %**, replicated to 54.6 % in a second
+balanced run
+([A12](ERRATA.md#a12-what-the-checkpoint-path-costs-measured-with-timers-in-the-source)).
+This sentence said "not established here" until 2026-08-26, which was true when
+it was written and stopped being true when run T was measured. And the
 external drafter is 0.8 B *dense* against a target that activates only ~3 B
 parameters per token, so drafting costs a quarter of a target step before any
 state management: 17.24 s in `generate()` against 1.89–3.43 s for a head that
