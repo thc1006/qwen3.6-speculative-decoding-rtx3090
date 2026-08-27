@@ -51,9 +51,9 @@ done
 [ -f "$RUNNER" ]  || { echo "no retest_runner.py: set BENCH_RUNNER" >&2; exit 1; }
 [ -f "$TELE_SH" ] || { echo "no gpu_telemetry.sh: set BENCH_TELEMETRY" >&2; exit 1; }
 STAMP="$(date +%Y%m%d_%H%M%S)"
-TELE="$BENCH/gpu_telemetry_V2_$STAMP.csv"
+TELE_SCHEMA="${BENCH_TELEMETRY_SCHEMA:-compact}"
+TELE_INTERVAL="${BENCH_TELEMETRY_INTERVAL:-5}"
 echo "runner    $RUNNER"
-echo "telemetry $TELE_SH"
 
 export MODEL_TARGET="${MODEL_TARGET:-$HOME/models/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf}"
 export MODEL_DRAFT="${MODEL_DRAFT:-$HOME/models/Qwen3.5-0.8B-Q4_K_M.gguf}"
@@ -73,8 +73,8 @@ export BENCH_CONCURRENCY=1
 export BENCH_ORDER=latin
 export BENCH_FLAVOR=master
 
-echo "telemetry -> $TELE"
-bash "$TELE_SH" "$TELE" &
+echo "telemetry $TELE_SH $TELE_SCHEMA $TELE_INTERVAL V2"
+bash "$TELE_SH" "$TELE_SCHEMA" "$TELE_INTERVAL" "V2" &
 TELE_PID=$!
 trap 'kill "$TELE_PID" 2>/dev/null || true' EXIT
 

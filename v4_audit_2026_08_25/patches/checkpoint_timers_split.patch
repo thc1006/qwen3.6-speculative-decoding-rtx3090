@@ -1,0 +1,69 @@
+diff --git a/tools/server/server-context.cpp b/tools/server/server-context.cpp
+index a9edbd7be..22ec7c10f 100644
+--- a/tools/server/server-context.cpp
++++ b/tools/server/server-context.cpp
+@@ -2960,21 +2960,34 @@ private:
+                    (ctx_dft_seq_rm_type == COMMON_CONTEXT_SEQ_RM_TYPE_RS && draft.size() > llama_n_rs_seq(ctx_dft));
+ 
+                 if (use_ckpt_tgt) {
+-                    //const int64_t t_start = ggml_time_us();
++                    const int64_t t_start = ggml_time_us();
++
++                    // drain first, and time the drain. update_tgt() calls
++                    // llama_state_seq_get_data_ext(), which begins with
++                    // ctx->synchronize(); doing it here does not add work, it
++                    // separates the wait from the copy.
++                    llama_synchronize(ctx_tgt);
++                    const int64_t t_sync = ggml_time_us() - t_start;
+ 
+                     ckpt.update_tgt(ctx_tgt, slot.id, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
+ 
+-                    //const int64_t t_total = ggml_time_us() - t_start;
+-                    //printf("checkpoint total: %f ms\n", t_total / 1000.0);
++                    const int64_t t_total = ggml_time_us() - t_start;
+ 
+-                    SLT_DBG(slot, "created speculative checkpoint (pos_min = %d, pos_max = %d, n_tokens = %d, size = %.3f MiB, draft = %.3f MiB)\n",
++                    SLT_DBG(slot, "created speculative checkpoint (pos_min = %d, pos_max = %d, n_tokens = %d, size = %.3f MiB, draft = %.3f MiB) AUDIT_US update_tgt=%lld sync_tgt=%lld\n",
+                             ckpt.pos_min, ckpt.pos_max, slot.prompt.n_tokens(),
+                             (float) ckpt.size() / 1024 / 1024,
+-                            (float) ckpt.data_dft.size() / 1024 / 1024);
++                            (float) ckpt.data_dft.size() / 1024 / 1024,
++                            (long long) t_total, (long long) t_sync);
+                 }
+ 
+                 if (use_ckpt_dft) {
++                    const int64_t t_start_dft = ggml_time_us();
++                    llama_synchronize(ctx_dft);
++                    const int64_t t_sync_dft = ggml_time_us() - t_start_dft;
+                     ckpt.update_dft(ctx_dft, slot.id, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
++                    SLT_DBG(slot, "checkpoint update_dft AUDIT_US update_dft=%lld sync_dft=%lld\n",
++                            (long long) (ggml_time_us() - t_start_dft),
++                            (long long) t_sync_dft);
+                 }
+             }
+         });
+@@ -3821,11 +3834,24 @@ private:
+ 
+                         SLT_DBG(slot, "restoring speculative checkpoint (pos_min = %d, pos_max = %d, size = %zu)\n", ckpt.pos_min, ckpt.pos_max, ckpt.size());
+ 
++                        const int64_t t_start_lt = ggml_time_us();
++                        llama_synchronize(slot.ctx_tgt);
++                        const int64_t t_sync_lt = ggml_time_us() - t_start_lt;
+                         ckpt.load_tgt(slot.ctx_tgt, slot.id, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
++                        const int64_t t_lt = ggml_time_us() - t_start_lt;
+ 
++                        int64_t t_ld = 0;
++                        int64_t t_sync_ld = 0;
+                         if (slot.ctx_dft) {
++                            const int64_t t_start_ld = ggml_time_us();
++                            llama_synchronize(slot.ctx_dft);
++                            t_sync_ld = ggml_time_us() - t_start_ld;
+                             ckpt.load_dft(slot.ctx_dft, slot.id, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
++                            t_ld = ggml_time_us() - t_start_ld;
+                         }
++                        SLT_DBG(slot, "restored speculative checkpoint AUDIT_US load_tgt=%lld sync_lt=%lld load_dft=%lld sync_ld=%lld\n",
++                                (long long) t_lt, (long long) t_sync_lt,
++                                (long long) t_ld, (long long) t_sync_ld);
+ 
+                         slot.mem.seq_rm(slot.id, ckpt.pos_max + 1, -1);
+ 

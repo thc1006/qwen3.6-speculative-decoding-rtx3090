@@ -1423,6 +1423,36 @@ class ARunScriptMustSetEveryFieldItClaimsToReproduce(unittest.TestCase):
                 self.assertEqual(self._exports(ROOT / script).get("BENCH_FIT_TARGET"),
                                  "3072")
 
+    def test_telemetry_is_started_with_an_interface_the_tool_accepts(self):
+        """`gpu_telemetry.sh` takes `[schema] [interval] [label]` and derives its
+        own output path. The run scripts passed a FILE PATH as the first
+        argument, so it was read as a schema, rejected, and the sampler exited
+        immediately - the eight-session crossover ran with no telemetry at all
+        and nothing said so. Same class as the fit-target miss: an interface
+        invented rather than read."""
+        schemas = set(re.findall(r"^(\w+)\)$",
+                                 (ROOT / "bench" / "gpu_telemetry.sh")
+                                 .read_text(encoding="utf-8"), re.M))
+        self.assertTrue({"full", "compact", "raw"} <= schemas, schemas)
+        for script in ("bench/run_v2_crossover.sh", "bench/run_v3_within.sh",
+                       "bench/run_t4_split_timers.sh"):
+            text = (ROOT / script).read_text(encoding="utf-8")
+            m = re.search(r'bash "\$TELE_SH" ([^\n&]*)&', text)
+            with self.subTest(script=script):
+                self.assertIsNotNone(m, f"{script} does not start the sampler")
+                args = m.group(1).split()
+                self.assertGreaterEqual(len(args), 1, args)
+                first = args[0].strip('"')
+                # either a literal schema, or a variable with a schema default
+                if first.startswith("$"):
+                    var = first.strip("${}").split(":-")[0]
+                    d = re.search(rf'{re.escape(var)}="\$\{{[^:]*:-(\w+)\}}"', text)
+                    self.assertIsNotNone(d, f"{script}: {first} has no default")
+                    first = d.group(1)
+                self.assertIn(first, schemas,
+                              f"{script} starts the sampler with {first!r}, "
+                              f"which gpu_telemetry.sh rejects as a schema")
+
     def test_the_scripts_do_not_set_a_run_level_cap_by_accident(self):
         """`run_v3_within.sh` measures both modes per arm; a run-level
         BENCH_IGNORE_EOS would flatten the freerun half into the capped one."""
@@ -1938,6 +1968,231 @@ class OutputDirectoryMustBeFresh(unittest.TestCase):
             r = run_runner({}, out)
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("already contains", r.stdout + r.stderr)
+
+
+class ThePullRequestBodyMustBeChecked(unittest.TestCase):
+    """A published document nothing parses is how every one of these started.
+
+    The third review's P0-4 was errors in the PR body. It is four numeric
+    tables and three counts, none of which had a code path, so fixing them
+    once fixed nothing. `analysis/verify_claims.py` parses it now, and this
+    keeps the parse from being dropped the way the run-M table's was.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    def test_the_body_is_in_the_tree(self):
+        self.assertTrue((self.ROOT / "PULL_REQUEST.md").is_file())
+
+    def test_the_checker_reads_it(self):
+        src = (self.ROOT / "analysis" / "verify_claims.py").read_text(encoding="utf-8")
+        self.assertIn("PULL_REQUEST.md", src)
+        self.assertIn("_pr_table", src)
+
+    def test_every_table_in_the_body_is_parsed(self):
+        """Counting the tables, not trusting that four is still all of them."""
+        body = (self.ROOT / "PULL_REQUEST.md").read_text(encoding="utf-8").splitlines()
+        def _is_rule(line):
+            bare = line.replace("|", "").replace(" ", "")
+            return bare and set(bare) <= set("-:")
+
+        # tables inside a list item are indented, and the first version of
+        # this test missed one that way
+        body = [l.strip() for l in body]
+        headers = [l for i, l in enumerate(body)
+                   if l.startswith("|") and i + 1 < len(body)
+                   and _is_rule(body[i + 1])]
+        # substring-matching the first column passes on any header whose first
+        # word appears anywhere in the source, which "arm" and "new" both do.
+        # The parsed set is the literal arguments `_pr_table` is called with.
+        import ast
+        tree = ast.parse((self.ROOT / "analysis" / "verify_claims.py")
+                         .read_text(encoding="utf-8"))
+        parsed = [n.args[0].value for n in ast.walk(tree)
+                  if isinstance(n, ast.Call)
+                  and getattr(n.func, "id", None) == "_pr_table"
+                  and n.args and isinstance(n.args[0], ast.Constant)]
+        self.assertTrue(parsed, "nothing calls _pr_table")
+        norm = str.maketrans({"\u2212": "-", "\u2013": "-", "\u2014": "-"})
+        unparsed = [h for h in headers
+                    if not any(h.translate(norm).startswith(a) for a in parsed)]
+        self.assertEqual(unparsed, [], f"{len(unparsed)} table(s) nothing reads")
+
+    def test_the_counts_it_quotes_are_derived_not_typed(self):
+        src = (self.ROOT / "analysis" / "verify_claims.py").read_text(encoding="utf-8")
+        for needle in ("assertion count it quotes", "regression count it quotes",
+                       "run-directory count it quotes", "mutation counts it quotes"):
+            self.assertIn(needle, src, f"nothing checks the {needle}")
+
+    def test_a_perturbation_of_it_is_registered(self):
+        muts = (self.ROOT / "tests" / "data_mutate.py").read_text(encoding="utf-8")
+        self.assertGreaterEqual(muts.count('"PULL_REQUEST.md"'), 5)
+
+
+class ComparabilityMustBeOneRule(unittest.TestCase):
+    """A16's "twelve comparable runs" is decided in two files.
+
+    `analysis/verify_claims.py` filters on seven manifest fields plus the run
+    date; `analysis/plot_v4_runs.py` had the first seven and not the date, so
+    when run T4 landed on 2026-08-27 the checker still said twelve and the
+    chart quietly became thirteen. Neither was wrong about its own arithmetic.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    def _selected(self, extra_date_filter):
+        tgt = ("707a55a8a4397ecde44de0c499d3e68c1ad1d240d1da65826b4949d1043f"
+               "4450")
+        out = []
+        data = self.ROOT / "v4_audit_2026_08_25" / "data"
+        for mp in sorted(data.glob("matrix_*/manifest.json")):
+            m = json.loads(mp.read_text(encoding="utf-8"))
+            if not (m.get("think") == "on" and m.get("concurrency") == 1
+                    and m.get("prompt_set", "v1") == "v1"
+                    and str(m.get("ctx")) == "8192"
+                    and str(m.get("fit_target")) == "3072"
+                    and m.get("target_sha256") == tgt
+                    and "spec-dflash-n2" in (m.get("arms") or {})):
+                continue
+            if extra_date_filter and not str(m.get("created", "")).startswith(
+                    "2026-08-26"):
+                continue
+            out.append(mp.parent.name)
+        return out
+
+    def test_the_date_filter_is_what_separates_them(self):
+        """Without it the two rules select different sets - the actual bug."""
+        self.assertNotEqual(self._selected(True), self._selected(False),
+                            "no run distinguishes the rules, so this test "
+                            "would pass whether or not the filter existed")
+
+    def test_both_files_carry_the_date_filter(self):
+        for rel in ("analysis/verify_claims.py", "analysis/plot_v4_runs.py"):
+            src = (self.ROOT / rel).read_text(encoding="utf-8")
+            self.assertIn('"2026-08-26"', src,
+                          f"{rel} selects comparable runs without the date")
+
+    def test_the_selection_is_still_twelve(self):
+        self.assertEqual(len(self._selected(True)), 12)
+
+    def test_and_run_t4_is_the_one_it_excludes(self):
+        excluded = set(self._selected(False)) - set(self._selected(True))
+        self.assertEqual(excluded, {"matrix_T4_split_20260827_175051"})
+
+
+class EveryPerturbationAnchorMustResolve(unittest.TestCase):
+    """A document perturbation is only a test if it lands where it says.
+
+    `edit_doc` checked that its anchor was present and not that it was unique,
+    so `| **39.09** | **54.7 %** |` -- two identical rows of the split table --
+    perturbed whichever came first. It still fired, which is the problem: an
+    anchor can go ambiguous, or stop matching after an edit, and the suite
+    reports the same 'all detected' either way.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    def _anchors(self):
+        import ast
+        tree = ast.parse((self.ROOT / "tests" / "data_mutate.py")
+                         .read_text(encoding="utf-8"))
+        out = []
+        for n in ast.walk(tree):
+            if (isinstance(n, ast.Call) and getattr(n.func, "id", "") == "edit_doc"
+                    and len(n.args) == 3
+                    and all(isinstance(a, ast.Constant) for a in n.args[:2])):
+                out.append((n.args[0].value, n.args[1].value))
+        return out
+
+    def test_there_are_anchors_to_check(self):
+        self.assertGreater(len(self._anchors()), 30)
+
+    def test_each_appears_exactly_once_in_its_document(self):
+        for rel, old in self._anchors():
+            txt = (self.ROOT / rel).read_text(encoding="utf-8")
+            self.assertEqual(txt.count(old), 1,
+                             f"{rel}: {old[:48]!r} appears {txt.count(old)}x")
+
+    def test_edit_doc_refuses_an_ambiguous_anchor(self):
+        src = (self.ROOT / "tests" / "data_mutate.py").read_text(encoding="utf-8")
+        self.assertIn("must be exactly one", src,
+                      "edit_doc accepts an anchor that matches more than once")
+
+
+class TheGitlessAssertionGapMustBeTheDeclaredOne(unittest.TestCase):
+    """`verify_claims.py` skips eight checks where there is no git history.
+
+    The pull request body publishes how many assertions the checker runs, and
+    `tests/data_mutate.py` runs it in a mirror that has no `.git`, so the two
+    counts differ by exactly the git-gated ones. That difference is a constant
+    in the checker; this derives it instead of trusting it.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    @staticmethod
+    def _count(env):
+        r = subprocess.run([sys.executable, "analysis/verify_claims.py"],
+                           cwd=str(TheGitlessAssertionGapMustBeTheDeclaredOne.ROOT),
+                           capture_output=True, text=True, env=env, timeout=900)
+        return sum(1 for l in r.stdout.splitlines()
+                   if l.startswith("  PASS") or l.startswith("  FAIL"))
+
+    def test_the_gap_is_what_the_checker_declares(self):
+        src = (self.ROOT / "analysis" / "verify_claims.py").read_text(encoding="utf-8")
+        m = re.search(r"^_GITLESS_SKIPPED = (\d+)$", src, re.M)
+        self.assertIsNotNone(m, "the checker no longer declares the gap")
+        declared = int(m.group(1))
+
+        with_git = dict(os.environ)
+        # emptying PATH would break every other subprocess too, so shadow just
+        # git with one that fails, the way a shallow clone or a mirror does
+        with tempfile.TemporaryDirectory() as shim:
+            g = Path(shim) / "git"
+            g.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+            g.chmod(0o755)
+            without_git = dict(os.environ,
+                               PATH=f"{shim}:{os.environ.get('PATH', '')}")
+            n_with = self._count(with_git)
+            n_without = self._count(without_git)
+        self.assertGreater(n_with, 0)
+        self.assertEqual(n_with - n_without, declared,
+                         f"the checker skips {n_with - n_without} assertions "
+                         f"without git and declares {declared}")
+
+
+class TheSplitTimersMustBeRederivable(unittest.TestCase):
+    """39.09 s and 0.002 s were in the document and nowhere else."""
+
+    ROOT = Path(__file__).resolve().parents[1]
+    DUMP = "checkpoint_timers_20260827_split.json"
+
+    def test_the_dump_is_committed(self):
+        self.assertTrue((self.ROOT / "v4_audit_2026_08_25" / "data" / self.DUMP).is_file())
+
+    def test_it_carries_the_split_fields(self):
+        rows = json.loads((self.ROOT / "v4_audit_2026_08_25" / "data" / self.DUMP)
+                          .read_text(encoding="utf-8"))
+        self.assertEqual(len(rows), 18)
+        # the timers only fire on the arm that checkpoints; the other twelve
+        # rows carry zeros and no split, which is the extractor's own shape
+        drafting = [r for r in rows if r["arm"] == "spec-draft-n8"]
+        self.assertEqual(len(drafting), 6)
+        for r in drafting:
+            for f in ("sync_total_s", "state_total_s", "checkpoint_total_s"):
+                self.assertIn(f, r, f"{f} missing: the split is what T4 was for")
+            self.assertAlmostEqual(r["sync_total_s"] + r["state_total_s"],
+                                   r["checkpoint_total_s"], places=2)
+
+    def test_the_rederivation_covers_it(self):
+        src = (self.ROOT / "analysis" / "rederive_from_logs.py").read_text(encoding="utf-8")
+        self.assertIn(self.DUMP, src)
+        self.assertIn("matrix_T4_split_20260827_175051", src)
+
+    def test_its_logs_are_attested(self):
+        man = (self.ROOT / "v4_audit_2026_08_25" / "EVIDENCE_MANIFEST.sha256") \
+            .read_text(encoding="utf-8")
+        self.assertEqual(man.count("matrix_T4_split_20260827_175051/server_logs/"), 18)
 
 
 def _load_runner():

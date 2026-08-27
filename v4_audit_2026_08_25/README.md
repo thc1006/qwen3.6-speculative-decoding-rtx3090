@@ -1120,7 +1120,7 @@ This table listed two of the run directories and the harness. There are 41.
 
 | Path | Contents |
 |---|---|
-| `data/<run>/` | one directory per run — `manifest.json`, one `<arm>__rep<n>.json` per arm-run, and `RUN_COMPLETE.json` on the runs the harness validated. 41 directories, 687 arm-runs. |
+| `data/<run>/` | one directory per run — `manifest.json`, one `<arm>__rep<n>.json` per arm-run, and `RUN_COMPLETE.json` on the runs the harness validated. 60 directories, 1305 arm-runs. |
 | `data/matrix_O2_latin_*/`, `data/matrix_O3_latin_*/` | the balanced nine-arm matrix the README leads with, and its five-hours-later replication on the same stock binary — 810 of 810 request-pairs byte-identical. Each carries its own `paired_blocks.json` |
 | `data/matrix_T_timers_*/`, `data/matrix_T3_timers_*/` | the two source-timed checkpoint runs behind [ERRATA A12](../ERRATA.md#a12-what-the-checkpoint-path-costs-measured-with-timers-in-the-source) and [A16](../ERRATA.md#a16-two-runs-identical-in-every-recorded-respect-and-byte-identical-in-output-differ-by-34--on-one-arm), with `checkpoint_timers.json` and the SHA-256 of every log they were extracted from |
 | `data/matrix_U*_dflashvar_*/` | six independent invocations of one configuration, the designed test behind [A16](../ERRATA.md#a16-two-runs-identical-in-every-recorded-respect-and-byte-identical-in-output-differ-by-34--on-one-arm) |
@@ -1144,8 +1144,19 @@ the manifest. `bash bench/collect_evidence.sh ~/bench` regenerates both and
 builds `raw_logs.tar.zst`, **271 028 599 bytes**, sha256
 `29c2401f100390268bbd52e43b5c2da9a61440bad3dabe502ca1684478771fd6`.
 
-**That archive is published**, with the 19 telemetry traces beside it, as the
-release asset `raw-evidence-2026-08-27`. Committed hashes tie the derived JSON
+**That archive is published**, with the 19 telemetry traces beside it, as an
+asset of the release `raw-evidence-2026-08-27`. A second tranche sits beside it
+— `raw_logs_20260827.tar.zst`, **187 358 414 bytes**, sha256
+`d56a7f88a099550bdab229ccb2bd36840f167550cea7689f575fd6d0f11da8ff`, and
+`telemetry_20260827.tar.zst` at `db833395…` — carrying the **618 logs and 2
+traces** of the runs the third review asked for: the eight-session crossover
+V2, the within-invocation V3 and the split-timer T4. Two archives rather than
+one rebuilt archive, so the first one's digest keeps meaning what it meant when
+it was published; unpack both into one bench root and this repository's whole
+manifest verifies, and all **620** of the second tranche's entries did before it
+was published.
+
+Committed hashes tie the derived JSON
 to files nobody else could see, which is a weaker claim than it sounds; the
 point of publishing is that the extraction can be re-run rather than trusted.
 `.github/workflows/evidence.yml` does exactly that, and this is what it

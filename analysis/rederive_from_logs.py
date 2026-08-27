@@ -49,9 +49,24 @@ def committed(name):
         return json.load(fh)
 
 
-def compare(label, regenerated, published, key, expected_gap=0):
+def compare(label, regenerated, published, key, expected_gap=0, scope=None):
+    """`scope` keeps the comparison to the runs the committed dump covers.
+
+    The bench root grows: the 2026-08-27 tranche adds 618 logs from runs that
+    postdate `acceptance_counter_comparison.json`. Regenerating over the whole
+    root then produces rows the dump cannot contain, which is not a discrepancy
+    and must not be reported as one - but the count of them is worth printing,
+    because "the extractor produced more than the dump" and "the extractor
+    produced something different" look identical if you only count.
+    """
     A = {key(r): r for r in regenerated}
     B = {key(r): r for r in published}
+    if scope is not None:
+        outside = {k for k in A if not scope(k)}
+        if outside:
+            print(f"  {label}: {len(outside)} record(s) from runs the dump "
+                  f"predates, not compared")
+            A = {k: v for k, v in A.items() if k not in outside}
     differing = sorted(k for k in set(A) & set(B) if A[k] != B[k])
     missing = sorted(set(B) - set(A))
     extra = sorted(set(A) - set(B))
@@ -82,9 +97,11 @@ def main():
     # --- the acceptance counters behind A13 --------------------------------
     published = committed("acceptance_counter_comparison.json")
     gap = sum(1 for r in published if r["run"] in NOT_REPRODUCIBLE)
+    _runs_in_dump = {r["run"] for r in published}
     compare("acceptance_counter_comparison.json",
             run("compare_acceptance_counters.py", bench), published,
-            lambda r: (r["run"], r["arm"], r.get("repeat")), expected_gap=gap)
+            lambda r: (r["run"], r["arm"], r.get("repeat")), expected_gap=gap,
+            scope=lambda k: k[0] in _runs_in_dump)
 
     # --- the source timers behind A12 --------------------------------------
     pub = committed("checkpoint_timers_20260826.json")
@@ -100,6 +117,23 @@ def main():
     compare("checkpoint_timers_20260826.json",
             got if isinstance(got, list) else got["rows"], pub_rows,
             lambda r: (r["arm"], r["repeat"]))
+
+    # --- run T4's split timers, which answer A12's boundary question --------
+    # Same extractor, a different instrumented build: the drain is timed
+    # separately, so `sync_total_s` is the wait A12 was accused of attributing
+    # to the copying. It is 0.002 s, and it has to come back from the logs.
+    d = os.path.join(bench, "matrix_T4_split_20260827_175051", "server_logs")
+    if os.path.isdir(d):
+        logs = [os.path.join(d, f) for f in sorted(os.listdir(d))
+                if f.endswith(".log")]
+        got = run("extract_checkpoint_timers.py", *logs)
+        compare("checkpoint_timers_20260827_split.json",
+                got if isinstance(got, list) else got["rows"],
+                committed("checkpoint_timers_20260827_split.json"),
+                lambda r: (r["arm"], r["repeat"]))
+    else:
+        print("  checkpoint_timers_20260827_split.json: run T4's logs are not "
+              "in this archive, not compared")
 
     # --- the speculative accounting behind A1 and A4 ------------------------
     pub = committed("spec_accounting_20260826.json")

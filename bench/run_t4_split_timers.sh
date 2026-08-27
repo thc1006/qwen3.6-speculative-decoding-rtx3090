@@ -94,8 +94,10 @@ export BENCH_CONCURRENCY=1
 export BENCH_FLAVOR=master
 unset BENCH_IGNORE_EOS BENCH_HARDCAP_SUFFIX || true
 
-TELE="$BENCH/gpu_telemetry_T4_$STAMP.csv"
-bash "$TELE_SH" "$TELE" &
+# gpu_telemetry.sh takes [schema] [interval] [label] and names its own file
+TELE_SCHEMA="${BENCH_TELEMETRY_SCHEMA:-compact}"
+TELE_INTERVAL="${BENCH_TELEMETRY_INTERVAL:-5}"
+bash "$TELE_SH" "$TELE_SCHEMA" "$TELE_INTERVAL" "T4" &
 TELE_PID=$!
 trap 'kill "$TELE_PID" 2>/dev/null || true; restore' EXIT
 

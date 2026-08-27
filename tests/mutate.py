@@ -301,6 +301,12 @@ MUTATIONS = [
      "        if True or set(halves_) == {\"freerun\", \"hardcap\"} and all(",
      "tests.test_harness_invariants.TheLengthModeAnalysisMustReadBothDesigns"),
 
+    ("a run script starts the telemetry sampler with a path again",
+     "bench/run_v2_crossover.sh",
+     'bash "$TELE_SH" "$TELE_SCHEMA" "$TELE_INTERVAL" "V2" &',
+     'bash "$TELE_SH" "$BENCH/gpu_telemetry_V2.csv" &',
+     "tests.test_harness_invariants.ARunScriptMustSetEveryFieldItClaimsToReproduce"),
+
 ]
 
 

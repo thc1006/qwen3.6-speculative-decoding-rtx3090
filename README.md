@@ -34,7 +34,7 @@
 > exception — it forces every request to the same token count — but its two
 > halves were not interleaved, so it measures a difference it cannot
 > attribute. The thinking-on results, which is everything in the
-> table below, are unaffected by the second: all 5724 thinking-on requests ran
+> table below, are unaffected by the second: all 5904 thinking-on requests ran
 > to the cap.
 >
 > The audit **retracted this repository's headline mechanism.** Earlier versions
@@ -866,14 +866,15 @@ does, over one ten-prompt arm-run of 3000 tokens:
 | | seconds | share |
 |---|---|---|
 | speculative checkpoint save (785) | 17.34 | 24.3 % |
-| speculative checkpoint restore (728) | 21.74 | 30.5 % |
+| speculative checkpoint restore (728) | 21.74 | 30.4 % |
 | drafter `generate()` | 17.27 | 24.2 % |
 | unattributed | 15.05 | 21.1 % |
 
 **More than half of the excess is spent inside the checkpoint calls** —
 39.07 s, reproducible to two hundredths of a second across four arm-runs, at a
 median of 21.9 ms per save and 22.4 ms per restore. Inside, not on: the state
-APIs synchronise first, so this is the API boundary, not state-copy time alone
+APIs synchronise first, so this is the API boundary. Run T4 times that wait
+separately and it is **0.002 s of 39.09 s**, so the boundary is state work
 ([A12](ERRATA.md#a12-what-the-checkpoint-path-costs-measured-with-timers-in-the-source)). `spec-dflash-n2` on the same prompts performs **zero** of
 these operations, spends 3.41 s drafting, and finishes **5.3 s faster than not
 speculating at all**.

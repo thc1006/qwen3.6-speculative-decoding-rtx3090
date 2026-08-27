@@ -26,9 +26,13 @@ import csv, hashlib, json, glob, math, os, pathlib, re, statistics as st
 from collections import Counter, defaultdict
 
 FAIL=[]
+RAN = []
+
+
 def chk(name, got, want, tol=0.05):
     ok = (abs(got-want) <= tol) if isinstance(want,(int,float)) else (got==want)
     print(f"  {'PASS' if ok else 'FAIL'}  {name:52s} got={got!r} want={want!r}")
+    RAN.append(name)
     if not ok: FAIL.append(name)
 
 print("=== v1 matrix (analysis/summary.csv) ===")
@@ -454,6 +458,24 @@ def _agg(pat, arm):
     return {"pooled": 1000*n/ms, "agg": st.mean(a), "acc": (100*da/dn) if dn else None,
             "drafted": dn, "reps": len(rs)}
 
+_DASH_EARLY = {"\u2212": "-", "\u2013": "-", "\u2014": "-",
+               "\u00a0": " ", "\u2009": " ", "\u202f": " "}
+
+
+def _norm_early(t: str) -> str:
+    for _a, _b in _DASH_EARLY.items():
+        t = t.replace(_a, _b)
+    return t
+
+
+def _cellv4(x):
+    """One numeric table cell, before `_pnum2` exists further down the file."""
+    t = _norm_early(x).replace("%", "").replace("pp", "").replace("*", "").replace("`", "")
+    for _c in (" ", "\u00a0", "\u2009", "\u202f"):
+        t = t.replace(_c, "")
+    return float(t)
+
+
 # M1: both self-speculative families under one policy
 _b = _agg("matrix_M1_*", "baseline")
 chk("M1 baseline aggregate", round(_b["agg"], 1), 103.3, 0.05)
@@ -469,6 +491,40 @@ for arm, agg_, delta, acc in (("spec-mtp-n1", 118.4,  14.6, 89.0),
     chk(f"M1 {arm} acceptance %", round(v["acc"], 1), acc, 0.05)
 chk("M1 DFlash beats MTP at the same draft length",
     _agg("matrix_M1_*", "spec-dflash-n2")["agg"] > _agg("matrix_M1_*", "spec-mtp-n2")["agg"], True)
+
+# ...and the table that publishes them, cell by cell. Computing a figure from
+# the data and comparing it with a literal proves the literal, not the document:
+# `tests/data_mutate.py` changed run M's published aggregate from 127.3 to 130.3
+# and nothing here noticed, because nothing here read that cell.
+_V4R_LINES = (pathlib.Path(__file__).resolve().parents[1] / "v4_audit_2026_08_25"
+              / "README.md").read_text(encoding="utf-8").splitlines()
+
+
+def _v4_table(header_startswith):
+    i = next(i for i, l in enumerate(_V4R_LINES) if l.startswith(header_startswith))
+    rows = []
+    for l in _V4R_LINES[i + 2:]:
+        if not l.startswith("|"):
+            break
+        rows.append([c.strip().strip("*`").replace("`", "").strip("* ").strip()
+                     for c in _norm_early(l).strip("|").split("|")])
+    return rows
+
+
+_M1T = {r[0]: r[1:] for r in
+        _v4_table("| arm | aggregate | vs no speculation | acceptance |")}
+chk("the v4 README's M1 table rows", len(_M1T), 7)
+chk("and the no-speculation row is one of them", "no speculation" in _M1T, True)
+chk("v4 README M1 no-speculation aggregate",
+    round(_b["agg"], 1), _cellv4(_M1T["no speculation"][0]), 0.05)
+for _arm, _row in sorted(_M1T.items()):
+    if _arm == "no speculation":
+        continue
+    _v = _agg("matrix_M1_*", _arm)
+    chk(f"v4 README M1 {_arm} aggregate", round(_v["agg"], 1), _cellv4(_row[0]), 0.05)
+    chk(f"v4 README M1 {_arm} vs baseline (%)",
+        round(100 * (_v["agg"] / _b["agg"] - 1), 1), _cellv4(_row[1].rstrip("\u2021 ")), 0.05)
+    chk(f"v4 README M1 {_arm} acceptance (%)", round(_v["acc"], 1), _cellv4(_row[2]), 0.05)
 
 # M4: the drafter-precision objection
 _b4 = _agg("matrix_M4_q4km_*", "baseline")
@@ -1140,6 +1196,7 @@ for f, needle, what in DOC_CLAIMS:
     txt = _norm((root / f).read_text(encoding="utf-8"))
     ok = _norm(needle) in txt
     print(f"  {'PASS' if ok else 'FAIL'}  {f:32s} quotes {needle!r:20s} ({what})")
+    RAN.append(f"{f}:{needle}")     # these are assertions too, and are counted
     if not ok:
         FAIL.append(f"{f}:{needle}")
 
@@ -1425,7 +1482,7 @@ for _f in glob.glob("v4_audit_2026_08_25/data/*/*__rep*.json"):
     for _x in json.load(open(_f)).get("rows") or []:
         _stops[_k][_x.get("finish_reason")] += 1
 chk("A17 no thinking-on request stopped before the cap",
-    dict(_stops["on"]), {"length": 5724})
+    dict(_stops["on"]), {"length": 5904})
 # finish_reason is the server's word for it; the claim is about token counts
 _short = 0
 for _f in glob.glob("v4_audit_2026_08_25/data/*/*__rep*.json"):
@@ -1436,7 +1493,7 @@ for _f in glob.glob("v4_audit_2026_08_25/data/*/*__rep*.json"):
         if _x["predicted_n"] != _m["max_tokens"]:
             _short += 1
 chk("A17 and every one of them generated exactly max_tokens", _short, 0)
-chk("A17 thinking-off requests that stopped early", _stops["off"]["stop"], 881)
+chk("A17 thinking-off requests that stopped early", _stops["off"]["stop"], 3101)
 # the second reading A17 overturns: acceptance, not only throughput
 _D = [r for r in _lm if r["run"].startswith("D_master")][0]
 _Con = [r for r in _lm if r["run"] == "C_master_matrix_think_on"][0]
@@ -1472,8 +1529,20 @@ _ER_LINES = pathlib.Path(__file__).resolve().parents[1].joinpath("ERRATA.md") \
     .read_text(encoding="utf-8").splitlines()
 
 
-def _md_table(header_startswith):
-    i = next(i for i, l in enumerate(_ER_LINES) if l.startswith(header_startswith))
+def _md_table(header_startswith, quoted=False):
+    """Read one ERRATA table. `quoted=True` strips the blockquote marker first,
+    for tables that live inside a `> [!IMPORTANT]` note."""
+    lines = ([l[2:] if l.startswith("> ") else l.rstrip(">") for l in _ER_LINES]
+             if quoted else _ER_LINES)
+    i = next(i for i, l in enumerate(lines) if l.startswith(header_startswith))
+    if quoted:
+        rows = []
+        for l in lines[i + 2:]:
+            if not l.startswith("|"):
+                break
+            rows.append([c.strip().strip("*`").replace("`", "").strip("* ").strip()
+                         for c in l.strip("|").split("|")])
+        return rows
     rows = []
     for l in _ER_LINES[i + 2:]:
         if not l.startswith("|"):
@@ -1706,12 +1775,12 @@ print("\n=== the raw-evidence manifest ===")
 _man = pathlib.Path(__file__).resolve().parents[1] / "v4_audit_2026_08_25" / "EVIDENCE_MANIFEST.sha256"
 _mlines = [l for l in _man.read_text(encoding="utf-8").splitlines()
            if l and not l.startswith("#")]
-chk("manifest entries", len(_mlines), 721)
+chk("manifest entries", len(_mlines), 1341)
 chk("every entry is a sha256 and a path",
     sorted({bool(re.fullmatch(r"[0-9a-f]{64}  \S.*", l)) for l in _mlines}), [True])
-chk("logs in the manifest", sum(1 for l in _mlines if l.endswith(".log")), 702)
+chk("logs in the manifest", sum(1 for l in _mlines if l.endswith(".log")), 1320)
 chk("telemetry traces in the manifest",
-    sum(1 for l in _mlines if l.endswith(".csv")), 19)
+    sum(1 for l in _mlines if l.endswith(".csv")), 21)
 chk("no duplicate paths", len({l.split("  ", 1)[1] for l in _mlines}), len(_mlines))
 _v4r = pathlib.Path(__file__).resolve().parents[1] / "v4_audit_2026_08_25" / "README.md"
 chk("the archive hash is recorded in both places",
@@ -1799,6 +1868,364 @@ for _f, (_ncnv, _nthink, _ndraft) in _HISTORICAL.items():
          if re.match(r'^[A-Z_]+="?/home/[a-z]', l.strip())], [])
 
 
+print("\n=== run V2: the crossover that identifies what run V could not ===")
+# Run V measured `ignore_eos` as two whole runs sixteen minutes apart, and A16
+# finds a DFlash-specific invocation effect of the same size. Run V2 is eight
+# sessions of two halves in AB BA BA AB BA AB AB BA order, so the mode is
+# balanced against the order and the session is the resampling unit.
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import length_mode as _lm
+
+
+_ER_V3 = _ER_V2 = re.sub(r"\s+", " ", _norm(
+    (pathlib.Path(__file__).resolve().parents[1] / "ERRATA.md")
+    .read_text(encoding="utf-8")))
+
+
+def _cell(x):
+    """One numeric table cell. `_pnum2` is defined further down the file."""
+    t = _norm(x).replace("%", "").replace("pp", "").replace("*", "").replace("`", "")
+    for _spx in (" ", "\u00a0", "\u2009", "\u202f"):
+        t = t.replace(_spx, "")
+    return float(t)
+
+_V2 = sorted((pathlib.Path(__file__).resolve().parents[1] / "v4_audit_2026_08_25"
+              / "data").glob("matrix_V2_s*"))
+chk("V2 halves on disk", len(_V2), 16)
+chk("V2 arm-runs", sum(len(list(d.glob("*__rep*.json"))) for d in _V2), 400)
+chk("every V2 half validated", sorted(d.name for d in _V2
+                                      if not (d / "RUN_COMPLETE.json").exists()), [])
+_v2_first = {}
+_v2_sess = {}
+for _d in _V2:
+    _m = json.loads((_d / "manifest.json").read_text(encoding="utf-8"))
+    _s = _d.name.split("_")[2]
+    _v2_sess.setdefault(_s, {})[("hardcap" if _m.get("ignore_eos") else "freerun")] = _d
+    _v2_first.setdefault(_s, []).append(
+        (_m["created"], "hardcap" if _m.get("ignore_eos") else "freerun"))
+chk("V2 sessions", sorted(_v2_sess), [f"s{i}" for i in range(1, 9)])
+chk("every session has both modes",
+    sorted(s for s, h in _v2_sess.items() if set(h) != {"freerun", "hardcap"}), [])
+# the order really is balanced, read from the manifests' own timestamps
+_order = {s: sorted(v)[0][1] for s, v in _v2_first.items()}
+chk("each mode ran first four times",
+    sorted(Counter(_order.values()).items()),
+    [("freerun", 4), ("hardcap", 4)])
+_pos = {m: [i + 1 for i, s in enumerate(sorted(_order)) if _order[s] == m]
+        for m in ("freerun", "hardcap")}
+chk("and the two orders share a mean time position",
+    [round(sum(v) / len(v), 2) for v in (_pos["freerun"], _pos["hardcap"])], [4.5, 4.5])
+# every half must have run at the fit target that keeps the DFlash arms alive
+chk("every V2 half ran at --fit-target 3072",
+    sorted({json.loads((d / "manifest.json").read_text(encoding="utf-8")).get("fit_target")
+            for d in _V2}), ["3072"])
+chk("every V2 half ran thinking off",
+    sorted({json.loads((d / "manifest.json").read_text(encoding="utf-8")).get("think")
+            for d in _V2}), ["off"])
+chk("and on a position-balanced schedule",
+    sorted({json.loads((d / "manifest.json").read_text(encoding="utf-8"))
+            .get("schedule_is_position_balanced") for d in _V2}), [True])
+
+# --- the numbers A17 now publishes -----------------------------------------
+_v2_shift = defaultdict(list)
+_v2_free = defaultdict(list)
+_v2_cap = defaultdict(list)
+_v2_base = {"freerun": [], "hardcap": []}
+for _s, _h in sorted(_v2_sess.items()):
+    _fr = {a: _lm.pooled(str(_h["freerun"]), a)["tok_s"]
+           for a in _lm.arms_of(str(_h["freerun"]))}
+    _cp = {a: _lm.pooled(str(_h["hardcap"]), a)["tok_s"]
+           for a in _lm.arms_of(str(_h["hardcap"]))}
+    _v2_base["freerun"].append(_fr["baseline"])
+    _v2_base["hardcap"].append(_cp["baseline"])
+    for _a, _v in _lm.contrast(_fr, _cp).items():
+        _v2_shift[_a].append(_v["shift_pp"])
+        _v2_free[_a].append(_v["free_pct"])
+        _v2_cap[_a].append(_v["cap_pct"])
+chk("V2 arms contrasted", sorted(_v2_shift),
+    ["spec-dflash-n2", "spec-dflash-n4", "spec-draft-n8", "spec-mtp-n2"])
+_A17T = {r[0]: r[1:] for r in _md_table(
+    "| arm | freerun | hard cap | shift, 95 % t over 8 sessions |")}
+chk("A17's crossover table rows", len(_A17T), 4)
+for _a, _row in sorted(_A17T.items()):
+    _f = _lm.interval(_v2_free[_a]); _c = _lm.interval(_v2_cap[_a])
+    _sh = _lm.interval(_v2_shift[_a])
+    chk(f"V2 {_a} freerun (%)", round(_f[0], 2), _cell(_row[0].split("[")[0]), 0.005)
+    chk(f"V2 {_a} hard cap (%)", round(_c[0], 2), _cell(_row[1].split("[")[0]), 0.005)
+    chk(f"V2 {_a} shift (pp)", round(_sh[0], 2), _cell(_row[2].split("[")[0]), 0.005)
+    chk(f"V2 {_a} the hard cap moved it", _sh[1] > 0, True)
+# the sign flip, which is what A17 was written about
+chk("V2 spec-dflash-n4 is negative free-running", round(_lm.interval(_v2_free["spec-dflash-n4"])[2], 2) < 0, True)
+chk("V2 spec-dflash-n4 is positive under the cap", round(_lm.interval(_v2_cap["spec-dflash-n4"])[1], 2) > 0, True)
+# run V's single session against the eight
+_RUNV = {"spec-dflash-n2": 9.26, "spec-mtp-n2": 9.68,
+         "spec-dflash-n4": 11.90, "spec-draft-n8": 6.31}
+_outside = sorted(a for a, v in _RUNV.items()
+                  if not (_lm.interval(_v2_shift[a])[1] <= v <= _lm.interval(_v2_shift[a])[2]))
+chk("run V's shift lies outside the eight-session interval for exactly this arm",
+    _outside, ["spec-dflash-n2"])
+chk("and above every one of the eight sessions",
+    round(max(_v2_shift["spec-dflash-n2"]), 2) < 9.26, True)
+chk("A17 says which arm and by how much", "about 3.3 pp on one arm" in _ER_V2, True)
+# the between-session spread is arm-specific, which is A16 from another design
+_sd = {a: st.stdev(v) for a, v in _v2_shift.items()}
+chk("V2 between-session SD, spec-draft-n8 (pp)", round(_sd["spec-draft-n8"], 2), 0.02, 0.005)
+chk("V2 between-session SD, spec-dflash-n2 (pp)", round(_sd["spec-dflash-n2"], 2), 1.27, 0.005)
+chk("the A16 arm is the least stable contrast",
+    max(_sd, key=lambda k: _sd[k]), "spec-dflash-n2")
+chk("by at least a factor of two over the next",
+    _sd["spec-dflash-n2"] > 2 * sorted(_sd.values())[-2], True)
+chk("while the baseline holds under 0.25 % either way",
+    [round(100 * st.stdev(v) / st.mean(v), 2) for v in
+     (_v2_base["freerun"], _v2_base["hardcap"])], [0.21, 0.11])
+chk("A17 records that no telemetry was captured for V2",
+    "No GPU telemetry was recorded for run V2" in _ER_V2, True)
+
+# The control that makes the spread interpretable: identical work, eight times.
+_v2_sig = defaultdict(lambda: defaultdict(set))
+_v2_work = defaultdict(lambda: defaultdict(set))
+_v2_rows = 0
+for _d in _V2:
+    _mode = ("hardcap" if json.loads((_d / "manifest.json").read_text(encoding="utf-8"))
+             .get("ignore_eos") else "freerun")
+    for _arm in sorted({f.name.split("__rep")[0] for f in _d.glob("*__rep*.json")}):
+        _out, _dn, _da = [], 0, 0
+        for _f in sorted(_d.glob(f"{_arm}__rep*.json")):
+            for _r in json.loads(_f.read_text(encoding="utf-8"))["rows"]:
+                _v2_rows += 1
+                _out.append((_r.get("tag"), _r.get("content") or "",
+                             _r["timings"]["predicted_n"]))
+                _dn += _r.get("draft_n", 0) or 0
+                _da += _r.get("draft_n_accepted", 0) or 0
+        _v2_sig[_mode][_arm].add(
+            hashlib.sha256(json.dumps(_out, sort_keys=True).encode()).hexdigest())
+        _v2_work[_mode][_arm].add((_dn, _da))
+chk("V2 request rows", _v2_rows, 4000)
+chk("every arm produced one set of text in every session",
+    sorted(f"{m}/{a}" for m in _v2_sig for a, v in _v2_sig[m].items() if len(v) != 1), [])
+chk("and one drafted/accepted pair",
+    sorted(f"{m}/{a}" for m in _v2_work for a, v in _v2_work[m].items() if len(v) != 1), [])
+chk("the hard-cap halves generated exactly the cap every time",
+    sorted({sum(_r["timings"]["predicted_n"]
+                for _f in _d.glob("baseline__rep*.json")
+                for _r in json.loads(_f.read_text(encoding="utf-8"))["rows"])
+            for _d in _V2
+            if json.loads((_d / "manifest.json").read_text(encoding="utf-8")).get("ignore_eos")}),
+    [15000])
+chk("A17 says the work was identical", "Identical to the token, in both modes" in _ER_V2, True)
+
+print("\n=== run V3: both modes inside one square, and the arm that disagrees ===")
+_V3 = sorted((pathlib.Path(__file__).resolve().parents[1] / "v4_audit_2026_08_25"
+              / "data").glob("matrix_V3_s*"))
+chk("V3 sessions", len(_V3), 2)
+chk("V3 arm-runs", sum(len(list(d.glob("*__rep*.json"))) for d in _V3), 200)
+chk("both V3 sessions validated",
+    sorted(d.name for d in _V3 if not (d / "RUN_COMPLETE.json").exists()), [])
+for _d in _V3:
+    _m = json.loads((_d / "manifest.json").read_text(encoding="utf-8"))
+    chk(f"{_d.name}: ten arms in a balanced square",
+        (len(_m["arms"]), _m["repeats"], _m["schedule_is_position_balanced"]),
+        (10, 10, True))
+    chk(f"{_d.name}: five of them capped", len(_m["hardcap_arms"]), 5)
+    chk(f"{_d.name}: the cap is per arm, not run-level", _m["ignore_eos"], False)
+    chk(f"{_d.name}: a capped arm runs its base arm's flags",
+        all(_m["arms"][a] == _m["arms"][a[:-4]] for a in _m["hardcap_arms"]), True)
+    chk(f"{_d.name}: at the fit target that keeps DFlash alive",
+        _m.get("fit_target"), "3072")
+
+_v3_shift = defaultdict(list)
+_v3_rate = defaultdict(dict)
+for _d in _V3:
+    _free = {a: _lm.pooled(str(_d), a)["tok_s"]
+             for a in _lm.arms_of(str(_d)) if not a.endswith("-cap")}
+    _cap = {a[:-4]: _lm.pooled(str(_d), a)["tok_s"]
+            for a in _lm.arms_of(str(_d)) if a.endswith("-cap")}
+    for _a, _v in _lm.contrast(_free, _cap).items():
+        _v3_shift[_a].append(_v["shift_pp"])
+    for _a in _free:
+        _v3_rate[_a].setdefault("free", []).append(_free[_a])
+        _v3_rate[_a].setdefault("cap", []).append(_cap[_a])
+_V3T = {r[0]: r[1:] for r in _md_table(
+    "| arm | V3 session 1 | V3 session 2 | V3 mean | V2, eight sessions |")}
+chk("A17's V3 table rows", len(_V3T), 4)
+for _a, _row in sorted(_V3T.items()):
+    chk(f"V3 {_a} session 1 (pp)", round(_v3_shift[_a][0], 2), _cell(_row[0]), 0.005)
+    chk(f"V3 {_a} session 2 (pp)", round(_v3_shift[_a][1], 2), _cell(_row[1]), 0.005)
+    chk(f"V3 {_a} mean (pp)", round(st.mean(_v3_shift[_a]), 2), _cell(_row[2]), 0.005)
+    chk(f"V3 {_a} the cap moved it", min(_v3_shift[_a]) > 0, True)
+# three agree with the crossover, one does not
+_agree = sorted(a for a in _v3_shift
+                if abs(st.mean(_v3_shift[a]) - st.mean(_v2_shift[a])) < 0.2)
+chk("the arms on which the two designs agree to a fifth of a point",
+    _agree, ["spec-dflash-n4", "spec-draft-n8", "spec-mtp-n2"])
+chk("and the one they do not",
+    sorted(set(_v3_shift) - set(_agree)), ["spec-dflash-n2"])
+chk("V3's two sessions agree with each other on that arm to 0.06 pp",
+    round(abs(_v3_shift["spec-dflash-n2"][0] - _v3_shift["spec-dflash-n2"][1]), 2),
+    0.06, 0.005)
+chk("A17 quotes the disagreement as a range",
+    "design-dependent between +5.9 and" in _ER_V3, True)
+# only that arm's absolute rate moves between the designs
+_moved = sorted(a for a in _v3_rate
+                if abs(st.mean(_v3_rate[a]["free"]) / st.mean(
+                    [_lm.pooled(str(d), a)["tok_s"] for d in _V2
+                     if not json.loads((d / "manifest.json").read_text(encoding="utf-8"))
+                     .get("ignore_eos")]) - 1) > 0.005)
+chk("the only arm whose free-running rate moves by more than half a percent",
+    _moved, ["spec-dflash-n2"])
+# and every V3 arm produced one output set across the two sessions
+_v3_sig = defaultdict(set)
+for _d in _V3:
+    for _arm in sorted({f.name.split("__rep")[0] for f in _d.glob("*__rep*.json")}):
+        _out = []
+        for _f in sorted(_d.glob(f"{_arm}__rep*.json")):
+            for _r in json.loads(_f.read_text(encoding="utf-8"))["rows"]:
+                _out.append((_r.get("tag"), _r.get("content") or "",
+                             _r["timings"]["predicted_n"]))
+        _v3_sig[_arm].add(hashlib.sha256(
+            json.dumps(_out, sort_keys=True).encode()).hexdigest())
+chk("every V3 arm produced one output set across both sessions",
+    sorted(a for a, v in _v3_sig.items() if len(v) != 1), [])
+chk("all ten of them", len(_v3_sig), 10)
+# the state is arm-run level: per-repeat CV inside one invocation
+def _cv(d, arm):
+    vs = []
+    for f in sorted(d.glob(f"{arm}__rep*.json")):
+        rows = json.loads(f.read_text(encoding="utf-8"))["rows"]
+        vs.append(1000 * sum(r["timings"]["predicted_n"] for r in rows)
+                  / sum(r["timings"]["predicted_ms"] for r in rows))
+    return 100 * st.stdev(vs) / st.mean(vs)
+chk("V3 s1 no-speculation CV inside the invocation (%)",
+    round(_cv(_V3[0], "baseline"), 2), 0.27, 0.005)
+chk("V3 s1 spec-mtp-n2 CV (%)", round(_cv(_V3[0], "spec-mtp-n2"), 2), 0.53, 0.005)
+chk("V3 s1 spec-dflash-n2 CV (%)", round(_cv(_V3[0], "spec-dflash-n2"), 2), 1.82, 0.005)
+chk("V3 s1 spec-dflash-n2-cap CV (%)",
+    round(_cv(_V3[0], "spec-dflash-n2-cap"), 2), 2.31, 0.005)
+chk("the unstable arm is at least three times the next inside one invocation",
+    _cv(_V3[0], "spec-dflash-n2") > 3 * _cv(_V3[0], "spec-mtp-n2"), True)
+chk("A17 says the state is finer-grained than A16 could see",
+    "consecutive arm-runs of the same" in _ER_V3, True)
+chk("A17 states that neither design varies the predecessor",
+    "balance *position* and not *predecessor*" in _ER_V3, True)
+
+print("\n=== run T4: the checkpoint boundary, split and measured ===")
+# The third review's P0-2: the timers surround calls that begin with
+# ctx->synchronize(), so 39.07 s might be an attribution to the API boundary
+# rather than to the copying. T4 drains explicitly and times the drain.
+_T4 = sorted((pathlib.Path(__file__).resolve().parents[1] / "v4_audit_2026_08_25"
+              / "data").glob("matrix_T4_split_*"))
+chk("T4 run directories", len(_T4), 1)
+_t4 = _T4[0]
+chk("T4 arm-runs", len(list(_t4.glob("*__rep*.json"))), 18)
+chk("T4 validated", (_t4 / "RUN_COMPLETE.json").exists(), True)
+_t4m = json.loads((_t4 / "manifest.json").read_text(encoding="utf-8"))
+chk("T4 arms", sorted(_t4m["arms"]), ["baseline", "spec-dflash-n2", "spec-draft-n8"])
+chk("T4 repeats, balanced where 4 could not be",
+    (_t4m["repeats"], _t4m["schedule_is_position_balanced"]), (6, True))
+chk("T4 ran thinking on at the audited fit target",
+    (_t4m["think"], _t4m["fit_target"]), ("on", "3072"))
+chk("T4 ran on an instrumented library, not the stock one",
+    _t4m["server_lib_sha256"]["libllama-server-impl.so"][:8], "0ff03b30")
+chk("the split patch is archived",
+    (pathlib.Path(__file__).resolve().parents[1] / "v4_audit_2026_08_25" / "patches"
+     / "checkpoint_timers_split.patch").is_file(), True)
+
+# decode seconds, from the arm-run JSON
+def _decode_s(arm):
+    out = []
+    for f in sorted(_t4.glob(f"{arm}__rep*.json")):
+        rows = json.loads(f.read_text(encoding="utf-8"))["rows"]
+        out.append(sum(r["timings"]["predicted_ms"] for r in rows) / 1000.0)
+    return out
+_t4_base = st.mean(_decode_s("baseline"))
+_t4_draft = st.mean(_decode_s("spec-draft-n8"))
+_t4_excess = _t4_draft - _t4_base
+chk("T4 excess over no speculation (s)", round(_t4_excess, 1), 71.5, 0.05)
+chk("and it reproduces A12's run T to under a fifth of a second",
+    abs(_t4_excess - 71.4) < 0.2, True)
+
+# The split itself, re-derived from the instrumented logs. Until 2026-08-27 the
+# three figures below were compared with literals and the document was the only
+# place they existed; `analysis/rederive_from_logs.py` now regenerates the dump
+# from run T4's 18 server logs and this reads the dump.
+_T4J = json.loads((pathlib.Path(__file__).resolve().parents[1] / "v4_audit_2026_08_25"
+                   / "data" / "checkpoint_timers_20260827_split.json")
+                  .read_text(encoding="utf-8"))
+chk("T4's split dump covers all eighteen arm-runs", len(_T4J), 18)
+_t4d = [r for r in _T4J if r["arm"] == "spec-draft-n8"]
+chk("six of them are the arm that checkpoints", len(_t4d), 6)
+chk("and the other twelve record no checkpoint events at all",
+    sorted({(r["creates"], r["restores"]) for r in _T4J if r["arm"] != "spec-draft-n8"}),
+    [(0, 0)])
+chk("785 creates and 728 restores in every one of the six",
+    sorted({(r["creates"], r["restores"]) for r in _t4d}), [(785, 728)])
+_t4_call = st.mean(r["checkpoint_total_s"] for r in _t4d)
+_t4_sync = st.mean(r["sync_total_s"] for r in _t4d)
+_t4_state = st.mean(r["state_total_s"] for r in _t4d)
+chk("the three parts add up", round(_t4_sync + _t4_state, 3), round(_t4_call, 3), 0.0015)
+
+_A12T = {r[0]: r[1:] for r in _md_table("| | seconds | share of the 71.49 s excess |", quoted=True)}
+chk("A12's split table rows", len(_A12T), 3)
+chk("A12 quotes the whole call",
+    round(_t4_call, 2), _cell(_A12T["inside the checkpoint calls"][0]), 0.005)
+chk("A12 quotes the synchronisation wait",
+    round(_t4_sync, 3), _cell(_A12T["of which, waiting on synchronize()"][0]), 0.0005)
+chk("A12 quotes the state work",
+    round(_t4_state, 2), _cell(_A12T["of which, state work"][0]), 0.005)
+chk("the wait is under a hundredth of a percent of the excess",
+    _cell(_A12T["of which, waiting on synchronize()"][1]) < 0.01, True)
+chk("and the wait's own share is what A12 published",
+    round(100 * _t4_sync / _t4_excess, 3),
+    _cell(_A12T["of which, waiting on synchronize()"][1]), 0.0005)
+chk("and the share is the one A12 published",
+    round(100 * _t4_state / _t4_excess, 1), _cell(_A12T["of which, state work"][1]), 0.05)
+chk("which reproduces run T's 54.7 % on a different build",
+    round(100 * _t4_call / _t4_excess, 1), 54.7, 0.05)
+# the components A12 says reproduce, against run T's own dump
+_T26 = {(r["arm"], r["repeat"]): r for r in json.loads(
+    (pathlib.Path(__file__).resolve().parents[1] / "v4_audit_2026_08_25" / "data"
+     / "checkpoint_timers_20260826.json").read_text(encoding="utf-8"))}
+_T26d = [v for k, v in _T26.items() if k[0] == "spec-draft-n8"]
+for _f, _tol in (("update_tgt_s", 0.05), ("load_tgt_s", 0.05), ("load_dft_s", 0.05)):
+    chk(f"T4 reproduces run T's {_f} to {_tol} s",
+        abs(st.mean(r[_f] for r in _t4d) - st.mean(r[_f] for r in _T26d)) < _tol, True)
+chk("A12 says the boundary question is answered by measurement",
+    "answered by measurement rather than by wording" in _ER_V3, True)
+chk("A12 records that the tree went back to stock",
+    "a0cbe4d0" in _ER_V3 and "0ff03b30" in _ER_V3, True)
+
+# A16's step, and the two things T4 could test
+_A16T = {r[0]: r[1:] for r in _md_table("| arm | per-repeat pooled tok/s | CV |")}
+chk("A16's T4 table rows", len(_A16T), 3)
+def _rates(arm):
+    out = []
+    for f in sorted(_t4.glob(f"{arm}__rep*.json")):
+        rows = json.loads(f.read_text(encoding="utf-8"))["rows"]
+        out.append(1000 * sum(r["timings"]["predicted_n"] for r in rows)
+                   / sum(r["timings"]["predicted_ms"] for r in rows))
+    return out
+for _label, _arm in (("no speculation", "baseline"),
+                     ("spec-draft-n8", "spec-draft-n8"),
+                     ("spec-dflash-n2", "spec-dflash-n2")):
+    _v = _rates(_arm)
+    _cv = 100 * st.stdev(_v) / st.mean(_v)
+    chk(f"T4 {_arm} per-repeat values",
+        [round(x, 2) for x in _v],
+        [_cell(x) for x in _A16T[_label][0].split()])
+    chk(f"T4 {_arm} CV (%)", round(_cv, 2), _cell(_A16T[_label][1]), 0.005)
+_d = _rates("spec-dflash-n2")
+chk("T4 the step: the last three are all above the first three",
+    min(_d[3:]) > max(_d[:3]), True)
+chk("and it is about four percent",
+    round(100 * (st.mean(_d[3:]) / st.mean(_d[:3]) - 1), 1), 3.9, 0.05)
+chk("while the arms beside it hold under one percent",
+    max(100 * st.stdev(_rates(a)) / st.mean(_rates(a))
+        for a in ("baseline", "spec-draft-n8")) < 1.0, True)
+chk("A16 records that the predecessor does not explain it",
+    "both predecessors produce both levels" in _ER_V3, True)
+chk("and that the telemetry moves the wrong way",
+    "moves the wrong way" in _ER_V3, True)
+
 print("\n=== the same measurement, stored twice, must agree ===")
 # Every arm-run row carries `predicted_ms`, `predicted_n` and
 # `predicted_per_second` at the top level AND inside `timings`, and different
@@ -1820,8 +2247,8 @@ for _f in _armruns:
             if _k in _r and _k in _t and _r[_k] != _t[_k]:
                 _disagree.append(f"{_f.parent.name}/{_f.name}: {_k} "
                                  f"{_r[_k]!r} at the top level, {_t[_k]!r} in timings")
-chk("arm-run files scanned", len(_armruns) > 600, True)
-chk("request rows scanned", _rows_seen > 7000, True)
+chk("arm-run files scanned", len(_armruns) > 1200, True)
+chk("request rows scanned", _rows_seen > 13000, True)
 chk("the two copies of every measurement agree", _disagree[:3], [])
 
 # B8: `predicted_per_second` is llama.cpp's own field and it reports a rate over
@@ -1842,7 +2269,7 @@ for _f in _armruns:
             _nn += 1
         else:
             _neither += 1
-chk("B8 rows where the server reports 1000*(n-1)/ms", _nm1, 7120)
+chk("B8 rows where the server reports 1000*(n-1)/ms", _nm1, 13300)
 chk("B8 rows where it reports 1000*n/ms", _nn, 44)
 chk("B8 rows matching neither", _neither, 0)
 chk("B8 the 44 are the legacy binary's",
@@ -2699,7 +3126,12 @@ for _mp in sorted(glob.glob("v4_audit_2026_08_25/data/matrix_*/manifest.json")):
             and _mm.get("prompt_set", "v1") == "v1" and str(_mm.get("ctx")) == "8192"
             and str(_mm.get("fit_target")) == "3072"
             and _mm.get("target_sha256") == _TGT_SHA
-            and "spec-dflash-n2" in (_mm.get("arms") or {})):
+            and "spec-dflash-n2" in (_mm.get("arms") or {})
+            # A16 is "twelve times IN ONE DAY". Run T4 satisfies every other
+            # criterion and ran on 2026-08-27, so it is a later measurement of
+            # the same thing, reported in A16's addendum rather than folded into
+            # the same-day statistics it would otherwise change.
+            and str(_mm.get("created", "")).startswith("2026-08-26")):
         _comparable_dirs.append(os.path.dirname(_mp))
 chk("comparable measurements of the DFlash arm", len(_comparable_dirs), 12)
 _dfl_base = []
@@ -2924,8 +3356,10 @@ chk("and that gap is what runs U3 and U5 actually differ by",
     round(_uvals["U5"] - _uvals["U3"], 2), 8.30, 0.005)
 chk("A17 shows the two halves could not have overlapped",
     "938 s" in _er_v and "982 s gap" in re.sub(r"\s+", " ", _er_v), True)
-chk("A17 no longer claims to close P1-3",
-    "does **not** close" in _er_v, True)
+chk("A17 closes only the crossover half of P1-3",
+    "closes the crossover half of" in _er_v, True)
+chk("and not the within-invocation half",
+    "does **not** close" in _er_v, False)
 chk("A17 separates the two estimands",
     "answer different questions" in _er_v, True)
 
@@ -3231,7 +3665,10 @@ for _d in sorted(glob.glob("v4_audit_2026_08_25/data/matrix_*")):
     if not (_m.get("think") == "on" and _m.get("concurrency") == 1
             and _m.get("prompt_set", "v1") == "v1" and str(_m.get("ctx")) == "8192"
             and str(_m.get("fit_target")) == "3072"
-            and _m.get("target_sha256") == _TGT and "baseline" in _m["arms"]):
+            and _m.get("target_sha256") == _TGT and "baseline" in _m["arms"]
+            # same-day, for the same reason as A16's set above: the footnote is
+            # about twelve measurements on 2026-08-26, and run T4 is a later one
+            and str(_m.get("created", "")).startswith("2026-08-26")):
         continue
     _b = _pooled_of(_d, "baseline")
     if not _b:
@@ -3276,6 +3713,242 @@ chk("README no longer claims the lower of the two is quoted",
     "The lower of the two is quoted" in _README, False)
 
 
+import ast as _ast0
+import pathlib as _pl0
+print("\n=== the pull request body (PULL_REQUEST.md) ===")
+# The third review's P0-4 was errors in the PR body. Fixing them once fixes
+# nothing durable: the body is a published document with four numeric tables in
+# it and nothing was reading them, which is the same defect this audit has now
+# found five times. The body lives in the tree and its tables are parsed here.
+# `gh pr edit 2 --body-file PULL_REQUEST.md` is what publishes it.
+_PR_LINES = (pathlib.Path(__file__).resolve().parents[1] / "PULL_REQUEST.md") \
+    .read_text(encoding="utf-8").splitlines()
+
+
+def _pr_table(header_startswith):
+    # tables inside a list item are indented; strip before matching
+    lines = [l.strip() for l in _PR_LINES]
+    i = next((i for i, l in enumerate(lines)
+              if _norm(l).startswith(header_startswith)), None)
+    if i is None:
+        return []
+    rows = []
+    for l in lines[i + 2:]:
+        if not l.startswith("|"):
+            break
+        rows.append([c.strip().strip("*`").replace("`", "").replace("*", "").strip()
+                     for c in _norm(l).strip("|").split("|")])
+    return rows
+
+
+# The body's own header comment says how many tables it has, which is one more
+# unchecked figure in a file that exists because of unchecked figures.
+def _pr_tables():
+    lines = [l.strip() for l in _PR_LINES]
+
+    def _rule(l):
+        bare = l.replace("|", "").replace(" ", "")
+        return bool(bare) and set(bare) <= set("-:")
+
+    return [l for i, l in enumerate(lines)
+            if l.startswith("|") and i + 1 < len(lines) and _rule(lines[i + 1])]
+
+
+_PRN = {"four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9}
+_hdr = next((w for w in _PRN if f"the {w} tables below" in "\n".join(_PR_LINES[:12])), None)
+chk("PR body: its header says how many tables it has", _hdr is not None, True)
+chk("PR body: and that is how many there are", _PRN.get(_hdr), len(_pr_tables()))
+
+# --- the headline table: run O2's nine arms, pooled, against the baseline ----
+def _prpool(d, arm):
+    """`_pool` is defined three times in this file and returns a tuple by here."""
+    n = ms = 0
+    for f in glob.glob(f"{d}/{arm}__rep*.json"):
+        r = json.load(open(f))
+        n += sum(x["predicted_n"] for x in r["rows"])
+        ms += sum(x["predicted_ms"] for x in r["rows"])
+    return 1000 * n / ms
+
+
+_PRH = {r[0]: r[1:] for r in
+        _pr_table("| arm | pooled tok/s | change |")}
+chk("the PR body's headline table rows", len(_PRH), 9)
+chk("and the no-speculation row is one of them", "no speculation" in _PRH, True)
+_pr_base = _prpool(_O2, "baseline")
+chk("PR body headline: no-speculation pooled",
+    round(_pr_base, 1), _cell(_PRH["no speculation"][0]), 0.05)
+for _arm, _row in sorted(_PRH.items()):
+    if _arm == "no speculation":
+        continue
+    _pv = _prpool(_O2, _arm)
+    chk(f"PR body headline {_arm} pooled tok/s",
+        round(_pv, 1), _cell(_row[0]), 0.05)
+    chk(f"PR body headline {_arm} change (%)",
+        round(100 * (_pv / _pr_base - 1), 1), _cell(_row[1]), 0.05)
+chk("PR body headline: the ordering it presents is by pooled rate, descending",
+    [a for a, r in sorted(_PRH.items(), key=lambda kv: -_cell(kv[1][0]))],
+    [r[0] for r in _pr_table("| arm | pooled tok/s | change |")])
+
+# --- what it costs: the A12 accounting, as the body groups it ---------------
+# The body merges A12's `load_tgt` and `load_dft` into one restore row and
+# renames `update_tgt` to save, so the labels differ from ERRATA's and the
+# numbers must not.
+_PRC = {r[0]: r[1:] for r in _pr_table("| | seconds | share of the excess |")}
+chk("the PR body's cost table rows", len(_PRC), 5)
+chk("PR body cost: the excess over no speculation",
+    round(_exc, 1), _cell(_PRC["excess over no speculation"][0]), 0.05)
+chk("PR body cost: checkpoint save, seconds",
+    round(st.mean([r["update_tgt_s"] for r in _ext]), 2),
+    _cell(_PRC["speculative checkpoint save (785)"][0]), 0.005)
+chk("PR body cost: checkpoint restore is load_tgt plus load_dft",
+    round(_restore, 2), _cell(_PRC["speculative checkpoint restore (728)"][0]), 0.005)
+# `_ck` is rebound further up this file; recompute from the rows themselves
+_pr_ck = st.mean([r["checkpoint_total_s"] for r in _ext])
+chk("PR body cost: and the save row is not the whole checkpoint",
+    _cell(_PRC["speculative checkpoint save (785)"][0])
+    + _cell(_PRC["speculative checkpoint restore (728)"][0]),
+    round(_pr_ck, 2), 0.015)
+for _row in ("speculative checkpoint save (785)",
+             "speculative checkpoint restore (728)",
+             "drafter generate()", "unattributed"):
+    chk(f"PR body cost: {_row} share of the excess (%)",
+        round(100 * _cell(_PRC[_row][0]) / _exc, 1), _cell(_PRC[_row][1]), 0.05)
+chk("PR body cost: the four rows add up to the excess",
+    round(sum(_cell(_PRC[k][0]) for k in
+              ("speculative checkpoint save (785)",
+               "speculative checkpoint restore (728)",
+               "drafter generate()", "unattributed")), 2),
+    round(_exc, 2), 0.05)
+chk("PR body cost: and the shares add up to 100 %",
+    round(sum(_cell(_PRC[k][1]) for k in
+              ("speculative checkpoint save (785)",
+               "speculative checkpoint restore (728)",
+               "drafter generate()", "unattributed")), 1), 100.0, 0.15)
+
+# --- and the same table in the top-level README ----------------------------
+# It was never parsed either, and it carried the same 30.5 %: the merged
+# restore row is 21.74 / 71.4 = 30.4 %, and 30.5 was load_tgt's share plus
+# load_dft's, each rounded first. With 30.4 the column adds to exactly 100.
+_RML = (pathlib.Path(__file__).resolve().parents[1] / "README.md") \
+    .read_text(encoding="utf-8").splitlines()
+_i = next(i for i, l in enumerate(_RML) if l.startswith("| | seconds | share |"))
+_RMC = {}
+for _l in _RML[_i + 2:]:
+    if not _l.startswith("|"):
+        break
+    _c = [x.strip().strip("*`").replace("`", "").strip("* ").strip()
+          for x in _norm(_l).strip("|").split("|")]
+    _RMC[_c[0]] = _c[1:]
+chk("the README's cost table rows", len(_RMC), 4)
+chk("README cost: checkpoint save, seconds",
+    round(st.mean([r["update_tgt_s"] for r in _ext]), 2),
+    _cell(_RMC["speculative checkpoint save (785)"][0]), 0.005)
+chk("README cost: checkpoint restore, seconds",
+    round(_restore, 2), _cell(_RMC["speculative checkpoint restore (728)"][0]), 0.005)
+for _row in ("speculative checkpoint save (785)",
+             "speculative checkpoint restore (728)",
+             "drafter generate()", "unattributed"):
+    chk(f"README cost: {_row} share (%)",
+        round(100 * _cell(_RMC[_row][0]) / _exc, 1), _cell(_RMC[_row][1]), 0.05)
+chk("README cost: the rows add up to the excess",
+    round(sum(_cell(v[0]) for v in _RMC.values()), 2), round(_exc, 2), 0.05)
+chk("README cost: and the shares add up to 100 %",
+    round(sum(_cell(v[1]) for v in _RMC.values()), 1), 100.0, 0.05)
+chk("README and the PR body publish the same cost table",
+    {k: v for k, v in _RMC.items()},
+    {k: v for k, v in _PRC.items() if k != "excess over no speculation"})
+chk("README records that the boundary was measured",
+    "0.002 s of 39.09 s" in _norm(pathlib.Path(__file__).resolve().parents[1]
+                                  .joinpath("README.md").read_text(encoding="utf-8")),
+    True)
+
+# --- run T4: the split that answers the API-boundary objection --------------
+_PRT4 = {r[0]: r[1:] for r in
+         _pr_table("| | seconds | share of the 71.49 s excess |")}
+chk("the PR body's T4 table rows", len(_PRT4), 3)
+chk("PR body T4: the wait, in seconds",
+    round(_t4_sync, 3), _cell(_PRT4["of which, waiting on synchronize()"][0]), 0.0005)
+chk("PR body T4: inside the checkpoint calls",
+    round(_t4_call, 2), _cell(_PRT4["inside the checkpoint calls"][0]), 0.005)
+chk("PR body T4: and the share of the excess",
+    round(100 * _t4_call / _t4_excess, 1),
+    _cell(_PRT4["inside the checkpoint calls"][1]), 0.05)
+chk("PR body T4: the wait's share, to three decimals",
+    round(100 * _t4_sync / _t4_excess, 3),
+    _cell(_PRT4["of which, waiting on synchronize()"][1]), 0.0005)
+chk("PR body T4: the excess in its table header matches the data",
+    round(_t4_excess, 1), 71.5, 0.05)
+
+# --- run V2: the crossover ---------------------------------------------------
+_PRV2 = {r[0]: r[1:] for r in
+         _pr_table("| arm | freerun | hard cap | shift, 95 % t over 8 sessions |")}
+chk("the PR body's V2 table rows", len(_PRV2), 4)
+chk("and it names the same four arms the data has",
+    sorted(_PRV2), sorted(_v2_shift))
+for _a, _row in sorted(_PRV2.items()):
+    chk(f"PR body V2 {_a} freerun (%)",
+        round(_lm.interval(_v2_free[_a])[0], 2), _cell(_row[0].split("[")[0]), 0.005)
+    chk(f"PR body V2 {_a} hard cap (%)",
+        round(_lm.interval(_v2_cap[_a])[0], 2), _cell(_row[1].split("[")[0]), 0.005)
+    chk(f"PR body V2 {_a} shift (pp)",
+        round(_lm.interval(_v2_shift[_a])[0], 2), _cell(_row[2].split("[")[0]), 0.005)
+
+# --- run V3 against V2, which is the disagreement the body reports -----------
+_PRV3 = {r[0]: r[1:] for r in
+         _pr_table("| arm | V3, within invocation | V2, between invocations |")}
+chk("the PR body's V3 table rows", len(_PRV3), 4)
+for _a, _row in sorted(_PRV3.items()):
+    chk(f"PR body V3 {_a} within-invocation mean (pp)",
+        round(st.mean(_v3_shift[_a]), 2), _cell(_row[0]), 0.005)
+    chk(f"PR body V3 {_a} against V2 (pp)",
+        round(_lm.interval(_v2_shift[_a])[0], 2), _cell(_row[1].split("[")[0]), 0.005)
+
+# --- the re-derivation table, against the dumps it names --------------------
+_PRR = {r[0]: r[1:] for r in
+        _pr_table("| derived file | records | identical | not regenerated |")}
+chk("the PR body's re-derivation table rows", len(_PRR), 4)
+for _f, _row in sorted(_PRR.items()):
+    _n = len(json.loads((pathlib.Path(__file__).resolve().parents[1]
+                         / "v4_audit_2026_08_25" / _f).read_text(encoding="utf-8")))
+    chk(f"PR body re-derivation: {_f} record count", _n, int(_cell(_row[0])))
+    chk(f"PR body re-derivation: {_f} identical plus not-regenerated",
+        int(_cell(_row[1])) + int(_cell(_row[2])), _n)
+chk("PR body re-derivation: it names the split dump run T4 produced",
+    "data/checkpoint_timers_20260827_split.json" in _PRR, True)
+
+# --- and the prose figures the body leads with ------------------------------
+_PR = re.sub(r"\s+", " ", _norm("\n".join(_PR_LINES)))
+chk("PR body: the arm-run total it claims matches the three runs on disk",
+    f"{sum(len(list(d.glob('*__rep*.json'))) for d in _V2) + 200 + 18} arm-runs" in _PR,
+    True)
+chk("PR body: it reports the V2 disagreement as a range, not a pick",
+    "design-dependent, +5.9 to +8.7 pp" in _PR, True)
+chk("PR body: it still says the randomised-order run has not been run",
+    _PR.count("it has not been run"), 2)
+chk("PR body: it does not claim the mode order was the cause",
+    "Order was not the cause" in _PR, True)
+chk("PR body: the regression count it quotes is the suite's own",
+    f"# {_pl0.Path(__file__).resolve().parents[1].joinpath('tests/test_harness_invariants.py').read_text(encoding='utf-8').count('    def test')} regressions" in _PR,
+    True)
+chk("PR body: the run-directory count it quotes is what the checker walks",
+    f"all {len([d for d in (_pl0.Path(__file__).resolve().parents[1] / 'v4_audit_2026_08_25' / 'data').iterdir() if d.is_dir()])} run directories" in _PR,
+    True)
+def _n_mutations(rel):
+    """How many entries the MUTATIONS list in one of the two suites holds."""
+    _t = _ast0.parse(_pl0.Path(__file__).resolve().parents[1].joinpath(rel)
+                     .read_text(encoding="utf-8"))
+    for _n in _t.body:
+        if (isinstance(_n, _ast0.Assign) and len(_n.targets) == 1
+                and getattr(_n.targets[0], "id", None) == "MUTATIONS"):
+            return len(_n.value.elts)
+    return None
+
+
+chk("PR body: the mutation counts it quotes are the two suites' own",
+    f"{_n_mutations('tests/mutate.py')} code and "
+    f"{_n_mutations('tests/data_mutate.py')} data perturbations" in _PR,
+    True)
+
 print("\n=== the checker audits itself ===")
 # A chk() whose computed side contains no name is comparing one literal with
 # another and can never fail. Six of these were found on 2026-08-26, four of them
@@ -3303,6 +3976,20 @@ chk("checker: no chk() compares literals with literals",
     (len(_literal_only), _literal_only[:3]), (0, []))
 chk("checker: number of assertions", len([1 for _n in _ast.walk(_tree)
      if isinstance(_n, _ast.Call) and isinstance(_n.func, _ast.Name) and _n.func.id == "chk"]) > 150, True)
+
+# Last, because it needs every other assertion to have run: the PR body quotes
+# how many there are, and a stale figure there is the same defect as a stale
+# figure in any other published table.
+#
+# Eight of them are the git-provenance checks, which do not run where there is
+# no `.git` - a mirror, or a shallow clone. So the count the body publishes is
+# the one a full checkout produces, and this compares against that rather than
+# pretending the two are the same number. `tests/data_mutate.py` runs the
+# checker in exactly such a mirror, which is how the difference surfaced.
+_GITLESS_SKIPPED = 8
+_pr_total = len(RAN) + 1 + (0 if _HAS_GIT else _GITLESS_SKIPPED)
+chk("PR body: the assertion count it quotes is a full checkout's",
+    f"# {_pr_total} assertions" in _PR, True)
 
 print(f"\n{'='*70}\n{'ALL CLAIMS VERIFIED' if not FAIL else 'FAILURES: ' + ', '.join(FAIL)}\n{'='*70}")
 sys.exit(1 if FAIL else 0)

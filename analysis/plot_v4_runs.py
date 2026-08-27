@@ -541,7 +541,13 @@ def plot_two_levels() -> None:
                 and m.get("prompt_set", "v1") == "v1" and str(m.get("ctx")) == "8192"
                 and str(m.get("fit_target")) == "3072"
                 and m.get("target_sha256") == TGT
-                and "spec-dflash-n2" in (m.get("arms") or {})):
+                and "spec-dflash-n2" in (m.get("arms") or {})
+                # A16 is "twelve times IN ONE DAY", and `verify_claims.py` uses
+                # exactly this rule. Run T4 satisfies everything else and ran on
+                # 2026-08-27; it is A16's addendum, not one of the 43 blocks.
+                # The two rules being separate copies is how they drifted apart
+                # once already, so `tests/` asserts they still agree.
+                and str(m.get("created", "")).startswith("2026-08-26")):
             continue
         runs.append((m["created"], os.path.basename(d)))
     if not runs:

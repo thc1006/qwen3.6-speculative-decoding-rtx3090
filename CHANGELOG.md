@@ -8,6 +8,128 @@ publication point with its own data set.
 
 ## [Unreleased] — the review pass, and an adversarial pass over it
 
+### The three runs the third review asked for
+
+Nine and a half hours on the bench card, 618 arm-runs, none failed.
+
+**Run V2 — the crossover.** Eight sessions of two halves in `AB BA BA AB BA AB
+AB BA` order, so each mode ran first four times and second four times with the
+two orders balanced in mean time position. 400 of 400 arm-runs. The hard cap
+raises every arm and every interval excludes zero; `spec-dflash-n4` is
+**−1.66 %** free-running and **+10.37 %** capped, both clear of zero on opposite
+sides, so the published "`n_max 4` goes negative" with thinking off is a length
+artefact. Run V's own numbers land inside the eight-session intervals for three
+of four arms — and **outside** for `spec-dflash-n2`, whose +9.26 pp is above all
+eight sessions. That arm's shift is +5.92 pp [+4.86, +6.99]. The review's
+objection was right and its size is **about 3.3 pp on one arm**.
+
+**Run V3 — both modes in one square.** `BENCH_HARDCAP_SUFFIX` puts `<arm>` and
+`<arm>-cap` in the same balanced 10×10 rotation, so the contrast is
+within-invocation. 200 of 200 arm-runs, two sessions. Three arms agree with the
+crossover to a tenth of a point. `spec-dflash-n2` does not: **+8.65 pp** within
+against **+5.92 pp** between, with V3's own two sessions 0.06 pp apart. The
+absolute rates say why — four of five arms reproduce between the designs to
+0.01–0.3 tok/s and the baseline to a hundredth, while that one arm moves −0.95 %
+free-running and +1.4 % capped, in opposite directions. The repository reports
+the effect for that arm as **design-dependent, +5.9 to +8.7 pp**, rather than
+picking the design that flatters it.
+
+**Run T4 — the checkpoint boundary, split.** The third review's P0-2 was that
+A12's timers surround calls beginning with `ctx->synchronize()`, so 39.07 s
+might be an attribution to the API boundary rather than to the copying.
+`bench/apply_split_timers.py` drains explicitly and times the drain. The answer
+is **0.002 s of 39.09 s — 0.003 % of the excess**. The queue is already empty
+when the checkpoint is taken. Every component reproduces (17.336 / 16.346 /
+5.412 against 17.34 / 16.33 / 5.41), the counts reproduce (785 creates, 728
+restores, six times), the excess reproduces (71.49 s against 71.4), and the
+share is **54.7 %**, exactly as published. The concern was legitimate and the
+measurement refutes it. The llama.cpp tree was restored to stock afterwards,
+verified by the library hash returning to `a0cbe4d0…`.
+
+**And T4 cornered A16.** Six repeats inside one invocation: `spec-dflash-n2`
+reads 139.36, 139.72, 139.93, then 145.04, 146.01, 144.43 — a **3.9 % step**
+partway through, on byte-identical output, while the two arms interleaved with
+it hold 0.12 % and 0.55 %. Three arms rotating means the predecessor varies, and
+it explains nothing: both predecessors produce both levels. 272 telemetry
+samples explain nothing either — across the step the card is *hotter*
+(63.4 → 64.9 °C), the SM clock is flat, the power is flat, and `sw_power_cap` is
+asserted in 17 samples while the arm is slow and 36 while it is fast. Every
+recorded physical quantity either does not move or moves the wrong way. A16's
+"invocation effect" is really an **arm-run-level** state that steps on a
+timescale of minutes.
+
+**What the runs cannot do**, stated because the review predicted it: both V2 and
+V3 use cyclic rotations, which balance position and fix the neighbour. Only T4,
+with three arms, varied the predecessor. Randomising the order is the next
+experiment and it has not been run.
+
+**The evidence for all of it is published.** A second tranche on the same
+release — `raw_logs_20260827.tar.zst`, 618 logs, 2.9 GB uncompressed, sha256
+`d56a7f88…` — kept separate so the first archive's digest keeps meaning what it
+meant. The manifest grows to 1320 logs and 21 traces, all 620 new entries
+verified against it before publishing, and the re-derivation still returns
+526 of 535, 12 of 12 and 12 of 12 identical with nothing differing.
+
+**One perturbation survived the clean mirror**, and it was a real gap: the v4
+README's run-M table publishes six aggregates that the checker computed from
+the data and compared with literals, never with the document. Changing a
+published 127.3 to 130.3 passed everything. That table is parsed cell by cell
+now — which is the same defect as the four tables the second review's pass
+found, in the one place a later edit put it back.
+
+**The pull request body is a published document, so it is in the tree now.**
+The third review's P0-4 was errors in it. Fixing them once fixes nothing: it is
+five numeric tables and four counts, and nothing was reading any of them.
+`PULL_REQUEST.md` holds the body, `analysis/verify_claims.py` parses all five
+tables cell by cell against the data, and the counts it quotes — assertions,
+regressions, perturbations, run directories — are derived from the files they
+describe rather than typed. `gh pr edit 2 --body-file PULL_REQUEST.md` is what
+publishes it.
+
+**That guard found one on its first run.** The checkpoint cost table appears in
+[`README.md`](README.md) and in the body as four merged rows, and both published
+the restore share as **30.5 %** — 22.9 + 7.6, the two component shares each
+rounded to one decimal and then added. The merged row is 21.74 s of 71.4 s,
+which is **30.4 %**, and with it the column adds to exactly 100.0 instead of
+100.1. A12's own four-row version has been parsed since 2026-08-26; the merged
+version was parsed nowhere. New **B9**.
+
+**And the count the body publishes could not hold in both places it is
+checked.** Eight of the checker's assertions are git-provenance checks that do
+not run where there is no `.git`, and `tests/data_mutate.py` runs the checker in
+exactly such a mirror. The first version of the count check compared against
+whatever had run, so it was right in a checkout and wrong in the mirror — which
+the mirror reported, correctly, as "the checker fails on an unperturbed mirror".
+It compares against a full checkout's count now, and a test derives the eight by
+running the checker twice with `git` shadowed by a failing shim, rather than
+trusting the constant.
+
+**A perturbation anchor could match twice.** `edit_doc` checked that its anchor
+was *present*, not that it was *unique*, so `| **39.09** | **54.7 %** |` — two
+identical rows of run T4's split table — perturbed whichever came first. It
+still fired, which is exactly the problem: an anchor can go ambiguous, or stop
+meaning what its perturbation's name says, and the suite prints the same "all
+detected" either way. It refuses a non-unique anchor now, and a test resolves
+all 39 against their documents on every run.
+
+**And "comparable" was decided in two files.** A16's twelve comparable runs are
+selected by seven manifest fields in `analysis/verify_claims.py` and by the same
+seven in `analysis/plot_v4_runs.py`. The checker also filters on the run date,
+because A16 is *twelve times in one day*; the chart did not. Run T4 satisfies
+all seven and ran on 2026-08-27, so the moment it was committed the checker
+still said twelve and the two-level chart quietly became thirteen — the chart
+check caught it as "stale", which is the right alarm for the wrong reason.
+Neither file was wrong about its own arithmetic. The chart carries the date
+filter now, and a test asserts both files carry it *and* that some run actually
+distinguishes the two rules, so the test cannot pass by there being nothing to
+separate.
+
+**And run T4's split is committed as data, not just as prose.** 39.09 s and
+0.002 s existed only in the document; `checkpoint_timers_20260827_split.json`
+holds all 18 arm-runs, `rederive_from_logs.py` regenerates it from the 18
+attested server logs — 18 of 18 identical — and the checker reads the dump
+rather than a literal.
+
 ### The third review
 
 A third REQUEST_CHANGES, on head `8954411`. Every accusation in it was checked
@@ -169,12 +291,12 @@ relying on, and which matter more than any of the above:
   different analyses read different copies: `paired_blocks.py`,
   `matrix_report.py`, `plot.py` and `plot_v4_runs.py` take the top-level one,
   `past_threshold_fit.py` the nested one. Nothing compared them, so a change to
-  either was invisible to whatever read the other. All 7164 rows of all 687
+  either was invisible to whatever read the other. All 13 344 rows of all 1305
   arm-run files are checked for agreement now, and both copies are perturbed.
 
 - **And a third, from chasing the second.** `predicted_per_second` — llama.cpp's
   own field, and the one every **request-mean** column in this repository is the
-  mean of — reports `1000 × (n − 1) / predicted_ms` in **7120 of 7164** rows.
+  mean of — reports `1000 × (n − 1) / predicted_ms` in **13 300 of 13 344** rows.
   It is a rate over `n − 1` tokens divided by the time for `n`. The 44
   exceptions are the legacy `bcb5eeb64` runs, so the definition also changed
   between the two tiers. Every headline figure and every delta is a pooled rate

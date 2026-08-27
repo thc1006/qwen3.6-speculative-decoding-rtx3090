@@ -40,30 +40,44 @@ jobs:
         run: |
           set -euo pipefail
           gh release download "$TAG" --repo "$GITHUB_REPOSITORY" \
-             --pattern 'raw_logs.tar.zst' --pattern 'telemetry.tar.zst' --dir evidence
+             --pattern '*.tar.zst' --dir evidence
           ls -l evidence
 
       - name: the archive is the one the repository names
         run: |
           set -euo pipefail
-          want=29c2401f100390268bbd52e43b5c2da9a61440bad3dabe502ca1684478771fd6
-          got=$(sha256sum evidence/raw_logs.tar.zst | cut -d' ' -f1)
-          echo "want $want"
-          echo "got  $got"
-          [ "$want" = "$got" ]
-          # and the same digest is what the manifest and the audit README record
-          grep -q "$want" v4_audit_2026_08_25/EVIDENCE_MANIFEST.sha256
-          grep -q "$want" v4_audit_2026_08_25/README.md
+          check() {
+            local file="$1" want="$2"
+            [ -f "$file" ] || { echo "missing $file" >&2; return 1; }
+            local got; got=$(sha256sum "$file" | cut -d' ' -f1)
+            echo "$(basename "$file") want $want got $got"
+            [ "$want" = "$got" ]
+            # and the same digest is what the manifest and the audit README record
+            grep -q "$want" v4_audit_2026_08_25/EVIDENCE_MANIFEST.sha256
+            grep -q "$want" v4_audit_2026_08_25/README.md
+          }
+          check evidence/raw_logs.tar.zst \
+            29c2401f100390268bbd52e43b5c2da9a61440bad3dabe502ca1684478771fd6
+          check evidence/raw_logs_20260827.tar.zst \
+            d56a7f88a099550bdab229ccb2bd36840f167550cea7689f575fd6d0f11da8ff
 
       - name: unpack, and check every file against the manifest
         run: |
           set -euo pipefail
           sudo apt-get -qq update && sudo apt-get -qq install -y zstd
           mkdir -p bench
+          # two tranches: the first archive keeps the digest it was published
+          # with, the second carries the 2026-08-27 runs
           tar --use-compress-program=unzstd -xf evidence/raw_logs.tar.zst -C bench
+          if [ -f evidence/raw_logs_20260827.tar.zst ]; then
+            tar --use-compress-program=unzstd -xf evidence/raw_logs_20260827.tar.zst -C bench
+          fi
           if [ -f evidence/telemetry.tar.zst ]; then
             tar --use-compress-program=unzstd -xf evidence/telemetry.tar.zst -C bench \
                 --strip-components=1
+          fi
+          if [ -f evidence/telemetry_20260827.tar.zst ]; then
+            tar --use-compress-program=unzstd -xf evidence/telemetry_20260827.tar.zst -C bench
           fi
           grep -v '^#' v4_audit_2026_08_25/EVIDENCE_MANIFEST.sha256 | grep -v '^$' > /tmp/manifest
           cd bench && sha256sum -c /tmp/manifest

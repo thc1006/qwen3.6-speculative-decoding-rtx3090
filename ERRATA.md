@@ -811,15 +811,39 @@ its own instrumentation.
 > work queued before the call to finish, as well as the serialisation, the
 > host/device copying, the container resize and the API's own bookkeeping.
 >
-> It is not isolated state-copy time, and **54.7 % is an attribution to the API
-> boundary, not a measurement of checkpoint memory traffic.** Some of the
-> synchronisation wait would be paid elsewhere on a path with no checkpoints
-> rather than disappearing, so the counterfactual saving is at most this figure
-> and plausibly less. Separating them needs a second timer inside the call —
-> `synchronize()` and the state get/set timed apart, or `AUDIT_US sync=` and
-> `AUDIT_US serialize=` emitted from `llama_state_seq_*_ext` itself — which is
-> a rebuild and a re-run that has not been done. Until it is, read every number
-> below as API-call elapsed.
+> That was raised as a reason to distrust the 54.7 %: if the wait were large, it
+> would be an attribution to the API boundary rather than to the copying, and
+> some of it would be paid elsewhere on a path with no checkpoints rather than
+> disappearing. **Run T4 measures it, and it is not.**
+>
+> `bench/apply_split_timers.py` drains the queue explicitly, immediately before
+> each of the four calls, and times the drain; the call's own internal
+> `synchronize()` then finds nothing outstanding, so what is left is the state
+> work. Total work is unchanged — the wait happened either way, a microsecond
+> earlier — and the field names are kept, so `update_tgt` still means the whole
+> call and the total must still reproduce 39.07 s. Six repeats, the same three
+> arms, `--fit-target 3072`, thinking on, on a build whose only difference from
+> the one A12 used is the extra timers:
+>
+> | | seconds | share of the 71.49 s excess |
+> |---|---:|---:|
+> | inside the checkpoint calls | **39.09** | **54.7 %** |
+> | of which, waiting on `synchronize()` | **0.002** | **0.003 %** |
+> | of which, state work | **39.09** | **54.7 %** |
+>
+> Two milliseconds of thirty-nine seconds. The queue is already drained when the
+> checkpoint is taken, which is what one would expect: the sampler has just read
+> the logits back. Every component reproduces — `update_tgt` 17.336 s against
+> 17.34, `load_tgt` 16.346 against 16.33, `load_dft` 5.412 against 5.41 — and so
+> do the event counts, 785 creates and 728 restores in every one of six repeats.
+> The excess itself lands at 71.49 s against 71.4.
+>
+> So the boundary question is answered by measurement rather than by wording:
+> **the 54.7 % is state work.** The patch is archived at
+> [`v4_audit_2026_08_25/patches/checkpoint_timers_split.patch`](v4_audit_2026_08_25/patches/checkpoint_timers_split.patch),
+> 31 insertions in one file; the instrumented library hashes to `0ff03b30…` and
+> the tree was restored to stock afterwards, verified by the library returning
+> to `a0cbe4d0…`.
 
 **The accounting.** One ten-prompt arm-run, 3000 generated tokens, decode time
 only, mean of four:
@@ -1260,6 +1284,41 @@ binary.** Twelve runs of the configuration span
 **+17.3 % to +26.7 %**. The interval describes the invocation, not the
 configuration, and the README quotes the range beside it for that reason.
 
+**Run T4 catches it stepping, inside one invocation, with the telemetry
+running.** Six repeats of three arms on the split-timer build, 2026-08-27,
+`spec-dflash-n2` in execution order:
+
+| arm | per-repeat pooled tok/s | CV |
+|---|---|---:|
+| no speculation | 116.74 116.24 116.62 116.33 115.13 115.54 | 0.55 % |
+| `spec-draft-n8` | 30.76 30.83 30.81 30.84 30.83 30.86 | **0.12 %** |
+| `spec-dflash-n2` | 139.36 139.72 139.93 **145.04 146.01 144.43** | **2.15 %** |
+
+Three low, then three high, a **3.5 % step** partway through a single
+invocation, on byte-identical output, while the two arms interleaved with it
+hold 0.12 % and 0.55 %. Two things this run could test and the others could not:
+
+- **It is not the preceding arm.** Three arms rotating means the predecessor
+  varies. `spec-dflash-n2` reads 139.36, 139.72, 145.04 and 146.01 after
+  `spec-draft-n8`, and 139.93 and 144.43 after `baseline` — both predecessors
+  produce both levels. The other two arms move by less than 1 % whatever
+  precedes them. Run V2 and run V3 could not test this at all: a cyclic
+  rotation balances position and fixes the neighbour, which is why
+  `spec-dflash-n2` follows `baseline` in 32 of V2's 40 arm-runs and
+  `baseline-cap` in 18 of V3's 20.
+- **It is not thermal, clock or power.** 272 telemetry samples at 5 s. Across
+  the step the card gets *hotter* (63.4 → 64.9 °C) and *slower to clock down*
+  is not what happens either — the SM clock is flat at 1942 → 1944 MHz and
+  power at 238.8 → 239.4 W. `sw_power_cap` is asserted in **17** samples while
+  the arm is slow and **36** while it is fast. Every physical quantity recorded
+  either does not move or moves the wrong way.
+
+So A16's "nothing recorded distinguishes them" now survives continuous
+telemetry, a varying predecessor, and a step visible inside one invocation. What
+is left is that this one arm's decode rate has two levels about 3.5 % apart, it
+moves between them on a timescale of minutes, and nothing this repository
+records predicts which one you get.
+
 ### A17. The thinking-off comparisons are not comparisons of the same amount of work
 
 Pooled decode rate is generated tokens over decode milliseconds. It is the right
@@ -1267,7 +1326,7 @@ metric when the arms generate the same number of tokens and a confounded one
 when they do not, because decode rate falls as the KV cache grows: an arm that
 stops at 187 tokens is being scored on cheaper tokens than one that runs to 300.
 
-With thinking **on**, the question never arises here. All **5724** thinking-on
+With thinking **on**, the question never arises here. All **5904** thinking-on
 requests in the controlled tier, across 35 run directories, returned
 `finish_reason: length` at exactly their run's `max_tokens`. Not one stopped
 early.
@@ -1399,11 +1458,174 @@ freerun half to its own length-matched prompts gives +21.25, +17.55, +12.67 and
 > and the acceptance profile all differ from the freerun half. Equal token
 > counts are not equal computation.
 
-This does **not** close [`RETEST_TODO.md`](RETEST_TODO.md) P1-3, which stays
-open for the crossover. The archived thinking-off runs stay as they are; what
-they measured is now stated, and a second measurement of the same five arms
-under a forced cap exists to compare against — a difference this design cannot
-attribute, not a bound on the confound.
+**Run V2 is the crossover, and it settles it.** Eight sessions of two halves
+each on 2026-08-27, in `AB BA BA AB BA AB AB BA` order so each mode ran first
+four times and second four times with the two orders balanced in mean time
+position — 4.5 each, so neither the mode nor the order is confounded with drift
+across the night. Five arms, five repeats a half, `latin`, thinking off, run V's
+configuration otherwise verbatim. **400 of 400 arm-runs, 16 of 16 halves
+complete, none failed.** The session is the resampling unit and the contrast is
+
+```
+shift(arm, session) = (cap rate / cap baseline − 1) − (free rate / free baseline − 1)
+```
+
+with the baseline measured **inside the same half**, so a whole-invocation shift
+that moves every arm equally cancels.
+
+| arm | freerun | hard cap | shift, 95 % t over 8 sessions |
+|---|---:|---:|---:|
+| `spec-dflash-n4` | **−1.66 %** [−1.98, −1.35] | **+10.37 %** [+10.20, +10.53] | **+12.03 pp** [+11.67, +12.38] |
+| `spec-mtp-n2` | +11.48 % [+11.24, +11.72] | +21.02 % [+20.82, +21.22] | +9.54 pp [+9.14, +9.93] |
+| `spec-draft-n8` | −76.77 % [−76.80, −76.73] | −70.46 % [−70.49, −70.43] | +6.31 pp [+6.29, +6.33] |
+| `spec-dflash-n2` | +10.71 % [+10.29, +11.14] | +16.63 % [+15.69, +17.58] | +5.92 pp [+4.86, +6.99] |
+
+**The hard cap moves every arm, and the sign flip is real.** Every interval
+excludes zero. `spec-dflash-n4` — the arm A17 was written about — is negative
+free-running and positive under the cap, with both intervals clear of zero on
+opposite sides. The published "`n_max 4` goes negative" with thinking off is a
+length artefact.
+
+**And run V overstated one of them.** Its `spec-dflash-n2` shift, +9.26 pp, lies
+outside [+4.86, +6.99] and above **all eight** sessions, whose maximum is
++8.07 pp. The inflation is in the hard-cap half: run V read +20.60 % there
+against a typical +16.63 % [+15.69, +17.58]. The other three of run V's four
+numbers land inside the eight-session intervals — +11.90 against [+11.67,
++12.38], +9.68 against [+9.14, +9.93], +6.31 against [+6.29, +6.33]. So the
+review's objection was right, and the size of what it was right about is
+**about 3.3 pp on one arm**.
+
+**Which arm, and why, is [A16](#a16-two-runs-identical-in-every-recorded-respect-and-byte-identical-in-output-differ-by-34--on-one-arm)
+again, from a different design.** The between-session standard deviation of the
+shift is not the same for every arm:
+
+| arm | SD over 8 sessions | range |
+|---|---:|---:|
+| `spec-draft-n8` | **0.02 pp** | 0.06 pp |
+| `spec-dflash-n4` | 0.42 pp | 1.07 pp |
+| `spec-mtp-n2` | 0.47 pp | 1.21 pp |
+| `spec-dflash-n2` | **1.27 pp** | **4.15 pp** |
+
+The arm A16 identified as carrying an unexplained invocation state is the one
+whose *contrast* is three times less stable than the other model-drafting arms
+and sixty times less stable than the external drafter — measured here by a
+design that knows nothing about A16. The no-speculation baseline holds a CV of
+**0.21 %** free-running and **0.11 %** capped across all eight sessions, so this
+is not a run-wide effect; it is that arm.
+
+**Order was not the problem.** Splitting the eight sessions by which mode ran
+first gives +5.22 against +6.62 for `spec-dflash-n2` (−1.40 pp), and −0.18,
++0.00 and +0.36 pp for the other three. The balanced design makes an order
+effect visible and there is barely one. What contaminated run V was the
+*invocation*, which is what averaging over eight of them removes.
+
+**And the work was identical every time.** Across all **4000 request rows** of
+the 400 arm-runs, every arm in every mode produced **one** distinct set of
+generated text and **one** distinct drafted/accepted pair over the eight
+sessions — byte-identical output on eight independent invocations, hours apart,
+with a server restart between every arm-run:
+
+| arm | freerun drafted / accepted | hard cap drafted / accepted |
+|---|---:|---:|
+| `spec-dflash-n2` | 6265 / 3660 = 58.4 % | 12 780 / 8550 = 66.9 % |
+| `spec-dflash-n4` | 10 305 / 4220 = 41.0 % | 20 440 / 9795 = 47.9 % |
+| `spec-mtp-n2` | 5790 / 3910 = 67.5 % | 11 835 / 9005 = 76.1 % |
+| `spec-draft-n8` | 14 625 / 3385 = 23.1 % | 26 370 / 9020 = 34.2 % |
+
+Identical to the token, in both modes, in all eight. So the 1.27 pp
+between-session spread on `spec-dflash-n2` is not the arm doing different work
+in different sessions — it did exactly the same work — and neither is the
++5.92 pp the cap buys it. **Only the time differs**, which is A16's finding
+stated on a dataset eight times the size and with the mode contrast controlled.
+
+> [!NOTE]
+> **No GPU telemetry was recorded for run V2.** `bench/gpu_telemetry.sh` takes
+> `[schema] [interval] [label]` and the run script passed it a file path, which
+> it read as a schema and rejected, so the sampler exited at start-up and
+> nothing said so. The script is fixed and a test now checks that every run
+> script starts the sampler with a schema the tool accepts. What stands in for
+> it here: the design is balanced in time, so a thermal drift moves both modes
+> equally, and the baseline's CV of 0.11–0.21 % across five and a half hours is
+> itself evidence that there was no drift to correct for.
+
+**Run V3 puts both modes inside one square, and for one arm it disagrees.**
+The crossover still measures the two modes in different invocations. `BENCH_HARDCAP_SUFFIX`
+makes `<arm>-cap` run `<arm>`'s server flags and send `ignore_eos` on its own
+requests, so ten arms — five configurations in both modes — are one 10×10 Latin
+square, every arm in every position exactly once, the two modes of a
+configuration minutes apart instead of sixteen. Two sessions, 200 of 200
+arm-runs, both validated, thinking off, everything else as run V2.
+
+| arm | V3 session 1 | V3 session 2 | V3 mean | V2, eight sessions |
+|---|---:|---:|---:|---:|
+| `spec-dflash-n4` | +12.25 pp | +12.08 pp | **+12.17** | +12.03 [+11.67, +12.38] |
+| `spec-mtp-n2` | +9.93 pp | +9.14 pp | **+9.53** | +9.54 [+9.14, +9.93] |
+| `spec-draft-n8` | +6.33 pp | +6.27 pp | **+6.30** | +6.31 [+6.29, +6.33] |
+| `spec-dflash-n2` | +8.67 pp | +8.62 pp | **+8.65** | +5.92 [+4.86, +6.99] |
+
+Three of the four agree with the crossover to a tenth of a point or better,
+across two designs that share nothing but the harness. The fourth does not:
+`spec-dflash-n2` reads **+8.65 pp** within the invocation against **+5.92 pp**
+between invocations, and V3's own two sessions differ by 0.06 pp while V2's
+eight span 4.15.
+
+**The absolute rates say the disagreement is that arm and nothing else.**
+
+| arm | V2 freerun | V3 freerun | V2 hard cap | V3 hard cap |
+|---|---:|---:|---:|---:|
+| no speculation | 116.56 | 116.55 | 117.04 | 117.00 |
+| `spec-dflash-n4` | 114.63 | 114.64 | 129.17 | 129.32 |
+| `spec-draft-n8` | 27.08 | 27.07 | 34.58 | 34.55 |
+| `spec-mtp-n2` | 129.95 | 129.66 | 141.64 | 141.31 |
+| **`spec-dflash-n2`** | **129.05** | **127.82** | **136.51** | **138.42** |
+
+Four of five reproduce between the two designs to 0.01–0.3 tok/s, the baseline
+to a hundredth. `spec-dflash-n2` moves −0.95 % free-running and **+1.4 % under
+the cap — in opposite directions**, which is the whole of the 2.7 pp
+disagreement.
+
+**And the state is finer-grained than [A16](#a16-two-runs-identical-in-every-recorded-respect-and-byte-identical-in-output-differ-by-34--on-one-arm)
+could see.** A16 had one measurement per run and called it an invocation
+effect. Ten repeats inside a single V3 invocation show it flickering *within*
+the invocation, arm-run to arm-run, with a server restarted between each:
+
+| arm, V3 session 1 | per-repeat pooled tok/s | CV |
+|---|---|---:|
+| no speculation | 117.3 116.8 116.6 116.8 116.5 116.4 117.2 116.5 116.6 117.0 | **0.27 %** |
+| `spec-mtp-n2` | 129.6 130.7 129.5 129.2 130.3 129.6 129.2 129.1 128.7 128.5 | 0.53 % |
+| `spec-dflash-n2` | 126.7 130.0 130.1 128.9 129.1 **123.9** 129.5 **124.8** 125.4 129.0 | **1.82 %** |
+| `spec-dflash-n2-cap` | 136.0 141.5 141.3 **133.0** 142.1 135.7 140.8 135.1 137.7 139.6 | **2.31 %** |
+
+Session 2 repeats it: 0.33 %, 1.84 % and 2.24 %. So it is not that some
+invocations are fast and others slow — **consecutive arm-runs of the same
+configuration inside one invocation differ by 6 tok/s**, on byte-identical
+output, while the no-speculation arm interleaved with them holds 0.3 %. Every
+one of the ten arms produced exactly one distinct output set across both V3
+sessions, so this is not different work either.
+
+**What neither design can test.** Both schedules are cyclic rotations, which
+balance *position* and not *predecessor*: in V2 `spec-dflash-n2` is preceded by
+`baseline` in 32 of 40 arm-runs, in V3 by `baseline-cap` in 18 of 20. The one
+predecessor contrast available is between the two designs, and it is confounded
+with the design. It points the same way each time — the arm is slower after a
+capped neighbour and faster after a free-running one, in both of its own modes —
+but a fixed rotation cannot separate that from anything else, and this
+repository has said the wrong thing about `spec-dflash-n2` twice already. The
+experiment that would settle it randomises the order so the predecessor varies,
+and it has not been run.
+
+**What to take from all three designs.** The hard cap raises every arm
+measurably; `spec-dflash-n4` changes sign under it and that is the strongest
+result here, agreeing at +12.03 and +12.17 pp across the two designs; and the
+size of the effect on `spec-dflash-n2` is **design-dependent between +5.9 and
++8.7 pp**, which this repository reports as a range rather than picking the
+design that flatters it.
+
+This closes the crossover half of [`RETEST_TODO.md`](RETEST_TODO.md) P1-3 and
+opens a narrower one: the order randomisation that would explain
+`spec-dflash-n2`. The archived thinking-off runs stay as they are; what they
+measured is now stated, and what a hard cap changes is now measured with an
+interval, twice, by two designs that disagree about exactly one arm.
 
 ---
 
@@ -1542,11 +1764,11 @@ repository with a **request-mean** column is the arithmetic mean of it —
 `analysis/matrix_report.py`, `analysis/plot.py` and `analysis/plot_v4_runs.py`
 all read it rather than dividing tokens by time themselves.
 
-Across all **7164** request rows of all **687** committed arm-run files:
+Across all **13 344** request rows of all **1305** committed arm-run files:
 
 | what the server reported | rows |
 |---|---:|
-| `1000 × (n − 1) / predicted_ms` | **7120** |
+| `1000 × (n − 1) / predicted_ms` | **13 300** |
 | `1000 × n / predicted_ms` | 44 |
 | neither | **0** |
 
@@ -1588,6 +1810,30 @@ relationship is asserted instead, in `analysis/verify_claims.py`, so it cannot
 change without failing the build, and recomputation is listed in
 [`RETEST_TODO.md`](RETEST_TODO.md).
 
+
+### B9. The checkpoint restore share was published as 30.5 %, and it is 30.4 %
+
+[A12](#a12-what-the-checkpoint-path-costs-measured-with-timers-in-the-source)
+publishes the checkpoint cost in four rows, splitting the restore into
+`load_tgt` and `load_dft` with a share each. The top-level
+[`README.md`](README.md) and the pull request body merge those two into one
+**restore** row, and they carried its share as **30.5 %**, which is 22.9 + 7.6 —
+the two shares each rounded to one decimal and then added. The merged row is
+21.74 s of 71.4 s, which is **30.4 %**.
+
+One tenth of a point, and it is the tenth that makes the column add up: with
+30.4 the four shares are 24.3 + 30.4 + 24.2 + 21.1 = **100.0**, and with 30.5
+they were 100.1. A reader checking the arithmetic would have found the table
+inconsistent with itself.
+
+**How it survived.** A12's own four-row table has been parsed cell by cell since
+2026-08-26. The two-document merged version was not parsed anywhere — the same
+defect as the four tables the second review's pass found and the run-M table the
+mutation suite found on 2026-08-27, in a third place. Both copies are parsed
+now, against each other as well as against the data, and
+`tests/data_mutate.py` perturbs both.
+
+The 39.07 s, the 54.7 %, the 24.3 %, the 24.2 % and the 21.1 % are unaffected.
 
 ## C — artefact and scope naming
 

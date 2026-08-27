@@ -19,6 +19,7 @@ Run: python tests/data_mutate.py
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -32,6 +33,7 @@ ROOT = Path(__file__).resolve().parents[1]
 COPY = ("analysis", "bench", "tests", "v4_audit_2026_08_25", "results",
         "v2_3090_followup", "v3_dflash_2026_05_07", "README.md", "ERRATA.md",
         "CHANGELOG.md", "RETEST_TODO.md", "BENCHMARK_ENV.md",
+        "PULL_REQUEST.md",
         "run_matrix.sh", "run_p0_matrix.sh", "run_verify_matrix.sh",
         "collect_env.sh")
 
@@ -157,9 +159,31 @@ def edit_doc(rel: str, old: str, new: str):
     def go(m: Path):
         p = m / rel
         t = p.read_text(encoding="utf-8")
-        if old not in t:
-            raise AssertionError(f"anchor not found in {rel}: {old[:40]!r}")
+        n = t.count(old)
+        if n != 1:
+            raise AssertionError(
+                f"anchor appears {n} times in {rel}, must be exactly one: "
+                f"{old[:48]!r}")
         p.write_text(t.replace(old, new, 1), encoding="utf-8")
+    go.touches = (rel,)
+    go.anchor = (rel, old)
+    return go
+
+
+def edit_doc_re(rel: str, pattern: str, repl):
+    """`edit_doc` for a figure whose current value this suite must not pin.
+
+    The assertion count in `PULL_REQUEST.md` is one: hard-coding it here would
+    make this file a second place that has to be updated whenever an assertion
+    is added, and that is how a published figure goes stale in the first place.
+    """
+    def go(m: Path):
+        p = m / rel
+        t = p.read_text(encoding="utf-8")
+        out, n = re.subn(pattern, repl, t, count=1)
+        if not n:
+            raise AssertionError(f"pattern not found in {rel}: {pattern!r}")
+        p.write_text(out, encoding="utf-8")
     go.touches = (rel,)
     return go
 
@@ -266,6 +290,34 @@ MUTATIONS = [
               "| `spec-dflash-n4` | **+1.35 %** | **+10.55 %** |")),
     ("A16: a run U figure becomes +19.3 %",
      edit_doc("README.md", "U3 **+17.3 %** 22:18", "U3 **+19.3 %** 22:18")),
+    # --- the pull request body, which had no code path until 2026-08-27 -----
+    # It is a published document with four numeric tables in it and nothing was
+    # reading them, which is the defect this audit has now closed five times.
+    ("PR body: the headline DFlash rate becomes 149.2",
+     edit_doc("PULL_REQUEST.md", "| **146.2** |", "| **149.2** |")),
+    ("PR body: the no-speculation baseline becomes 112.7",
+     edit_doc("PULL_REQUEST.md", "| **115.7** |", "| **112.7** |")),
+    ("PR body: the synchronisation wait becomes 2.002 s",
+     edit_doc("PULL_REQUEST.md", "| **0.002** |", "| **2.002** |")),
+    ("README cost table: the restore share goes back to 30.5 %",
+     edit_doc("README.md", "| 21.74 | 30.4 % |", "| 21.74 | 30.5 % |")),
+    ("README cost table: the drafter's seconds become 19.27",
+     edit_doc("README.md", "| drafter `generate()` | 17.27 |",
+              "| drafter `generate()` | 19.27 |")),
+    ("PR body cost table: the restore share goes back to 30.5 %",
+     edit_doc("PULL_REQUEST.md", "| 21.74 | 30.4 % |", "| 21.74 | 30.5 % |")),
+    ("PR body: the checkpoint share becomes 64.7 %",
+     edit_doc("PULL_REQUEST.md",
+              "| inside the checkpoint calls | **39.09** | **54.7 %** |",
+              "| inside the checkpoint calls | **39.09** | **64.7 %** |")),
+    ("PR body: V2's sign-flipping arm stops flipping",
+     edit_doc("PULL_REQUEST.md", "| **\u22121.66 %** [\u22121.98, \u22121.35] |",
+              "| **+1.66 %** [\u22121.98, \u22121.35] |")),
+    ("PR body: V3's disagreeing arm is made to agree",
+     edit_doc("PULL_REQUEST.md", "| **+8.65 pp** |", "| **+5.92 pp** |")),
+    ("PR body: the assertion count goes stale by one",
+     edit_doc_re("PULL_REQUEST.md", r"# (\d+) assertions",
+                 lambda m: f"# {int(m.group(1)) + 1} assertions")),
     ("C4b: the clock mean becomes 1947",
      edit_doc("ERRATA.md", "1800\u20131965 MHz of a 2100 MHz maximum, mean 1937",
               "1800\u20131965 MHz of a 2100 MHz maximum, mean 1947")),
