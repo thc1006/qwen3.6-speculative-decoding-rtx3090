@@ -1159,13 +1159,14 @@ was published.
 Committed hashes tie the derived JSON
 to files nobody else could see, which is a weaker claim than it sounds; the
 point of publishing is that the extraction can be re-run rather than trusted.
-`.github/workflows/evidence.yml` does exactly that, and this is what it
-reproduces from the archive alone:
+`analysis/rederive_from_logs.py <bench-root>` does exactly that, and this is
+what it reproduces from the archive alone:
 
 | derived file | records | identical | not reproducible |
 |---|---:|---:|---|
 | `data/spec_accounting_20260826.json` | 12 | **12** | — |
 | `data/checkpoint_timers_20260826.json` | 12 | **12** | — |
+| `data/checkpoint_timers_20260827_split.json` | 18 | **18** | — |
 | `data/acceptance_counter_comparison.json` | 535 | **526** | 9 |
 
 Zero records differ. The nine that are not reproducible belong to runs **G**,
@@ -1178,6 +1179,18 @@ reason. The runs are `matrix_G_dflash_20260826_000124`,
 they contribute nine of the 535 rows behind
 [A13](../ERRATA.md#a13-there-are-two-acceptance-counters-they-disagree-and-the-disagreement-is-exactly-the-checkpoint-path); the claim
 there survives on the other 526.
+
+> [!IMPORTANT]
+> **That table was produced by running the script, not by CI.**
+> [`.github/workflows/evidence.yml`](../.github/workflows/evidence.yml) does the
+> same thing on `workflow_dispatch`, on `release: published` and weekly, and it
+> has **never run**: GitHub registers workflows, schedules and dispatch targets
+> from the **default branch**, and this file lives only on `audit-2026-08-25`.
+> `gh api .../workflows/evidence.yml/dispatches` returns 404 for that reason.
+> The workflow becomes live when the branch merges. Until then the figures above
+> are what `python analysis/rederive_from_logs.py <bench-root>` prints after
+> unpacking both published tranches into one directory, which is a command
+> anyone with the release can run.
 
 Four run directories are archived under their bench-host names rather than the
 descriptive ones used here: `C_master_matrix_think_on`,

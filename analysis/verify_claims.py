@@ -3725,6 +3725,9 @@ _PR_LINES = (pathlib.Path(__file__).resolve().parents[1] / "PULL_REQUEST.md") \
     .read_text(encoding="utf-8").splitlines()
 
 
+_PR = re.sub(r"\s+", " ", _norm("\n".join(_PR_LINES)))
+
+
 def _pr_table(header_startswith):
     # tables inside a list item are indented; strip before matching
     lines = [l.strip() for l in _PR_LINES]
@@ -3916,8 +3919,31 @@ for _f, _row in sorted(_PRR.items()):
 chk("PR body re-derivation: it names the split dump run T4 produced",
     "data/checkpoint_timers_20260827_split.json" in _PRR, True)
 
+# --- the same table in the audit README, which nothing read either ----------
+_V4R = {r[0]: r[1:] for r in
+        _v4_table("| derived file | records | identical | not reproducible |")}
+chk("the audit README's re-derivation table rows", len(_V4R), 4)
+chk("and it lists the same files the body does",
+    sorted(_V4R), sorted(_PRR))
+for _f, _row in sorted(_V4R.items()):
+    _n = len(json.loads((pathlib.Path(__file__).resolve().parents[1]
+                         / "v4_audit_2026_08_25" / _f).read_text(encoding="utf-8")))
+    chk(f"audit README re-derivation: {_f} record count", _n, int(_cellv4(_row[0])))
+    chk(f"audit README and the body agree on {_f}",
+        [_row[0], _row[1]], [_PRR[_f][0], _PRR[_f][1]])
+# and both must say the workflow has not run, because it has not
+_V4TXT = re.sub(r"\s+", " ", _norm((pathlib.Path(__file__).resolve().parents[1]
+                / "v4_audit_2026_08_25" / "README.md").read_text(encoding="utf-8")))
+chk("the audit README says the table came from the script, not CI",
+    "produced by running the script, not by CI" in _V4TXT, True)
+chk("and says the workflow has never run", "has **never run**" in _V4TXT, True)
+chk("the body says the same", "That is the script's output, not CI's." in _PR, True)
+chk("and neither claims the evidence workflow runs in CI",
+    ("evidence.yml` downloads them" in _PR
+     or "evidence.yml` does it in CI" in _V4TXT
+     or "evidence.yml` does exactly that" in _V4TXT), False)
+
 # --- and the prose figures the body leads with ------------------------------
-_PR = re.sub(r"\s+", " ", _norm("\n".join(_PR_LINES)))
 chk("PR body: the arm-run total it claims matches the three runs on disk",
     f"{sum(len(list(d.glob('*__rep*.json'))) for d in _V2) + 200 + 18} arm-runs" in _PR,
     True)

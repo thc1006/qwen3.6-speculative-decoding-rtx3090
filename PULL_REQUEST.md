@@ -3,7 +3,13 @@
   other published table in this repository. `analysis/verify_claims.py` parses
   the six tables below cell by cell and `tests/data_mutate.py` perturbs them;
   a figure that drifts out of agreement with the data fails CI. Push changes
-  here first, then `gh pr edit 2 --body-file PULL_REQUEST.md`.
+  here first, then publish. `gh pr edit --body-file` does not work here: gh
+  2.46 asks for `repository.pullRequest.projectCards`, which GitHub has retired,
+  and the whole call fails with exit 1 while looking like a deprecation notice.
+  The REST route has no such field:
+
+    python -c "import json,pathlib,re;b=re.sub(r'^<!--.*?-->\s*','',pathlib.Path('PULL_REQUEST.md').read_text(),flags=re.S).strip();pathlib.Path('/tmp/b.json').write_text(json.dumps({'body':b}))"
+    gh api -X PATCH repos/thc1006/qwen3.6-speculative-decoding-rtx3090/pulls/2 --input /tmp/b.json
 
   No em-dashes or en-dashes in here, unlike the rest of this repository's prose:
   a local pre-tool hook refuses to post GitHub text containing them. Ranges are
@@ -294,8 +300,8 @@ changed. Nothing in it was rejected.
   for V2, V3 and T4, kept separate so the first archive's digest keeps meaning
   what it meant. The manifest is 1320 logs and 21 traces; all 620 new entries
   were verified against it before publishing.
-  `.github/workflows/evidence.yml` downloads them, checks every file against
-  `EVIDENCE_MANIFEST.sha256`, and re-runs the extractors:
+  `python analysis/rederive_from_logs.py <bench-root>` checks every file
+  against `EVIDENCE_MANIFEST.sha256` and re-runs the extractors:
 
   | derived file | records | identical | not regenerated |
   |---|---:|---:|---:|
@@ -303,6 +309,14 @@ changed. Nothing in it was rejected.
   | `data/checkpoint_timers_20260826.json` | 12 | **12** | 0 |
   | `data/checkpoint_timers_20260827_split.json` | 18 | **18** | 0 |
   | `data/acceptance_counter_comparison.json` | 535 | **526** | 9 |
+
+  **That is the script's output, not CI's.**
+  `.github/workflows/evidence.yml` does the same thing on `workflow_dispatch`,
+  on `release: published` and weekly, and it has **never run**: GitHub
+  registers workflows, schedules and dispatch targets from the default branch,
+  and the file exists only on this one. Dispatching it returns 404. It becomes
+  live when this merges; until then the numbers are what anyone with the
+  release gets from that one command.
 
   Zero records differ. The nine belong to three exploratory runs whose logs are
   in the archive and whose arm-run JSON is not committed, because they never
@@ -318,20 +332,22 @@ this a draft is below, under *Not closed*.
 
 ```
 python analysis/rederive_from_logs.py bench   # raw logs -> the committed JSON
-python analysis/verify_claims.py          # 1650 assertions, re-derived
+python analysis/verify_claims.py          # 1664 assertions, re-derived
 python analysis/check_data_integrity.py   # structure of all 60 run directories
 python -m unittest discover tests         # 132 regressions for defects shipped here
 python tests/mutate.py                    # break each fix, require its test to fail
 python tests/data_mutate.py               # perturb a measurement or a published
                                           #   figure, require the checker to fail
-                                          #   50 code and 73 data perturbations,
+                                          #   50 code and 76 data perturbations,
                                           #   with a clean-mirror re-check after
                                           #   the last restore
 python analysis/plot_v4_runs.py --check   # charts still match the data
 ```
 
-CI runs all of it, with actions pinned to commit SHAs, chart dependencies
-hash-pinned, shellcheck at `--severity=style` and pyflakes.
+CI runs all of it on every push, with actions pinned to commit SHAs, chart
+dependencies hash-pinned, shellcheck at `--severity=style` and pyflakes. That
+is `.github/workflows/audit.yml`, which is registered and green on this head.
+The evidence workflow beside it is not: see above.
 
 `verify_claims.py` parses its own AST and fails if any assertion compares two
 literals. Six of them did, and were rewritten.
@@ -360,7 +376,8 @@ literals. Six of them did, and were rewritten.
 - The 7 GB of llama-server logs are not committed.
   `v4_audit_2026_08_25/EVIDENCE_MANIFEST.sha256` holds the SHA-256 of all 1320
   of them and of the 21 telemetry traces; both compressed tranches are published
-  as release assets and CI re-runs the extractors against them.
+  as release assets, and `analysis/rederive_from_logs.py` re-runs the
+  extractors against them.
 - `draft-eagle3` needs three extract layers this model does not expose;
   `--spec-type draft-dspark` is DeepseekV4-only. Nine of eleven measured.
 

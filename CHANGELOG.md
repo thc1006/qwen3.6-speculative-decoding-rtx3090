@@ -8,6 +8,16 @@ publication point with its own data set.
 
 ## [Unreleased] — the review pass, and an adversarial pass over it
 
+**And the workflow that would do that in CI has never run.**
+`.github/workflows/evidence.yml` is wired to `workflow_dispatch`, to
+`release: published` and to a weekly cron, and none of the three can fire:
+GitHub registers workflows, schedules and dispatch targets from the **default
+branch**, and that file exists only on `audit-2026-08-25`. Dispatching it
+returns 404. Every re-derivation figure this repository publishes was therefore
+produced by running the script, and the documents said "CI does it" in three
+places. All three now say what actually happened and why, and what makes the
+workflow live: merging the branch.
+
 ### The three runs the third review asked for
 
 Nine and a half hours on the bench card, 618 arm-runs, none failed.
@@ -332,10 +342,9 @@ GPU traces. Until now the repository committed the hashes of files nobody else
 could see, which ties the derived JSON to something unavailable; the point of
 publishing is that the extraction can be re-run instead of trusted.
 
-`analysis/rederive_from_logs.py` re-runs the three extractors over the unpacked
-archive and diffs the result against what is committed.
-`.github/workflows/evidence.yml` does it in CI, on demand, on release and
-weekly. Measured, from the archive alone:
+`analysis/rederive_from_logs.py` re-runs the extractors over the unpacked
+archive and diffs the result against what is committed. Measured, from the
+archive alone:
 
 | derived file | records | identical | not regenerated |
 |---|---:|---:|---:|
