@@ -1319,6 +1319,53 @@ is left is that this one arm's decode rate has two levels about 3.5 % apart, it
 moves between them on a timescale of minutes, and nothing this repository
 records predicts which one you get.
 
+**"Nothing recorded" is a statement about the recording, and two quantities
+that matter here were never in it.** Saying no field explains the step invites
+the reading that no physical cause is left, which is not what was measured.
+Both of these were identified on 2026-08-27, after the fact, and neither is
+offered as the explanation — they are named because a reader is entitled to
+know what the telemetry could not have seen.
+
+- **GDDR6X memory-junction temperature, which NVML does not expose on Linux.**
+  `temperature.gpu` is the core sensor. The memory modules on a 3090 have their
+  own junction sensor and their own throttle point, and the controller reduces
+  **memory bandwidth** when it is exceeded — a core reading in the sixties says
+  nothing about it. NVIDIA has an open request to surface it through nvidia-smi
+  or NVML on Linux and had not done so; Windows tools read it through NVAPI.
+  So every `temp_c` column in this repository is the core, and a
+  bandwidth-bound decode on a memory-throttling card would look exactly like
+  "the clock is flat and the arm is slower". Direction is against it here — the
+  card is *hotter* while the arm is *faster* — which is a reason to doubt it,
+  not a measurement of it. What would settle it is a junction reading, and this
+  host cannot produce one.
+- **Host CPU load, which this repository never sampled at all.**
+  `bench/gpu_telemetry.sh` queries `nvidia-smi` and nothing else — no load
+  average, no `/proc/stat`, no per-process attribution in any of its three
+  schemas — so no run here can say what else the bench host was doing while it
+  decoded. That gap is this repository's own and is checkable: read the script.
+
+  Whether a stray process can move a decode rate by the order this section is
+  about is a separate question, and the evidence for it is **not from this
+  repository**, so treat it as a reason to instrument rather than as a result.
+  On **2026-08-27** this repository's own verification pipeline was recorded by
+  a benchmark harness on the same machine as two `host_contended` incidents,
+  and the pass they landed on was re-run. That harness belongs to a sibling
+  project, its incident log is not published here, and nothing in this
+  repository attests to it. What is attested here is only the absence: the
+  column does not exist.
+
+Neither is an explanation and neither is dismissed. The honest form of the
+finding is: **this one arm has two levels, and the instrument list that failed
+to distinguish them was `nvidia-smi` alone.**
+
+`bench/host_guard.py --sample` records host load — busy percent, load average,
+and the largest process that is not the benchmark's own descendant — so a
+future run can test the second of these. **No run in this repository has it**,
+including V2, V3 and T4; it was written on 2026-08-27, after they finished, and
+retrofitting a column to a trace that never had one is not something this
+repository does. The junction temperature needs a sensor the platform does not
+offer, so that one stays untestable here.
+
 ### A17. The thinking-off comparisons are not comparisons of the same amount of work
 
 Pooled decode rate is generated tokens over decode milliseconds. It is the right

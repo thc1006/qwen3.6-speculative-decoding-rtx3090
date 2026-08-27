@@ -23,6 +23,14 @@ on:
 permissions:
   contents: read
 
+# See the same block in audit.yml: the default `bash -e {0}` has no pipefail,
+# so a piped checker can print a failure into a green job. Every step here
+# already sets `-euo pipefail` itself; this makes it the default so a step
+# added later does not have to remember.
+defaults:
+  run:
+    shell: bash
+
 jobs:
   rederive:
     name: raw logs to committed JSON

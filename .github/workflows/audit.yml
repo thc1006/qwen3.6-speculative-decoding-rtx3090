@@ -13,6 +13,17 @@ on:
 permissions:
   contents: read
 
+# A `run:` step with no `shell:` gets `bash -e {0}`, which has `-e` and NOT
+# `-o pipefail`. Under that default a step like `python check.py | tail -1`
+# reports the exit status of `tail`, so a checker can print FAIL and the job
+# still goes green - the failure mode a sibling repository shipped for months.
+# No step here pipes today; naming the shell is what keeps that true when one
+# does. It also means an intentionally-empty `grep` now needs `|| true`, which
+# is the trade this repository already learned in v3's bench script.
+defaults:
+  run:
+    shell: bash
+
 jobs:
   audit-static:
     name: static

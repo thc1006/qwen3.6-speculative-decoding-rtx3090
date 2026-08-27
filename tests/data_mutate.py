@@ -414,6 +414,16 @@ MUTATIONS = [
 
 
 def main() -> None:
+    # This spawns one checker per perturbation for several minutes. On a host
+    # that is measuring, that burst invalidates the arm-pass it lands on - it
+    # did, on 2026-08-27, and the measurement had to be re-run. Refuse rather
+    # than be polite about it. See bench/host_guard.py for what actually caused
+    # the six cores, which was not this suite being parallel; it is sequential.
+    sys.path.insert(0, str(ROOT / "bench"))
+    import host_guard
+    host_guard.protect("the data perturbation suite")
+    host_guard.serialise("verify")
+
     # Every perturbation must say which files it touched, because the restore
     # loop only puts back what is declared. One of them did not, and the mirror
     # kept a 5 C warmer telemetry trace for the rest of the run - so every

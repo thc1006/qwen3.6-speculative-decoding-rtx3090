@@ -332,6 +332,13 @@ def mirror(into: Path) -> Path:
 
 
 def main() -> None:
+    # One `unittest` subprocess per mutation, for minutes. Same reason as
+    # tests/data_mutate.py: a burst on a measuring host costs an arm-pass.
+    sys.path.insert(0, str(ROOT / "bench"))
+    import host_guard
+    host_guard.protect("the code mutation suite")
+    host_guard.serialise("verify")
+
     print(f"  {'mutation':52s} guarding test")
     escaped = []
     with tempfile.TemporaryDirectory() as tmp:

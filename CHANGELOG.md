@@ -8,6 +8,40 @@ publication point with its own data set.
 
 ## [Unreleased] — the review pass, and an adversarial pass over it
 
+**This repository's verification pipeline invalidated somebody else's
+measurement, so it can no longer start one.** On 2026-08-27 a benchmark harness
+sharing the host logged two `host_contended` incidents against `python3`, and a
+four-hour phase had to be re-run to clear the flags. The obvious explanation was
+wrong: `tests/mutate.py` and `tests/data_mutate.py` are **sequential**, one
+subprocess at a time, and neither can produce six cores of load. What did was
+(a) several full pipelines launched back to back until they overlapped, each
+single-threaded, and (b) `analysis/plot_v4_runs.py` importing matplotlib and so
+numpy, whose OpenBLAS spawns a thread per core, with nothing in this repository
+pinning it. Attributing the burst to "the suite is parallel" would have been a
+tidy story no measurement supports, which is the mistake A12 was written about.
+
+`bench/host_guard.py` refuses to start either suite while a GPU lock is held or
+a benchmark process is running, takes a whole-host `flock` so two pipelines
+cannot overlap, pins the BLAS thread variables for itself and every child, and
+renices. CI is exempt, because there is no card there to contend for.
+
+**A16 says "nothing recorded distinguishes them", and that is a statement about
+the recording.** Two quantities were never in it, both named now, neither
+offered as the explanation. The GDDR6X memory-junction temperature is a
+separate sensor with its own throttle point that reduces **memory bandwidth**,
+and NVML does not expose it on Linux — every `temp_c` column here is the core
+die. Host CPU load was never sampled at all: `bench/gpu_telemetry.sh` queries
+`nvidia-smi` and nothing else in all three of its schemas. The second is now
+recordable — `bench/host_guard.py --sample` writes busy percent, load average
+and the largest process that is not the benchmark's own descendant, attributed
+by descent rather than by name — and **no run in this repository has it**,
+V2, V3 and T4 included.
+
+**CI got `shell: bash`.** A `run:` step with no shell gets `bash -e {0}`, which
+has `-e` and not `-o pipefail`, so `checker.py | tail -1` reports `tail`'s exit
+status and a checker can print FAIL into a green job. No step here pipes today;
+naming the shell is what keeps that true when one does.
+
 **And the workflow that would do that in CI has never run.**
 `.github/workflows/evidence.yml` is wired to `workflow_dispatch`, to
 `release: published` and to a weekly cron, and none of the three can fire:
