@@ -30,6 +30,10 @@ on:
       - analysis/extract_checkpoint_timers.py
       - analysis/extract_spec_accounting.py
       - analysis/compare_acceptance_counters.py
+      # the last step of this job runs the claim checker, so a change to it can
+      # break this workflow without touching an extractor - which is how the
+      # shallow-clone failure reached a green audit and a red evidence run
+      - analysis/verify_claims.py
       - .github/workflows/evidence.yml
       - v4_audit_2026_08_25/EVIDENCE_MANIFEST.sha256
 

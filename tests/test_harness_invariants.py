@@ -2999,8 +2999,15 @@ class AShallowCloneMustBeDiagnosedNotEndured(unittest.TestCase):
                    "tests/mutate.py", "tests/data_mutate.py")
         for rel in (".github/workflows/audit.yml", ".github/workflows/evidence.yml"):
             lines = (self.ROOT / rel).read_text(encoding="utf-8").splitlines()
+            # only inside `jobs:`. Without this, `  push:` under `on:` reads as
+            # a job, and adding a path filter that mentions the checker made
+            # the rule demand a checkout depth from a trigger block.
+            try:
+                first = next(i for i, l in enumerate(lines) if l.rstrip() == "jobs:")
+            except StopIteration:
+                self.fail(f"{rel}: no `jobs:` section")
             starts = [i for i, l in enumerate(lines)
-                      if re.fullmatch(r"  [A-Za-z0-9_-]+:", l)]
+                      if i > first and re.fullmatch(r"  [A-Za-z0-9_-]+:", l)]
             self.assertTrue(starts, f"{rel}: no job blocks found")
             for n, i in enumerate(starts):
                 end = starts[n + 1] if n + 1 < len(starts) else len(lines)
