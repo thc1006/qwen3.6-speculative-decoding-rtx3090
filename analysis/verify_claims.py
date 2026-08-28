@@ -3975,6 +3975,73 @@ chk("PR body: the mutation counts it quotes are the two suites' own",
     f"{_n_mutations('tests/data_mutate.py')} data perturbations" in _PR,
     True)
 
+print("\n=== do the canonical documents agree with each other? ===")
+# The fourth review found five documents describing three different datasets:
+# RETEST_TODO said the crossover was unrun while the PR body reported its
+# results, CITATION.cff dated the controlled tier to 2026-08-26 and said the
+# raw logs were unpublished, and the README's tier stopped at run V. Nothing
+# compared them, because each was internally consistent.
+_CFF = (pathlib.Path(__file__).resolve().parents[1] / "CITATION.cff") \
+    .read_text(encoding="utf-8")
+_TODO = _norm((pathlib.Path(__file__).resolve().parents[1] / "RETEST_TODO.md")
+              .read_text(encoding="utf-8"))
+_RDME = _norm((pathlib.Path(__file__).resolve().parents[1] / "README.md")
+              .read_text(encoding="utf-8"))
+
+# the newest run directory on disk is what the metadata has to cover
+_all_runs = sorted((pathlib.Path(__file__).resolve().parents[1]
+                    / "v4_audit_2026_08_25" / "data").glob("matrix_*"))
+_stamps = sorted({d.name.rsplit("_", 2)[-2] for d in _all_runs
+                  if d.name.rsplit("_", 2)[-2].startswith("2026")})
+chk("the newest committed run is from 2026-08-27", _stamps[-1], "20260827")
+chk("CITATION.cff's release date is not older than the newest run",
+    re.search(r"^date-released:\s*(\S+)", _CFF, re.M).group(1) >= "2026-08-27", True)
+chk("CITATION.cff no longer says the controlled-tier logs are unpublished",
+    "logs themselves are not published" in _CFF, False)
+chk("CITATION.cff says they are published",
+    "published as release assets" in _CFF, True)
+chk("the README's controlled tier reaches V3",
+    "controlled tier** is runs A-V3" in _RDME, True)
+chk("RETEST_TODO no longer calls the crossover script unrun",
+    "written and unrun" in _TODO, False)
+chk("RETEST_TODO marks the crossover done",
+    "mode order controlled.**~~ **Done 2026-08-27.**" in _TODO, True)
+chk("RETEST_TODO marks the split timer done",
+    "The checkpoint timers, split.**~~ **Done 2026-08-27.**" in _TODO, True)
+chk("and it opens the carryover-balanced design instead",
+    "carryover-balanced version of that design" in _TODO, True)
+# a completed run must not be described as open anywhere
+_completed = {"matrix_V2_s1_freerun_20260827_044442",
+              "matrix_V3_s1_20260827_102614",
+              "matrix_T4_split_20260827_175051"}
+chk("each completed 2026-08-27 run is on disk with its validation",
+    sorted(d.name for d in _all_runs
+           if d.name in _completed and (d / "RUN_COMPLETE.json").exists()),
+    sorted(_completed))
+
+print("\n=== is every request-mean column labelled for what it is? ===")
+# B8 documents that `predicted_per_second` divides n-1 tokens by the time for n,
+# and the repository chose to keep the published figures rather than move dozens
+# by a third of a percent. The fourth review's condition for that choice is that
+# every place carrying the column says so, and that none of them is used for a
+# thinking-off cross-arm comparison. That is now a rule, not a habit.
+for _rel in ("README.md", "ERRATA.md", "v4_audit_2026_08_25/README.md"):
+    _txt = (pathlib.Path(__file__).resolve().parents[1] / _rel) \
+        .read_text(encoding="utf-8")
+    _n = _txt.count("| request-mean |")
+    chk(f"{_rel} publishes a request-mean column", _n > 0, True)
+    chk(f"{_rel} says what request-mean is",
+        "llama.cpp's own `predicted_per_second`, averaged" in _norm(_txt), True)
+    chk(f"{_rel} says it must not carry a thinking-off cross-arm comparison",
+        "must not carry a cross-arm comparison in the" in _norm(_txt), True)
+    chk(f"{_rel} links the caveat to B8",
+        "b8-every-request-mean-here-counts-one-token-fewer-than-it-timed" in _txt,
+        True)
+    # and the caveat must come before the first such table, not after it
+    chk(f"{_rel} puts the caveat before the first such table",
+        _txt.index("predicted_per_second`, averaged") < _txt.index("| request-mean |"),
+        True)
+
 print("\n=== the checker audits itself ===")
 # A chk() whose computed side contains no name is comparing one literal with
 # another and can never fail. Six of these were found on 2026-08-26, four of them

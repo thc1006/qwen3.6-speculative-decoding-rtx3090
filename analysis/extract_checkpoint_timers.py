@@ -80,9 +80,22 @@ def analyse(path: str) -> dict:
             vals = sync[key]
             if not vals:
                 continue
+            # Cardinality, because a dropped or duplicated marker would show up
+            # as a plausible number rather than as an error: one drain per call,
+            # the drain no longer than the call, and a non-negative remainder.
+            if len(vals) != len(whole):
+                sys.exit(f"{os.path.basename(path)}: {len(vals)} {key} markers "
+                         f"for {len(whole)} "
+                         f"whole-call markers; the split is not one to one")
+            if sum(vals) > sum(whole):
+                sys.exit(f"{os.path.basename(path)}: {key} drain exceeds the "
+                         f"call it is inside")
             out[f"{key}_s"] = round(sum(vals) / 1e6, 3)
             out[f"{key.replace('sync', 'state')}_s"] = round(
                 (sum(whole) - sum(vals)) / 1e6, 3)
+            if out[f"{key.replace('sync', 'state')}_s"] < 0:
+                sys.exit(f"{os.path.basename(path)}: negative state time "
+                         f"for {key}")
         out["sync_total_s"] = round(
             sum(sum(v) for v in sync.values()) / 1e6, 3)
         out["state_total_s"] = round(

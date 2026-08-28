@@ -130,10 +130,22 @@ def main() -> None:
         shutil.rmtree(tmp, ignore_errors=True)
         sys.exit(f"the stage holds {len(staged)} shards and the index names "
                  f"{len(shards)}; refusing to promote it")
+    # Move the old stage aside, then promote. If the promotion fails the old
+    # stage is already gone, so put it back: otherwise a failed rename leaves
+    # no stage at all, and the next run finds nothing where it expects a
+    # checkpoint. `STAGE` is on one filesystem so both renames are atomic.
     old = STAGE.parent / (STAGE.name + f".previous.{os.getpid()}")
+    moved = False
     if STAGE.exists() or STAGE.is_symlink():
         STAGE.rename(old)
-    tmp.rename(STAGE)
+        moved = True
+    try:
+        tmp.rename(STAGE)
+    except OSError:
+        if moved and not (STAGE.exists() or STAGE.is_symlink()):
+            old.rename(STAGE)          # put the previous stage back
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise
     if old.exists():
         shutil.rmtree(old, ignore_errors=True)
     print(f"  staged {STAGE}  ({len(shards)} shards, "

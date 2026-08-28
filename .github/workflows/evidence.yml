@@ -19,6 +19,19 @@ on:
     types: [published]
   schedule:
     - cron: "37 5 * * 1"
+  # `schedule` and `workflow_dispatch` only fire from the DEFAULT branch, so on
+  # a branch this workflow could not run at all and its evidence chain was
+  # never demonstrated - only asserted. `push` reads the workflow from the ref
+  # being pushed, so this makes it runnable here. Scoped to the files that
+  # decide what the extraction does, which is when the chain needs re-proving.
+  push:
+    paths:
+      - analysis/rederive_from_logs.py
+      - analysis/extract_checkpoint_timers.py
+      - analysis/extract_spec_accounting.py
+      - analysis/compare_acceptance_counters.py
+      - .github/workflows/evidence.yml
+      - v4_audit_2026_08_25/EVIDENCE_MANIFEST.sha256
 
 permissions:
   contents: read
@@ -44,7 +57,15 @@ jobs:
       - name: fetch the archive
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.event.inputs.release_tag || 'raw-evidence-2026-08-27' }}
+          # `github.event.inputs` does not exist on a release event, so this
+          # used to fall through to the hard-coded tag and validate LAST
+          # release's archive against a new release. Route on the event.
+          TAG: >-
+            ${{
+              github.event_name == 'release'
+                && github.event.release.tag_name
+                || (inputs.release_tag || 'raw-evidence-2026-08-27')
+            }}
         run: |
           set -euo pipefail
           gh release download "$TAG" --repo "$GITHUB_REPOSITORY" \
@@ -101,14 +122,31 @@ jobs:
             [E_past_threshold]=matrix_E_threshold_20260825_224802
             [H_pmin_sweep]=matrix_H_pmin_20260826_005716
           )
+          # `|| true` hid a failed copy, so the re-derivation could run against
+          # a directory that never received the committed JSON and report a gap
+          # as though the extractor had produced one.
+          staged=0
           for d in v4_audit_2026_08_25/data/*/; do
             n=$(basename "$d")
             t="bench/${as[$n]:-$n}"
             [ -d "$t" ] || continue
-            cp "$d"*.json "$t"/ 2>/dev/null || true
+            found=0
+            for f in "$d"*.json; do
+              [ -e "$f" ] || continue
+              cp "$f" "$t"/ || { echo "FAIL: cannot stage $f" >&2; exit 1; }
+              found=1
+            done
+            [ "$found" -eq 1 ] || { echo "FAIL: no JSON to stage from $d" >&2; exit 1; }
+            staged=$((staged + 1))
           done
+          echo "staged JSON into $staged run directories"
+          [ "$staged" -gt 0 ] || { echo "FAIL: staged nothing" >&2; exit 1; }
 
       - name: re-derive, and require the result to be what is committed
+        env:
+          # the whole point of this job is that the archive regenerates the
+          # committed JSON; a missing run T4 must fail it, not be reported
+          REDERIVE_REQUIRE_T4: "1"
         run: python analysis/rederive_from_logs.py bench
 
       - name: the charts still match the re-derived data

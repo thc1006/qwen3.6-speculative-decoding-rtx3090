@@ -13,7 +13,7 @@
 > benchmark of all RTX 3090 systems, of all Qwen3.6 quantisations, of all
 > speculative-decoding methods, or of end-to-end voice-agent latency.
 >
-> The **controlled tier** is runs A–V, collected 2026-08-25/26 on post-merge
+> The **controlled tier** is runs A–V3 and T4, collected 2026-08-25/27 on post-merge
 > master `3737e4137`: repeated arm-runs with a matched no-speculation baseline
 > inside each run, thinking suppression verified per request rather than
 > assumed, concurrent client requests verified from request timestamps, full per-request text
@@ -533,6 +533,8 @@ size without any appeal to expert-union loading.
 Ten 300-token requests per config, one measurement each. Deltas are against the
 matched no-speculation reference. Descriptive only.
 
+> **`request-mean` is llama.cpp's own `predicted_per_second`, averaged.** That field divides `n − 1` generated tokens by the time for `n`, in 13 300 of 13 344 committed request rows, so every request-mean here is low by `(n − 1) / n` — 0.33 % at 300 tokens and more at shorter lengths. It is uniform across arms on a run where every request hits the same cap, and it is NOT uniform where the arms stop at different lengths, so it must not carry a cross-arm comparison in the thinking-off runs. Every headline figure and every published delta is a **pooled** rate computed from `predicted_n` and `predicted_ms` directly and contains none of this. See [B8](ERRATA.md#b8-every-request-mean-here-counts-one-token-fewer-than-it-timed).
+
 | condition | request-mean | pooled | median | min | requests with a counted draft round |
 |---|---:|---:|---:|---:|---:|
 | baseline | 135.7 | 135.7 | 135.6 | 135.3 | 0 / 10 |
@@ -874,7 +876,8 @@ does, over one ten-prompt arm-run of 3000 tokens:
 39.07 s, reproducible to two hundredths of a second across four arm-runs, at a
 median of 21.9 ms per save and 22.4 ms per restore. Inside, not on: the state
 APIs synchronise first, so this is the API boundary. Run T4 times that wait
-separately and it is **0.002 s of 39.09 s**, so the boundary is state work
+separately and it is **0.002 s of 39.09 s**, so what the boundary measures is
+post-drain state-save/restore API work rather than waiting
 ([A12](ERRATA.md#a12-what-the-checkpoint-path-costs-measured-with-timers-in-the-source)). `spec-dflash-n2` on the same prompts performs **zero** of
 these operations, spends 3.41 s drafting, and finishes **5.3 s faster than not
 speculating at all**.

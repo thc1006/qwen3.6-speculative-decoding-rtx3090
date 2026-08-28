@@ -7,8 +7,8 @@ message: >-
   v1.0 through v3.0 contain claims retracted by the 2026-08-25 audit; see
   ERRATA.md.
 type: dataset
-version: v4.1
-date-released: 2026-08-26
+version: v4.2
+date-released: 2026-08-28
 authors:
   - family-names: Tsai
     given-names: Hsiu-Chi
@@ -45,5 +45,6 @@ abstract: >-
   decode graph. The repository preserves per-request timings and the SHA-256 of
   every raw server log, and an audit (ERRATA.md) documenting which of the
   originally published claims survive re-examination and which do not; the raw
-  controlled-tier logs themselves are not published. Findings are bounded to
+  controlled-tier logs are published as release assets and the extraction
+  is re-runnable from them. Findings are bounded to
   llama.cpp commit 3737e4137 and the recorded configuration.

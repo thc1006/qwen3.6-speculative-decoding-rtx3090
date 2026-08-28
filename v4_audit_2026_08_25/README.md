@@ -43,6 +43,8 @@ The three arms differ in one thing only:
 
 `data/A_bcb5eeb64_legacy/`, 2 repeats, binary sha256 `32c16754e053da2f…`
 
+> **`request-mean` is llama.cpp's own `predicted_per_second`, averaged.** That field divides `n − 1` generated tokens by the time for `n`, in 13 300 of 13 344 committed request rows, so every request-mean here is low by `(n − 1) / n` — 0.33 % at 300 tokens and more at shorter lengths. It is uniform across arms on a run where every request hits the same cap, and it is NOT uniform where the arms stop at different lengths, so it must not carry a cross-arm comparison in the thinking-off runs. Every headline figure and every published delta is a **pooled** rate computed from `predicted_n` and `predicted_ms` directly and contains none of this. See [B8](../ERRATA.md#b8-every-request-mean-here-counts-one-token-fewer-than-it-timed).
+
 | arm | request-mean | pooled | min | accepted / drafted | completed |
 |---|---:|---:|---:|---:|---|
 | baseline | 123.0 | 122.9 | 116.2 | — | 2 / 2 |

@@ -41,6 +41,47 @@ ROOT = Path(__file__).resolve().parents[1]
 
 # (description, file, correct fragment, defect to restore, test that must fail)
 MUTATIONS = [
+    # --- the fourth review's findings, each broken here ---------------------
+    ("the perturbation suite stops refusing to run during a measurement",
+     "tests/data_mutate.py",
+     'host_guard.protect("the data perturbation suite")',
+     'pass  # guard removed',
+     "tests.test_harness_invariants.TheVerificationSuitesMustRefuseAMeasuringHost"),
+    ("benchmark detection goes back to matching anywhere in the command line",
+     "bench/host_guard.py",
+     "    if exe in _BENCH_EXE:",
+     "    if any(n in ' '.join(argv) for n in _BENCH_EXE):",
+     "tests.test_harness_invariants.TheVerificationSuitesMustRefuseAMeasuringHost"),
+    ("the rerun script goes back to a variable the runner never reads",
+     "bench/run_v2_crossover.sh",
+     'export LLAMA_SERVER_BIN="${LLAMA_SERVER_BIN:-',
+     'export BENCH_SERVER="${BENCH_SERVER:-',
+     "tests.test_harness_invariants.TheRerunScriptsMustBeSelfContainedAndFailClosed"),
+    ("the rerun script stops failing when a session fails",
+     "bench/run_v3_within.sh",
+     '[ -z "$FAILED" ] || { echo "FAIL: sessions failed:$FAILED" >&2; rc=1; }',
+     'true',
+     "tests.test_harness_invariants.TheRerunScriptsMustBeSelfContainedAndFailClosed"),
+    ("re-derivation indexes with a dict comprehension again",
+     "analysis/rederive_from_logs.py",
+     '    A = index_unique(regenerated, key, f"{label}: regenerated")',
+     "    A = {key(r): r for r in regenerated}",
+     "tests.test_harness_invariants.RederivationMustNotCollapseOrMiscount"),
+    ("re-derivation goes back to counting the gap instead of naming it",
+     "analysis/rederive_from_logs.py",
+     "if set(missing) != set(expected_missing):",
+     "if len(missing) != len(expected_missing):",
+     "tests.test_harness_invariants.RederivationMustNotCollapseOrMiscount"),
+    ("a completed arm-run may again have no observed target identity",
+     "bench/retest_runner.py",
+     "    if healthy and not seen_identity:",
+     "    if False and not seen_identity:",
+     "tests.test_harness_invariants.AHealthyArmRunMustSayWhatItLoaded"),
+    ("the workflows lose their named shell, and with it pipefail",
+     ".github/workflows/audit.yml",
+     "defaults:\n  run:\n    shell: bash\n",
+     "",
+     "tests.test_harness_invariants.TheWorkflowsMustNameTheirShell"),
     ("extractor double-counts the draft component",
      "analysis/extract_spec_accounting.py",
      "sum(float(a) for a, _ in created) / 1024, 2)",
@@ -226,8 +267,8 @@ MUTATIONS = [
      "tests.test_harness_invariants.RederivationMustNotForgive"),
     ("the re-derivation tolerates records that vanished",
      "analysis/rederive_from_logs.py",
-     "    if len(missing) != expected_gap:",
-     "    if False:",
+     "elif len(missing) != expected_gap:",
+     "elif False:",
      "tests.test_harness_invariants.RederivationMustNotForgive"),
 
     ("the model the server loaded stops being compared",
@@ -313,8 +354,12 @@ MUTATIONS = [
 COPY = ("analysis", "bench", "tests", "v4_audit_2026_08_25", "results",
         "v2_3090_followup", "v3_dflash_2026_05_07", "README.md", "ERRATA.md",
         "CHANGELOG.md", "RETEST_TODO.md", "BENCHMARK_ENV.md",
+        "CITATION.cff",
         "run_matrix.sh", "run_p0_matrix.sh", "run_verify_matrix.sh",
-        "collect_env.sh")
+        "collect_env.sh", "PULL_REQUEST.md", "tools",
+        # the workflows are mutated too now, and a mirror without them turns a
+        # mutation into a FileNotFoundError rather than a verdict
+        ".github")
 
 
 def mirror(into: Path) -> Path:

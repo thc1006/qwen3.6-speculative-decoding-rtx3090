@@ -178,13 +178,19 @@ requests. Any master comparison must pass `--spec-type` explicitly.
 > are in [`v4_audit_2026_08_25/README.md`](v4_audit_2026_08_25/README.md).
 > This section is what is genuinely still open.
 
-- **Run V, rerun with the mode order controlled.** See P1-3 above: the
-  `ignore_eos` treatment was not interleaved, so the measured shift cannot be
-  separated from the invocation effect in A16. `bench/run_v2_crossover.sh` is
-  written and unrun — four sessions, AB/BA/BA/AB, run V's configuration
-  otherwise verbatim, about three hours on an exclusive card. Analyse it with
-  the session as the block, not the difference of two whole-run point
-  estimates.
+- ~~**Run V, rerun with the mode order controlled.**~~ **Done 2026-08-27.**
+  `bench/run_v2_crossover.sh` ran eight sessions in `AB BA BA AB BA AB AB BA`
+  order, 400 of 400 arm-runs, with the session as the resampling unit;
+  `bench/run_v3_within.sh` added a within-invocation square, 200 of 200. Run V
+  overstated `spec-dflash-n2` by about 3.3 pp and the other three of its four
+  numbers land inside the eight-session intervals
+  ([A17](ERRATA.md#a17-the-thinking-off-comparisons-are-not-comparisons-of-the-same-amount-of-work)).
+- **A carryover-balanced version of that design.** V2 and V3 are both cyclic
+  rotations: they balance treatment *position* and fix the *predecessor*, so
+  every capped arm follows its own uncapped twin and mode stays aliased with
+  first-order carryover. A Williams square, or a randomised order, with the
+  session as the resampling unit, is what would let the mode effect be called
+  identified rather than replicated. Not run.
 - **Recompute every `request-mean` from `predicted_n` and `predicted_ms`.**
   [B8](ERRATA.md#b8-every-request-mean-here-counts-one-token-fewer-than-it-timed):
   llama.cpp's `predicted_per_second` is a rate over `n − 1` tokens divided by
@@ -193,10 +199,15 @@ requests. Any master comparison must pass `--spec-type` explicitly.
   moves; on the thinking-off runs, where arms stop at different lengths, the
   bias differs per arm. Several dozen published figures would move by 0.33 %
   and each needs re-verifying, which is why it is here rather than done.
-- **The checkpoint timers, split.** A12's figure is elapsed inside the
-  checkpoint API calls, and those begin with `ctx->synchronize()`. A second
-  timer inside the call — synchronisation and state get/set apart — would say
-  how much of the 54.7 % is copying and how much is waiting.
+- ~~**The checkpoint timers, split.**~~ **Done 2026-08-27.**
+  `bench/apply_split_timers.py` drains the queue explicitly before each call
+  and times the drain: **0.002 s of 39.09 s**, 0.003 % of the excess, so what
+  the 54.7 % measures is post-drain checkpoint state-save/restore API work
+  rather than waiting on target work queued earlier
+  ([A12](ERRATA.md#a12-what-the-checkpoint-path-costs-measured-with-timers-in-the-source)).
+  The residual is not raw copy cost: it still contains serialisation,
+  allocation and resize, backend transfer, state traversal and the API's own
+  bookkeeping, none of which this run separates.
 - **A design that identifies the A16 invocation effect**: randomised order with
   the session as the resampling unit, the stock and instrumented builds
   stratified, and the preceding treatment recorded. The fixed rotation used so

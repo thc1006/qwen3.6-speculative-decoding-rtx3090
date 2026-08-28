@@ -86,6 +86,7 @@ import socket
 import os
 import signal
 import subprocess
+import random
 import sys
 import time
 import urllib.error
@@ -166,12 +167,26 @@ IGNORE_EOS = _env_bool("BENCH_IGNORE_EOS", False)
 # in one balanced square, in one invocation, adjacent in time, so the contrast
 # is within-invocation and whatever state the drafter is in applies to both.
 HARDCAP_SUFFIX = os.environ.get("BENCH_HARDCAP_SUFFIX", "").strip()
+# The suffix becomes part of a treatment identity and of a filename. Left
+# unconstrained it could carry a path separator, `..`, or a name that collides
+# with a real arm, and the first two would place an arm-run outside the run
+# directory. Restrict it to what an arm name may contain.
+if HARDCAP_SUFFIX:
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+", HARDCAP_SUFFIX):
+        sys.exit(f"BENCH_HARDCAP_SUFFIX={HARDCAP_SUFFIX!r} must match "
+                 r"[A-Za-z0-9_.-]+; it names files and treatments")
+    if HARDCAP_SUFFIX in (".", ".."):
+        sys.exit(f"BENCH_HARDCAP_SUFFIX={HARDCAP_SUFFIX!r} is a path component")
 # the raw string is kept for the manifest: "what was asked for" and "what was
 # run" are different records, and D2 was a mismatch between them
 _THINK_RAW = os.environ.get("BENCH_THINK", "on")
 THINK = "on" if _env_bool("BENCH_THINK", True) else "off"
 CONCURRENCY = _env_int("BENCH_CONCURRENCY", 1, 1)
-ORDER_MODE = _env_choice("BENCH_ORDER", "latin", ("latin", "cyclic", "mirrored"))
+ORDER_MODE = _env_choice("BENCH_ORDER", "latin",
+                         ("latin", "cyclic", "mirrored", "williams"))
+# `williams` randomises its row order; the seed is recorded so the schedule is
+# reproducible from the manifest alone.
+SCHEDULE_SEED = _env_int("BENCH_SCHEDULE_SEED", 0, low=0, high=2**31 - 1)
 # Pinning -ngl 999 makes llama.cpp's memory fitter abort ("n_gpu_layers already
 # set by user to 999, abort") instead of adjusting the parameters the caller
 # left unset. That is why the BF16 DFlash drafter appeared not to fit: with -ngl
@@ -602,7 +617,8 @@ if EXPECT_LIB and not re.fullmatch(r"[0-9a-f]{64}", EXPECT_LIB):
 _LIB_BASELINE: dict | None = None
 
 
-def check_identity(arm: str, rep: int, ident: dict, libs: dict) -> list[str]:
+def check_identity(arm: str, rep: int, ident: dict, libs: dict,
+                   healthy: bool = True) -> list[str]:
     """Compare what answered against what the caller said should answer."""
     bad: list[str] = []
     if EXPECT_COMMIT:
@@ -619,11 +635,22 @@ def check_identity(arm: str, rep: int, ident: dict, libs: dict) -> list[str]:
     # and /props are two independent reads of the same fact; both are compared
     # when present, and neither is required, because a server that never
     # reached the loader has neither and the crash is the finding.
+    seen_identity = []
     for src, got in (("startup log", ident.get("model_path")),
                      ("/props", (ident.get("props") or {}).get("model_path"))):
+        if got:
+            seen_identity.append(src)
         if got and TARGET and os.path.realpath(got) != os.path.realpath(TARGET):
             bad.append(f"{arm} rep{rep}: {src} says the target is {got!r}, "
                        f"MODEL_TARGET={TARGET!r}")
+    # A crashed arm-run has neither source and the crash is the finding. An
+    # arm-run that produced rows and yet yielded no observed target identity is
+    # a different thing: nothing then ties the numbers to the model the
+    # manifest names, and comparing nothing used to pass.
+    if healthy and not seen_identity:
+        bad.append(f"{arm} rep{rep}: the run produced results but neither the "
+                   f"startup log nor /props yielded a target path, so nothing "
+                   f"observed ties it to MODEL_TARGET")
     # `libllama-server-impl.so` is the server's own code, but it is not the only
     # thing that decides what a decode does: `libllama.so`, `libggml-cuda.so`
     # and `libggml-base.so` are all loaded, and swapping any of them between
@@ -1149,6 +1176,64 @@ def is_position_balanced(pos: dict[str, list[int]]) -> bool:
     return all(sorted(v) == want for v in pos.values())
 
 
+def carryover_counts(sched: list[list[str]]) -> dict:
+    """How often each arm immediately follows each other arm, within a repeat.
+
+    A cyclic rotation balances POSITION and leaves this alone: in run V3 every
+    capped arm followed its own uncapped twin in 18 of 20 arm-runs, so the mode
+    and the predecessor were aliased and no analysis of that run could separate
+    them. Counting is the only way to say whether a schedule fixed that.
+    """
+    out: dict = {}
+    for row in sched:
+        for a, b in zip(row, row[1:]):
+            out.setdefault(b, {}).setdefault(a, 0)
+            out[b][a] += 1
+    return out
+
+
+def is_carryover_balanced(sched: list[list[str]], arms: list[str]) -> bool:
+    """Every ordered pair of distinct arms adjacent exactly once, within rows."""
+    c = carryover_counts(sched)
+    want = {a for a in arms}
+    for b in want:
+        preds = c.get(b, {})
+        if set(preds) != want - {b} or set(preds.values()) != {1}:
+            return False
+    return True
+
+
+def williams_square(arms: list[str], seed: int) -> list[list[str]]:
+    """A Latin square balanced for first-order carryover.
+
+    First row `1, n, 2, n-1, 3, ...`, then each row is the previous one shifted
+    by one. For even `n` the adjacent differences in that first row are all
+    distinct, so every ordered pair of arms is adjacent exactly once across the
+    square. Odd `n` needs two squares and is refused here rather than silently
+    producing an unbalanced schedule.
+
+    The ROW order is then shuffled with `seed`. Rows run back to back, so the
+    n-1 transitions between them are extra adjacencies that no n x n square can
+    balance; shuffling makes them differ between sessions instead of repeating
+    the same n-1 pairs every time.
+    """
+    n = len(arms)
+    if n % 2:
+        sys.exit(f"BENCH_ORDER=williams needs an even number of arms; got {n}. "
+                 f"An odd-sized Williams design is two squares, which this "
+                 f"runner does not build.")
+    first, lo, hi = [], 0, n - 1
+    while lo <= hi:
+        first.append(lo)
+        lo += 1
+        if lo <= hi:
+            first.append(hi)
+            hi -= 1
+    rows = [[arms[(x + i) % n] for x in first] for i in range(n)]
+    random.Random(seed).shuffle(rows)
+    return rows
+
+
 def build_schedule(arms: list[str], repeats: int, mode: str) -> list[list[str]]:
     """Build the arm order for every block, and refuse to call it balanced
     unless it is.
@@ -1161,6 +1246,16 @@ def build_schedule(arms: list[str], repeats: int, mode: str) -> list[list[str]]:
     claimed balance. `cyclic` is that same rotation, named for what it is.
     """
     n = len(arms)
+    if mode == "williams":
+        if repeats != n:
+            sys.exit(f"BENCH_ORDER=williams is one row per arm: BENCH_REPEATS "
+                     f"must be {n}, not {repeats}. The balance is a property of "
+                     f"the whole square and a truncated one does not have it.")
+        sched = williams_square(arms, SCHEDULE_SEED)
+        if not is_carryover_balanced(sched, arms):
+            sys.exit("BENCH_ORDER=williams produced a schedule that is not "
+                     "carryover-balanced; refusing to run under a false label")
+        return sched
     if mode == "mirrored":
         sched = [arms if r % 2 == 0 else list(reversed(arms)) for r in range(repeats)]
     else:
@@ -1290,7 +1385,9 @@ def validate_run(out: Path, arms: list[str], repeats: int,
     for res in results:
         arm, rep = res.get("arm"), res.get("repeat")
         problems += check_identity(arm, rep, res.get("server_identity") or {},
-                                   res.get("server_lib_sha256") or {})
+                                   res.get("server_lib_sha256") or {},
+                                   healthy=bool(res.get("rows"))
+                                   and not res.get("crashed"))
         td = res.get("teardown") or {}
         if not td.get("settled"):
             problems.append(f"arm-run {arm} rep{rep}: the GPU held "
@@ -1367,6 +1464,21 @@ def main() -> None:
                     f" (BENCH_HARDCAP_SUFFIX={HARDCAP_SUFFIX!r}, so "
                     f"'<arm>{HARDCAP_SUFFIX}' is accepted for any known arm)")
             sys.exit(f"unknown arm {a!r}{hint}; known: {', '.join(ARMS)}")
+    # A real arm named `<other><suffix>` reads two ways: as itself, or as the
+    # capped twin of `<other>`. `arm_is_hardcap` resolves it deterministically -
+    # the real arm wins - and that resolution is deliberate and tested. What was
+    # missing is that the run's own record never said a choice had been made, so
+    # a reader of the manifest could not tell which arm answered. Refusing the
+    # configuration outright would break `BENCH_HARDCAP_SUFFIX=-kvfp16`, which
+    # is a real arm suffix in this table and nothing to do with capping.
+    AMBIGUOUS_ARMS = sorted(a for a in arms
+                            if HARDCAP_SUFFIX and a in ARMS
+                            and a.endswith(HARDCAP_SUFFIX)
+                            and a[:-len(HARDCAP_SUFFIX)] in ARMS)
+    if AMBIGUOUS_ARMS:
+        print(f"  note: {', '.join(AMBIGUOUS_ARMS)} are real arms whose names "
+              f"also read as '<arm>{HARDCAP_SUFFIX}'; each runs as ITSELF, and "
+              f"the manifest records that under `ambiguous_arms`.", flush=True)
     dupes = sorted({a for a in arms if arms.count(a) > 1})
     if dupes:
         # Two entries write the same `<arm>__rep<n>.json`, so the second
@@ -1410,6 +1522,8 @@ def main() -> None:
         "arms": {a: ARMS[arm_base(a)] for a in arms},
         "hardcap_suffix": HARDCAP_SUFFIX or None,
         "hardcap_arms": sorted(a for a in arms if arm_is_hardcap(a)),
+        # arms that read both ways under the suffix; each ran as itself
+        "ambiguous_arms": AMBIGUOUS_ARMS,
         "repeats": REPEATS, "max_tokens": MAX_TOKENS,
         "temperature": 0.0, "seed": 42, "think": THINK, "think_env": _THINK_RAW, "ignore_eos": IGNORE_EOS,
         "concurrency": CONCURRENCY, "fit": FIT, "ctx": CTX,
@@ -1423,6 +1537,14 @@ def main() -> None:
         "schedule_position_counts": position_counts(SCHEDULE) if SCHEDULE else {},
         "schedule_is_position_balanced": bool(SCHEDULE) and is_position_balanced(
             position_counts(SCHEDULE)),
+        # Three separate facts, because a schedule can have the first and not
+        # the second, and run V3 did: every arm visited every position exactly
+        # once while every capped arm followed its own uncapped twin.
+        "schedule_first_order_carryover_balanced":
+            bool(SCHEDULE) and is_carryover_balanced(SCHEDULE, arms),
+        "schedule_randomized": ORDER_MODE == "williams",
+        "schedule_seed": SCHEDULE_SEED if ORDER_MODE == "williams" else None,
+        "schedule_carryover_counts": carryover_counts(SCHEDULE) if SCHEDULE else {},
         "prompt_set": PROMPT_SET_NAME, "n_prompts": len(PROMPTS),
         "prompt_tags": [t for t, _, _ in PROMPTS],
         "fit_target": FIT_TARGET or None,
@@ -1430,6 +1552,9 @@ def main() -> None:
             "latin": "cyclic rotation, validated position-balanced before the run",
             "cyclic": "cyclic rotation; NOT position-balanced and not claimed to be",
             "mirrored": "arm order reversed on odd repeats; balanced only for even repeats",
+            "williams": "Williams square, randomised row order: every arm in "
+                        "every position exactly once AND every arm preceded by "
+                        "every other exactly once within a repeat",
         }[ORDER_MODE],
         "gpu_fields": GPU_FIELDS,
         "nvidia_smi": nvidia_smi(),
@@ -1475,8 +1600,23 @@ def main() -> None:
     # integrity checker read it as an attestation of completeness. Validate
     # first; on failure write RUN_FAILED.json instead, so a partial directory
     # announces itself rather than passing silently.
+    # A matrix runs for hours and the model hashes were taken once, at the
+    # start. A file swapped in the middle would leave every later arm measuring
+    # something else while the manifest still named the original. Hash again at
+    # the end and require the same answer.
+    after = {"target_sha256": sha256(TARGET),
+             "draft_sha256": sha256(DRAFT) if DRAFT else None,
+             "dflash_sha256": sha256(DFLASH) if DFLASH else None,
+             "mtp_sha256": sha256(MTP) if MTP else None}
+    model_moved = [k for k, v in after.items() if manifest.get(k) != v]
     problems = validate_run(OUT, arms, REPEATS, results)
+    if model_moved:
+        problems.append(
+            "a model file changed while the matrix ran: "
+            + "; ".join(f"{k} {str(manifest.get(k))[:12]} -> {str(after[k])[:12]}"
+                        for k in model_moved))
     stamp = {
+        "model_sha256_after": after,
         "completed_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         "arms": arms, "repeats": REPEATS, "prompt_set": PROMPT_SET_NAME,
         "n_prompts": len(PROMPTS),

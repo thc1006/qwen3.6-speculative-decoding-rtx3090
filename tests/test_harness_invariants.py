@@ -915,9 +915,9 @@ class TheWholeLibraryMapIsPinned(unittest.TestCase):
         rr = self._rr()
         rr._LIB_BASELINE = None
         first = {"libllama-server-impl.so": "a" * 64, "libggml-cuda.so": "b" * 64}
-        self.assertEqual(rr.check_identity("arm", 0, {}, first), [])
+        self.assertEqual(rr.check_identity("arm", 0, {}, first, healthy=False), [])
         moved = {"libllama-server-impl.so": "a" * 64, "libggml-cuda.so": "c" * 64}
-        bad = rr.check_identity("arm", 1, {}, moved)
+        bad = rr.check_identity("arm", 1, {}, moved, healthy=False)
         self.assertTrue(bad)
         self.assertIn("libggml-cuda.so", bad[0])
 
@@ -925,16 +925,16 @@ class TheWholeLibraryMapIsPinned(unittest.TestCase):
         rr = self._rr()
         base = {"libllama.so": "a" * 64, "libggml.so": "b" * 64}
         rr._LIB_BASELINE = None
-        rr.check_identity("arm", 0, {}, base)
+        rr.check_identity("arm", 0, {}, base, healthy=False)
         # one gone
-        self.assertTrue(rr.check_identity("arm", 1, {}, {"libllama.so": "a" * 64}))
+        self.assertTrue(rr.check_identity("arm", 1, {}, {"libllama.so": "a" * 64}, healthy=False))
         # one added
         self.assertTrue(rr.check_identity("arm", 2, {},
-                                          dict(base, libextra_so="d" * 64)))
+                                          dict(base, libextra_so="d" * 64), healthy=False))
         # and an EMPTY map is not "every library vanished", it is an arm-run
         # that never hashed anything - the crash is the finding, and cascading
         # a library complaint onto every later arm hides it
-        self.assertEqual(rr.check_identity("crashed", 3, {}, {}), [])
+        self.assertEqual(rr.check_identity("crashed", 3, {}, {}, healthy=False), [])
 
     def test_a_crashed_arm_run_does_not_become_the_baseline(self):
         """A crashed arm-run never hashed anything. Seeding the baseline from
@@ -942,19 +942,19 @@ class TheWholeLibraryMapIsPinned(unittest.TestCase):
         changed, so one crash failed the whole run for the wrong reason."""
         rr = self._rr()
         rr._LIB_BASELINE = None
-        self.assertEqual(rr.check_identity("crashed", 0, {}, {}), [])
+        self.assertEqual(rr.check_identity("crashed", 0, {}, {}, healthy=False), [])
         self.assertIsNone(rr._LIB_BASELINE)
         real = {"libllama-server-impl.so": "a" * 64}
-        self.assertEqual(rr.check_identity("arm", 0, {}, real), [])
+        self.assertEqual(rr.check_identity("arm", 0, {}, real, healthy=False), [])
         self.assertEqual(rr._LIB_BASELINE, real)
-        self.assertEqual(rr.check_identity("crashed", 1, {}, {}), [])
+        self.assertEqual(rr.check_identity("crashed", 1, {}, {}, healthy=False), [])
 
     def test_an_unchanged_map_passes(self):
         rr = self._rr()
         rr._LIB_BASELINE = None
         same = {"libllama-server-impl.so": "a" * 64, "libggml.so": "b" * 64}
-        rr.check_identity("arm", 0, {}, same)
-        self.assertEqual(rr.check_identity("arm", 1, {}, dict(same)), [])
+        rr.check_identity("arm", 0, {}, same, healthy=False)
+        self.assertEqual(rr.check_identity("arm", 1, {}, dict(same), healthy=False), [])
 
 
 class PairedBlocksAgreesWithTheRunner(unittest.TestCase):
@@ -1099,7 +1099,7 @@ class WhatAnsweredMustHaveLoadedTheRightModel(unittest.TestCase):
         rr = self._rr()
         rr._LIB_BASELINE = None
         rr.TARGET = "/models/right.gguf"
-        bad = rr.check_identity("arm", 0, {"model_path": "/models/wrong.gguf"}, {})
+        bad = rr.check_identity("arm", 0, {"model_path": "/models/wrong.gguf"}, {}, healthy=False)
         self.assertTrue(bad)
         self.assertIn("wrong.gguf", bad[0])
 
@@ -1108,7 +1108,7 @@ class WhatAnsweredMustHaveLoadedTheRightModel(unittest.TestCase):
         rr._LIB_BASELINE = None
         rr.TARGET = "/models/right.gguf"
         bad = rr.check_identity("arm", 0,
-                                {"props": {"model_path": "/models/other.gguf"}}, {})
+                                {"props": {"model_path": "/models/other.gguf"}}, {}, healthy=False)
         self.assertTrue(bad)
         self.assertIn("/props", bad[0])
 
@@ -1119,7 +1119,7 @@ class WhatAnsweredMustHaveLoadedTheRightModel(unittest.TestCase):
         self.assertEqual(
             rr.check_identity("arm", 0,
                               {"model_path": "/models/right.gguf",
-                               "props": {"model_path": "/models/right.gguf"}}, {}),
+                               "props": {"model_path": "/models/right.gguf"}}, {}, healthy=False),
             [])
 
 
@@ -2159,6 +2159,771 @@ class TheGitlessAssertionGapMustBeTheDeclaredOne(unittest.TestCase):
         self.assertEqual(n_with - n_without, declared,
                          f"the checker skips {n_with - n_without} assertions "
                          f"without git and declares {declared}")
+
+
+class TheVerificationSuitesMustRefuseAMeasuringHost(unittest.TestCase):
+    """The guard added on 2026-08-27 was itself unguarded.
+
+    `tests/mutate.py` opens by saying a mutation that survives means its guard
+    is decorative. Three guards shipped that night with nothing testing them:
+    this one, the workflows' `shell: bash`, and A16's new claims. Deleting
+    `host_guard.protect(...)` from either suite failed nothing, which is the
+    defect this whole branch exists to catch, committed by the branch itself.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    def _hg(self):
+        sys.path.insert(0, str(self.ROOT / "bench"))
+        import host_guard
+        return host_guard
+
+    def test_both_suites_call_the_guard_before_they_work(self):
+        for rel in ("tests/mutate.py", "tests/data_mutate.py"):
+            src = (self.ROOT / rel).read_text(encoding="utf-8")
+            self.assertIn("host_guard.protect(", src,
+                          f"{rel} can start during a measurement")
+            self.assertIn("host_guard.serialise(", src,
+                          f"{rel} can overlap with another pipeline")
+
+    def test_detection_is_positional_not_a_substring(self):
+        """`\"bench.py\" in cmdline` also matches an editor, a grep, and this
+        session's own shell command that merely names it."""
+        m = self._hg()._benchmark_name
+        for argv, want in (
+                (["/opt/build/bin/llama-server", "-m", "x.gguf"], "llama-server"),
+                (["python3", "harness/bench.py", "--matrix", "phase_a"], "bench.py"),
+                (["python3", "-u", "harness/bench.py"], "bench.py"),
+                (["grep", "-rn", "bench.py", "."], None),
+                (["bash", "-c", "echo bench.py llama-server"], None),
+                (["vim", "harness/bench.py"], None),
+                (["python3", "tests/data_mutate.py"], None),
+                ([], None)):
+            self.assertEqual(m(argv), want, f"argv={argv}")
+
+    def test_every_thread_variable_is_pinned(self):
+        """OpenBLAS spawning one thread per core is half of what caused the
+        contention; setdefault must cover all five names."""
+        hg = self._hg()
+        self.assertEqual(len(hg._THREAD_VARS), 5)
+        for v in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"):
+            self.assertIn(v, hg._THREAD_VARS)
+
+    def _protect(self, env_extra, lockfile):
+        code = ("import sys; sys.path.insert(0, 'bench'); import host_guard; "
+                "host_guard.protect('t'); print('proceeded')")
+        env = dict(os.environ, BENCH_GPU_LOCK=str(lockfile), **env_extra)
+        env.pop("BENCH_ALLOW_CONTENDED", None)
+        if "CI" not in env_extra:
+            env.pop("CI", None)
+        return subprocess.run([sys.executable, "-c", code], cwd=str(self.ROOT),
+                              capture_output=True, text=True, env=env, timeout=120)
+
+    def test_a_held_lock_stops_it(self):
+        with tempfile.NamedTemporaryFile(suffix=".lock") as lk:
+            r = self._protect({}, lk.name)
+        self.assertNotEqual(r.returncode, 0, "a held lock did not stop the suite")
+        self.assertIn("refusing to run", r.stdout + r.stderr)
+
+    def test_but_ci_is_exempt_because_there_is_no_card_there(self):
+        with tempfile.NamedTemporaryFile(suffix=".lock") as lk:
+            r = self._protect({"CI": "true"}, lk.name)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("proceeded", r.stdout)
+
+
+class TheWorkflowsMustNameTheirShell(unittest.TestCase):
+    """A `run:` step with no shell gets `bash -e {0}`: -e, and no pipefail.
+
+    Under that default `checker.py | tail -1` reports tail's exit status, so a
+    checker can print FAIL into a green job. Nothing here pipes today; this is
+    what keeps that true when something does.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    def test_both_workflows_declare_bash(self):
+        for wf in ("audit.yml", "evidence.yml"):
+            src = (self.ROOT / ".github" / "workflows" / wf).read_text(encoding="utf-8")
+            self.assertRegex(src, r"defaults:\s*\n\s*run:\s*\n\s*shell:\s*bash",
+                             f"{wf} leaves the shell defaulted, so no pipefail")
+
+    def test_no_step_pipes_without_saying_pipefail(self):
+        """Belt and braces: even with the default named, a step that pipes and
+        overrides the shell would be back where it started."""
+        offenders = []
+        for wf in ("audit.yml", "evidence.yml"):
+            path = self.ROOT / ".github" / "workflows" / wf
+            for i, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+                t = line.strip()
+                if t.startswith("#") or "||" in t:
+                    continue
+                if re.search(r"[^|]\|[^|]", t) and "pipefail" not in t:
+                    offenders.append(f"{wf}:{i} {t[:60]}")
+        # the two that exist are inside steps that set -euo pipefail themselves
+        for o in offenders:
+            self.assertIn("evidence.yml", o, f"unguarded pipe: {o}")
+
+
+class TheTelemetryGapA16NamesMustBeReal(unittest.TestCase):
+    """A16 says host load was never sampled. That has to stay true of the
+    sampler, or the sentence becomes false without anyone noticing."""
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    def test_gpu_telemetry_samples_no_host_load(self):
+        src = (self.ROOT / "bench" / "gpu_telemetry.sh").read_text(encoding="utf-8")
+        for needle in ("/proc/stat", "loadavg", "vmstat", "mpstat"):
+            self.assertNotIn(needle, src,
+                             "gpu_telemetry.sh grew host sampling; A16 says it "
+                             "has none and no run has the column")
+
+    def test_no_committed_trace_has_a_host_column(self):
+        data = self.ROOT / "v4_audit_2026_08_25" / "data"
+        checked = 0
+        for csv in sorted(data.glob("gpu_telemetry_*.csv")):
+            head = csv.read_text(encoding="utf-8", errors="replace").split("\n", 1)[0]
+            checked += 1
+            for bad in ("load1", "busy_pct", "own_pct", "other_pct"):
+                self.assertNotIn(bad, head, f"{csv.name} has a host column")
+        self.assertGreater(checked, 0, "no telemetry traces found to check")
+
+    def test_the_sampler_exists_for_the_next_run(self):
+        hg = (self.ROOT / "bench" / "host_guard.py").read_text(encoding="utf-8")
+        self.assertIn("def sample(", hg)
+        self.assertIn("--sample", hg)
+
+
+class TheRerunScriptsMustBeSelfContainedAndFailClosed(unittest.TestCase):
+    """A published reproducer that only works in the author's shell is not one.
+
+    Both drivers exported `BENCH_SERVER`. `retest_runner.py` reads
+    `LLAMA_SERVER_BIN` and nothing else, so a clean shell failed outright and a
+    shell that happened to carry somebody else's `LLAMA_SERVER_BIN` silently ran
+    a binary the script never chose. Both scripts also ended on `find | wc`,
+    which succeeds, so every session could fail and the driver still exited 0.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+    SCRIPTS = ("bench/run_v2_crossover.sh", "bench/run_v3_within.sh")
+
+    def _src(self, rel):
+        return (self.ROOT / rel).read_text(encoding="utf-8")
+
+    def test_they_export_the_variable_the_runner_reads(self):
+        runner = self._src("bench/retest_runner.py")
+        self.assertIn('os.environ.get("LLAMA_SERVER_BIN"', runner)
+        self.assertNotIn("BENCH_SERVER", runner,
+                         "the runner grew a second name for the server")
+        for rel in self.SCRIPTS:
+            src = self._src(rel)
+            self.assertIn("export LLAMA_SERVER_BIN=", src, f"{rel}")
+            self.assertNotIn("export BENCH_SERVER=", src,
+                             f"{rel} still exports a name nothing consumes")
+
+    def test_they_assert_the_binary_before_hours_of_work(self):
+        for rel in self.SCRIPTS:
+            src = self._src(rel)
+            self.assertIn("BENCH_EXPECT_COMMIT", src,
+                          f"{rel} does not pin the server commit")
+        # and the runner must actually act on it
+        self.assertIn('EXPECT_COMMIT = os.environ.get("BENCH_EXPECT_COMMIT"',
+                      self._src("bench/retest_runner.py"))
+
+    def test_they_exit_non_zero_when_a_session_fails(self):
+        for rel in self.SCRIPTS:
+            src = self._src(rel).rstrip()
+            self.assertTrue(src.endswith('exit "$rc"'),
+                            f"{rel} ends on {src.splitlines()[-1]!r}, which can "
+                            f"succeed while sessions failed")
+            self.assertIn('[ -z "$FAILED" ]', src, f"{rel} ignores FAILED")
+
+    def test_they_require_the_exact_expected_number_of_units(self):
+        v2 = self._src("bench/run_v2_crossover.sh")
+        self.assertIn("-eq 16", v2, "V2 does not require 16 validated halves")
+        v3 = self._src("bench/run_v3_within.sh")
+        self.assertIn("-eq 2", v3, "V3 does not require 2 validated sessions")
+        self.assertIn("-eq 100", v3, "V3 does not require 100 arm-runs a session")
+
+    def test_the_scripts_still_lint(self):
+        """shellcheck runs in CI; a syntax error here would only surface there."""
+        for rel in self.SCRIPTS:
+            r = subprocess.run(["bash", "-n", str(self.ROOT / rel)],
+                               capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, f"{rel}: {r.stderr}")
+
+
+class RederivationMustNotCollapseOrMiscount(unittest.TestCase):
+    """`compare()` indexed both sides with a dict comprehension.
+
+    Two records sharing a key collapsed to the last one, so a dump that cannot
+    be indexed compared clean. And the gap was checked by COUNT: delete one
+    reproducible row, add one unreproducible row, and nine is still nine.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    def _mod(self):
+        sys.path.insert(0, str(self.ROOT / "analysis"))
+        import importlib
+        import rederive_from_logs
+        return importlib.reload(rederive_from_logs)
+
+    def test_a_duplicate_key_is_refused_not_overwritten(self):
+        m = self._mod()
+        rows = [{"k": 1, "v": "a"}, {"k": 1, "v": "b"}]
+        with self.assertRaises(SystemExit) as cm:
+            m.index_unique(rows, lambda r: r["k"], "test")
+        self.assertIn("duplicate key", str(cm.exception))
+
+    def test_compare_actually_uses_it(self):
+        """Testing the helper in isolation leaves `compare()` free to go back
+        to a dict comprehension, which is the defect, not the helper."""
+        src = (self.ROOT / "analysis" / "rederive_from_logs.py").read_text(encoding="utf-8")
+        body = src.split("def compare(")[1].split("\ndef ")[0]
+        self.assertIn("index_unique(regenerated", body)
+        self.assertIn("index_unique(published", body)
+        self.assertNotIn("{key(r): r for r in", body,
+                         "compare() indexes with a dict comprehension again")
+
+    def test_unique_keys_still_index(self):
+        m = self._mod()
+        out = m.index_unique([{"k": 1}, {"k": 2}], lambda r: r["k"], "test")
+        self.assertEqual(sorted(out), [1, 2])
+
+    def test_the_missing_set_is_compared_not_its_size(self):
+        m = self._mod()
+        m.FAIL.clear()
+        published = [{"k": i} for i in range(4)]
+        # one documented gap (k=3), but a DIFFERENT row (k=0) actually missing
+        regenerated = [{"k": 1}, {"k": 2}, {"k": 3}]
+        m.compare("t", regenerated, published, lambda r: r["k"],
+                  expected_missing=[3])
+        self.assertTrue(m.FAIL, "a swapped missing row passed as the documented one")
+        self.assertIn("not the documented one", m.FAIL[0])
+
+    def test_the_documented_gap_still_passes(self):
+        m = self._mod()
+        m.FAIL.clear()
+        published = [{"k": i} for i in range(4)]
+        regenerated = [{"k": 0}, {"k": 1}, {"k": 2}]
+        m.compare("t", regenerated, published, lambda r: r["k"],
+                  expected_missing=[3])
+        self.assertEqual(m.FAIL, [])
+
+    def test_t4_can_be_made_mandatory(self):
+        src = (self.ROOT / "analysis" / "rederive_from_logs.py").read_text(encoding="utf-8")
+        self.assertIn("REDERIVE_REQUIRE_T4", src)
+        wf = (self.ROOT / ".github" / "workflows" / "evidence.yml").read_text(encoding="utf-8")
+        self.assertIn("REDERIVE_REQUIRE_T4", wf,
+                      "the evidence workflow does not require T4")
+
+
+class AHealthyArmRunMustSayWhatItLoaded(unittest.TestCase):
+    """Provenance was compared only when it happened to be present.
+
+    `check_identity` compared the startup log and `/props` against
+    MODEL_TARGET "when present, and neither is required, because a server that
+    never reached the loader has neither". True of a crash. For an arm-run that
+    produced rows, having neither means nothing observed ties the numbers to
+    the model the manifest names, and the comparison silently passed.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    def _rr(self):
+        return _load_runner()
+
+    def test_a_completed_run_with_no_observed_identity_fails(self):
+        rr = self._rr()
+        rr._LIB_BASELINE = None
+        bad = rr.check_identity("arm", 0, {}, {"libllama.so": "a" * 64},
+                                healthy=True)
+        self.assertTrue(bad, "a healthy arm-run passed with no identity at all")
+        self.assertIn("neither the startup log nor /props", bad[0])
+
+    def test_a_crashed_run_is_still_exempt(self):
+        rr = self._rr()
+        rr._LIB_BASELINE = None
+        self.assertEqual(rr.check_identity("crashed", 0, {}, {}, healthy=False), [])
+
+    def test_either_source_alone_satisfies_it(self):
+        rr = self._rr()
+        for ident in ({"model_path": rr.TARGET},
+                      {"props": {"model_path": rr.TARGET}}):
+            with self.subTest(ident=sorted(ident)):
+                rr._LIB_BASELINE = None
+                bad = rr.check_identity("arm", 0, ident,
+                                        {"libllama.so": "a" * 64}, healthy=True)
+                self.assertEqual(bad, [], bad)
+
+    def test_the_caller_passes_the_run_health(self):
+        src = (self.ROOT / "bench" / "retest_runner.py").read_text(encoding="utf-8")
+        self.assertIn("healthy=bool(res.get(\"rows\"))", src,
+                      "check_identity is called without saying whether the "
+                      "arm-run produced anything")
+
+    def test_the_fake_server_prints_a_loader_line(self):
+        """Otherwise every end-to-end test exercises the absent-provenance path,
+        which is how this stayed invisible."""
+        fake = (self.ROOT / "tests" / "fake_llama_server.py").read_text(encoding="utf-8")
+        self.assertIn("llama_model_loader: loaded meta data", fake)
+
+
+class ACarryoverContrastNeedsABalancedSchedule(unittest.TestCase):
+    """`analysis/carryover.py` must refuse the runs that cannot answer it.
+
+    Run V3's cyclic rotation preceded every arm by one and the same arm nine
+    times out of nine. A carryover number computed from that is the predecessor
+    and the treatment at once, which is the alias the fourth review found in
+    the wording. Printing it anyway would be worse than not having the file.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    def _run(self, pattern):
+        r = subprocess.run(
+            [sys.executable, "analysis/carryover.py", "--json"]
+            + sorted(str(p) for p in (self.ROOT / "v4_audit_2026_08_25" / "data").glob(pattern)),
+            cwd=str(self.ROOT), capture_output=True, text=True, timeout=300)
+        self.assertEqual(r.returncode, 0, r.stderr[-800:])
+        return json.loads(r.stdout)
+
+    def test_it_refuses_the_cyclic_runs(self):
+        for pattern in ("matrix_V3_s*_20260827_102614", "matrix_O2_latin_*"):
+            with self.subTest(pattern=pattern):
+                out = self._run(pattern)
+                self.assertTrue(out["runs"], "no runs analysed")
+                for rec in out["runs"]:
+                    self.assertFalse(rec["first_order_carryover_balanced"])
+                    self.assertIn("refused", rec)
+                self.assertNotIn("across_sessions", out,
+                                 "a contrast was reported for an aliased schedule")
+
+    def test_the_diagnostic_names_the_alias(self):
+        out = self._run("matrix_V3_s*_20260827_102614")
+        note = out["runs"][0]["balance_note"]
+        self.assertIn("preceded by 1 of 9", note)
+        self.assertIn("9x", note, "the note does not say how lopsided it is")
+
+    def test_the_order_comes_from_the_data_not_the_manifest(self):
+        src = (self.ROOT / "analysis" / "carryover.py").read_text(encoding="utf-8")
+        self.assertIn("t_start", src)
+        self.assertNotIn('m["schedule"]', src,
+                         "the analyser trusts the planned schedule")
+
+    def test_the_runner_can_build_a_balanced_one(self):
+        """Otherwise the refusal above is the only outcome this file can have."""
+        rr = _load_runner()
+        arms = [f"a{i}" for i in range(10)]
+        sched = rr.williams_square(arms, 1)
+        self.assertTrue(rr.is_carryover_balanced(sched, arms))
+        self.assertTrue(rr.is_position_balanced(rr.position_counts(sched)))
+        cyclic = rr.build_schedule(arms, 10, "latin")
+        self.assertFalse(rr.is_carryover_balanced(cyclic, arms),
+                         "the cyclic schedule would have been balanced after all")
+
+
+class TheCarryoverAnalyserMustRecoverAPlantedEffect(unittest.TestCase):
+    """Refusing the wrong schedules is half of it; the other half is arithmetic.
+
+    Two defects in the first version would have produced a plausible wrong
+    number for run W and nothing would have caught them:
+
+      * it averaged over EVERY adjacency, but only the within-repeat ones are
+        balanced. On the schedule W actually runs, that gives `spec-dflash-n2`
+        six capped and four free predecessors instead of five and four - nine
+        arms of ten contaminated by the row boundary.
+      * it dropped crashed arm-runs before computing predecessors, so the arm
+        after a crash was attributed to the wrong one.
+
+    So this plants a known carryover effect and requires it back.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+    ARMS = ["a", "a-cap", "b", "b-cap", "c", "c-cap"]
+    BASE = {"a": 100.0, "a-cap": 110.0, "b": 50.0, "b-cap": 55.0,
+            "c": 200.0, "c-cap": 220.0}
+    EFFECT = 0.04          # 4 % slower after a capped predecessor
+
+    def _square(self):
+        rr = _load_runner()
+        return rr.williams_square(self.ARMS, 11)
+
+    def _write_run(self, out: Path, square, crash=None, boundary_bias=0.0):
+        """Synthesise a run whose rates carry EFFECT and nothing else."""
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "manifest.json").write_text(json.dumps(
+            {"hardcap_suffix": "-cap", "order_mode": "williams"}), encoding="utf-8")
+        flat = [(rep, arm) for rep, row in enumerate(square) for arm in row]
+        t = 0.0
+        for i, (rep, arm) in enumerate(flat):
+            prev = flat[i - 1] if i else None
+            rate = self.BASE[arm]
+            if prev:
+                if prev[1].endswith("-cap"):
+                    rate *= (1 - self.EFFECT)
+                # a row-boundary adjacency also carries a large spurious bias,
+                # so a tool that folds those in cannot return EFFECT
+                if prev[0] != rep:
+                    rate *= (1 + boundary_bias)
+            n, ms = 300, 1000.0 * 300 / rate
+            crashed = crash == (rep, arm)
+            body = {"arm": arm, "repeat": rep, "crashed": crashed,
+                    "rows": [] if crashed else
+                            [{"t_start": t, "predicted_n": n, "predicted_ms": ms}]}
+            (out / f"{arm}__rep{rep}.json").write_text(json.dumps(body),
+                                                       encoding="utf-8")
+            t += 1.0
+
+    def _analyse(self, d: Path):
+        r = subprocess.run([sys.executable, "analysis/carryover.py", "--json", str(d)],
+                           cwd=str(self.ROOT), capture_output=True, text=True,
+                           timeout=120)
+        self.assertEqual(r.returncode, 0, r.stderr[-600:])
+        return json.loads(r.stdout)
+
+    def test_the_split_is_the_one_the_design_promises(self):
+        with tempfile.TemporaryDirectory() as t:
+            d = Path(t) / "matrix_X_s1_1"
+            self._write_run(d, self._square())
+            out = self._analyse(d)
+        rec = out["runs"][0]
+        self.assertTrue(rec["first_order_carryover_balanced"], rec["balance_note"])
+        self.assertNotIn("refused", rec)
+        for a, v in rec["capped_predecessor"].items():
+            want = [3, 2] if not a.endswith("-cap") else [2, 3]
+            self.assertEqual([v["n_cap"], v["n_free"]], want, a)
+            self.assertTrue(v["split_is_balanced"], a)
+
+    def test_it_returns_the_effect_that_was_planted(self):
+        with tempfile.TemporaryDirectory() as t:
+            d = Path(t) / "matrix_X_s1_1"
+            self._write_run(d, self._square())
+            out = self._analyse(d)
+        for a, v in out["runs"][0]["capped_predecessor"].items():
+            self.assertAlmostEqual(v["delta_pct"], -100 * self.EFFECT, places=6,
+                                   msg=f"{a}: planted {-100*self.EFFECT}, got "
+                                       f"{v['delta_pct']}")
+
+    def test_a_row_boundary_bias_does_not_leak_into_it(self):
+        """This is the defect, made visible: a huge bias on exactly the
+        adjacencies the square cannot balance must not move the answer."""
+        with tempfile.TemporaryDirectory() as t:
+            d = Path(t) / "matrix_X_s1_1"
+            self._write_run(d, self._square(), boundary_bias=0.50)
+            out = self._analyse(d)
+        for a, v in out["runs"][0]["capped_predecessor"].items():
+            self.assertAlmostEqual(v["delta_pct"], -100 * self.EFFECT, places=6,
+                                   msg=f"{a}: a 50 % boundary bias moved the "
+                                       f"contrast to {v['delta_pct']}")
+
+    def test_an_arm_run_with_no_clock_is_refused_not_reordered(self):
+        """A crashed arm-run has no `t_start` anywhere, so its slot is not in
+        the data. Sorting it to one end silently hands its neighbour the wrong
+        predecessor; guessing from the manifest is what this file refuses to
+        do. The run is refused, and the driver would not have attested it."""
+        sq = self._square()
+        victim = (2, sq[2][3])
+        with tempfile.TemporaryDirectory() as t:
+            d = Path(t) / "matrix_X_s1_1"
+            self._write_run(d, sq, crash=victim)
+            r = subprocess.run(
+                [sys.executable, "analysis/carryover.py", "--json", str(d)],
+                cwd=str(self.ROOT), capture_output=True, text=True, timeout=120)
+        self.assertNotEqual(r.returncode, 0, "a run with a gap was analysed")
+        self.assertIn("no requests", r.stderr + r.stdout)
+        self.assertIn("every predecessor after the gap", r.stderr + r.stdout)
+
+
+class ThePublishToolMustParseAndVerify(unittest.TestCase):
+    """The regex it replaced published half of its own command to GitHub.
+
+    `re.sub(r'^<!--.*?-->', ...)` stopped at the literal `-->` inside the
+    command text that lived in the comment, and the check that was supposed to
+    catch it ran the same broken regex over both sides, so they agreed.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    def _strip(self, text):
+        sys.path.insert(0, str(self.ROOT / "tools"))
+        import importlib
+        import publish_pr_body
+        return importlib.reload(publish_pr_body).strip_header(text)
+
+    def test_a_marker_inside_the_comment_does_not_end_it(self):
+        body = self._strip('<!--\n  see re.sub(r"^<!--.*?-->", "", x)\n-->\nreal body\n')
+        self.assertEqual(body, "real body")
+
+    def test_a_marker_must_be_a_whole_line(self):
+        body = self._strip('<!--\n  trailing --> mid-line\n-->\nreal body\n')
+        self.assertEqual(body, "real body")
+
+    def test_an_unclosed_comment_is_refused(self):
+        with self.assertRaises(SystemExit):
+            self._strip("<!--\n  never closed\n\nbody\n")
+
+    def test_a_file_without_a_header_is_returned_whole(self):
+        self.assertEqual(self._strip("just a body\n"), "just a body")
+
+    def test_the_real_file_strips_to_prose(self):
+        text = (self.ROOT / "PULL_REQUEST.md").read_text(encoding="utf-8")
+        body = self._strip(text)
+        self.assertFalse(body.startswith("\\s*"), "the old defect is back")
+        self.assertNotIn("gh api -X PATCH", body[:400],
+                         "the publishing command is being published again")
+        self.assertTrue(body.startswith("This branch audits"), body[:80])
+
+    def test_it_reads_the_body_back_before_claiming_success(self):
+        src = (self.ROOT / "tools" / "publish_pr_body.py").read_text(encoding="utf-8")
+        self.assertIn('_api("GET")', src, "it never re-reads what it published")
+        self.assertIn("differs from", src, "no byte comparison after publishing")
+
+
+class TheRerunScriptsMustBehaveWithAFakeRunner(unittest.TestCase):
+    """Source-level assertions pass on a script that does not work.
+
+    The fourth review asked for behaviour: does the driver hand the runner the
+    variable it reads, and does it fail when a session produces nothing? Both
+    are answered by running it against a stub.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    def _harness(self, tmp: Path, runner_body: str):
+        bench = tmp / "bench"
+        (bench / "llama-retest" / "build" / "bin").mkdir(parents=True)
+        server = bench / "llama-retest" / "build" / "bin" / "llama-server"
+        server.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        server.chmod(0o755)
+        (bench / "retest_runner.py").write_text(runner_body, encoding="utf-8")
+        # exits at once: a stub that sleeps inherits stdout and holds the pipe
+        # open, so `capture_output` waits for it and the test hangs rather than
+        # testing anything. The driver's trap tolerates an already-dead sampler.
+        (bench / "gpu_telemetry.sh").write_text(
+            "#!/bin/sh\necho stub telemetry\n", encoding="utf-8")
+        return bench
+
+    def _run(self, script: str, bench: Path, env_extra=None):
+        env = dict(os.environ, BENCH_ROOT=str(bench),
+                   BENCH_RUNNER=str(bench / "retest_runner.py"),
+                   BENCH_TELEMETRY=str(bench / "gpu_telemetry.sh"),
+                   MODEL_TARGET="/dev/null", MODEL_DRAFT="/dev/null",
+                   MODEL_DFLASH="/dev/null", MODEL_MTP="/dev/null")
+        env.pop("LLAMA_SERVER_BIN", None)
+        env.update(env_extra or {})
+        return subprocess.run(["bash", str(self.ROOT / script)], env=env,
+                              capture_output=True, text=True, timeout=300)
+
+    STUB_RECORDS_ENV = (
+        "import json, os, pathlib\n"
+        "out = pathlib.Path(os.environ['BENCH_OUT'])\n"
+        "out.mkdir(parents=True, exist_ok=True)\n"
+        "(out / 'seen_env.json').write_text(json.dumps(\n"
+        "    {k: v for k, v in os.environ.items() if k.startswith(('BENCH_', 'LLAMA_'))}))\n"
+    )
+
+    def test_the_driver_passes_the_variable_the_runner_reads(self):
+        with tempfile.TemporaryDirectory() as t:
+            bench = self._harness(Path(t), self.STUB_RECORDS_ENV)
+            r = self._run("bench/run_v3_within.sh", bench)
+            seen = sorted(bench.glob("matrix_V3_*/seen_env.json"))
+            self.assertTrue(seen, r.stdout[-500:] + r.stderr[-500:])
+            env = json.loads(seen[0].read_text(encoding="utf-8"))
+        self.assertIn("LLAMA_SERVER_BIN", env,
+                      "the runner was never told where the server is")
+        self.assertTrue(env["LLAMA_SERVER_BIN"].endswith("llama-server"))
+        self.assertNotIn("BENCH_SERVER", env, "the dead name is exported again")
+        self.assertIn("BENCH_EXPECT_COMMIT", env, "the binary is not pinned")
+
+    def test_it_exits_non_zero_when_nothing_completes(self):
+        """The stub writes no RUN_COMPLETE.json, so every session failed."""
+        with tempfile.TemporaryDirectory() as t:
+            bench = self._harness(Path(t), self.STUB_RECORDS_ENV)
+            r = self._run("bench/run_v3_within.sh", bench)
+        self.assertNotEqual(r.returncode, 0,
+                            "the driver reported success with no validated run")
+        self.assertIn("FAIL", r.stdout + r.stderr)
+
+    def test_a_missing_server_binary_stops_it_before_any_arm(self):
+        with tempfile.TemporaryDirectory() as t:
+            bench = self._harness(Path(t), self.STUB_RECORDS_ENV)
+            (bench / "llama-retest" / "build" / "bin" / "llama-server").unlink()
+            r = self._run("bench/run_v3_within.sh", bench)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("not executable", r.stdout + r.stderr)
+
+
+class TheSuffixMustNotCollideWithARealArm(unittest.TestCase):
+    """`arm_is_hardcap` gives a real arm precedence, so a real arm named
+    `<other><suffix>` answers a request for `<other>`'s capped twin with a
+    different configuration entirely."""
+
+    def test_a_clash_is_detectable(self):
+        arms = {"foo": [], "foo-cap": [], "bar": []}
+        suf = "-cap"
+        clash = sorted(a for a in arms if a.endswith(suf) and a[:-len(suf)] in arms)
+        self.assertEqual(clash, ["foo-cap"])
+
+    def test_the_real_arm_table_has_no_clash_for_cap(self):
+        rr = _load_runner()
+        clash = [a for a in rr.ARMS if a.endswith("-cap")
+                 and a[:-4] in rr.ARMS]
+        self.assertEqual(clash, [])
+
+    def test_the_runner_records_the_resolution_rather_than_refusing(self):
+        """Refusing was over-reach and broke a documented behaviour.
+
+        `BENCH_HARDCAP_SUFFIX=-kvfp16` is a real arm suffix in this table and
+        has nothing to do with capping; `arm_is_hardcap` already resolves the
+        overlap deterministically, and that resolution is tested elsewhere.
+        What was missing was any record that a choice had been made, so the
+        manifest names the arms that read both ways.
+        """
+        src = (Path(__file__).resolve().parents[1] / "bench" / "retest_runner.py") \
+            .read_text(encoding="utf-8")
+        self.assertIn("ambiguous_arms", src)
+        self.assertIn("each runs as ITSELF", src)
+        self.assertNotIn("would be served the real arm instead", src,
+                         "the over-broad refusal is back")
+
+    def test_a_real_arm_still_wins_under_an_overlapping_suffix(self):
+        rr = _load_runner()
+        overlapping = [a for a in rr.ARMS
+                       if a.endswith("-kvfp16") and a[:-7] in rr.ARMS]
+        self.assertTrue(overlapping, "the table no longer has an overlap to test")
+
+
+class ModelFilesMustNotChangeUnderARun(unittest.TestCase):
+    """The hashes were taken once, at the start of a run that lasts hours."""
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    def test_the_runner_hashes_again_at_the_end(self):
+        src = (self.ROOT / "bench" / "retest_runner.py").read_text(encoding="utf-8")
+        self.assertIn("model_sha256_after", src)
+        self.assertIn("a model file changed while the matrix ran", src)
+
+    def test_the_mismatch_is_a_run_problem_not_a_warning(self):
+        src = (self.ROOT / "bench" / "retest_runner.py").read_text(encoding="utf-8")
+        block = src.split("model_moved = ")[1].split("stamp = ")[0]
+        self.assertIn("problems.append", block,
+                      "a changed model file does not fail the run")
+
+
+class TheModeAnalyserMustFailClosed(unittest.TestCase):
+    """P0-3's other half. The estimand was the headline; these were the rest.
+
+    Each of these used to pass silently: a half the driver never attested, a
+    crashed arm-run averaged into a pooled rate, two directories claiming the
+    same session and mode, an order guessed from a missing timestamp, halves
+    that ran different models, and arm sets that did not match.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    def _src(self):
+        return (self.ROOT / "analysis" / "length_mode.py").read_text(encoding="utf-8")
+
+    def test_a_crashed_arm_run_is_not_pooled(self):
+        body = self._src().split("def pooled(")[1].split("\ndef ")[0]
+        self.assertIn('body.get("crashed")', body)
+        self.assertIn("continue", body)
+
+    def test_a_duplicate_session_half_is_refused(self):
+        self.assertIn("two directories claim to be session", self._src())
+
+    def test_an_unknown_order_is_not_guessed(self):
+        src = self._src()
+        self.assertIn("first_mode[s] = None", src,
+                      "a missing or equal timestamp still picks a side")
+        # the old form assigned a side whenever a stamp was absent; the new one
+        # only chooses between two stamps that exist and differ
+        self.assertNotIn('if tf and tc and tf < tc else "hardcap"', src)
+        self.assertIn("if not tf or not tc or tf == tc:", src)
+
+    def test_the_halves_must_be_the_same_experiment(self):
+        src = self._src()
+        for field in ("target_sha256", "server_loaded_commit", "prompt_set"):
+            self.assertIn(f'"{field}"', src, f"{field} is not compared")
+        self.assertIn("is not the mode alone", src)
+
+    def test_the_arm_sets_must_match(self):
+        src = self._src()
+        self.assertIn("do not carry the same arms", src)
+        self.assertIn("arms without a twin", src)
+
+    def test_an_unattested_run_needs_an_explicit_flag(self):
+        src = self._src()
+        self.assertIn("has no RUN_COMPLETE.json", src)
+        self.assertIn("--allow-incomplete", src)
+
+    def test_a_mistyped_path_is_refused(self):
+        r = subprocess.run(
+            [sys.executable, "analysis/length_mode.py", "no/such/dir"],
+            cwd=str(self.ROOT), capture_output=True, text=True, timeout=120)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("not a directory", r.stdout + r.stderr)
+
+    def test_the_published_numbers_survive_all_of_it(self):
+        """The gates are additive guarantees; if they changed a published
+        figure they would be corrections, and would be labelled as such."""
+        d = sorted((self.ROOT / "v4_audit_2026_08_25" / "data")
+                   .glob("matrix_V2_s*_20260827_044442"))
+        r = subprocess.run(
+            [sys.executable, "analysis/length_mode.py"] + [str(x) for x in d],
+            cwd=str(self.ROOT), capture_output=True, text=True, timeout=600)
+        self.assertEqual(r.returncode, 0, r.stderr[-500:])
+        for arm, pp in (("spec-dflash-n4", "+12.03"), ("spec-mtp-n2", "+9.54"),
+                        ("spec-draft-n8", "+6.31"), ("spec-dflash-n2", "+5.92")):
+            self.assertRegex(r.stdout, rf"{re.escape(arm)}\s+\{pp} pp",
+                             f"{arm} moved")
+
+
+class TheMirrorsMustCarryEverythingTheCheckerReads(unittest.TestCase):
+    """A file the checker reads and the mirror lacks is not a failed assertion.
+
+    It is a `FileNotFoundError` on the UNPERTURBED copy, which stops both
+    perturbation suites before a single mutation runs and reports nothing about
+    any guard. `tests/data_mutate.py` already carries a comment saying this
+    happened once - "the mirror silently lacked them until the checker crashed
+    on the unperturbed copy" - and nothing was added to stop it happening
+    again. It happened again on 2026-08-28, with `CITATION.cff`.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    def _copy_list(self, rel):
+        src = (self.ROOT / rel).read_text(encoding="utf-8")
+        body = src.split("COPY = (")[1].split(")")[0]
+        return set(re.findall(r'"([^"]+)"', body))
+
+    def _named_by_the_checker(self):
+        src = (self.ROOT / "analysis" / "verify_claims.py").read_text(encoding="utf-8")
+        out = set()
+        for m in re.finditer(
+                r'["\']([A-Za-z0-9_][A-Za-z0-9_./-]*\.(?:md|cff|json|csv|yml|sh|py|txt))["\']',
+                src):
+            top = m.group(1).split("/")[0]
+            if (self.ROOT / top).exists():
+                out.add(top)
+        return out
+
+    def test_the_checker_names_things_worth_checking(self):
+        named = self._named_by_the_checker()
+        self.assertGreater(len(named), 8, "the extraction found almost nothing")
+        self.assertIn("CITATION.cff", named)
+
+    def test_both_mirrors_carry_all_of_them(self):
+        named = self._named_by_the_checker()
+        for rel in ("tests/data_mutate.py", "tests/mutate.py"):
+            with self.subTest(suite=rel):
+                missing = sorted(named - self._copy_list(rel))
+                self.assertEqual(missing, [],
+                                 f"{rel}'s mirror would lack {missing}, so the "
+                                 f"checker crashes on the unperturbed copy and "
+                                 f"no perturbation is ever evaluated")
 
 
 class TheSplitTimersMustBeRederivable(unittest.TestCase):

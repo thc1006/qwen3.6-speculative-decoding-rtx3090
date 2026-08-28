@@ -53,7 +53,15 @@ restore() {
     cd "$TREE"
     git checkout -- tools/server/server-context.cpp 2>/dev/null || true
     echo "=== rebuilding stock $(date -Is) ==="
-    cmake --build build -j "$(nproc)" --target llama-server > "$BENCH/T4_rebuild_stock_$STAMP.log" 2>&1 || true
+    # This used to end in `|| true`, so a failed rebuild left an instrumented
+    # library in a tree the script reported as restored. The whole point of the
+    # restore is that the next run does not silently use the patched build.
+    if ! cmake --build build -j "$(nproc)" --target llama-server \
+            > "$BENCH/T4_rebuild_stock_$STAMP.log" 2>&1; then
+        echo "!!! STOCK REBUILD FAILED - the tree still holds the instrumented" >&2
+        echo "!!! library. See $BENCH/T4_rebuild_stock_$STAMP.log" >&2
+        RESTORE_FAILED=1
+    fi
     local back
     back="$(sha256sum build/bin/libllama-server-impl.so | cut -d' ' -f1)"
     if [ "$back" = "$STOCK_IMPL" ]; then
@@ -106,3 +114,9 @@ echo "=== measuring -> $(basename "$OUT")  $(date -Is) ==="
 BENCH_OUT="$OUT" python3 "$RUNNER"
 test -f "$OUT/RUN_COMPLETE.json" || { echo "T4 did not complete" >&2; exit 1; }
 echo "=== T4 done $(date -Is) ==="
+# `restore` runs from the EXIT trap after this, so surface its verdict rather
+# than letting a failed rebuild leave a green run behind an instrumented tree
+if [ "${RESTORE_FAILED:-0}" -ne 0 ]; then
+    echo "!!! the llama.cpp tree was NOT restored to stock" >&2
+    exit 1
+fi

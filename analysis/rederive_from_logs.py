@@ -49,7 +49,24 @@ def committed(name):
         return json.load(fh)
 
 
-def compare(label, regenerated, published, key, expected_gap=0, scope=None):
+def index_unique(records, key_fn, label):
+    """{key: record}, refusing a duplicate key rather than keeping the last.
+
+    A dict comprehension silently drops the earlier of two records that share a
+    key, so two rows that disagree collapse into one and the comparison passes.
+    """
+    out = {}
+    for r in records:
+        k = key_fn(r)
+        if k in out:
+            sys.exit(f"{label}: duplicate key {k!r}; refusing to compare a "
+                     f"dump that cannot be indexed")
+        out[k] = r
+    return out
+
+
+def compare(label, regenerated, published, key, expected_gap=0, scope=None,
+            expected_missing=None):
     """`scope` keeps the comparison to the runs the committed dump covers.
 
     The bench root grows: the 2026-08-27 tranche adds 618 logs from runs that
@@ -59,8 +76,8 @@ def compare(label, regenerated, published, key, expected_gap=0, scope=None):
     because "the extractor produced more than the dump" and "the extractor
     produced something different" look identical if you only count.
     """
-    A = {key(r): r for r in regenerated}
-    B = {key(r): r for r in published}
+    A = index_unique(regenerated, key, f"{label}: regenerated")
+    B = index_unique(published, key, f"{label}: committed")
     if scope is not None:
         outside = {k for k in A if not scope(k)}
         if outside:
@@ -81,7 +98,17 @@ def compare(label, regenerated, published, key, expected_gap=0, scope=None):
         print(f"      missing {k}")
     if differing:
         FAIL.append(f"{label}: {len(differing)} record(s) differ")
-    if len(missing) != expected_gap:
+    # Counting the gap lets a different set of missing records pass as long as
+    # the count matches: delete one reproducible row, add one unreproducible
+    # one, and the number never moves. The keys are what is documented.
+    if expected_missing is not None:
+        if set(missing) != set(expected_missing):
+            only_now = sorted(set(missing) - set(expected_missing))[:3]
+            only_doc = sorted(set(expected_missing) - set(missing))[:3]
+            FAIL.append(
+                f"{label}: the missing set is not the documented one "
+                f"(unexpectedly missing {only_now}, unexpectedly present {only_doc})")
+    elif len(missing) != expected_gap:
         FAIL.append(f"{label}: {len(missing)} records could not be regenerated, "
                     f"and {expected_gap} is what this repository documents")
     if extra:
@@ -96,11 +123,14 @@ def main():
 
     # --- the acceptance counters behind A13 --------------------------------
     published = committed("acceptance_counter_comparison.json")
-    gap = sum(1 for r in published if r["run"] in NOT_REPRODUCIBLE)
     _runs_in_dump = {r["run"] for r in published}
+    # exactly which rows may be absent, not how many
+    _expected_missing = [(r["run"], r["arm"], r.get("repeat"))
+                         for r in published if r["run"] in NOT_REPRODUCIBLE]
     compare("acceptance_counter_comparison.json",
             run("compare_acceptance_counters.py", bench), published,
-            lambda r: (r["run"], r["arm"], r.get("repeat")), expected_gap=gap,
+            lambda r: (r["run"], r["arm"], r.get("repeat")),
+            expected_missing=_expected_missing,
             scope=lambda k: k[0] in _runs_in_dump)
 
     # --- the source timers behind A12 --------------------------------------
@@ -131,9 +161,13 @@ def main():
                 got if isinstance(got, list) else got["rows"],
                 committed("checkpoint_timers_20260827_split.json"),
                 lambda r: (r["arm"], r["repeat"]))
+    elif os.environ.get("REDERIVE_REQUIRE_T4") == "1":
+        FAIL.append("checkpoint_timers_20260827_split.json: run T4's logs are "
+                    "not in this archive, and REDERIVE_REQUIRE_T4=1 was set")
     else:
         print("  checkpoint_timers_20260827_split.json: run T4's logs are not "
-              "in this archive, not compared")
+              "in this archive, not compared (set REDERIVE_REQUIRE_T4=1 to "
+              "make this fatal, which the evidence workflow does)")
 
     # --- the speculative accounting behind A1 and A4 ------------------------
     pub = committed("spec_accounting_20260826.json")

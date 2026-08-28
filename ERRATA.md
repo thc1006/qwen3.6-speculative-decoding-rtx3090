@@ -214,6 +214,8 @@ from id 5 to 248320 runs only once the special-token check passes.
 on 2026-08-25 (`llama-server` @ `bcb5eeb64`, `--draft-max 8 --draft-min 4`,
 greedy, the ten v1 prompts, ABBA-ordered, three arms interleaved):
 
+> **`request-mean` is llama.cpp's own `predicted_per_second`, averaged.** That field divides `n − 1` generated tokens by the time for `n`, in 13 300 of 13 344 committed request rows, so every request-mean here is low by `(n − 1) / n` — 0.33 % at 300 tokens and more at shorter lengths. It is uniform across arms on a run where every request hits the same cap, and it is NOT uniform where the arms stop at different lengths, so it must not carry a cross-arm comparison in the thinking-off runs. Every headline figure and every published delta is a **pooled** rate computed from `predicted_n` and `predicted_ms` directly and contains none of this. See [B8](#b8-every-request-mean-here-counts-one-token-fewer-than-it-timed).
+
 | binary | arm | request-mean | drafted / accepted |
 |---|---|---:|---|
 | `bcb5eeb64` | translation fallback, as published | 113.9 | 194 / 194 |
@@ -839,7 +841,12 @@ its own instrumentation.
 > The excess itself lands at 71.49 s against 71.4.
 >
 > So the boundary question is answered by measurement rather than by wording:
-> **the 54.7 % is state work.** The patch is archived at
+> **the 54.7 % is post-drain checkpoint state-save/restore API work.** It is
+> not raw copy cost, and this section does not claim it is: the residual
+> still holds serialisation, container allocation and resize, host/device
+> transfer, state traversal and the API's own bookkeeping, and nothing here
+> separates those. What T4 rules out is that the 39 seconds were spent
+> waiting on target work queued before the call. The patch is archived at
 > [`v4_audit_2026_08_25/patches/checkpoint_timers_split.patch`](v4_audit_2026_08_25/patches/checkpoint_timers_split.patch),
 > 31 insertions in one file; the instrumented library hashes to `0ff03b30…` and
 > the tree was restored to stock afterwards, verified by the library returning
@@ -1527,11 +1534,46 @@ that moves every arm equally cancels.
 | `spec-draft-n8` | −76.77 % [−76.80, −76.73] | −70.46 % [−70.49, −70.43] | +6.31 pp [+6.29, +6.33] |
 | `spec-dflash-n2` | +10.71 % [+10.29, +11.14] | +16.63 % [+15.69, +17.58] | +5.92 pp [+4.86, +6.99] |
 
+> [!IMPORTANT]
+> **What the shift column is, and what it is not.** Every figure above is an
+> **absolute change in percentage points** of the arm-versus-baseline number:
+> `100*(cap/base_cap - 1) - 100*(free/base_free - 1)`. It is the quantity A17's
+> other method, `analysis/length_matching.py`, reports for the same arms, which
+> is why it is the published one.
+>
+> `analysis/length_mode.py` defined the session effect as a difference of **log**
+> ratios in its own documentation while averaging the percentage-point form, and
+> the two are not the same estimand. They agree where the arm sits near its
+> baseline and diverge sharply where it does not:
+>
+> | arm | published, pp | log contrast |
+> |---|---:|---:|
+> | `spec-dflash-n4` | +12.03 pp | +12.23 % |
+> | `spec-mtp-n2` | +9.54 pp | +8.56 % |
+> | `spec-dflash-n2` | +5.92 pp | +5.35 % |
+> | `spec-draft-n8` | **+6.31 pp** | **+27.15 %** |
+>
+> `spec-draft-n8` runs at a quarter of the baseline, so a 6.31-point absolute
+> recovery is a 27 % multiplicative one. Both are true and they answer different
+> questions. The analyser prints and serialises both now; the tables publish the
+> percentage-point form and say so.
+
 **The hard cap moves every arm, and the sign flip is real.** Every interval
 excludes zero. `spec-dflash-n4` — the arm A17 was written about — is negative
 free-running and positive under the cap, with both intervals clear of zero on
-opposite sides. The published "`n_max 4` goes negative" with thinking off is a
-length artefact.
+opposite sides. So the published "`n_max 4` goes negative" with thinking off
+**is not robust to the stopping policy**.
+
+That is deliberately weaker than "a length artefact", which this section said
+until 2026-08-28. `ignore_eos` does not only equalise the token count. Forcing
+generation past a natural stop changes which tokens are produced, the positions
+they occupy, the experts those positions route to, and the acceptance
+trajectory of the drafts that follow. What V2 establishes is that the sign
+differs between a forced 300-token cap and natural stopping; attributing the
+difference to output length alone would be attributing it to one component of
+a treatment that changes several at once, which is the mistake
+[A12](#a12-what-the-checkpoint-path-costs-measured-with-timers-in-the-source)
+was written about.
 
 **And run V overstated one of them.** Its `spec-dflash-n2` shift, +9.26 pp, lies
 outside [+4.86, +6.99] and above **all eight** sessions, whose maximum is

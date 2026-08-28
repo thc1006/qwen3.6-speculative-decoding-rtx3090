@@ -59,7 +59,14 @@ export MODEL_TARGET="${MODEL_TARGET:-$HOME/models/Qwen3.6-35B-A3B-UD-Q4_K_XL.ggu
 export MODEL_DRAFT="${MODEL_DRAFT:-$HOME/models/Qwen3.5-0.8B-Q4_K_M.gguf}"
 export MODEL_DFLASH="${MODEL_DFLASH:-$HOME/models/qwen36-dflash-master.gguf}"
 export MODEL_MTP="${MODEL_MTP:-$HOME/models/qwen36-mtp-q8_0.gguf}"
-export BENCH_SERVER="${BENCH_SERVER:-$BENCH/llama-retest/build/bin/llama-server}"
+# `retest_runner.py` reads LLAMA_SERVER_BIN and only that. This script
+# exported BENCH_SERVER, a name nothing consumes, so a clean shell failed
+# and a shell that happened to carry someone else's LLAMA_SERVER_BIN ran
+# a binary this script never chose. Both are fixed by using the real name
+# and asserting what the run must have used.
+export LLAMA_SERVER_BIN="${LLAMA_SERVER_BIN:-$BENCH/llama-retest/build/bin/llama-server}"
+[ -x "$LLAMA_SERVER_BIN" ] || { echo "not executable: $LLAMA_SERVER_BIN" >&2; exit 1; }
+export BENCH_EXPECT_COMMIT="${BENCH_EXPECT_COMMIT:-3737e41370da1830a44c663f9929a0f27591ffa6}"
 
 # run V verbatim
 export BENCH_ARMS="baseline,spec-dflash-n2,spec-dflash-n4,spec-mtp-n2,spec-draft-n8"
@@ -115,4 +122,17 @@ half 8 hardcap ; half 8 freerun
 echo "=== V2 done $(date -Is) ==="
 echo "completed:$DONE"
 echo "failed:${FAILED:- none}"
-find "$BENCH" -maxdepth 1 -type d -name "matrix_V2_*_$STAMP" -printf . | wc -c
+
+# This used to end on `find | wc`, which succeeds, so the script exited 0 with
+# every session failed. A driver that reports success on no data is worse than
+# one that crashes: the operator sees output directories and a summary and
+# believes the matrix ran.
+halves=$(find "$BENCH" -maxdepth 1 -type d -name "matrix_V2_*_$STAMP" -printf . | wc -c)
+complete=$(find "$BENCH" -maxdepth 1 -type d -name "matrix_V2_*_$STAMP" \
+             -exec test -f '{}/RUN_COMPLETE.json' \; -printf . | wc -c)
+echo "half directories:$halves  validated:$complete  expected:16"
+rc=0
+[ -z "$FAILED" ] || { echo "FAIL: sessions failed:$FAILED" >&2; rc=1; }
+[ "$halves"   -eq 16 ] || { echo "FAIL: $halves half directories, expected 16" >&2; rc=1; }
+[ "$complete" -eq 16 ] || { echo "FAIL: $complete validated, expected 16" >&2; rc=1; }
+exit "$rc"

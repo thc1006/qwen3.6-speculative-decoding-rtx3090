@@ -15,17 +15,34 @@ in AB BA BA AB BA AB AB BA order, so each mode runs first four times and second
 four times with the two orders balanced in mean time position. The session is
 the resampling unit. Within a session,
 
+    shift_pp(a) = 100*(r_a,cap/r_base,cap - 1) - 100*(r_a,free/r_base,free - 1)
+
+an **absolute change in percentage points** of the arm-versus-baseline figure,
+which is the quantity A17's tables publish and the quantity
+`analysis/length_matching.py` reports for the same arms by a different method.
+Because the order is balanced, an order effect cannot masquerade as a mode
+effect in that mean - and splitting the sessions by which mode ran first says
+whether one is present.
+
+This file used to define the session effect as a difference of log ratios,
+
     d(a) = log( r_a,cap / r_base,cap ) - log( r_a,free / r_base,free )
 
-and the mode effect is the mean of d over sessions. Because the order is
-balanced, an order effect cannot masquerade as a mode effect in that mean - and
-splitting the sessions by which mode ran first says whether one is present.
+say the mode effect was the mean of d, and then average `shift_pp` instead.
+Those are different estimands and they diverge exactly where the baseline ratio
+is far from 1: `spec-draft-n8` moves from about -76.8 % to -70.5 %, which is
++6.31 pp absolutely and about +27 % multiplicatively. The pp figure is the one
+published, and the log contrast is computed and reported beside it as a
+sensitivity so a reader can see when the choice matters.
 
 **within** (`bench/run_v3_within.sh`): one balanced square containing both
 modes, `<arm>` and `<arm>-cap` side by side. The same d(a), computed inside a
 single invocation, so the drafter is in whatever state it is in for both halves
-of the contrast. This is the design that identifies the effect; the crossover
-bounds it.
+of the contrast. This is **within-invocation replication with a fixed
+predecessor**, not a design that identifies the effect: the square is a cyclic
+rotation, so every capped arm follows its own uncapped twin and mode is aliased
+with first-order carryover. The AB/BA crossover is the primary evidence; this
+says whether the same contrast survives inside one invocation.
 
     python analysis/length_mode.py <run-dir> [<run-dir> ...]
     python analysis/length_mode.py --json <run-dir> ...
@@ -54,7 +71,13 @@ def pooled(run_dir, arm):
     gen = []
     for f in sorted(glob.glob(os.path.join(run_dir, f"{arm}__rep*.json"))):
         with open(f, encoding="utf-8") as fh:
-            rows = json.load(fh)["rows"]
+            body = json.load(fh)
+        # a crashed arm-run can still carry the requests it got through before
+        # it died; averaging those into a rate is averaging a partial run with
+        # whole ones, which is not what "pooled over every repeat" means
+        if body.get("crashed"):
+            continue
+        rows = body["rows"]
         ms += sum(r["timings"]["predicted_ms"] for r in rows)
         n += sum(r["timings"]["predicted_n"] for r in rows)
         gen += [r["timings"]["predicted_n"] for r in rows]
@@ -94,8 +117,10 @@ def contrast(free_rates, cap_rates, base="baseline"):
       change_pct   how much faster than the baseline MEASURED IN THE SAME MODE
       shift_pp     the hard-cap change minus the freerun change, which is what
                    A17's table publishes
-      log_delta    the same contrast as a log ratio, which is what averages
-                   properly across sessions
+      log_delta    the same contrast as a log ratio. Reported as a
+                   sensitivity, not as the published figure: it answers a
+                   different question, and for an arm at -76 % of baseline the
+                   two disagree by a factor of four
     """
     if base not in free_rates or base not in cap_rates:
         return {}
@@ -156,9 +181,13 @@ def session_of(name):
     return "_".join(stamp[-2:]) if len(stamp) >= 2 else name
 
 
+ALLOW_INCOMPLETE = "--allow-incomplete" in sys.argv
+
+
 def report_within(dirs, out):
     print("=== both modes inside one invocation ===")
     per_arm = defaultdict(list)
+    per_arm_log = defaultdict(list)
     for d in sorted(dirs):
         arms = arms_of(d)
         free = {a: pooled(d, a)["tok_s"] for a in arms
@@ -169,7 +198,21 @@ def report_within(dirs, out):
         print(f"\n  {os.path.basename(d.rstrip('/'))}  "
               f"complete={complete(d)}  order={man.get('order_mode')}  "
               f"balanced={man.get('schedule_is_position_balanced')}  "
+              f"carryover={man.get('schedule_first_order_carryover_balanced')}  "
               f"repeats={man.get('repeats')}")
+        # `complete` was printed and never acted on. A run the driver refused
+        # to attest is a run whose cells are not all there, and averaging it
+        # with runs that are is how an incomplete matrix reaches a table.
+        if not complete(d) and not ALLOW_INCOMPLETE:
+            sys.exit(f"{os.path.basename(d.rstrip('/'))} has no RUN_COMPLETE.json, "
+                     f"so the driver did not attest it. Pass --allow-incomplete "
+                     f"to analyse it anyway, and do not publish the result.")
+        # every free arm must have a capped twin and the reverse, or the
+        # contrast is over whichever arms happened to appear in both
+        if set(free) != set(cap):
+            only_f, only_c = sorted(set(free) - set(cap)), sorted(set(cap) - set(free))
+            sys.exit(f"{os.path.basename(d.rstrip('/'))}: arms without a twin "
+                     f"(free only: {only_f}, capped only: {only_c})")
         c = contrast(free, cap)
         if not c:
             print("    no usable baseline pair in this run")
@@ -180,6 +223,7 @@ def report_within(dirs, out):
             print(f"    {a:<22} {v['free_pct']:+8.2f}% {v['cap_pct']:+9.2f}% "
                   f"{v['shift_pp']:+8.2f} pp")
             per_arm[a].append(v["shift_pp"])
+            per_arm_log[a].append(v["log_delta"])
         out.setdefault("within", []).append(
             {"dir": os.path.basename(d.rstrip("/")), "complete": complete(d),
              "freerun_tok_s": free, "hardcap_tok_s": cap,
@@ -191,8 +235,15 @@ def report_within(dirs, out):
         for a, vs in sorted(per_arm.items(), key=lambda kv: -st.mean(kv[1])):
             m, lo, hi, n = interval(vs)
             rng = "" if lo is None else f"  [{lo:+.2f}, {hi:+.2f}]"
-            print(f"    {a:<22} {m:+8.2f} pp{rng}   n={n}")
-            out["within_summary"][a] = {"mean_pp": m, "lo": lo, "hi": hi, "n": n}
+            lm = st.mean(per_arm_log[a])
+            pct = 100.0 * math.expm1(lm)
+            print(f"    {a:<22} {m:+8.2f} pp{rng}   n={n}"
+                  f"   (log contrast {pct:+.2f} %)")
+            out["within_summary"][a] = {
+                "mean_pp": m, "lo": lo, "hi": hi, "n": n,
+                "estimand": "absolute change in percentage points of the "
+                            "arm-vs-baseline figure",
+                "log_contrast_pct": pct}
 
 
 def report_crossover(halves, out):
@@ -201,6 +252,11 @@ def report_crossover(halves, out):
     order = {}
     for name, mode, d in halves:
         s = session_of(name)
+        if mode in by_session[s]:
+            sys.exit(f"two directories claim to be session {s}'s {mode} half: "
+                     f"{os.path.basename(by_session[s][mode].rstrip('/'))} and "
+                     f"{name}. Silently keeping the last would publish an "
+                     f"interval over a set nobody chose.")
         by_session[s][mode] = d
         order.setdefault(s, []).append((name, mode))
     for s in order:
@@ -224,9 +280,35 @@ def report_crossover(halves, out):
         f, c = by_session[s]["freerun"], by_session[s]["hardcap"]
         # which ran first, from the manifests' own timestamps
         tf, tc = manifest(f).get("created", ""), manifest(c).get("created", "")
-        first_mode[s] = "freerun" if tf and tc and tf < tc else "hardcap"
+        # `tf < tc else hardcap` called a session hard-cap-first whenever a
+        # stamp was missing or the two were equal, which is a guess wearing the
+        # clothes of a measurement. An unknown order is recorded as unknown and
+        # left out of the order split, not assigned to one side.
+        if not tf or not tc or tf == tc:
+            first_mode[s] = None
+        else:
+            first_mode[s] = "freerun" if tf < tc else "hardcap"
+        # The two halves must be the same experiment run twice. A mismatched
+        # model, binary or prompt set makes the difference between them
+        # something other than the mode, and `contrast()` would have quietly
+        # reported it as the mode anyway.
+        mf, mc = manifest(f), manifest(c)
+        for field in ("target_sha256", "draft_sha256", "prompt_set", "n_prompts",
+                      "max_tokens", "think", "ctx", "fit_target", "concurrency",
+                      "server_loaded_commit"):
+            if mf.get(field) != mc.get(field):
+                sys.exit(f"session {s}: the two halves differ in {field} "
+                         f"({mf.get(field)!r} vs {mc.get(field)!r}), so their "
+                         f"difference is not the mode alone")
         fr = {a: pooled(f, a)["tok_s"] for a in arms_of(f) if pooled(f, a)}
         cp = {a: pooled(c, a)["tok_s"] for a in arms_of(c) if pooled(c, a)}
+        # `contrast()` iterates the free arms and skips any without a capped
+        # twin, so an arm missing from one half used to shrink the comparison
+        # without saying so
+        if set(fr) != set(cp):
+            only_f, only_c = sorted(set(fr) - set(cp)), sorted(set(cp) - set(fr))
+            sys.exit(f"session {s}: the halves do not carry the same arms "
+                     f"(only free: {only_f}, only capped: {only_c})")
         for a, v in contrast(fr, cp).items():
             deltas[a][s] = v
 
@@ -238,9 +320,24 @@ def report_crossover(halves, out):
         shifts = [v["shift_pp"] for v in deltas[a].values()]
         m, lo, hi, n = interval(shifts)
         rng = "" if lo is None else f"[{lo:+.2f} pp, {hi:+.2f} pp]"
-        print(f"  {a:<22} {m:+10.2f} pp {rng:>24} {n:>9}")
+        # the same sessions under the other estimand, so the reader can see
+        # where the choice of estimand changes the answer and where it does not
+        lg = [v["log_delta"] for v in deltas[a].values()]
+        lm, llo, lhi, _ = interval(lg)
+        pct = 100.0 * math.expm1(lm)
+        lrng = "" if llo is None else (f"[{100 * math.expm1(llo):+.2f} %, "
+                                       f"{100 * math.expm1(lhi):+.2f} %]")
+        print(f"  {a:<22} {m:+10.2f} pp {rng:>24} {n:>9}"
+              f"   (log contrast {pct:+.2f} % {lrng})")
         out["crossover"][a] = {"mean_shift_pp": m, "lo": lo, "hi": hi,
                                "sessions": n,
+                               "estimand": "absolute change in percentage "
+                                           "points of the arm-vs-baseline figure",
+                               "log_contrast_pct": pct,
+                               "log_contrast_lo_pct":
+                                   None if llo is None else 100 * math.expm1(llo),
+                               "log_contrast_hi_pct":
+                                   None if lhi is None else 100 * math.expm1(lhi),
                                "per_session": {s: v["shift_pp"]
                                                for s, v in deltas[a].items()},
                                "log_delta": {s: v["log_delta"]
@@ -271,8 +368,16 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("dirs", nargs="+")
     ap.add_argument("--json", help="write the numbers here")
+    ap.add_argument("--allow-incomplete", action="store_true",
+                    help="analyse runs the driver did not attest; the result "
+                         "is exploratory and must not be published")
     args = ap.parse_args()
     dirs = [d for d in args.dirs if os.path.isdir(d)]
+    missing = [d for d in args.dirs if not os.path.isdir(d)]
+    if missing:
+        # a mistyped path used to vanish into the filter and the run just
+        # analysed fewer directories than the caller asked for
+        sys.exit(f"not a directory: {' '.join(missing[:3])}")
     if not dirs:
         sys.exit("no run directories")
     within, halves = classify(dirs)

@@ -29,9 +29,12 @@ import sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 PORT = 8080
+MODEL = ""
 for i, a in enumerate(sys.argv):
     if a == "--port" and i + 1 < len(sys.argv):
         PORT = int(sys.argv[i + 1])
+    if a in ("-m", "--model") and i + 1 < len(sys.argv):
+        MODEL = sys.argv[i + 1]
 
 N_PREDICT = int(os.environ.get("FAKE_PREDICTED_N", "300"))
 FAIL_ON = int(os.environ.get("FAKE_FAIL_ON_TAG", "0"))
@@ -95,4 +98,12 @@ if os.environ.get("FAKE_EXIT_BEFORE_HEALTH") == "1":
 print(f"build {os.environ.get('FAKE_BUILD', '9999')} "
       f"({os.environ.get('FAKE_COMMIT', 'deadbee')}) with cc (fake) for x86_64-linux-gnu",
       flush=True)
+# A real llama-server always prints which file it loaded, and the runner now
+# requires a healthy arm-run to have observed the target from somewhere. This
+# fake used to print no loader line at all, so every end-to-end test exercised
+# the path where provenance is simply absent - which was exactly the fail-open
+# the fourth review found.
+if MODEL and os.environ.get("FAKE_NO_LOADER_LINE") != "1":
+    print(f"llama_model_loader: loaded meta data with 45 key-value pairs and "
+          f"579 tensors from {MODEL} (version GGUF V3 (latest))", flush=True)
 HTTPServer(("127.0.0.1", PORT), H).serve_forever()

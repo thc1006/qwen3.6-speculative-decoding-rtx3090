@@ -2,19 +2,17 @@
   The body of pull request #2, kept here so its numbers are checked like every
   other published table in this repository. `analysis/verify_claims.py` parses
   the six tables below cell by cell and `tests/data_mutate.py` perturbs them;
-  a figure that drifts out of agreement with the data fails CI. Push changes
-  here first, then publish. `gh pr edit --body-file` does not work here: gh
-  2.46 asks for `repository.pullRequest.projectCards`, which GitHub has retired,
-  and the whole call fails with exit 1 while looking like a deprecation notice.
-  The REST route has no such field:
+  a figure that drifts out of agreement with the data fails CI.
 
-    python -c "import json,pathlib,re;b=re.sub(r'^<!--.*?-->\s*','',pathlib.Path('PULL_REQUEST.md').read_text(),flags=re.S).strip();pathlib.Path('/tmp/b.json').write_text(json.dumps({'body':b}))"
-    gh api -X PATCH repos/thc1006/qwen3.6-speculative-decoding-rtx3090/pulls/2 --input /tmp/b.json
+  Publish with `python tools/publish_pr_body.py`, which strips this comment
+  line by line and then reads the body back from GitHub to prove it landed.
+  Do not strip it with a regex: the previous one-liner matched a literal
+  closing marker inside its own pattern and published half of itself.
 
-  No em-dashes or en-dashes in here, unlike the rest of this repository's prose:
-  a local pre-tool hook refuses to post GitHub text containing them. Ranges are
-  written "1 to 8" and asides take commas, colons or parentheses. U+2212 for a
-  negative number is fine and the tables use it.
+  No em-dashes or en-dashes in here, unlike the rest of this repository's
+  prose: a local pre-tool hook refuses to post GitHub text containing them.
+  Ranges are written "1 to 8" and asides take commas, colons or parentheses.
+  U+2212 for a negative number is fine and the tables use it.
 -->
 
 This branch audits what this repository had published, measures what it had never
@@ -108,7 +106,12 @@ the checkpoint is taken; the sampler has just read the logits back. Every
 component reproduces (17.336 / 16.346 / 5.412 against 17.34 / 16.33 / 5.41), so
 do the counts (785 creates, 728 restores, in all six repeats) and the excess
 (71.49 s against 71.4). The concern was legitimate and the measurement refutes
-it: **the 54.7 % is state work.** The patch is archived, 31 insertions in one
+it: **the 54.7 % is post-drain checkpoint state-save/restore API work.** Not
+raw copy cost: the residual still contains serialisation, container
+allocation and resize, host/device transfer, state traversal and the API's
+own bookkeeping, and this run separates none of them from each other. What
+it rules out is that the time was spent waiting on target work queued
+before the call. The patch is archived, 31 insertions in one
 file; the tree was restored to stock afterwards, verified by the library hash
 returning to `a0cbe4d0…`.
 
@@ -177,10 +180,26 @@ whole-invocation shift that moves every arm equally cancels.
 | `spec-draft-n8` | −76.77 % | −70.46 % | +6.31 pp [+6.29, +6.33] |
 | `spec-dflash-n2` | +10.71 % | +16.63 % | +5.92 pp [+4.86, +6.99] |
 
+**What the shift column is.** An **absolute change in percentage points** of
+the arm-versus-baseline number, which is what `analysis/length_matching.py`
+reports for the same arms by a different method. The analyser used to define
+the session effect as a difference of log ratios in its documentation while
+averaging the percentage-point form; those are different estimands. They agree
+near the baseline and diverge away from it: `spec-draft-n8` is +6.31 pp and
+**+27.15 %** as a log contrast, because it runs at a quarter of baseline speed.
+Both are printed and serialised now, and the tables publish the pp form.
+
 **The hard cap raises every arm and every interval excludes zero.**
 `spec-dflash-n4`, the arm A17 was written about and published as "`n_max 4` goes
 negative", is negative free-running and positive under the cap, both intervals
-clear of zero on opposite sides. That sign flip is a length artefact.
+clear of zero on opposite sides.
+
+That sign is **not robust to the stopping policy**, which is weaker than
+calling it a length artefact. `ignore_eos` does not only equalise the token
+count: forcing generation past a natural stop changes which tokens are
+produced, the positions they occupy, the experts routed, and the acceptance
+that follows. V2 shows the sign differs between a forced cap and natural
+stopping, not that length alone causes it.
 
 **And run V overstated one arm.** Its `spec-dflash-n2` shift, +9.26 pp, lies
 above **all eight** sessions (max +8.07). The other three of its four numbers
@@ -332,13 +351,13 @@ this a draft is below, under *Not closed*.
 
 ```
 python analysis/rederive_from_logs.py bench   # raw logs -> the committed JSON
-python analysis/verify_claims.py          # 1664 assertions, re-derived
+python analysis/verify_claims.py          # 1689 assertions, re-derived
 python analysis/check_data_integrity.py   # structure of all 60 run directories
-python -m unittest discover tests         # 132 regressions for defects shipped here
+python -m unittest discover tests         # 191 regressions for defects shipped here
 python tests/mutate.py                    # break each fix, require its test to fail
 python tests/data_mutate.py               # perturb a measurement or a published
                                           #   figure, require the checker to fail
-                                          #   50 code and 76 data perturbations,
+                                          #   58 code and 76 data perturbations,
                                           #   with a clean-mirror re-check after
                                           #   the last restore
 python analysis/plot_v4_runs.py --check   # charts still match the data

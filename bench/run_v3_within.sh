@@ -51,7 +51,14 @@ export MODEL_TARGET="${MODEL_TARGET:-$HOME/models/Qwen3.6-35B-A3B-UD-Q4_K_XL.ggu
 export MODEL_DRAFT="${MODEL_DRAFT:-$HOME/models/Qwen3.5-0.8B-Q4_K_M.gguf}"
 export MODEL_DFLASH="${MODEL_DFLASH:-$HOME/models/qwen36-dflash-master.gguf}"
 export MODEL_MTP="${MODEL_MTP:-$HOME/models/qwen36-mtp-q8_0.gguf}"
-export BENCH_SERVER="${BENCH_SERVER:-$BENCH/llama-retest/build/bin/llama-server}"
+# `retest_runner.py` reads LLAMA_SERVER_BIN and only that. This script
+# exported BENCH_SERVER, a name nothing consumes, so a clean shell failed
+# and a shell that happened to carry someone else's LLAMA_SERVER_BIN ran
+# a binary this script never chose. Both are fixed by using the real name
+# and asserting what the run must have used.
+export LLAMA_SERVER_BIN="${LLAMA_SERVER_BIN:-$BENCH/llama-retest/build/bin/llama-server}"
+[ -x "$LLAMA_SERVER_BIN" ] || { echo "not executable: $LLAMA_SERVER_BIN" >&2; exit 1; }
+export BENCH_EXPECT_COMMIT="${BENCH_EXPECT_COMMIT:-3737e41370da1830a44c663f9929a0f27591ffa6}"
 
 # run V's five configurations, each in both modes
 export BENCH_HARDCAP_SUFFIX="-cap"
@@ -90,3 +97,19 @@ done
 echo "=== V3 done $(date -Is) ==="
 echo "completed:$DONE"
 echo "failed:${FAILED:- none}"
+
+# Fail closed. Two sessions, ten arms each, both validated, or this is not the
+# run the repository publishes.
+sessions=$(find "$BENCH" -maxdepth 1 -type d -name "matrix_V3_s*_$STAMP" -printf . | wc -c)
+complete=$(find "$BENCH" -maxdepth 1 -type d -name "matrix_V3_s*_$STAMP" \
+             -exec test -f '{}/RUN_COMPLETE.json' ';' -printf . | wc -c)
+echo "sessions:$sessions  validated:$complete  expected:2"
+rc=0
+[ -z "$FAILED" ] || { echo "FAIL: sessions failed:$FAILED" >&2; rc=1; }
+[ "$sessions" -eq 2 ] || { echo "FAIL: $sessions sessions, expected 2" >&2; rc=1; }
+[ "$complete" -eq 2 ] || { echo "FAIL: $complete validated, expected 2" >&2; rc=1; }
+for d in "$BENCH"/matrix_V3_s*_"$STAMP"; do
+    n=$(find "$d" -maxdepth 1 -name '*__rep*.json' -printf . | wc -c)
+    [ "$n" -eq 100 ] || { echo "FAIL: $d has $n arm-runs, expected 100" >&2; rc=1; }
+done
+exit "$rc"
