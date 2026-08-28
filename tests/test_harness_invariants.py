@@ -17,6 +17,7 @@ import itertools
 import json
 import os
 import socket
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -2924,6 +2925,60 @@ class TheMirrorsMustCarryEverythingTheCheckerReads(unittest.TestCase):
                                  f"{rel}'s mirror would lack {missing}, so the "
                                  f"checker crashes on the unperturbed copy and "
                                  f"no perturbation is ever evaluated")
+
+
+class AShallowCloneMustBeDiagnosedNotEndured(unittest.TestCase):
+    """`actions/checkout` defaults to depth 1, and the checker could not say so.
+
+    The first real run of the evidence workflow failed with five provenance
+    assertions listing run directories and nothing naming the cause. A shallow
+    clone still satisfies `git rev-parse --git-dir`, so `_HAS_GIT` was true and
+    the history simply was not there. Diagnosing it took a whole 40-minute CI
+    run; reading the message now takes a second.
+
+    A mirror with no `.git` is a different thing and is legitimately skipped -
+    `tests/data_mutate.py` creates one on purpose.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    def test_the_checker_tells_them_apart(self):
+        src = (self.ROOT / "analysis" / "verify_claims.py").read_text(encoding="utf-8")
+        self.assertIn("--is-shallow-repository", src)
+        self.assertIn("fetch-depth: 0", src, "the message does not name the fix")
+        self.assertIn("no git history here (a mirror)", src,
+                      "a mirror with no git must still be skipped, not refused")
+
+    def test_it_refuses_a_real_shallow_clone(self):
+        with tempfile.TemporaryDirectory() as t:
+            dst = Path(t) / "shallow"
+            r = subprocess.run(
+                ["git", "clone", "--depth", "1", "--no-local", "-q",
+                 f"file://{self.ROOT}", str(dst)],
+                capture_output=True, text=True, timeout=600)
+            if r.returncode:
+                self.skipTest(f"cannot make a shallow clone here: {r.stderr[-200:]}")
+            self.assertEqual(
+                subprocess.run(["git", "-C", str(dst), "rev-parse",
+                                "--is-shallow-repository"],
+                               capture_output=True, text=True).stdout.strip(),
+                "true")
+            # the clone carries the committed checker; test the working one
+            shutil.copy2(self.ROOT / "analysis" / "verify_claims.py",
+                         dst / "analysis" / "verify_claims.py")
+            out = subprocess.run([sys.executable, "analysis/verify_claims.py"],
+                                 cwd=str(dst), capture_output=True, text=True,
+                                 timeout=900)
+        self.assertNotEqual(out.returncode, 0, "a shallow clone was accepted")
+        blob = out.stdout + out.stderr
+        self.assertIn("SHALLOW clone", blob)
+        self.assertIn("fetch-depth: 0", blob)
+
+    def test_the_evidence_workflow_asks_for_full_history(self):
+        wf = (self.ROOT / ".github" / "workflows" / "evidence.yml") \
+            .read_text(encoding="utf-8")
+        self.assertIn("fetch-depth: 0", wf,
+                      "the workflow that runs the checker still clones shallow")
 
 
 class TheSplitTimersMustBeRederivable(unittest.TestCase):

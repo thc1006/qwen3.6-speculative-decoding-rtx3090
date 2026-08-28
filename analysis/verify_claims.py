@@ -1363,8 +1363,29 @@ chk("the rewrite map names the two commits that moved", len(_RW_MAP), 2)
 # broke the "unit and mutation" job while passing everywhere else.
 _HAS_GIT = _sp2.run(["git", "-C", str(_repo), "rev-parse", "--git-dir"],
                     capture_output=True).returncode == 0
+# A SHALLOW clone is not the same as no clone, and telling them apart matters.
+# `tests/data_mutate.py` runs this in a mirror with no `.git` at all, which is
+# legitimate and skipped. `actions/checkout` defaults to depth 1, where
+# `rev-parse --git-dir` still succeeds and the history is simply absent - so
+# every provenance assertion failed with a list of run directories and nothing
+# said why. That cost one full evidence-workflow run to diagnose. A shallow
+# clone in CI is a configuration error and says so.
+if _HAS_GIT:
+    _shallow = _sp2.run(["git", "-C", str(_repo), "rev-parse",
+                         "--is-shallow-repository"],
+                        capture_output=True, text=True).stdout.strip() == "true"
+    if _shallow:
+        sys.exit(
+            "  ----  this is a SHALLOW clone. The harness-provenance checks "
+            "resolve each run's `runner_sha256` against every version of\n"
+            "        bench/retest_runner.py this repository has held, which a "
+            "depth-1 clone cannot do.\n"
+            "        In GitHub Actions add `with: { fetch-depth: 0 }` to the "
+            "checkout step; see .github/workflows/audit.yml.\n"
+            "        Refusing rather than reporting five assertion failures "
+            "that do not name the cause.")
 if not _HAS_GIT:
-    print("  ----  no git history here (a mirror, or a shallow clone); "
+    print("  ----  no git history here (a mirror); "
           "the harness-provenance checks are skipped, not passed")
 if _HAS_GIT:
     chk("and both new SHAs are in this history",
