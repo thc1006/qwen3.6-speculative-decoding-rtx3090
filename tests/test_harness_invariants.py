@@ -3272,51 +3272,89 @@ class TheStubServerMustNotOutliveItsParent(unittest.TestCase):
     interrupted runs, each still listening. Same shape as the mutation suite's
     interrupted restore, which ERRATA already records: cleanup that only happens
     on the ordinary path is not cleanup.
+
+    The parent here is a python launcher and not `bash -c '... & sleep'`. The
+    first version used bash and passed locally and failed on CI with "the stub
+    server never started" and nothing else, because the server's own output went
+    to a pipe nobody read. The server's stdout and stderr land in a file now, and
+    every assertion below quotes it.
     """
 
+    LAUNCHER = (
+        "import os, pathlib, subprocess, sys, time\n"
+        "env = dict(os.environ, FAKE_READY_FILE=sys.argv[6])\n"
+        "out = open(sys.argv[4], 'w')\n"
+        "p = subprocess.Popen([sys.argv[1], sys.argv[2], '-m', '/dev/null',\n"
+        "                      '--port', sys.argv[3]], env=env,\n"
+        "                     stdout=out, stderr=subprocess.STDOUT)\n"
+        "pathlib.Path(sys.argv[5]).write_text(str(p.pid))\n"
+        "time.sleep(300)\n")
+
     def test_it_exits_when_its_parent_is_killed(self):
-        port = free_port()
-        parent = subprocess.Popen(
-            ["bash", "-c",
-             f"{sys.executable} {ROOT / 'tests' / 'fake_llama_server.py'} "
-             f"-m /dev/null --port {port} & echo $!; sleep 300"],
-            stdout=subprocess.PIPE, text=True)
-        try:
-            child = int(parent.stdout.readline().strip())
-        except ValueError:                       # pragma: no cover - launch failed
-            parent.kill()
-            self.fail("the stub server did not report a pid")
         alive = lambda pid: os.path.exists(f"/proc/{pid}")     # noqa: E731
+        port = free_port()
+        with tempfile.TemporaryDirectory() as t:
+            log = Path(t) / "server.out"
+            pid_file = Path(t) / "server.pid"
+            ready = Path(t) / "server.ready"
+            parent = subprocess.Popen(
+                [sys.executable, "-c", self.LAUNCHER, sys.executable,
+                 str(ROOT / "tests" / "fake_llama_server.py"), str(port),
+                 str(log), str(pid_file), str(ready)])
 
-        def listening():
-            with socket.socket() as s:
-                s.settimeout(0.2)
-                return s.connect_ex(("127.0.0.1", int(port))) == 0
+            def said():
+                return log.read_text(encoding="utf-8") if log.exists() else ""
 
-        try:
-            # wait for the port, not for /proc: the pid exists the moment bash
-            # forks, which is before python has recorded its parent, and killing
-            # in that window tests a race rather than the behaviour
-            for _ in range(100):
-                if listening():
-                    break
-                time.sleep(0.1)
-            self.assertTrue(listening(), "the stub server never started")
-            parent.kill()
-            parent.wait(timeout=30)
-            for _ in range(30):
-                if not alive(child):
-                    break
-                time.sleep(0.5)
-            self.assertFalse(
-                alive(child),
-                "the stub server outlived the process that started it, which is "
-                "how two of them were left holding ports for a day and more")
-        finally:
-            if parent.poll() is None:
+            child = None
+            try:
+                for _ in range(300):
+                    if pid_file.exists() and pid_file.read_text().strip():
+                        child = int(pid_file.read_text().strip())
+                        break
+                    time.sleep(0.1)
+                self.assertIsNotNone(child, f"no pid was recorded: {said()!r}")
+                # the server's own readiness file, not an open port: the pid
+                # exists the moment the launcher forks, and the port says the
+                # socket bound, which is neither necessary nor sufficient for
+                # the parent to have been recorded. Waiting for the port passed
+                # locally and failed on CI in seven milliseconds, which is less
+                # than one turn of a loop that sleeps a tenth of a second, so
+                # what it observed was some other process holding that port.
+                for _ in range(300):
+                    if ready.exists():
+                        break
+                    if not alive(child):
+                        break
+                    time.sleep(0.1)
+                self.assertTrue(
+                    ready.exists(),
+                    f"the stub server never armed its watchdog; it said "
+                    f"{said()!r} and is {'alive' if alive(child) else 'gone'}")
+                self.assertEqual(ready.read_text().strip(), str(parent.pid),
+                                 "the server recorded a different parent")
+                # the readiness file is written before the socket binds, so a
+                # port taken by something else would leave a dead child and a
+                # test that passes without exercising anything
+                self.assertTrue(
+                    alive(child),
+                    f"the stub server was gone before the parent was killed, so "
+                    f"nothing was tested; it said {said()!r}")
                 parent.kill()
-            if alive(child):
-                os.kill(child, signal.SIGKILL)
+                parent.wait(timeout=30)
+                for _ in range(60):
+                    if not alive(child):
+                        break
+                    time.sleep(0.5)
+                self.assertFalse(
+                    alive(child),
+                    "the stub server outlived the process that started it, "
+                    "which is how two of them were left holding ports for a "
+                    f"day and more; it said {said()!r}")
+            finally:
+                if parent.poll() is None:
+                    parent.kill()
+                if child is not None and alive(child):
+                    os.kill(child, signal.SIGKILL)
 
 
 class TheSplitTimersMustBeRederivable(unittest.TestCase):

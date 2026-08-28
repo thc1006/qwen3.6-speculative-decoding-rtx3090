@@ -20,6 +20,8 @@ Environment knobs, used by the tests to drive failure paths:
                              stop early unless the request sets ignore_eos, so
                              the hard-cap guard has something to catch
   FAKE_BUILD=<n> FAKE_COMMIT=<sha>
+  FAKE_READY_FILE=<path>     write the parent pid there once the orphan
+                             watchdog is armed, and only then
 """
 from __future__ import annotations
 
@@ -138,4 +140,12 @@ def _exit_when_orphaned() -> None:
 
 
 threading.Thread(target=_exit_when_orphaned, daemon=True).start()
+# A readiness signal for the one test that needs to know the watchdog is armed,
+# written only when asked so that no other test sees a byte of difference. The
+# open port is not that signal: it says the socket bound, which is neither
+# necessary nor sufficient for the parent to have been recorded, and a test that
+# waited for it passed locally and failed on CI in seven milliseconds.
+if os.environ.get("FAKE_READY_FILE"):
+    with open(os.environ["FAKE_READY_FILE"], "w") as _rf:
+        _rf.write(str(_PARENT))
 HTTPServer(("127.0.0.1", PORT), H).serve_forever()
