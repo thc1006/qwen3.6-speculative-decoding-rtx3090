@@ -2991,27 +2991,69 @@ class AShallowCloneMustBeDiagnosedNotEndured(unittest.TestCase):
         it through the tests. Both failed in CI for the same reason, three
         commits apart. Naming the rule is cheaper than diagnosing it again.
         """
-        import yaml
+        # No PyYAML: these tests are stdlib-only and CI's unit job installs
+        # nothing. Importing it passed here and raised ERROR there, which is
+        # the same shape as every other "works on my machine" defect this
+        # branch has been fixing. Job blocks are `^  name:` at two spaces.
+        REACHES = ("verify_claims", "unittest discover",
+                   "tests/mutate.py", "tests/data_mutate.py")
         for rel in (".github/workflows/audit.yml", ".github/workflows/evidence.yml"):
-            d = yaml.safe_load((self.ROOT / rel).read_text(encoding="utf-8"))
-            for jn, job in d["jobs"].items():
-                body = " ".join(str(st.get("run", "")) for st in job.get("steps", []))
-                reaches = ("verify_claims" in body
-                           or "unittest discover" in body
-                           or "tests/mutate.py" in body
-                           or "tests/data_mutate.py" in body)
-                if not reaches:
+            lines = (self.ROOT / rel).read_text(encoding="utf-8").splitlines()
+            starts = [i for i, l in enumerate(lines)
+                      if re.fullmatch(r"  [A-Za-z0-9_-]+:", l)]
+            self.assertTrue(starts, f"{rel}: no job blocks found")
+            for n, i in enumerate(starts):
+                end = starts[n + 1] if n + 1 < len(starts) else len(lines)
+                block = "\n".join(lines[i:end])
+                name = lines[i].strip().rstrip(":")
+                if not any(k in block for k in REACHES):
                     continue
-                depth = None
-                for st in job.get("steps", []):
-                    if "checkout" in str(st.get("uses", "")):
-                        depth = (st.get("with") or {}).get("fetch-depth")
-                with self.subTest(workflow=rel, job=jn):
-                    self.assertEqual(
-                        depth, 0,
-                        f"{rel}:{jn} reaches the claim checker but clones at "
-                        f"depth {depth!r}; the provenance assertions need the "
-                        f"whole history and the checker refuses a shallow clone")
+                with self.subTest(workflow=rel, job=name):
+                    self.assertIn(
+                        "fetch-depth: 0", block,
+                        f"{rel}:{name} reaches the claim checker but does not "
+                        f"ask for full history; the provenance assertions need "
+                        f"every version of the runner and the checker refuses "
+                        f"a shallow clone")
+
+
+class TheSuiteMustRunOnAStockInterpreter(unittest.TestCase):
+    """A test that imports something CI does not install passes here and
+
+    ERRORs there. That happened with PyYAML: the unit job installs nothing, so
+    a rule about workflow files could not be checked by the job it governs.
+    The general form is the same "works on my machine" this branch keeps
+    finding, and it is cheap to forbid.
+
+    `analysis/plot_v4_runs.py` legitimately needs matplotlib and runs in its
+    own job with a hash-pinned lock file; the TESTS are the stdlib-only part.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    def test_no_test_module_imports_anything_third_party(self):
+        import ast as _ast
+        stdlib = set(sys.stdlib_module_names)
+        allowed = stdlib | {"host_guard", "publish_pr_body", "carryover",
+                            "length_mode", "paired_blocks", "rr_under_test",
+                            "rederive_from_logs", "past_threshold_fit",
+                            "verify_claims", "extract_checkpoint_timers"}
+        offenders = []
+        for f in sorted((self.ROOT / "tests").glob("*.py")):
+            tree = _ast.parse(f.read_text(encoding="utf-8"))
+            for n in _ast.walk(tree):
+                if isinstance(n, _ast.Import):
+                    names = [a.name.split(".")[0] for a in n.names]
+                elif isinstance(n, _ast.ImportFrom) and n.level == 0 and n.module:
+                    names = [n.module.split(".")[0]]
+                else:
+                    continue
+                for name in names:
+                    if name not in allowed:
+                        offenders.append(f"{f.name}:{n.lineno} {name}")
+        self.assertEqual(offenders, [],
+                         "the unit job installs nothing, so these imports pass "
+                         "locally and ERROR in CI")
 
 
 class TheSplitTimersMustBeRederivable(unittest.TestCase):
