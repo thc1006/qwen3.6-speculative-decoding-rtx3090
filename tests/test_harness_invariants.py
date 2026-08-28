@@ -11,6 +11,7 @@ No GPU, no network, no third-party packages. `python -m unittest discover tests`
 """
 from __future__ import annotations
 
+import ast
 import math as _math
 import re
 import itertools
@@ -27,6 +28,29 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+
+# Captured before any test runs. A test that replaces one of these and does not
+# put it back changes the behaviour of every test that sorts after it, and the
+# symptom appears somewhere else entirely: a no-op `time.sleep` turned a thirty
+# second wait into half a millisecond and reported the thing being waited for as
+# never having happened, on CI, in a test that passed on its own.
+_STDLIB_ORIGINALS = [
+    (time, "sleep"), (os, "killpg"), (os, "getpgid"), (os, "kill"),
+    (subprocess, "run"), (subprocess, "Popen"), (shutil, "rmtree"),
+    (socket, "socket"), (json, "load"), (json, "dump"),
+]
+_STDLIB_AS_FOUND = {(m.__name__, n): getattr(m, n) for m, n in _STDLIB_ORIGINALS}
+
+
+def tearDownModule():
+    replaced = sorted(f"{m.__name__}.{n}" for m, n in _STDLIB_ORIGINALS
+                      if getattr(m, n) is not _STDLIB_AS_FOUND[(m.__name__, n)])
+    if replaced:
+        raise AssertionError(
+            "the suite ended with these still replaced: " + ", ".join(replaced)
+            + " - patch through TestCase.addCleanup so the next test sees the "
+              "real one")
+
 RUNNER = ROOT / "bench" / "retest_runner.py"
 sys.path.insert(0, str(ROOT / "analysis"))
 
@@ -665,6 +689,21 @@ class TeardownMustNotContaminateTheNextArm(unittest.TestCase):
     with `-fit on` against a stale free-memory reading, so the failure landed on
     the following arm and looked like that arm's fault."""
 
+    def patch(self, module, name, value):
+        """Replace `module.name` for this test only, and put it back after.
+
+        `rr.os` IS the `os` module - modules are singletons - so `rr.os.killpg =
+        ...` replaced it for the whole process and never restored it. Six tests
+        here did that to `os.killpg`, `os.getpgid` and `time.sleep`, and every
+        test that sorted after this class then ran with a `time.sleep` that
+        returned immediately. A wait loop written later spun three hundred times
+        in half a millisecond and reported that the thing it was waiting for had
+        never happened. `tearDownModule` below refuses to end the run with any
+        of them still replaced.
+        """
+        self.addCleanup(setattr, module, name, getattr(module, name))
+        setattr(module, name, value)
+
     def _rr(self):
         import importlib.util
         os.environ.update(LLAMA_SERVER_BIN="/bin/true", MODEL_TARGET="/dev/null",
@@ -718,8 +757,8 @@ class TeardownMustNotContaminateTheNextArm(unittest.TestCase):
         rr.gpu_mem_used_mib = fake_mem
         proc = types.SimpleNamespace(pid=1, returncode=0, poll=lambda: 0,
                                      wait=lambda timeout=None: 0)
-        rr.os.killpg = lambda *a, **k: None
-        rr.os.getpgid = lambda p: 1
+        self.patch(rr.os, "killpg", lambda *a, **k: None)
+        self.patch(rr.os, "getpgid", lambda p: 1)
         td = rr.stop_server(proc, baseline_mib=16600)
         self.assertTrue(td["settled"])
         # 2048 MiB was not a tolerance, it was most of the margin the fitter
@@ -738,9 +777,9 @@ class TeardownMustNotContaminateTheNextArm(unittest.TestCase):
         rr.gpu_mem_used_mib = lambda: next(seq, 16700)
         proc = types.SimpleNamespace(pid=1, returncode=0, poll=lambda: 0,
                                      wait=lambda timeout=None: 0)
-        rr.os.killpg = lambda *a, **k: None
-        rr.os.getpgid = lambda p: 1
-        rr.time.sleep = lambda *_a: None
+        self.patch(rr.os, "killpg", lambda *a, **k: None)
+        self.patch(rr.os, "getpgid", lambda p: 1)
+        self.patch(rr.time, "sleep", lambda *_a: None)
         td = rr.stop_server(proc, baseline_mib=16600)
         self.assertTrue(td["settled"])
         # 16700 low, 18000 high, then three low: five readings, and settling on
@@ -753,9 +792,9 @@ class TeardownMustNotContaminateTheNextArm(unittest.TestCase):
         rr.gpu_mem_used_mib = lambda: 16650
         proc = types.SimpleNamespace(pid=1, returncode=0, poll=lambda: 0,
                                      wait=lambda timeout=None: 0)
-        rr.os.killpg = lambda *a, **k: None
-        rr.os.getpgid = lambda p: 1
-        rr.time.sleep = lambda *_a: None
+        self.patch(rr.os, "killpg", lambda *a, **k: None)
+        self.patch(rr.os, "getpgid", lambda p: 1)
+        self.patch(rr.time, "sleep", lambda *_a: None)
         td = rr.stop_server(proc, baseline_mib=16600)
         self.assertTrue(td["settled"])
         self.assertEqual(td["readings"], 3)
@@ -770,8 +809,8 @@ class TeardownMustNotContaminateTheNextArm(unittest.TestCase):
         rr.gpu_mem_used_mib = lambda: None
         proc = types.SimpleNamespace(pid=1, returncode=0, poll=lambda: 0,
                                      wait=lambda timeout=None: 0)
-        rr.os.killpg = lambda *a, **k: None
-        rr.os.getpgid = lambda p: 1
+        self.patch(rr.os, "killpg", lambda *a, **k: None)
+        self.patch(rr.os, "getpgid", lambda p: 1)
         td = rr.stop_server(proc, baseline_mib=16600)
         self.assertFalse(td["settled"])
         self.assertFalse(td["readable"])
@@ -821,8 +860,8 @@ class TeardownMustNotContaminateTheNextArm(unittest.TestCase):
         rr.gpu_mem_used_mib = lambda: None
         proc = types.SimpleNamespace(pid=1, returncode=0, poll=lambda: 0,
                                      wait=lambda timeout=None: 0)
-        rr.os.killpg = lambda *a, **k: None
-        rr.os.getpgid = lambda p: 1
+        self.patch(rr.os, "killpg", lambda *a, **k: None)
+        self.patch(rr.os, "getpgid", lambda p: 1)
         td = rr.stop_server(proc, baseline_mib=None)
         self.assertTrue(td["settled"])
         self.assertFalse(td["readable"])
@@ -3178,6 +3217,58 @@ class EveryTranchePublishedMustBeVerified(unittest.TestCase):
                          f"does not list them, so a change there would not "
                          f"re-run the chain it can break")
 
+    def test_the_filter_covers_what_the_scripts_import_not_just_their_names(self):
+        """A dependency reached by `import` is invisible to a filter of names.
+
+        The previous test reads the paths the workflow spells out. The last
+        step runs `analysis/verify_claims.py`, which imports five other modules
+        in `analysis/` and reads a sixth by path; none of the six was in the
+        filter, so a change to the mode contrast or the carryover analysis -
+        both of which the checker asserts against - would not have re-run this
+        chain. `rederive_from_logs.py`'s three dependencies were listed, by
+        hand, because somebody thought of them.
+        """
+        root = self.ROOT
+        wf = (root / ".github" / "workflows" / "evidence.yml") \
+            .read_text(encoding="utf-8")
+        listed = set(re.findall(r"^      - (\S+)$", wf, re.M))
+        entries = sorted(set(re.findall(r"python (analysis/\w+\.py)", wf)))
+        self.assertTrue(entries, "the workflow runs no analysis script")
+        local = {f.stem for f in (root / "analysis").glob("*.py")}
+
+        def deps(stem, seen):
+            if stem in seen:
+                return seen
+            seen.add(stem)
+            tree = ast.parse((root / "analysis" / f"{stem}.py")
+                             .read_text(encoding="utf-8"))
+            for n in ast.walk(tree):
+                got = None
+                if isinstance(n, ast.Import):
+                    for al in n.names:
+                        if al.name.split(".")[0] in local:
+                            deps(al.name.split(".")[0], seen)
+                elif isinstance(n, ast.ImportFrom) and n.module:
+                    got = n.module.split(".")[0]
+                elif (isinstance(n, ast.Constant) and isinstance(n.value, str)
+                      and n.value.endswith(".py")):
+                    got = Path(n.value).stem
+                if got in local:
+                    deps(got, seen)
+            return seen
+
+        missing = set()
+        for entry in entries:
+            for stem in deps(Path(entry).stem, set()):
+                rel = f"analysis/{stem}.py"
+                if rel not in listed:
+                    missing.add(rel)
+        self.assertEqual(
+            sorted(missing), [],
+            "the evidence job runs a script that reaches these, and its push "
+            "filter does not list them, so a change there would not re-run the "
+            "chain it can break")
+
     def test_no_digest_in_the_workflow_is_invented(self):
         """The other direction, and it is the one that caught a real mistake.
 
@@ -3197,6 +3288,57 @@ class EveryTranchePublishedMustBeVerified(unittest.TestCase):
         self.assertEqual(invented, [],
                          f"{len(invented)} digest(s) the workflow checks that "
                          f"appear nowhere in the manifest: {[d[:12] for d in invented]}")
+
+
+class EveryLiveShellScriptMustBeLinted(unittest.TestCase):
+    """The same defect as the class below, in the step beside the one it fixed.
+
+    `analysis bench tests` was widened to a `find` when `tools/` turned out to
+    be a fourth directory nobody had listed. The shellcheck step next to it kept
+    `bench/*.sh`, and four scripts at the repository root sat outside it: three
+    historical ones, which were clean, and `collect_env.sh`, which is what
+    writes BENCHMARK_ENV.md and had two findings.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+    ARCHIVED = {"v2_3090_followup", "v3_dflash_2026_05_07", "results"}
+
+    def _step(self):
+        wf = (self.ROOT / ".github" / "workflows" / "audit.yml") \
+            .read_text(encoding="utf-8")
+        i = wf.index("shellcheck every live shell script")
+        j = wf.find("\n  audit-", i)
+        return wf[i:] if j < 0 else wf[i:j]
+
+    def _excluded(self):
+        found = set(re.findall(r"-not -path '\./([^/]+)/\*'", self._step()))
+        return found - {".git"}
+
+    def test_the_step_finds_files_rather_than_naming_a_glob(self):
+        step = self._step()
+        self.assertIn("find . -name '*.sh'", step,
+                      "a glob names only the directories somebody thought of")
+        self.assertNotIn("shellcheck --severity=style bench/*.sh", step)
+
+    def test_the_exclusions_are_the_archived_trees_and_nothing_else(self):
+        self.assertEqual(self._excluded(), self.ARCHIVED)
+
+    def test_every_live_shell_script_would_be_reached(self):
+        excluded = self._excluded() | {".git"}
+        live = sorted(str(f.relative_to(self.ROOT))
+                      for f in self.ROOT.rglob("*.sh")
+                      if not set(f.relative_to(self.ROOT).parts) & excluded)
+        self.assertGreaterEqual(len(live), 8, f"found only {live}")
+        # the four the old glob missed, named so this cannot silently narrow
+        for want in ("collect_env.sh", "run_matrix.sh", "run_p0_matrix.sh",
+                     "run_verify_matrix.sh"):
+            self.assertIn(want, live,
+                          f"{want} is live and outside the archived trees, so "
+                          f"the step must reach it")
+
+    def test_the_step_refuses_an_empty_set(self):
+        self.assertIn("no shell scripts found", self._step(),
+                      "a find that matched nothing would lint nothing and pass")
 
 
 class EveryLivePythonFileMustBeLinted(unittest.TestCase):
@@ -3305,13 +3447,28 @@ class TheStubServerMustNotOutliveItsParent(unittest.TestCase):
             def said():
                 return log.read_text(encoding="utf-8") if log.exists() else ""
 
+            def wait_for(cond, seconds=30):
+                """Bounded by the clock, not by a count of sleeps.
+
+                A loop of `range(300)` with `time.sleep(0.1)` is thirty seconds
+                only while `time.sleep` sleeps. Another test in this file
+                replaced it with a no-op and did not put it back, so the same
+                loop finished in half a millisecond and this test reported, on
+                CI, that the thing it was waiting for had never happened. The
+                guard above stops that recurring; this stops it mattering.
+                """
+                end = time.monotonic() + seconds
+                while time.monotonic() < end:
+                    if cond():
+                        return True
+                    time.sleep(0.05)
+                return cond()
+
             child = None
             try:
-                for _ in range(300):
-                    if pid_file.exists() and pid_file.read_text().strip():
-                        child = int(pid_file.read_text().strip())
-                        break
-                    time.sleep(0.1)
+                if wait_for(lambda: pid_file.exists()
+                            and pid_file.read_text().strip()):
+                    child = int(pid_file.read_text().strip())
                 self.assertIsNotNone(child, f"no pid was recorded: {said()!r}")
                 # the server's own readiness file, not an open port: the pid
                 # exists the moment the launcher forks, and the port says the
@@ -3320,12 +3477,7 @@ class TheStubServerMustNotOutliveItsParent(unittest.TestCase):
                 # locally and failed on CI in seven milliseconds, which is less
                 # than one turn of a loop that sleeps a tenth of a second, so
                 # what it observed was some other process holding that port.
-                for _ in range(300):
-                    if ready.exists():
-                        break
-                    if not alive(child):
-                        break
-                    time.sleep(0.1)
+                wait_for(lambda: ready.exists() or not alive(child))
                 self.assertTrue(
                     ready.exists(),
                     f"the stub server never armed its watchdog; it said "
@@ -3341,10 +3493,7 @@ class TheStubServerMustNotOutliveItsParent(unittest.TestCase):
                     f"nothing was tested; it said {said()!r}")
                 parent.kill()
                 parent.wait(timeout=30)
-                for _ in range(60):
-                    if not alive(child):
-                        break
-                    time.sleep(0.5)
+                wait_for(lambda: not alive(child))
                 self.assertFalse(
                     alive(child),
                     "the stub server outlived the process that started it, "
@@ -3355,6 +3504,64 @@ class TheStubServerMustNotOutliveItsParent(unittest.TestCase):
                     parent.kill()
                 if child is not None and alive(child):
                     os.kill(child, signal.SIGKILL)
+
+
+class NoTestMayLeaveTheStandardLibraryPatched(unittest.TestCase):
+    """`rr.os` is the `os` module, so `rr.os.killpg = ...` is global and forever.
+
+    Twelve assignments in this file replaced `os.killpg`, `os.getpgid` and
+    `time.sleep` for the rest of the process. Nothing depended on them until a
+    test written later waited thirty seconds in a loop that sleeps a tenth of a
+    second a turn; with `sleep` a no-op the loop finished in half a millisecond
+    and the failure surfaced on CI as "the thing I waited for never happened",
+    in a test that passed when run on its own.
+
+    Two guards, because they catch different things. `tearDownModule` catches
+    any shape at run time but only for the names it lists. This one catches the
+    shape itself, anywhere in the file, whatever the name.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+    STDLIB = {"os", "time", "sys", "shutil", "subprocess", "socket", "json",
+              "random", "glob", "pathlib", "tempfile", "signal", "math"}
+
+    def test_no_assignment_reaches_a_module_attribute(self):
+        src = (self.ROOT / "tests" / "test_harness_invariants.py") \
+            .read_text(encoding="utf-8")
+        bad = []
+        for node in ast.walk(ast.parse(src)):
+            if not isinstance(node, ast.Assign):
+                continue
+            for tgt in node.targets:
+                # `<anything>.<stdlib module>.<name> = ...`
+                if (isinstance(tgt, ast.Attribute)
+                        and isinstance(tgt.value, ast.Attribute)
+                        and tgt.value.attr in self.STDLIB):
+                    bad.append(f"line {node.lineno}: "
+                               f"{ast.unparse(tgt)} = ...")
+        self.assertEqual(
+            bad, [],
+            "these replace an attribute of a shared module for the whole "
+            "process; route them through a helper that restores it: "
+            + "; ".join(bad))
+
+    def test_the_runtime_guard_covers_the_names_that_were_patched(self):
+        """The three that were actually left replaced must be in the list."""
+        names = {f"{m.__name__}.{n}" for m, n in _STDLIB_ORIGINALS}
+        for want in ("os.killpg", "os.getpgid", "time.sleep"):
+            self.assertIn(want, names)
+
+    def test_the_helper_restores_what_it_replaces(self):
+        real = time.sleep
+
+        class T(TeardownMustNotContaminateTheNextArm):
+            def runTest(self):
+                self.patch(time, "sleep", lambda *_a: None)
+                assert time.sleep is not real
+
+        T().run(unittest.TestResult())
+        self.assertIs(time.sleep, real,
+                      "the helper left the replacement in place")
 
 
 class TheSplitTimersMustBeRederivable(unittest.TestCase):

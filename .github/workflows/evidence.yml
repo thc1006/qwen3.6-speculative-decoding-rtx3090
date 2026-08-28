@@ -5,8 +5,11 @@ name: evidence
 # they came from the logs. Separate because it downloads 259 MiB and unpacks
 # 4 GB, which has no business running on every push.
 #
-# Run it from the Actions tab, or let the weekly schedule catch a drift between
-# the extractors and the dumps they produced.
+# `workflow_dispatch` and `schedule` are declared below and NEITHER CAN FIRE
+# today: both read the workflow from the default branch, and master carries no
+# `.github/` at all. They start working the moment this branch merges. Until
+# then the `push` filter below is the only thing that runs this job, which is
+# why that filter has to be complete.
 
 on:
   workflow_dispatch:
@@ -34,6 +37,17 @@ on:
       # break this workflow without touching an extractor - which is how the
       # shallow-clone failure reached a green audit and a red evidence run
       - analysis/verify_claims.py
+      # and everything it imports: the filter listed the entry script only, so
+      # a change to the mode contrast or the carryover analysis - which the
+      # checker asserts against - would not re-run this chain. Held to the
+      # import closure by a test, because a list maintained by hand is how the
+      # two omissions above got here.
+      - analysis/carryover.py
+      - analysis/length_mode.py
+      - analysis/paired_blocks.py
+      - analysis/past_threshold_fit.py
+      - analysis/table_coverage.py
+      - analysis/thermal_report.py
       - .github/workflows/evidence.yml
       - v4_audit_2026_08_25/EVIDENCE_MANIFEST.sha256
       # the archive step greps each digest in the audit README as well as the
@@ -43,6 +57,13 @@ on:
 
 permissions:
   contents: read
+
+# One run per ref. This job downloads 680 MB and unpacks 4 GB; two pushes a
+# minute apart used to mean two of them, and the older one's verdict was
+# already stale when it landed.
+concurrency:
+  group: evidence-${{ github.ref }}
+  cancel-in-progress: true
 
 # See the same block in audit.yml: the default `bash -e {0}` has no pipefail,
 # so a piped checker can print a failure into a green job. Every step here
@@ -113,35 +134,50 @@ jobs:
             db833395470aeaf842225a33fb544e933f1c0a3047cac161524aca1ac1aef061
           check evidence/telemetry_20260828.tar.zst \
             72e331bf0cbfaaee73619acf320523598cab4a46b7a7daa51fabbd6e2c455bf3
+          # and nothing was downloaded that no `check` above covers: the
+          # pattern is a glob, so a seventh asset added to the release would be
+          # unpacked with its archive digest unverified. Counted against this
+          # file rather than a literal, so adding a check is the only way to
+          # raise the number.
+          checked=$(grep -c '^          check evidence/' \
+                      .github/workflows/evidence.yml)
+          got=$(find evidence -maxdepth 1 -name '*.tar.zst' | wc -l)
+          [ "$checked" -eq "$got" ] || {
+            echo "FAIL: $got archives downloaded, $checked have a digest here" >&2
+            exit 1
+          }
+          echo "$got archives, each against a digest this file records"
 
       - name: unpack, and check every file against the manifest
         run: |
           set -euo pipefail
           sudo apt-get -qq update && sudo apt-get -qq install -y zstd
           mkdir -p bench
-          # two tranches: the first archive keeps the digest it was published
-          # with, the second carries the 2026-08-27 runs
+          # Three tranches, and no `if [ -f ]` around any of them: the step
+          # above fails when one of the six archives is absent, so the guards
+          # that used to be here could never be false, and they read as though
+          # a missing tranche were tolerated. That is the shape this repository
+          # keeps finding in its own checks.
           tar --use-compress-program=unzstd -xf evidence/raw_logs.tar.zst -C bench
-          if [ -f evidence/raw_logs_20260827.tar.zst ]; then
-            tar --use-compress-program=unzstd -xf evidence/raw_logs_20260827.tar.zst -C bench
-          fi
-          if [ -f evidence/telemetry.tar.zst ]; then
-            tar --use-compress-program=unzstd -xf evidence/telemetry.tar.zst -C bench \
-                --strip-components=1
-          fi
-          if [ -f evidence/telemetry_20260827.tar.zst ]; then
-            tar --use-compress-program=unzstd -xf evidence/telemetry_20260827.tar.zst -C bench
-          fi
+          tar --use-compress-program=unzstd -xf evidence/raw_logs_20260827.tar.zst -C bench
+          tar --use-compress-program=unzstd -xf evidence/telemetry.tar.zst -C bench \
+              --strip-components=1
+          tar --use-compress-program=unzstd -xf evidence/telemetry_20260827.tar.zst -C bench
           # third tranche: run W's 500 logs and its telemetry trace
-          if [ -f evidence/raw_logs_20260828.tar.zst ]; then
-            tar --use-compress-program=unzstd -xf evidence/raw_logs_20260828.tar.zst -C bench
-          fi
-          if [ -f evidence/telemetry_20260828.tar.zst ]; then
-            tar --use-compress-program=unzstd -xf evidence/telemetry_20260828.tar.zst -C bench
-          fi
+          tar --use-compress-program=unzstd -xf evidence/raw_logs_20260828.tar.zst -C bench
+          tar --use-compress-program=unzstd -xf evidence/telemetry_20260828.tar.zst -C bench
           grep -v '^#' v4_audit_2026_08_25/EVIDENCE_MANIFEST.sha256 | grep -v '^$' > /tmp/manifest
           cd bench && sha256sum -c /tmp/manifest
-          echo "$(find . -name '*.log' | wc -l) logs verified"
+          # `sha256sum -c` proves every file the manifest names is intact. It
+          # says nothing about a file the archive carries and the manifest does
+          # not, so the count is compared rather than printed.
+          want=$(grep -c '\.log$' /tmp/manifest)
+          got=$(find . -name '*.log' | wc -l)
+          [ "$want" -eq "$got" ] || {
+            echo "FAIL: $got logs unpacked, $want in the manifest" >&2
+            exit 1
+          }
+          echo "$got logs, and no log the manifest does not name"
 
       - name: put the committed arm-run JSON beside the logs
         run: |
@@ -157,10 +193,11 @@ jobs:
           # a directory that never received the committed JSON and report a gap
           # as though the extractor had produced one.
           staged=0
+          skipped=()
           for d in v4_audit_2026_08_25/data/*/; do
             n=$(basename "$d")
             t="bench/${as[$n]:-$n}"
-            [ -d "$t" ] || continue
+            if [ ! -d "$t" ]; then skipped+=("$n"); continue; fi
             found=0
             for f in "$d"*.json; do
               [ -e "$f" ] || continue
@@ -172,6 +209,18 @@ jobs:
           done
           echo "staged JSON into $staged run directories"
           [ "$staged" -gt 0 ] || { echo "FAIL: staged nothing" >&2; exit 1; }
+          # Two committed runs predate the archive and have no logs in it. That
+          # is the whole list, and it is compared rather than counted: a broken
+          # alias in `as` would drop a run out of the re-derivation silently,
+          # and the only trace would have been a smaller number in the line
+          # above, which nothing read.
+          got=$(printf '%s\n' "${skipped[@]:-}" | sort | tr '\n' ' ')
+          want="A_bcb5eeb64_legacy B_master_3737e4137 "
+          [ "$got" = "$want" ] || {
+            echo "FAIL: runs with no archived logs are now [$got], not [$want]" >&2
+            exit 1
+          }
+          echo "not staged, as expected: $got"
 
       - name: re-derive, and require the result to be what is committed
         env:

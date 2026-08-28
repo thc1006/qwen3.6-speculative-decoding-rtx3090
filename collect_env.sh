@@ -49,7 +49,7 @@ MODEL_DIR="${MODEL_DIR:-$HOME/benchmarks/models}"
     echo '```'
     uname -a
     if command -v lsb_release >/dev/null 2>&1; then lsb_release -a 2>&1; fi
-    cat /etc/os-release 2>/dev/null | head -5
+    head -5 /etc/os-release 2>/dev/null
     echo '```'
     echo ""
     echo "## CUDA / driver"
@@ -73,7 +73,12 @@ MODEL_DIR="${MODEL_DIR:-$HOME/benchmarks/models}"
     echo ""
     echo "## Models"
     echo '```'
-    ls -lhS "$MODEL_DIR"/*/*.gguf 2>/dev/null | awk '{print $5, $9}'
+    # `find -printf` piped through `numfmt`, not `ls -lhS | awk`: a model path
+    # containing a space split into two columns and lined the size up against
+    # the wrong file. `--to=iec` reproduces what `ls -lh` printed, so the
+    # section keeps the form it was published in.
+    find "$MODEL_DIR" -mindepth 2 -maxdepth 2 -name '*.gguf' -printf '%s %p\n' \
+        2>/dev/null | sort -rn | numfmt --to=iec --field=1
     for f in "$MODEL_DIR"/*/*.gguf; do
         [ -f "$f" ] || continue
         echo "$(sha256sum "$f" | awk '{print $1"  "}')$(basename "$f")"
