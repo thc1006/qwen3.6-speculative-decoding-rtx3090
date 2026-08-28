@@ -1144,7 +1144,9 @@ one of them and of the 19 telemetry traces, and each attested run additionally
 records `server_log_sha256` per arm-run, so a single log can be checked without
 the manifest. `bash bench/collect_evidence.sh ~/bench` regenerates both and
 builds `raw_logs.tar.zst`, **271 028 599 bytes**, sha256
-`29c2401f100390268bbd52e43b5c2da9a61440bad3dabe502ca1684478771fd6`.
+`29c2401f100390268bbd52e43b5c2da9a61440bad3dabe502ca1684478771fd6`, with
+`telemetry.tar.zst` at **162 320 bytes**, sha256
+`8a29cc875e30bc66c6e83913b1bf40b075295218a37eef37897317805b47d03c`.
 
 **That archive is published**, with the 19 telemetry traces beside it, as an
 asset of the release `raw-evidence-2026-08-27`. A second tranche sits beside it
@@ -1156,7 +1158,12 @@ V2, the within-invocation V3 and the split-timer T4. Two archives rather than
 one rebuilt archive, so the first one's digest keeps meaning what it meant when
 it was published; unpack both into one bench root and this repository's whole
 manifest verifies, and all **620** of the second tranche's entries did before it
-was published.
+was published. A third tranche followed on 2026-08-28 for run W —
+`raw_logs_20260828.tar.zst`, **221 242 327 bytes**, sha256
+`5af671bf3cf47a20fa2ca78504c089642b9bb2ea249b8997577b4852caa7a5c2`, 500 logs, with
+`telemetry_20260828.tar.zst` at `72e331bf…` — and all **501** of its entries
+were verified against the unpacked archive before publishing, which is the
+check that was missing when the manifest named them one commit early.
 
 Committed hashes tie the derived JSON
 to files nobody else could see, which is a weaker claim than it sounds; the

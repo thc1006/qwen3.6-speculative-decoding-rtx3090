@@ -98,6 +98,17 @@ jobs:
             29c2401f100390268bbd52e43b5c2da9a61440bad3dabe502ca1684478771fd6
           check evidence/raw_logs_20260827.tar.zst \
             d56a7f88a099550bdab229ccb2bd36840f167550cea7689f575fd6d0f11da8ff
+          check evidence/raw_logs_20260828.tar.zst \
+            5af671bf3cf47a20fa2ca78504c089642b9bb2ea249b8997577b4852caa7a5c2
+          # the telemetry archives were recorded in the manifest and never
+          # verified here, so a trace could have been replaced without the
+          # digest check noticing; only the per-file sums would have caught it
+          check evidence/telemetry.tar.zst \
+            8a29cc875e30bc66c6e83913b1bf40b075295218a37eef37897317805b47d03c
+          check evidence/telemetry_20260827.tar.zst \
+            db833395470aeaf842225a33fb544e933f1c0a3047cac161524aca1ac1aef061
+          check evidence/telemetry_20260828.tar.zst \
+            72e331bf0cbfaaee73619acf320523598cab4a46b7a7daa51fabbd6e2c455bf3
 
       - name: unpack, and check every file against the manifest
         run: |
@@ -116,6 +127,13 @@ jobs:
           fi
           if [ -f evidence/telemetry_20260827.tar.zst ]; then
             tar --use-compress-program=unzstd -xf evidence/telemetry_20260827.tar.zst -C bench
+          fi
+          # third tranche: run W's 500 logs and its telemetry trace
+          if [ -f evidence/raw_logs_20260828.tar.zst ]; then
+            tar --use-compress-program=unzstd -xf evidence/raw_logs_20260828.tar.zst -C bench
+          fi
+          if [ -f evidence/telemetry_20260828.tar.zst ]; then
+            tar --use-compress-program=unzstd -xf evidence/telemetry_20260828.tar.zst -C bench
           fi
           grep -v '^#' v4_audit_2026_08_25/EVIDENCE_MANIFEST.sha256 | grep -v '^$' > /tmp/manifest
           cd bench && sha256sum -c /tmp/manifest

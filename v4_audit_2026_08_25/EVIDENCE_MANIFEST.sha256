@@ -13,6 +13,9 @@
 #   raw_logs.tar.zst   271 028 599 bytes (259 MiB), zstd -19
 #   sha256             29c2401f100390268bbd52e43b5c2da9a61440bad3dabe502ca1684478771fd6
 #
+#   telemetry.tar.zst    162 320 bytes
+#   sha256               8a29cc875e30bc66c6e83913b1bf40b075295218a37eef37897317805b47d03c
+#
 # Published 2026-08-27 as the release asset `raw-evidence-2026-08-27`, with the
 # 19 telemetry traces beside it. Committed hashes tie the derived JSON to files
 # nobody else can see; publishing is what lets the extraction be re-run instead
@@ -1390,6 +1393,14 @@ db927ac25b00635ed95c26d6749668be932a1db1a62884116c601dc0e83bcce1  gpu_telemetry_
 # Five sessions of a 10 x 10 square, 500 arm-runs, 500 server logs and one
 # telemetry trace. Kept separate for the same reason the second tranche was:
 # the earlier archives keep the digests they were published with.
+#
+#   raw_logs_20260828.tar.zst    221 242 327 bytes
+#   sha256   5af671bf3cf47a20fa2ca78504c089642b9bb2ea249b8997577b4852caa7a5c2
+#   telemetry_20260828.tar.zst    58 905 bytes
+#   sha256   72e331bf0cbfaaee73619acf320523598cab4a46b7a7daa51fabbd6e2c455bf3
+#
+# Assets of the same release, `raw-evidence-2026-08-27`. All 501 entries below
+# were verified against the unpacked archive before it was published.
 # ---------------------------------------------------------------------------
 d5810262ba1c3b57d0b788d9435513c93306fd1be444b3a520902adc1e55ae65  matrix_W_s1_20260828_104222/server_logs/baseline-cap__rep0.log
 74a32244cf083c6b352d815a980ab38a56c111a66412a62c943bfec0679ea44f  matrix_W_s1_20260828_104222/server_logs/baseline-cap__rep1.log

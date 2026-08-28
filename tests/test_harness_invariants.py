@@ -3066,6 +3066,78 @@ class TheSuiteMustRunOnAStockInterpreter(unittest.TestCase):
                          "locally and ERROR in CI")
 
 
+class EveryTranchePublishedMustBeVerified(unittest.TestCase):
+    """The manifest named 501 files one commit before the archive existed.
+
+    `sha256sum -c` then reported 501 "FAILED open or read" and the evidence job
+    went red, 40 minutes after the push. The ordering rule is: publish the
+    archive, verify the entries against it, then commit the manifest. What can
+    be checked cheaply is the weaker half of it - that every tranche the
+    manifest header names is one the workflow actually fetches and verifies.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    def _manifest_head(self):
+        text = (self.ROOT / "v4_audit_2026_08_25" / "EVIDENCE_MANIFEST.sha256") \
+            .read_text(encoding="utf-8")
+        return "\n".join(l for l in text.splitlines() if l.startswith("#"))
+
+    def test_the_header_names_a_digest_for_every_archive(self):
+        head = self._manifest_head()
+        archives = set(re.findall(r"(raw_logs\S*\.tar\.zst)", head))
+        self.assertGreaterEqual(len(archives), 3, f"found {archives}")
+        for a in archives:
+            # the digest line follows the size line for each archive
+            i = head.index(a)
+            self.assertRegex(head[i:i + 400], r"sha256\s+[0-9a-f]{64}",
+                             f"{a} has no digest in the manifest header")
+
+    def test_the_workflow_verifies_each_of_them(self):
+        wf = (self.ROOT / ".github" / "workflows" / "evidence.yml") \
+            .read_text(encoding="utf-8")
+        head = self._manifest_head()
+        for a in sorted(set(re.findall(r"(raw_logs\S*\.tar\.zst)", head))):
+            with self.subTest(archive=a):
+                self.assertTrue(f"check evidence/{a}" in wf,
+                                f"{a} is in the manifest header but the "
+                                f"evidence workflow never checks its digest")
+                self.assertTrue(f"-xf evidence/{a}" in wf,
+                                f"{a} is checked but never unpacked")
+
+    def test_every_digest_in_the_header_appears_in_the_workflow(self):
+        """A tranche whose digest is recorded but not verified is a tranche
+        nobody proves is the one the manifest describes."""
+        head = self._manifest_head()
+        wf = (self.ROOT / ".github" / "workflows" / "evidence.yml") \
+            .read_text(encoding="utf-8")
+        missing = [d for d in re.findall(r"sha256\s+([0-9a-f]{64})", head)
+                   if d not in wf]
+        self.assertEqual(missing, [],
+                         f"{len(missing)} digest(s) in the manifest header that "
+                         f"the workflow never verifies")
+
+    def test_no_digest_in_the_workflow_is_invented(self):
+        """The other direction, and it is the one that caught a real mistake.
+
+        While adding the telemetry checks I wrote a 64-hex string that was the
+        hash of nothing: `telemetry.tar.zst` had no recorded digest, so there
+        was nothing to copy and I produced one. A digest the workflow checks
+        must be one the manifest records, and the manifest's digests are
+        measured from the published assets.
+        """
+        head = self._manifest_head()
+        wf = (self.ROOT / ".github" / "workflows" / "evidence.yml") \
+            .read_text(encoding="utf-8")
+        # only the ones used as an argument to `check`, not action pins
+        checked = re.findall(r"check evidence/\S+\s*\\?\s*\n\s*([0-9a-f]{64})", wf)
+        self.assertGreaterEqual(len(checked), 5, f"found only {len(checked)}")
+        invented = [d for d in checked if d not in head]
+        self.assertEqual(invented, [],
+                         f"{len(invented)} digest(s) the workflow checks that "
+                         f"appear nowhere in the manifest: {[d[:12] for d in invented]}")
+
+
 class TheSplitTimersMustBeRederivable(unittest.TestCase):
     """39.09 s and 0.002 s were in the document and nowhere else."""
 

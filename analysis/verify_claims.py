@@ -4291,11 +4291,14 @@ if _HAS_GIT:
         chk("and it is an ancestor of the commit that adds W's data",
             _anc.returncode == 0, True)
     else:
-        # on disk but not yet committed is the state during the write-up, and
-        # it is not a failure: the check arms itself at the commit, which is
-        # the only moment it can mean anything
-        print("  ----  W's data is not committed yet; the ancestry check arms "
-              "itself when it is, which is the point of writing the plan first")
+        # On disk but not yet committed is the state during the write-up. This
+        # branch used to print instead of asserting, which made the number of
+        # git-gated assertions depend on whether the data had been committed -
+        # so committing it changed `_GITLESS_SKIPPED` from 10 to 11 and CI went
+        # red on the commit that added the data. One chk either way keeps the
+        # count a property of the code.
+        chk("W's data is not committed yet, so the ancestry check is pending",
+            _w_commit == "", True)
 
 print("\n=== the checker audits itself ===")
 # A chk() whose computed side contains no name is comparing one literal with
@@ -4334,7 +4337,7 @@ chk("checker: number of assertions", len([1 for _n in _ast.walk(_tree)
 # the one a full checkout produces, and this compares against that rather than
 # pretending the two are the same number. `tests/data_mutate.py` runs the
 # checker in exactly such a mirror, which is how the difference surfaced.
-_GITLESS_SKIPPED = 10
+_GITLESS_SKIPPED = 11
 _pr_total = len(RAN) + 1 + (0 if _HAS_GIT else _GITLESS_SKIPPED)
 chk("PR body: the assertion count it quotes is a full checkout's",
     f"# {_pr_total} assertions" in _PR, True)
