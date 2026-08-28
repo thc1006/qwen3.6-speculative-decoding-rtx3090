@@ -365,6 +365,9 @@ COPY = ("analysis", "bench", "tests", "v4_audit_2026_08_25", "results",
         "v2_3090_followup", "v3_dflash_2026_05_07", "README.md", "ERRATA.md",
         "CHANGELOG.md", "RETEST_TODO.md", "BENCHMARK_ENV.md",
         "CITATION.cff",
+        # the CI-install guard reads both locks, so a mirror
+        # without them turns that test into a FileNotFoundError
+        "requirements-lint.lock", "requirements-plot.lock",
         "run_matrix.sh", "run_p0_matrix.sh", "run_verify_matrix.sh",
         "collect_env.sh", "PULL_REQUEST.md", "tools",
         # the workflows are mutated too now, and a mirror without them turns a

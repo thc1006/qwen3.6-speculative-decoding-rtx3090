@@ -41,6 +41,15 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with: { python-version: "3.12" }
+      - name: the linters, pinned by hash
+        # The charts job says it about its own lock and it is just as true
+        # here: a job that checks this repository must not be able to change
+        # without a change in this repository. `pip install pyflakes==3.4.0`
+        # was version-pinned and not hash-pinned, and shellcheck came from
+        # `apt-get install`, which is whatever Ubuntu ships that week - a
+        # release that adds a check turns the build red with nothing here
+        # having moved, and one that drops a check turns it green the same way.
+        run: pip install --require-hashes -r requirements-lint.lock
       - name: byte-compile and pyflakes every live python file
         # Not a hand-written directory list: `tools/` was added on 2026-08-28
         # and the old `analysis bench tests` covered neither it nor anything
@@ -51,7 +60,6 @@ jobs:
         # would not change behaviour and would still change a published file.
         run: |
           set -euo pipefail
-          pip install pyflakes==3.4.0
           files=$(find . -name '*.py' \
                     -not -path './.git/*' \
                     -not -path './v2_3090_followup/*' \
@@ -75,7 +83,6 @@ jobs:
         # earlier versions published and ERRATA quotes their behaviour.
         run: |
           set -euo pipefail
-          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
           files=$(find . -name '*.sh' \
                     -not -path './.git/*' \
                     -not -path './v2_3090_followup/*' \

@@ -34,6 +34,9 @@ COPY = ("analysis", "bench", "tests", "v4_audit_2026_08_25", "results",
         "v2_3090_followup", "v3_dflash_2026_05_07", "README.md", "ERRATA.md",
         "CHANGELOG.md", "RETEST_TODO.md", "BENCHMARK_ENV.md",
         "CITATION.cff",
+        # the CI-install guard reads both locks, so a mirror
+        # without them turns that test into a FileNotFoundError
+        "requirements-lint.lock", "requirements-plot.lock",
         "PULL_REQUEST.md",
         # the coverage census asserts that every markdown file in the tree is
         # either censused or excluded with a reason, so a mirror missing one

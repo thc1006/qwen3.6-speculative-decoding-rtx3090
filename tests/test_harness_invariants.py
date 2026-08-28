@@ -3290,6 +3290,90 @@ class EveryTranchePublishedMustBeVerified(unittest.TestCase):
                          f"appear nowhere in the manifest: {[d[:12] for d in invented]}")
 
 
+class EveryCIInstallMustBePinnedByHash(unittest.TestCase):
+    """A job that checks this repository must not change without a commit here.
+
+    The charts job says exactly that about `requirements-plot.lock`, and
+    nothing asserted it - not for that lock, and not for the two installs beside
+    it. `pip install pyflakes==3.4.0` was version-pinned and not hash-pinned,
+    and `apt-get install shellcheck` was not pinned at all: a shellcheck release
+    that adds a check turns the build red with nothing here having moved, and
+    one that drops a check turns it green the same way.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+    # decompressors only. They turn the archive's bytes back into the same
+    # bytes and the manifest verifies what comes out, so their version cannot
+    # change a verdict. Anything that can, belongs in a lock file.
+    APT_ALLOWED = {"zstd"}
+
+    def _workflows(self):
+        """Each workflow with its comment lines removed.
+
+        The first version of this scanned the raw text and reported the
+        `pip install pyflakes==3.4.0` inside the comment that explains why that
+        line is gone. A check that reads its own explanation as evidence is the
+        same shape as a probe whose detection string is a literal in the file it
+        searches, which this repository has now written twice.
+        """
+        for wf in sorted((self.ROOT / ".github" / "workflows").glob("*.yml")):
+            body = "\n".join(l for l in wf.read_text(encoding="utf-8").splitlines()
+                             if not l.lstrip().startswith("#"))
+            yield wf, body
+
+    def test_every_pip_install_requires_hashes(self):
+        loose = []
+        for wf, text in self._workflows():
+            for m in re.finditer(r"pip install ([^\n]*)", text):
+                args = m.group(1)
+                if "--require-hashes" not in args:
+                    loose.append(f"{wf.name}: pip install {args.strip()}")
+        self.assertEqual(loose, [],
+                         "these install whatever the index serves that day")
+
+    def test_every_lock_a_workflow_installs_exists_and_hashes_everything(self):
+        seen = 0
+        for wf, text in self._workflows():
+            for lock in set(re.findall(r"-r (\S+\.lock)", text)):
+                with self.subTest(lock=lock):
+                    path = self.ROOT / lock
+                    self.assertTrue(path.exists(), f"{lock} is installed and absent")
+                    body = path.read_text(encoding="utf-8")
+                    reqs = re.findall(r"^([A-Za-z0-9_.-]+)==", body, re.M)
+                    self.assertTrue(reqs, f"{lock} pins nothing")
+                    for r in reqs:
+                        i = body.index(f"{r}==")
+                        j = body.find("\n\n", i)
+                        self.assertIn("--hash=sha256:",
+                                      body[i:j if j > 0 else len(body)],
+                                      f"{lock}: {r} is pinned by version only")
+                    seen += 1
+        self.assertGreaterEqual(seen, 2, "found only %d lock file(s)" % seen)
+
+    def test_apt_installs_only_what_cannot_change_a_verdict(self):
+        got = set()
+        for _wf, text in self._workflows():
+            # only what follows `install`, and only up to the next `&&`:
+            # matching the whole line swept in the `update` of
+            # `apt-get update && apt-get install zstd`
+            for m in re.finditer(r"apt-get[^\n]*?\binstall\b([^\n&]*)", text):
+                for w in m.group(1).split():
+                    if not w.startswith("-"):
+                        got.add(w)
+        self.assertEqual(got - self.APT_ALLOWED, set(),
+                         "an apt package that can change a verdict is not "
+                         "pinned to anything; put it in a lock file")
+
+    def test_the_linters_are_the_ones_the_steps_run(self):
+        lock = (self.ROOT / "requirements-lint.lock").read_text(encoding="utf-8")
+        wf = (self.ROOT / ".github" / "workflows" / "audit.yml") \
+            .read_text(encoding="utf-8")
+        self.assertIn("pyflakes==", lock)
+        self.assertIn("shellcheck-py==", lock)
+        self.assertIn("pyflakes $files", wf)
+        self.assertIn("shellcheck --severity=style $files", wf)
+
+
 class EveryLiveShellScriptMustBeLinted(unittest.TestCase):
     """The same defect as the class below, in the step beside the one it fixed.
 
