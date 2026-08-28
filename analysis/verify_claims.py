@@ -4063,6 +4063,49 @@ for _rel in ("README.md", "ERRATA.md", "v4_audit_2026_08_25/README.md"):
         _txt.index("predicted_per_second`, averaged") < _txt.index("| request-mean |"),
         True)
 
+print("\n=== run W's analysis plan was registered before its data ===")
+# The same discipline PREREGISTERED_PREDICTION.md carries: an analysis chosen
+# after seeing which answer the data gives is not evidence about the question.
+# W exists to settle a disagreement this repository has been wrong about twice,
+# so the estimators and the thresholds are committed first and the ordering is
+# asserted, not asked for on trust.
+_PW = pathlib.Path(__file__).resolve().parents[1] / "v4_audit_2026_08_25" / "PREREGISTERED_W.md"
+chk("run W's plan is committed", _PW.is_file(), True)
+_PWT = _norm(_PW.read_text(encoding="utf-8"))
+chk("it names the disagreement it is there to settle",
+    "+5.92 pp" in _PWT and "+8.65 pp" in _PWT, True)
+chk("it names the alias V3 could not remove",
+    "9 of 9" in _PWT, True)
+chk("it fixes the estimand before the data",
+    "absolute change in\npercentage points" in _PWT
+    or "absolute change in percentage points" in " ".join(_PWT.split()), True)
+chk("it says what a null result on the predecessor question would mean",
+    "no detectable\npredecessor effect" in _PWT
+    or "no detectable predecessor effect" in " ".join(_PWT.split()), True)
+chk("it refuses in advance to pick a favourite among three readings",
+    "not to\nchoose a favourite" in _PWT
+    or "not to choose a favourite" in " ".join(_PWT.split()), True)
+chk("it does not claim W will identify A16",
+    "No claim will be made that W identifies" in " ".join(_PWT.split()), True)
+if _HAS_GIT:
+    _pw_commit = _sp2.run(["git", "-C", str(_repo), "log", "--format=%H", "-1", "--",
+                           "v4_audit_2026_08_25/PREREGISTERED_W.md"],
+                          capture_output=True, text=True).stdout.strip()
+    chk("the plan has a commit of its own", bool(_pw_commit), True)
+    _wdirs = sorted((pathlib.Path(__file__).resolve().parents[1]
+                     / "v4_audit_2026_08_25" / "data").glob("matrix_W_*"))
+    if _wdirs:
+        _w_commit = _sp2.run(["git", "-C", str(_repo), "log", "--format=%H", "-1", "--",
+                              str(_wdirs[0].relative_to(_repo))],
+                             capture_output=True, text=True).stdout.strip()
+        _anc = _sp2.run(["git", "-C", str(_repo), "merge-base", "--is-ancestor",
+                         _pw_commit, _w_commit], capture_output=True)
+        chk("and it is an ancestor of the commit that adds W's data",
+            _anc.returncode == 0, True)
+    else:
+        print("  ----  W's data is not committed yet; the ancestry check waits "
+              "for it, which is the point of writing the plan now")
+
 print("\n=== the checker audits itself ===")
 # A chk() whose computed side contains no name is comparing one literal with
 # another and can never fail. Six of these were found on 2026-08-26, four of them
