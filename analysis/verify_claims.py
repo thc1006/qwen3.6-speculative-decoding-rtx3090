@@ -4143,7 +4143,7 @@ chk("checker: number of assertions", len([1 for _n in _ast.walk(_tree)
 # the one a full checkout produces, and this compares against that rather than
 # pretending the two are the same number. `tests/data_mutate.py` runs the
 # checker in exactly such a mirror, which is how the difference surfaced.
-_GITLESS_SKIPPED = 8
+_GITLESS_SKIPPED = 9
 _pr_total = len(RAN) + 1 + (0 if _HAS_GIT else _GITLESS_SKIPPED)
 chk("PR body: the assertion count it quotes is a full checkout's",
     f"# {_pr_total} assertions" in _PR, True)

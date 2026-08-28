@@ -2169,7 +2169,10 @@ class TheGitlessAssertionGapMustBeTheDeclaredOne(unittest.TestCase):
         self.assertGreater(n_with, 0)
         self.assertEqual(n_with - n_without, declared,
                          f"the checker skips {n_with - n_without} assertions "
-                         f"without git and declares {declared}")
+                         f"without git and declares {declared}. Adding or "
+                         f"removing a git-gated assertion changes this: set "
+                         f"_GITLESS_SKIPPED = {n_with - n_without} in "
+                         f"analysis/verify_claims.py.")
 
 
 class TheVerificationSuitesMustRefuseAMeasuringHost(unittest.TestCase):
