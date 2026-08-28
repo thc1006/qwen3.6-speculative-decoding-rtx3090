@@ -16,11 +16,13 @@ import re
 import itertools
 import json
 import os
+import signal
 import socket
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -3259,6 +3261,62 @@ class EveryLivePythonFileMustBeLinted(unittest.TestCase):
         ch = (self.ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
         self.assertIn("`results/`, `v2_3090_followup/v2_*/`", ch,
                       "the changelog no longer names the untouched trees")
+
+
+class TheStubServerMustNotOutliveItsParent(unittest.TestCase):
+    """A fixture that survives an interrupted run holds its port forever.
+
+    `retest_runner.py` stops the server in a `finally`, which does not run when
+    the runner itself is killed. Two `fake_llama_server.py` processes were found
+    alive on the development host after two days and one day, orphaned by
+    interrupted runs, each still listening. Same shape as the mutation suite's
+    interrupted restore, which ERRATA already records: cleanup that only happens
+    on the ordinary path is not cleanup.
+    """
+
+    def test_it_exits_when_its_parent_is_killed(self):
+        port = free_port()
+        parent = subprocess.Popen(
+            ["bash", "-c",
+             f"{sys.executable} {ROOT / 'tests' / 'fake_llama_server.py'} "
+             f"-m /dev/null --port {port} & echo $!; sleep 300"],
+            stdout=subprocess.PIPE, text=True)
+        try:
+            child = int(parent.stdout.readline().strip())
+        except ValueError:                       # pragma: no cover - launch failed
+            parent.kill()
+            self.fail("the stub server did not report a pid")
+        alive = lambda pid: os.path.exists(f"/proc/{pid}")     # noqa: E731
+
+        def listening():
+            with socket.socket() as s:
+                s.settimeout(0.2)
+                return s.connect_ex(("127.0.0.1", int(port))) == 0
+
+        try:
+            # wait for the port, not for /proc: the pid exists the moment bash
+            # forks, which is before python has recorded its parent, and killing
+            # in that window tests a race rather than the behaviour
+            for _ in range(100):
+                if listening():
+                    break
+                time.sleep(0.1)
+            self.assertTrue(listening(), "the stub server never started")
+            parent.kill()
+            parent.wait(timeout=30)
+            for _ in range(30):
+                if not alive(child):
+                    break
+                time.sleep(0.5)
+            self.assertFalse(
+                alive(child),
+                "the stub server outlived the process that started it, which is "
+                "how two of them were left holding ports for a day and more")
+        finally:
+            if parent.poll() is None:
+                parent.kill()
+            if alive(child):
+                os.kill(child, signal.SIGKILL)
 
 
 class TheSplitTimersMustBeRederivable(unittest.TestCase):

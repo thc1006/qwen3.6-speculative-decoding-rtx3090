@@ -35,6 +35,10 @@ COPY = ("analysis", "bench", "tests", "v4_audit_2026_08_25", "results",
         "CHANGELOG.md", "RETEST_TODO.md", "BENCHMARK_ENV.md",
         "CITATION.cff",
         "PULL_REQUEST.md",
+        # the coverage census asserts that every markdown file in the tree is
+        # either censused or excluded with a reason, so a mirror missing one
+        # fails on the unperturbed copy
+        "pr_comment.md",
         "run_matrix.sh", "run_p0_matrix.sh", "run_verify_matrix.sh",
         "collect_env.sh")
 

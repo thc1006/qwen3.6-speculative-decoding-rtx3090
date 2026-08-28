@@ -26,6 +26,8 @@ from __future__ import annotations
 import json
 import os
 import sys
+import threading
+import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 PORT = 8080
@@ -106,4 +108,34 @@ print(f"build {os.environ.get('FAKE_BUILD', '9999')} "
 if MODEL and os.environ.get("FAKE_NO_LOADER_LINE") != "1":
     print(f"llama_model_loader: loaded meta data with 45 key-value pairs and "
           f"579 tensors from {MODEL} (version GGUF V3 (latest))", flush=True)
+
+_PARENT = os.getppid()
+
+
+def _exit_when_orphaned() -> None:
+    """Exit if the process that launched this one goes away.
+
+    `retest_runner.py` kills the server in a `finally`, which does not run when
+    the runner itself is killed - and then this outlives it, holding its port
+    with nothing left to talk to. Two of these were found alive after two days
+    and one day, orphaned by interrupted test runs, which is the same shape as
+    the mutation suite's interrupted restore in ERRATA. One second of polling
+    is enough: nothing here needs to survive its parent.
+
+    Two conditions, not one. Comparing against the parent recorded at start
+    covers a reparented orphan, which lands on the nearest subreaper and only
+    on init when there is not one closer. Checking for init as well covers the
+    window before this line runs: if the parent dies first, the recorded parent
+    is already init and the comparison alone would never fire. The test found
+    that, by killing the parent as soon as the pid existed rather than once the
+    port was open.
+    """
+    while True:
+        _now = os.getppid()
+        if _now != _PARENT or _now == 1:
+            os._exit(0)
+        time.sleep(1)
+
+
+threading.Thread(target=_exit_when_orphaned, daemon=True).start()
 HTTPServer(("127.0.0.1", PORT), H).serve_forever()

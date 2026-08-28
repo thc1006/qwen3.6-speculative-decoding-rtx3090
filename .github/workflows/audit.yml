@@ -105,6 +105,12 @@ jobs:
         with: { python-version: "3.12" }
       - name: re-derive every quoted figure and grep the documents for it
         run: python analysis/verify_claims.py
+      - name: how much of what is published is checked cell by cell
+        # printed, not gated, here: the gate is in verify_claims.py, which
+        # holds the census to an exact table count and a floor on the parsed
+        # ones. This step exists so the number is visible in the log rather
+        # than only failing when it moves.
+        run: python analysis/table_coverage.py
       - name: the past-threshold fit reports and serialises
         run: |
           set -e

@@ -303,9 +303,15 @@ adversarial pass over this branch's own commits found:
   turned up in five places: three found by the review's own pass, then run M's
   aggregates found by the mutation suite, then the merged checkpoint cost table
   in `README.md` and in this body, which carried a restore share of 30.5 % where
-  the row is 30.4 % and the column consequently added to 100.1 (**B9**). All are
-  parsed cell by cell now, and 73 data and document perturbations are permanent
-  tests.
+  the row is 30.4 % and the column consequently added to 100.1 (**B9**). Those
+  five are parsed cell by cell now, but "all of them" was a statement about the
+  ones that had been found, not about the class, and each had been found by
+  accident. The class is counted instead: of 136 published tables 124 carry
+  measurements, 44 are parsed, and perturbing the other 80 one cell at a time
+  leaves 67 that accept a wrong number with nothing noticing. Perturbing the 44
+  that are parsed catches all 44. `analysis/table_coverage.py` is the
+  measurement and **A19** the accounting; 84 data and document perturbations
+  remain permanent tests.
 
 ## What the third review found
 
@@ -385,13 +391,13 @@ this a draft is below, under *Not closed*.
 
 ```
 python analysis/rederive_from_logs.py bench   # raw logs -> the committed JSON
-python analysis/verify_claims.py          # 1816 assertions, re-derived
+python analysis/verify_claims.py          # 2741 assertions, re-derived
 python analysis/check_data_integrity.py   # structure of all 65 run directories
-python -m unittest discover tests         # 205 regressions for defects shipped here
+python -m unittest discover tests         # 206 regressions for defects shipped here
 python tests/mutate.py                    # break each fix, require its test to fail
 python tests/data_mutate.py               # perturb a measurement or a published
                                           #   figure, require the checker to fail
-                                          #   58 code and 84 data perturbations,
+                                          #   59 code and 84 data perturbations,
                                           #   with a clean-mirror re-check after
                                           #   the last restore
 python analysis/plot_v4_runs.py --check   # charts still match the data

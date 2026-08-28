@@ -198,12 +198,23 @@ The run-to-run SD column is the one honest `±` in this repository: the spread
 of five whole-prompt-set repeats, 0.04–2.48 tok/s. The historical `±27–31` was
 spread *between prompts*.
 
+It is the SD of the five repeats' **request means** — llama.cpp's
+`predicted_per_second` averaged over the ten prompts — and not of the pooled
+rate in the column beside it. The two are different estimators and give
+different answers: recomputing this column from the per-repeat pooled rate
+reproduces 3 of the 13 published values, the request mean reproduces 13 of 13.
+Like every request mean in this repository it is low by `(n−1)/n`; see
+[`../ERRATA.md` B8](../ERRATA.md#b8-every-request-mean-here-counts-one-token-fewer-than-it-timed).
+
 Two entries in that column need reading carefully. `baseline`'s 2.08 is almost
 entirely its cold-start first repeat — excluding it the SD is 0.47. But
 `ngram-cache`'s is not: 77.9, 74.7, 75.8, 72.3, 72.0 tok/s, still 1.86 after
 dropping rep 0, and drifting downward. It is the least reproducible arm in the
-matrix by a wide margin, and this audit does not have an explanation for it.
-Every other arm sits between 0.03 and 0.48 once the cold start is removed.
+matrix, and this audit does not have an explanation for it. The other eleven
+arms span 0.03 to 1.01 once the cold start is removed, the top of that range
+being `ngram-cache-kvfp16`; so `ngram-cache` leads by a factor of 1.8, not by
+the wide margin an earlier version of this paragraph claimed. See
+[`../ERRATA.md` A18](../ERRATA.md#a18-run-cs-spread-claim-excluded-five-arms-without-saying-so).
 
 Three things fall out.
 
@@ -408,6 +419,17 @@ individually:
 | `zh_hant` | 121.4 | 138.4 | 99.5 | 55.2 |
 
 (per-request decode rate, mean of three repeats)
+
+`n_max 8`'s aggregate loss, on the other hand, *is* an average that hides
+winners. It is −14.8 % over the ten prompts and it beats no speculation on
+three of them — `code_small`, `reasoning` and `medium_rec` — and acceptance
+separates the two groups without an overlap: the three winners sit at 71.8 %,
+48.6 % and 47.3 %, the seven losers between 27.1 % and 37.8 %, a 9.5 pp gap
+with nothing in it. So the best `n_max` is a property of the prompt and not
+only of the build, and a single aggregate number chooses it for the average
+request rather than for the request in front of you. This repository does not
+have enough prompts to say where the boundary is; it has ten, and they fall on
+two sides of one.
 
 The sign flips with draft length, and it flips fast: +18.7 % at 4, −14.8 % at 8,
 −47.4 % at 16, with acceptance falling 55.8 % → 36.8 % → 21.4 % as the window
@@ -836,9 +858,19 @@ and 4:
 | `ngram-map-k4v-m4` | 108.0 | −1.2 % | 12 | 0.0 % / 70.0 % |
 
 **They almost never engage**, and that is measured on the one quantity here that
-neither counter can distort. The speculator's `generate()` is called **3271
-times** across the thirty requests and returns a draft **twice**. The 144 draft
-tokens are three lookup hits — `144/48`, `24/8`, `12/4` all give exactly three.
+neither counter can distort. Per repeat — ten requests — the speculator's
+`generate()` is called **3271 times** and returns a draft **twice**; across all
+thirty requests that is **9 813 calls and six drafts**. The counters are
+recorded per repeat, and the three repeats are identical to the token, which is
+why one set of figures covers all of them.
+
+The draft-token column is the server's count over all thirty requests, and
+`144/48`, `24/8` and `12/4` all give exactly three: by that counter each arm
+produced one full-length lookup hit per repeat, whatever `size_m` was set to.
+The drafter's own count is both larger and differently shaped — 55, 15 and 10
+tokens per repeat against the server's 48, 8 and 4, in 2, 2 and 3 drafts — so
+the two counters disagree about how much was drafted here and not only about
+how much was accepted.
 
 The acceptance column carries two numbers because the two counters disagree, and
 this arm is the worst case in the repository: the server reports **0.0 %** and

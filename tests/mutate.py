@@ -41,6 +41,11 @@ ROOT = Path(__file__).resolve().parents[1]
 
 # (description, file, correct fragment, defect to restore, test that must fail)
 MUTATIONS = [
+    ("the stub server stops exiting when the process that started it dies",
+     "tests/fake_llama_server.py",
+     "threading.Thread(target=_exit_when_orphaned, daemon=True).start()",
+     "pass  # watchdog removed",
+     "tests.test_harness_invariants.TheStubServerMustNotOutliveItsParent"),
     # --- the fourth review's findings, each broken here ---------------------
     ("the perturbation suite stops refusing to run during a measurement",
      "tests/data_mutate.py",

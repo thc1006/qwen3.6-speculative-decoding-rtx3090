@@ -1782,6 +1782,120 @@ opens a narrower one: the order randomisation that would explain
 measured is now stated, and what a hard cap changes is now measured with an
 interval, twice, by two designs that disagree about exactly one arm.
 
+### A18. Run C's spread claim excluded five arms without saying so
+
+Run C's table caption said, of the run-to-run SD column:
+
+> Every other arm sits between 0.03 and 0.48 once the cold start is removed.
+
+It does not. Recomputed from the committed arm-runs, the eleven arms other than
+`baseline` and `ngram-cache` span **0.03 to 1.01** tok/s with rep 0 dropped, and
+five of them are above 0.48:
+
+| arm | run-to-run SD, five repeats | with rep 0 dropped |
+|---|---:|---:|
+| `spec-draft-n8` | 0.54 | 0.48 |
+| `spec-draft-v1cfg` | 0.56 | 0.58 |
+| `ngram-mod-n24` | 0.59 | 0.65 |
+| `ngram-simple` | 0.88 | 0.78 |
+| `spec-draft-n16` | 0.86 | 0.78 |
+| `ngram-cache-kvfp16` | 1.08 | 1.01 |
+
+0.48 is `spec-draft-n8`'s, the sixth-smallest of those eleven and the seventh
+of all thirteen. The sentence read as a range over every arm and was a range
+over the six smallest.
+
+It mattered for the sentence in front of it. `ngram-cache` was called the least
+reproducible arm **by a wide margin**; against a true runner-up of 1.01 its 1.86
+is a factor of 1.8, not the fourfold gap 0.48 implies. It is still the largest,
+and this audit still has no explanation for it, but the margin was overstated.
+
+Two things follow, and both are now enforced rather than intended. The caption
+states which estimator the column is — the SD of the five repeats' request
+means, not of the pooled rate printed beside it, which is a different number:
+recomputing the column from per-repeat pooled rates reproduces 3 of the 13
+published values and the request mean reproduces 13 of 13. And all 65 cells of
+that table, and both range endpoints of this sentence, are now re-derived from
+the arm-runs by `analysis/verify_claims.py` instead of typed.
+
+This was found by perturbation, not by reading: `analysis/table_coverage.py
+--probe` writes a wrong number into each published table in turn and asks
+whether the claim checker notices. The table that carried this sentence did not
+notice, because nothing read it.
+
+### A19. How much of what this repository publishes would notice if it were wrong
+
+Six times a figure has been computed here from the data, compared against a
+literal, and printed into a table that nothing read. Writing a wrong number
+into the table passed every check: run M's aggregates, three tables the second
+review found, the merged checkpoint-cost table in two documents, and A16's own
+O2-against-O3 table. Every one was found by accident, which is not a method.
+
+`analysis/table_coverage.py` makes it a measurement. It counts the tables in
+the nine published documents, and `--probe` writes a wrong number into one cell
+of each in turn, runs the claim checker, and asks whether an assertion that was
+passing now fails. Measured on the tree this entry is committed in:
+
+Of **136** tables, **12** carry no derivable number — paths, hashes, build
+identifiers — and **124** carry measurements. **44** of those are parsed cell by
+cell by `analysis/verify_claims.py`; **80** are not.
+
+Perturbing all **80**: two have no cell that can be perturbed, **11** are caught
+by some other check, and **67 accept a wrong number and nothing notices**.
+Eleven being caught without being parsed is the general net doing its job — the
+rule that every quoted throughput must equal one derivable for that arm — and it
+catches a typo, not a figure attributed to the wrong run.
+
+Perturbing all **44** that are parsed: **44 are caught, none survives**. That
+number is the point of running it. "Parsed" is a claim about what a parser does,
+and a parser can match a header, return rows, and assert nothing about the
+column you changed — which is exactly what the W three-design table did, in two
+documents, until this pass.
+
+**The larger half is not tables.** **1 155** decimal numbers sit in prose,
+outside every table; **647** of them do not appear as a string literal anywhere
+in the checker, counting only literals that are not assertion labels — a label
+is prose about a check and not a check, and leaving them in made the count move
+whenever an assertion was reworded. That criterion is an upper bound on the gap
+rather than the gap, so a fixed sample of **40** of the 647 was perturbed the
+same way, seed `20260828`: **40 of 40 accepted a wrong number**. The 95 %
+Wilson interval puts the unguarded fraction of that population at **91 % or
+above**. The prose half of this repository is, to a first approximation,
+unchecked.
+
+**The measurement was wrong twice before it measured anything.** The first
+version used the claim checker's exit status, and every table came back caught,
+because one unrelated assertion was failing at the time and the checker exited
+non-zero whatever was done to the documents — a probe whose control and
+treatment agree measures nothing. It compares failure *sets* now. The second
+matched a table header against the literals the checker parses without asking
+which document the reader reads, so a table duplicated into a second document
+counted as parsed there too; that is how the changelog's copy of the
+re-derivation table passed as covered while accepting a wrong number. Each
+reader is bound to its document now. Both mistakes are recorded in the file,
+because the shape of a wrong measurement outlives the number it produced.
+
+**What this pass changed.** Twenty tables are parsed that were not, about nine
+hundred assertions' worth, including every cell of the thirteen-arm run C
+table, run O's head-to-head, the v1 representative table with both of its
+range rows, run J and run K, run L's two halves, and the V2 and V3 columns of
+the W table in both documents that carry it. Four published statements were wrong and are corrected:
+[A18](#a18-run-cs-spread-claim-excluded-five-arms-without-saying-so),
+[B1](#b1-mean-toks-was-the-request-mean-only-pooled-throughput-is-materially-worse),
+run N's two counter spans, and `n_max 8`'s prompt split, which the run J table
+had contained since it was published and no sentence had drawn out.
+
+**What it did not change.** Sixty-seven tables and most of the prose are still
+unguarded. The probe is not run in CI: at about twenty seconds a table it is
+close to an hour, and it needs a git worktree. What CI does hold is the census —
+`verify_claims.py` pins the table count exactly and the parsed count as a floor,
+so a new table has to be parsed or accounted for, and a parser that is deleted
+fails. The numbers above are reproduced by
+`python analysis/table_coverage.py --probe`, `--probe --covered` and
+`--prose --probe`.
+
+---
+
 ---
 
 ## B — statistics that were reported incorrectly
@@ -1799,9 +1913,17 @@ with a deep slow tail the two diverge sharply:
 | ngram-mod-n24 | 131.1 (−3.4 %) | 131.1 (−3.4 %) | 130.0 | 129.6 |
 | draft-q35-08b-max8 | 121.1 (−10.8 %) | **109.9 (−19.0 %)** | 135.6 | 59.2 |
 | ngram-cache | 119.1 (−12.2 %) | **111.3 (−18.0 %)** | 135.6 | 65.3 |
-| ngcache-1000tok | 115.9 (−13.0 % vs 300-tok base) | **98.9 (−25.7 % vs baseline-1000tok)** | 133.1 | 60.0 |
+| ngcache-1000tok | 115.9 (−13.0 % vs baseline-1000tok) | **98.9 (−25.7 % vs baseline-1000tok)** | 133.1 | 60.0 |
 
 Both are now reported, in `analysis/summary_by_config.csv` and on the charts.
+
+The last row's request-mean cell said **−13.0 % vs 300-tok base** until
+2026-08-28. It is not: against the 300-token `baseline` that figure is
+**−14.6 %**. −13.0 % is against `baseline-1000tok`, the same reference the
+pooled cell beside it names, which is also what the README's copy of this row
+uses. Every cell of this table is now re-derived from `analysis/summary.csv` by
+`analysis/verify_claims.py`, the reference each delta uses read out of the cell
+text rather than assumed, so a cell that names the wrong one fails.
 
 ### B2. The `±` column was across-prompt spread, not repeated-run uncertainty
 

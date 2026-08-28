@@ -8,6 +8,58 @@ publication point with its own data set.
 
 ## [Unreleased] — the review pass, and an adversarial pass over it
 
+**A published number is only checked if changing it breaks something, and that
+is now measured rather than assumed.** `analysis/table_coverage.py` counts the
+tables in the nine published documents; `--probe` writes a wrong number into
+one cell of each in turn and asks whether an assertion that was passing now
+fails. Of 136 tables, 124 carry measurements, 44 are parsed cell by cell, and
+of the 80 that are not, **67 accept a wrong number and nothing notices**.
+Perturbing the 44 that are parsed catches all 44 — which is the run worth
+doing, because "parsed" is a claim about a parser, and a parser can match a
+header, return rows and assert nothing about the column you changed. That is
+what the W three-design table did, in both documents that carry it: only the W
+column was read, so V2's `+12.03` and V3's `+12.17` — two thirds of a
+three-way comparison — could have been anything. Full accounting in
+[`ERRATA.md`](ERRATA.md) A19.
+
+The measurement was wrong twice before it measured anything, and both mistakes
+are recorded in the file. The first used the claim checker's exit status, and
+every table came back caught, because one unrelated assertion was failing at
+the time and the checker exited non-zero whatever was done to the documents; a
+probe whose control and treatment agree measures nothing, so it compares
+failure *sets* now. The second matched a table header against the literals the
+checker parses without asking which document the reader reads, so a table
+duplicated into a second document counted as parsed there too — which is how
+the changelog's own copy of the re-derivation table passed as covered while
+accepting a wrong number.
+
+**Four published statements were wrong.** Run C's caption said every other arm
+sat between 0.03 and 0.48 tok/s of run-to-run SD once the cold start was
+removed; five arms are above it and the true top is 1.01, so `ngram-cache` leads
+by a factor of 1.8 and not by the wide margin claimed (ERRATA A18). B1's
+long-output row labelled its request-mean delta `vs 300-tok base`; −13.0 % is
+against `baseline-1000tok`, and against the 300-token baseline it is −14.6 %.
+Run N's paragraph mixed two spans, quoting a per-repeat call count of 3271
+against a thirty-request draft-token count. And run J's per-prompt table had
+contained, since it was published, the fact that `n_max 8` loses 14.8 % on
+aggregate while winning on three prompts of ten, with acceptance separating the
+winners from the losers by 9.5 pp and no overlap; no sentence had drawn it out,
+and now one does.
+
+Twenty tables are parsed that were not — every cell of run C's thirteen arms,
+run O's head-to-head, the v1 representative table including both of its range
+rows, runs J, K, L and N, and the V2 and V3 columns of the W table — about nine
+hundred assertions, which is where most of this pass went. The census itself is
+now a gate: `verify_claims.py` pins the table count exactly and the parsed
+count as a floor, so a new table must be parsed or accounted for, and every
+markdown file must be either censused or excluded with a stated reason.
+
+**The larger half is prose, and it is not fixed.** Most decimal numbers in
+these documents are not in any table, and a seeded sample of them was perturbed
+the same way; the result is in ERRATA A19 with its interval. The probe is not
+run in CI — about twenty seconds a table is close to an hour, and it needs a
+git worktree.
+
 **This repository's verification pipeline invalidated somebody else's
 measurement, so it can no longer start one.** On 2026-08-27 a benchmark harness
 sharing the host logged two `host_contended` incidents against `python3`, and a
