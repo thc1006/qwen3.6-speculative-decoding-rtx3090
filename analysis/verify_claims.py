@@ -1421,9 +1421,26 @@ if _HAS_GIT and (_resolved or _dangling):
     chk("and each one says why", sorted(r for r, w in _RW_RUNS.items() if not w), [])
 elif _HAS_GIT:
     print("  ----  declared-vs-actual harness commits: nothing to resolve")
+# A harness version can also be archived rather than committed, which happened
+# once: run W's runner was deployed from the working tree and edited twice
+# before it was committed, so the source that produced 500 arm-runs was never a
+# commit. Hiding that would be worse than recording it - the file is archived,
+# byte for byte, and the pin resolves to something real.
+_ARCH = {}
+_arch_dir = pathlib.Path(__file__).resolve().parents[1] / "v4_audit_2026_08_25" / "harness"
+if _arch_dir.is_dir():
+    for _f in sorted(_arch_dir.glob("*.py")):
+        _ARCH[hashlib.sha256(_f.read_bytes()).hexdigest()] = _f.name
+chk("archived harness versions, for runs whose runner was never committed",
+    sorted(_ARCH.values()), ["retest_runner_W_20260828_104222.py"])
 if _HAS_GIT and _blobs:
-    chk("every recorded harness hash is in this repository's history",
-        sorted(k for k, v in _declared.items() if v not in _blobs), [])
+    chk("every recorded harness hash resolves, in history or in the archive",
+        sorted(k for k, v in _declared.items()
+               if v not in _blobs and v not in _ARCH), [])
+    chk("and the archive is used only where history does not have it",
+        sorted(k for k, v in _declared.items()
+               if v in _ARCH and v not in _blobs),
+        sorted(k for k in _declared if k.startswith("matrix_W_")))
     # deliberately NOT asserting that the working-tree file is in history: it
     # is not, until it is committed, and a check that cannot fail is worse than
     # no check. The assertion above is the one that matters.
@@ -1514,7 +1531,8 @@ for _f in glob.glob("v4_audit_2026_08_25/data/*/*__rep*.json"):
         if _x["predicted_n"] != _m["max_tokens"]:
             _short += 1
 chk("A17 and every one of them generated exactly max_tokens", _short, 0)
-chk("A17 thinking-off requests that stopped early", _stops["off"]["stop"], 3101)
+# run W adds 500 thinking-off arm-runs, half of them capped
+chk("A17 thinking-off requests that stopped early", _stops["off"]["stop"], 4951)
 # the second reading A17 overturns: acceptance, not only throughput
 _D = [r for r in _lm if r["run"].startswith("D_master")][0]
 _Con = [r for r in _lm if r["run"] == "C_master_matrix_think_on"][0]
@@ -1796,12 +1814,12 @@ print("\n=== the raw-evidence manifest ===")
 _man = pathlib.Path(__file__).resolve().parents[1] / "v4_audit_2026_08_25" / "EVIDENCE_MANIFEST.sha256"
 _mlines = [l for l in _man.read_text(encoding="utf-8").splitlines()
            if l and not l.startswith("#")]
-chk("manifest entries", len(_mlines), 1341)
+chk("manifest entries", len(_mlines), 1842)
 chk("every entry is a sha256 and a path",
     sorted({bool(re.fullmatch(r"[0-9a-f]{64}  \S.*", l)) for l in _mlines}), [True])
-chk("logs in the manifest", sum(1 for l in _mlines if l.endswith(".log")), 1320)
+chk("logs in the manifest", sum(1 for l in _mlines if l.endswith(".log")), 1820)
 chk("telemetry traces in the manifest",
-    sum(1 for l in _mlines if l.endswith(".csv")), 21)
+    sum(1 for l in _mlines if l.endswith(".csv")), 22)
 chk("no duplicate paths", len({l.split("  ", 1)[1] for l in _mlines}), len(_mlines))
 _v4r = pathlib.Path(__file__).resolve().parents[1] / "v4_audit_2026_08_25" / "README.md"
 chk("the archive hash is recorded in both places",
@@ -2084,8 +2102,19 @@ chk("and the one they do not",
 chk("V3's two sessions agree with each other on that arm to 0.06 pp",
     round(abs(_v3_shift["spec-dflash-n2"][0] - _v3_shift["spec-dflash-n2"][1]), 2),
     0.06, 0.005)
-chk("A17 quotes the disagreement as a range",
-    "design-dependent between +5.9 and" in _ER_V3, True)
+# The range was the honest answer while two designs disagreed and neither could
+# attribute it. Run W attributes it, so A17 now states the within-invocation
+# figure and names what the crossover's lower one is measuring instead.
+chk("A17 no longer reports that arm as a bare range",
+    "design-dependent between +5.9 and" in _ER_V3, False)
+chk("A17 states the within-invocation figure",
+    "+8.29 pp [+7.97, +8.60] when the two modes are" in " ".join(_ER_V3.split()), True)
+chk("and says what the crossover's number is instead",
+    "the two modes sit in different invocations" in " ".join(_ER_V3.split()), True)
+chk("A17 reports the predecessor result as a null at this power, not as absence",
+    "no detectable predecessor effect at" in " ".join(_ER_V3.split()), True)
+chk("A17 rules out carryover as the explanation for the gap",
+    "not first-order carryover" in " ".join(_ER_V3.split()), True)
 # only that arm's absolute rate moves between the designs
 _moved = sorted(a for a in _v3_rate
                 if abs(st.mean(_v3_rate[a]["free"]) / st.mean(
@@ -2290,7 +2319,7 @@ for _f in _armruns:
             _nn += 1
         else:
             _neither += 1
-chk("B8 rows where the server reports 1000*(n-1)/ms", _nm1, 13300)
+chk("B8 rows where the server reports 1000*(n-1)/ms", _nm1, 18300)
 chk("B8 rows where it reports 1000*n/ms", _nn, 44)
 chk("B8 rows matching neither", _neither, 0)
 chk("B8 the 44 are the legacy binary's",
@@ -3968,8 +3997,16 @@ chk("and neither claims the evidence workflow runs in CI",
 chk("PR body: the arm-run total it claims matches the three runs on disk",
     f"{sum(len(list(d.glob('*__rep*.json'))) for d in _V2) + 200 + 18} arm-runs" in _PR,
     True)
-chk("PR body: it reports the V2 disagreement as a range, not a pick",
-    "design-dependent, +5.9 to +8.7 pp" in _PR, True)
+# Until run W the honest answer was a range, because two designs disagreed and
+# neither could attribute it. W attributes it, so the body states the
+# within-invocation figure and says what the crossover measures instead.
+chk("PR body no longer reports that arm as a bare range",
+    "design-dependent, +5.9 to +8.7 pp" in _PR, False)
+chk("PR body says W's interval overlaps V3 and not V2",
+    "overlaps V3's and does not" in _PR, True)
+chk("PR body reports the predecessor null as a null at this power",
+    "no\ndetectable effect at this power" in _PR
+    or "no detectable effect at this power" in _PR, True)
 chk("PR body: it still says the randomised-order run has not been run",
     _PR.count("it has not been run"), 2)
 chk("PR body: it does not claim the mode order was the cause",
@@ -3996,6 +4033,155 @@ chk("PR body: the mutation counts it quotes are the two suites' own",
     f"{_n_mutations('tests/data_mutate.py')} data perturbations" in _PR,
     True)
 
+print("\n=== run W: the carryover-balanced design ===")
+_W = sorted((pathlib.Path(__file__).resolve().parents[1] / "v4_audit_2026_08_25"
+             / "data").glob("matrix_W_s*_20260828_104222"))
+chk("W sessions on disk", len(_W), 5)
+chk("W arm-runs", sum(len(list(d.glob("*__rep*.json"))) for d in _W), 500)
+chk("every W session validated",
+    sorted(d.name for d in _W if not (d / "RUN_COMPLETE.json").exists()), [])
+_WM = [json.loads((d / "manifest.json").read_text(encoding="utf-8")) for d in _W]
+chk("W ran the Williams schedule", sorted({m["order_mode"] for m in _WM}), ["williams"])
+chk("and every session claims all three balance properties",
+    sorted({(m["schedule_is_position_balanced"],
+             m["schedule_first_order_carryover_balanced"],
+             m["schedule_randomized"]) for m in _WM}), [(True, True, True)])
+chk("with a different seed each", len({m["schedule_seed"] for m in _WM}), 5)
+chk("W is V3's configuration except the schedule",
+    sorted({(m["think"], m["fit_target"], str(m["ctx"]), m["repeats"],
+             m["hardcap_suffix"], len(m["arms"])) for m in _WM}),
+    [("off", "3072", "8192", 10, "-cap", 10)])
+
+# the balance is a property of what RAN, checked from t_start, not the label
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import carryover as _co
+_wbal = []
+for _d in _W:
+    _runs = _co.arm_runs(str(_d))
+    _ok, _why = _co.is_balanced(_runs)
+    _wbal.append(_ok)
+chk("every arm preceded by every other exactly once, read from t_start",
+    sorted(set(_wbal)), [True])
+
+# Q1, against what A17 publishes
+_wmode = defaultdict(list)
+for _d in _W:
+    _arms = _lm.arms_of(str(_d))
+    _free = {a: _lm.pooled(str(_d), a)["tok_s"] for a in _arms
+             if not a.endswith("-cap") and _lm.pooled(str(_d), a)}
+    _cap = {a[:-4]: _lm.pooled(str(_d), a)["tok_s"] for a in _arms
+            if a.endswith("-cap") and _lm.pooled(str(_d), a)}
+    for _a, _v in _lm.contrast(_free, _cap).items():
+        _wmode[_a].append(_v["shift_pp"])
+_WT = {r[0]: r[1:] for r in _md_table(
+    "| arm | V2, 8 sessions, between | V3, 2 sessions, within | "
+    "**W, 5 sessions, within and carryover-balanced** |")}
+chk("A17's four-design table rows", len(_WT), 4)
+for _a, _row in sorted(_WT.items()):
+    _m, _lo, _hi, _n = _lm.interval(_wmode[_a])
+    chk(f"W {_a} shift (pp)", round(_m, 2), _cell(_row[2].split("[")[0]), 0.005)
+    chk(f"W {_a} sessions", _n, 5)
+chk("W's spec-dflash-n2 interval does not overlap V2's",
+    _lm.interval(_wmode["spec-dflash-n2"])[1] > 6.99, True)
+chk("and does overlap V3's",
+    _lm.interval(_wmode["spec-dflash-n2"])[2] > 8.28, True)
+chk("W's spec-dflash-n4 keeps the sign flip",
+    _lm.interval(_wmode["spec-dflash-n4"])[1] > 0, True)
+
+# Q2, the predecessor contrast the design exists for
+_wcarry = defaultdict(list)
+for _d in _W:
+    _runs = _co.arm_runs(str(_d))
+    for _a, _v in _co.capped_contrast(_runs, "-cap").items():
+        chk(f"W {_d.name[8:11]} {_a} predecessor split is the balanced one",
+            _v["split_is_balanced"], True)
+        _wcarry[_a].append(_v["delta_pct"])
+_excl = sorted(a for a, v in _wcarry.items()
+               if (lambda i: i[1] is not None and (i[1] > 0 or i[2] < 0))(_lm.interval(v)))
+chk("no arm's predecessor interval excludes zero", _excl, [])
+_wd2 = _lm.interval(_wcarry["spec-dflash-n2"])
+chk("spec-dflash-n2 has the largest predecessor contrast",
+    max(_wcarry, key=lambda k: abs(st.mean(_wcarry[k]))), "spec-dflash-n2")
+chk("its point estimate (%)", round(_wd2[0], 2), -1.20, 0.005)
+chk("and it points the way A17 guessed", _wd2[0] < 0, True)
+chk("A17 reports it as a null at this power, with the interval",
+    "[-2.61 %, +0.22 %]" in _norm(_ER_V3), True)
+
+# Q3, and that the work was identical
+_wcv = defaultdict(list)
+for _d in _W:
+    for _a in ("baseline", "spec-dflash-n2"):
+        _r = [1000 * sum(x["predicted_n"] for x in json.load(open(f))["rows"])
+              / sum(x["predicted_ms"] for x in json.load(open(f))["rows"])
+              for f in sorted(_d.glob(f"{_a}__rep*.json"))]
+        _wcv[_a].append(100 * st.stdev(_r) / st.mean(_r))
+# per-repeat CV over the ten arm-runs, which is what PREREGISTERED_W.md asked
+# for and what V3's published 1.82 % is. `carryover.py`'s `spread` averages
+# over predecessors first and reads 1.65 for the same arm; two definitions of
+# the same word, and the table now says which one it publishes.
+chk("W per-repeat CV, spec-dflash-n2 (%)",
+    round(st.mean(_wcv["spec-dflash-n2"]), 2), 1.69, 0.005)
+chk("W per-repeat CV, no speculation (%)",
+    round(st.mean(_wcv["baseline"]), 2), 0.31, 0.005)
+_WCVT = {r[0]: r[1:] for r in _md_table("| arm | mean per-repeat CV inside a session |")}
+chk("A17's CV table rows", len(_WCVT), 5)
+chk("A17 publishes the computed CV for that arm",
+    round(st.mean(_wcv["spec-dflash-n2"]), 2), _cell(_WCVT["spec-dflash-n2"][0]), 0.005)
+chk("and for no speculation",
+    round(st.mean(_wcv["baseline"]), 2), _cell(_WCVT["no speculation"][0]), 0.005)
+chk("the unstable arm is five times the baseline",
+    st.mean(_wcv["spec-dflash-n2"]) > 5 * st.mean(_wcv["baseline"]), True)
+_wtxt = defaultdict(set)
+_wdraft = defaultdict(set)
+for _d in _W:
+    for _f in _d.glob("*__rep*.json"):
+        _j = json.loads(_f.read_text(encoding="utf-8"))
+        _wtxt[_j["arm"]].add(tuple(r.get("content", "")[:200] for r in _j["rows"]))
+        _wdraft[_j["arm"]].add((sum(r["draft_n"] for r in _j["rows"]),
+                                sum(r["draft_n_accepted"] for r in _j["rows"])))
+chk("every W arm produced exactly one distinct output set over five sessions",
+    sorted({len(v) for v in _wtxt.values()}), [1])
+# The prose says the drafted/accepted pairs match V2's and V3's exactly, and
+# until 2026-08-28 nothing read them: halving one request's accepted count in
+# `tests/data_mutate.py` changed no verdict. The claim is the counts, so the
+# counts are what is asserted.
+chk("and exactly one distinct drafted/accepted pair",
+    sorted({len(v) for v in _wdraft.values()}), [1])
+for _a, _pair in (("spec-dflash-n2", (1253, 732)), ("spec-dflash-n2-cap", (2556, 1710)),
+                  ("spec-dflash-n4", (2061, 844)), ("spec-dflash-n4-cap", (4088, 1959)),
+                  ("spec-mtp-n2", (1158, 782)), ("spec-mtp-n2-cap", (2367, 1801)),
+                  ("spec-draft-n8", (2925, 677)), ("spec-draft-n8-cap", (5274, 1804))):
+    chk(f"W {_a} drafted/accepted", sorted(_wdraft[_a]), [_pair])
+chk("W's baseline arms draft nothing",
+    sorted(_wdraft["baseline"] | _wdraft["baseline-cap"]), [(0, 0)])
+# and the acceptance rates A17 quotes for the same arms in V2 and V3
+for _a, _want in (("spec-dflash-n2", 58.4), ("spec-dflash-n2-cap", 66.9),
+                  ("spec-mtp-n2", 67.5), ("spec-draft-n8", 23.1)):
+    _dn, _da = sorted(_wdraft[_a])[0]
+    chk(f"W {_a} acceptance (%)", round(100 * _da / _dn, 1), _want, 0.05)
+chk("A17 says the pairs match the earlier runs",
+    "matching V2's and V3's counts exactly" in " ".join(_ER_V3.split())
+    or "the same\n1253/732" in _ER_V3
+    or "1253/732" in _ER_V3, True)
+
+# --- run W, four designs side by side ---------------------------------------
+_PRW = {r[0]: r[1:] for r in _pr_table(
+    "| arm | V2, between | V3, within | **W, within and carryover-balanced** |")}
+chk("the PR body's four-design table rows", len(_PRW), 4)
+chk("and it names the same arms the data has", sorted(_PRW), sorted(_wmode))
+for _a, _row in sorted(_PRW.items()):
+    _m, _lo, _hi, _n = _lm.interval(_wmode[_a])
+    chk(f"PR body W {_a} shift (pp)", round(_m, 2), _cell(_row[2].split("[")[0]), 0.005)
+    chk(f"PR body W {_a} agrees with A17's table",
+        _cell(_row[2].split("[")[0]), _cell(_WT[_a][2].split("[")[0]), 0.005)
+chk("PR body: the predecessor result is the one computed",
+    round(_lm.interval(_wcarry["spec-dflash-n2"])[0], 2), -1.20, 0.005)
+chk("PR body quotes it",
+    "**-1.20 %**" in _norm(_PR) and "[-2.61, +0.22]" in _norm(_PR), True)
+chk("PR body quotes the per-repeat CV pair",
+    "**1.69 %**" in _PR and "**0.31 %**" in _PR, True)
+
+
 print("\n=== do the canonical documents agree with each other? ===")
 # The fourth review found five documents describing three different datasets:
 # RETEST_TODO said the crossover was unrun while the PR body reported its
@@ -4014,9 +4200,9 @@ _all_runs = sorted((pathlib.Path(__file__).resolve().parents[1]
                     / "v4_audit_2026_08_25" / "data").glob("matrix_*"))
 _stamps = sorted({d.name.rsplit("_", 2)[-2] for d in _all_runs
                   if d.name.rsplit("_", 2)[-2].startswith("2026")})
-chk("the newest committed run is from 2026-08-27", _stamps[-1], "20260827")
+chk("the newest committed run is from 2026-08-28", _stamps[-1], "20260828")
 chk("CITATION.cff's release date is not older than the newest run",
-    re.search(r"^date-released:\s*(\S+)", _CFF, re.M).group(1) >= "2026-08-27", True)
+    re.search(r"^date-released:\s*(\S+)", _CFF, re.M).group(1) >= "2026-08-28", True)
 chk("CITATION.cff no longer says the controlled-tier logs are unpublished",
     "logs themselves are not published" in _CFF, False)
 chk("CITATION.cff says they are published",
@@ -4094,17 +4280,22 @@ if _HAS_GIT:
     chk("the plan has a commit of its own", bool(_pw_commit), True)
     _wdirs = sorted((pathlib.Path(__file__).resolve().parents[1]
                      / "v4_audit_2026_08_25" / "data").glob("matrix_W_*"))
+    _w_commit = ""
     if _wdirs:
         _w_commit = _sp2.run(["git", "-C", str(_repo), "log", "--format=%H", "-1", "--",
                               str(_wdirs[0].relative_to(_repo))],
                              capture_output=True, text=True).stdout.strip()
+    if _w_commit:
         _anc = _sp2.run(["git", "-C", str(_repo), "merge-base", "--is-ancestor",
                          _pw_commit, _w_commit], capture_output=True)
         chk("and it is an ancestor of the commit that adds W's data",
             _anc.returncode == 0, True)
     else:
-        print("  ----  W's data is not committed yet; the ancestry check waits "
-              "for it, which is the point of writing the plan now")
+        # on disk but not yet committed is the state during the write-up, and
+        # it is not a failure: the check arms itself at the commit, which is
+        # the only moment it can mean anything
+        print("  ----  W's data is not committed yet; the ancestry check arms "
+              "itself when it is, which is the point of writing the plan first")
 
 print("\n=== the checker audits itself ===")
 # A chk() whose computed side contains no name is comparing one literal with
@@ -4143,7 +4334,7 @@ chk("checker: number of assertions", len([1 for _n in _ast.walk(_tree)
 # the one a full checkout produces, and this compares against that rather than
 # pretending the two are the same number. `tests/data_mutate.py` runs the
 # checker in exactly such a mirror, which is how the difference surfaced.
-_GITLESS_SKIPPED = 9
+_GITLESS_SKIPPED = 10
 _pr_total = len(RAN) + 1 + (0 if _HAS_GIT else _GITLESS_SKIPPED)
 chk("PR body: the assertion count it quotes is a full checkout's",
     f"# {_pr_total} assertions" in _PR, True)

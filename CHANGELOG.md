@@ -52,6 +52,57 @@ produced by running the script, and the documents said "CI does it" in three
 places. All three now say what actually happened and why, and what makes the
 workflow live: merging the branch.
 
+### Run W, and the question it removes
+
+Five sessions of a 10 x 10 Williams square on 2026-08-28, 500 of 500 arm-runs,
+none failed. Run V3 verbatim except for `BENCH_ORDER`: the exported treatment
+variables were diffed and differ in three places, all of them the schedule.
+Every arm visits every position exactly once **and** is preceded by every other
+arm exactly once within a repeat, verified from the arm-runs' own `t_start`
+order in all five sessions rather than from the manifest.
+
+The analysis plan was committed in `PREREGISTERED_W.md` while the run was at
+360 of 500, and the checker asserts that commit is an ancestor of the one
+carrying the data. It fixed the estimators, the thresholds, and four things
+that would cost something: that a three-way disagreement would be published as
+one, that the estimand would not be switched afterwards, that no claim would be
+made about identifying A16, and that a null on the predecessor question would
+be reported with its interval rather than as absence.
+
+**The mode effect survives a carryover-balanced schedule.**
+`spec-dflash-n4`'s sign flip — the strongest result in A17 — now holds at
++12.03, +12.17 and **+12.10** pp across three designs. `spec-mtp-n2` and
+`spec-draft-n8` agree with both earlier designs to a tenth of a point.
+
+**And the arm this repository has been wrong about twice resolves.**
+`spec-dflash-n2` reads **+8.29 pp [+7.97, +8.60]**, an interval that overlaps
+V3's and does not overlap the crossover's [+4.86, +6.99] at all. The two
+within-invocation designs agree; the between-invocation one does not.
+
+**It is not first-order carryover, which is the point of the design.** With
+every arm preceded by every other exactly once, the contrast between running
+after a capped neighbour and after a free-running one is −1.20 %
+[−2.61, +0.22] for that arm — the largest of any by six times, pointing the way
+A17 guessed, negative in four sessions of five — and **no arm's interval
+excludes zero**. At five sessions that is a null at this power, reported with
+the interval; but an effect large enough to explain a 2.4 pp gap would sit far
+outside it. The one candidate this repository had been able to name is removed.
+
+What is left is A16, and W reproduces it on the largest dataset yet: mean
+within-session CV of **1.69 %** for `spec-dflash-n2` against **0.31 %** for no
+speculation, on work identical to the token. Across all 5000 request rows,
+every arm produced one distinct output set and one distinct drafted/accepted
+pair, matching V2's and V3's counts exactly.
+
+**A process failure the run exposed.** W's manifests pin a `runner_sha256` that
+resolves to no commit: the runner was deployed from the working tree, the run
+started, and the file was edited twice more before being committed. The exact
+source is archived under `v4_audit_2026_08_25/harness/`, verified to hash to
+what all five manifests name, and the checker now requires every run's harness
+hash to resolve **either** in history or in that directory — so a run whose
+harness is neither cannot pass unnoticed. Archiving is not a substitute for
+committing first.
+
 ### The three runs the third review asked for
 
 Nine and a half hours on the bench card, 618 arm-runs, none failed.

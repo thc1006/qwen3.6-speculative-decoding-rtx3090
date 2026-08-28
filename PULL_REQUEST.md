@@ -1,7 +1,7 @@
 <!--
   The body of pull request #2, kept here so its numbers are checked like every
   other published table in this repository. `analysis/verify_claims.py` parses
-  the six tables below cell by cell and `tests/data_mutate.py` perturbs them;
+  the seven tables below cell by cell and `tests/data_mutate.py` perturbs them;
   a figure that drifts out of agreement with the data fails CI.
 
   Publish with `python tools/publish_pr_body.py`, which strips this comment
@@ -194,7 +194,7 @@ Both are printed and serialised now, and the tables publish the pp form.
 negative", is negative free-running and positive under the cap, both intervals
 clear of zero on opposite sides.
 
-That sign is **not robust to the stopping policy**, which is weaker than
+That sign **depends on the stopping policy**, which is weaker than
 calling it a length artefact. `ignore_eos` does not only equalise the token
 count: forcing generation past a natural stop changes which tokens are
 produced, the positions they occupy, the experts routed, and the acceptance
@@ -222,12 +222,46 @@ sessions, 200 of 200 arm-runs.
 | `spec-dflash-n2` | **+8.65 pp** | **+5.92** [+4.86, +6.99] |
 
 Three of four agree to a tenth of a point across two designs that share nothing
-but the harness, and V3's own two sessions are 0.06 pp apart. The absolute rates
-localise the disagreement: four of five arms reproduce between the designs to
-0.01 to 0.3 tok/s and the baseline to a hundredth, while `spec-dflash-n2` moves
-−0.95 % free-running and +1.4 % capped, **in opposite directions**. This
-repository reports that arm's effect as **design-dependent, +5.9 to +8.7 pp**,
-rather than picking the design that flatters it.
+but the harness, and V3's own two sessions are 0.06 pp apart. The fourth does
+not, and both schedules are cyclic rotations that balance treatment position
+and leave the predecessor fixed, so neither could say why.
+
+**Run W is the design that can.** Five sessions of a 10 x 10 Williams square,
+row order shuffled from a per-session seed, 500 of 500 arm-runs. Run V3
+verbatim except for `BENCH_ORDER`. Every arm visits every position exactly once
+**and** is preceded by every other arm exactly once within a repeat, verified
+from the arm-runs' own `t_start` order rather than from the manifest, in all
+five sessions. The analysis plan was committed while the run was at 360 of 500
+and the checker asserts that commit is an ancestor of the one carrying the
+data.
+
+| arm | V2, between | V3, within | **W, within and carryover-balanced** |
+|---|---:|---:|---:|
+| `spec-dflash-n4` | +12.03 [+11.67, +12.38] | +12.17 | **+12.10** [+11.87, +12.34] |
+| `spec-mtp-n2` | +9.54 [+9.14, +9.93] | +9.53 | **+9.53** [+9.34, +9.73] |
+| `spec-dflash-n2` | **+5.92** [+4.86, +6.99] | **+8.65** | **+8.29** [+7.97, +8.60] |
+| `spec-draft-n8` | +6.31 [+6.29, +6.33] | +6.30 | **+6.35** [+6.32, +6.38] |
+
+`spec-dflash-n4`'s sign flip holds at +12.03, +12.17 and +12.10 across three
+schedules. For `spec-dflash-n2`, W's interval **overlaps V3's and does not
+overlap V2's at all**: the two within-invocation designs agree and the
+between-invocation crossover does not.
+
+**It is not the predecessor.** With every arm preceded by every other exactly
+once, the contrast between running after a capped neighbour and after a
+free-running one is **−1.20 %** [−2.61, +0.22] for `spec-dflash-n2`. That is
+the largest of any arm by six times, it points the way A17 guessed, and it is
+negative in four sessions of five, but **no arm's interval excludes zero**.
+Reported as no detectable effect at this power, with the interval, not as
+absence. An effect
+big enough to explain a 2.4 pp gap would be far outside it.
+
+**What is left is A16.** The difference is between measuring the two modes
+inside one invocation and across two. W reproduces the instability that section
+is about: mean within-session CV of **1.69 %** for `spec-dflash-n2` against
+**0.31 %** for no speculation, on work identical to the token: every arm
+produced one distinct output set and one distinct drafted/accepted pair across
+all 5000 request rows, matching V2's and V3's counts exactly.
 
 The thinking-**on** results, which is everything in the headline table, are
 unaffected: the same test moves them by 0.00 pp, because all 5904 thinking-on
@@ -351,13 +385,13 @@ this a draft is below, under *Not closed*.
 
 ```
 python analysis/rederive_from_logs.py bench   # raw logs -> the committed JSON
-python analysis/verify_claims.py          # 1697 assertions, re-derived
-python analysis/check_data_integrity.py   # structure of all 60 run directories
+python analysis/verify_claims.py          # 1815 assertions, re-derived
+python analysis/check_data_integrity.py   # structure of all 65 run directories
 python -m unittest discover tests         # 195 regressions for defects shipped here
 python tests/mutate.py                    # break each fix, require its test to fail
 python tests/data_mutate.py               # perturb a measurement or a published
                                           #   figure, require the checker to fail
-                                          #   58 code and 76 data perturbations,
+                                          #   58 code and 84 data perturbations,
                                           #   with a clean-mirror re-check after
                                           #   the last restore
 python analysis/plot_v4_runs.py --check   # charts still match the data

@@ -1699,16 +1699,82 @@ predecessor contrast available is between the two designs, and it is confounded
 with the design. It points the same way each time — the arm is slower after a
 capped neighbour and faster after a free-running one, in both of its own modes —
 but a fixed rotation cannot separate that from anything else, and this
-repository has said the wrong thing about `spec-dflash-n2` twice already. The
-experiment that would settle it randomises the order so the predecessor varies,
-and it has not been run.
+repository has said the wrong thing about `spec-dflash-n2` twice already.
 
-**What to take from all three designs.** The hard cap raises every arm
-measurably; `spec-dflash-n4` changes sign under it and that is the strongest
-result here, agreeing at +12.03 and +12.17 pp across the two designs; and the
-size of the effect on `spec-dflash-n2` is **design-dependent between +5.9 and
-+8.7 pp**, which this repository reports as a range rather than picking the
-design that flatters it.
+**Run W is the design that can, and the predecessor is not the answer.** Five
+sessions of a 10 × 10 Williams square on 2026-08-28, row order shuffled from a
+per-session seed, 500 of 500 arm-runs. It is run V3 verbatim except for
+`BENCH_ORDER`; the exported treatment variables differ in three places and all
+three are the schedule. Every arm visits every position exactly once **and** is
+preceded by every other arm exactly once within a repeat — verified from the
+arm-runs' own `t_start` order, not from the manifest, in all five sessions.
+The analysis plan was committed in
+[`PREREGISTERED_W.md`](v4_audit_2026_08_25/PREREGISTERED_W.md) while the run was at 360 of 500,
+and `analysis/verify_claims.py` asserts that commit is an ancestor of this one.
+
+| arm | V2, 8 sessions, between | V3, 2 sessions, within | **W, 5 sessions, within and carryover-balanced** |
+|---|---:|---:|---:|
+| `spec-dflash-n4` | +12.03 [+11.67, +12.38] | +12.17 | **+12.10** [+11.87, +12.34] |
+| `spec-mtp-n2` | +9.54 [+9.14, +9.93] | +9.53 | **+9.53** [+9.34, +9.73] |
+| `spec-dflash-n2` | **+5.92** [+4.86, +6.99] | **+8.65** | **+8.29** [+7.97, +8.60] |
+| `spec-draft-n8` | +6.31 [+6.29, +6.33] | +6.30 | **+6.35** [+6.32, +6.38] |
+
+Three of four agree with both earlier designs. `spec-dflash-n4`'s sign flip —
+the strongest result in this section — now holds at +12.03, +12.17 and +12.10
+across three schedules, so it is not an artefact of any of them.
+
+**And the fourth arm resolves, but not the way the schedule was supposed to
+resolve it.** W's interval for `spec-dflash-n2` **overlaps V3's and does not
+overlap V2's at all** ([+7.97, +8.60] against [+4.86, +6.99]). The two
+within-invocation designs agree; the between-invocation crossover does not.
+
+That could have been carryover, because V3's schedule aliased it. W says it is
+not. With every arm preceded by every other exactly once, the contrast between
+"after a capped neighbour" and "after a free-running one" is:
+
+| arm | rate after capped vs free | 95 % t over 5 sessions |
+|---|---:|---:|
+| `spec-dflash-n2` | **−1.20 %** | [−2.61 %, +0.22 %] |
+| `spec-dflash-n4-cap` | −0.21 % | [−0.66 %, +0.24 %] |
+| `spec-dflash-n2-cap` | +0.19 % | [−0.95 %, +1.32 %] |
+| every other arm | under 0.15 % | all containing zero |
+
+**No arm's interval excludes zero.** `spec-dflash-n2` is the largest by six
+times and points the way A17 guessed — slower after a capped neighbour, in four
+sessions of five — but at five sessions the interval spans zero. Per the
+pre-registered plan this is reported as **no detectable predecessor effect at
+this power**, with the interval, and not as "there is none". What it does rule
+out is first-order carryover as the *explanation* for a 2.4 pp gap between V2
+and W: an effect that size would have to be far outside this interval.
+
+**What is left is A16.** The gap is between measuring the two modes inside one
+invocation and measuring them across two, and this repository already has a
+section about a state that changes between and within invocations on this exact
+arm. W reproduces it: per-repeat CV inside a single session, averaged over the
+five,
+
+| arm | mean per-repeat CV inside a session |
+|---|---:|
+| `spec-dflash-n2` | **1.69 %** |
+| `spec-dflash-n2-cap` | **1.71 %** |
+| `spec-mtp-n2` | 0.50 % |
+| no speculation | **0.31 %** |
+| `spec-draft-n8` | 0.14 % |
+
+Five times the baseline, on work that is identical to the token: across all
+5000 request rows of the 500 arm-runs, every arm produced **one** distinct set
+of generated text and **one** distinct drafted/accepted pair — the same
+1253/732 = 58.4 % and 2556/1710 = 66.9 % that V2 and V3 recorded, over five
+more independent invocations.
+
+**What to take from all four designs.** The hard cap raises every arm
+measurably, and `spec-dflash-n4` changes sign under it at +12.03, +12.17 and
++12.10 pp across three schedules — the strongest result in this section. The
+effect on `spec-dflash-n2` is **+8.29 pp [+7.97, +8.60] when the two modes are
+measured inside one invocation**, and the crossover's +5.92 pp is what the same
+contrast reads when the two modes sit in different invocations. The difference
+between those two numbers is not first-order carryover, is not the treatment,
+and is the same unexplained arm-run-level state A16 is about.
 
 This closes the crossover half of [`RETEST_TODO.md`](RETEST_TODO.md) P1-3 and
 opens a narrower one: the order randomisation that would explain

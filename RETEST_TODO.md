@@ -185,12 +185,30 @@ requests. Any master comparison must pass `--spec-type` explicitly.
   overstated `spec-dflash-n2` by about 3.3 pp and the other three of its four
   numbers land inside the eight-session intervals
   ([A17](ERRATA.md#a17-the-thinking-off-comparisons-are-not-comparisons-of-the-same-amount-of-work)).
-- **A carryover-balanced version of that design.** V2 and V3 are both cyclic
-  rotations: they balance treatment *position* and fix the *predecessor*, so
-  every capped arm follows its own uncapped twin and mode stays aliased with
-  first-order carryover. A Williams square, or a randomised order, with the
-  session as the resampling unit, is what would let the mode effect be called
-  identified rather than replicated. Not run.
+- ~~**A carryover-balanced version of that design.**~~ **Done 2026-08-28.**
+  Run W: five sessions of a 10 x 10 Williams square, row order shuffled from a
+  per-session seed, 500 of 500 arm-runs, run V3 verbatim except for the
+  schedule. Every arm preceded by every other exactly once within a repeat,
+  verified from the data. The mode effect survives: `spec-dflash-n4`'s sign
+  flip holds at +12.03, +12.17 and +12.10 pp across three designs, and
+  `spec-dflash-n2` reads +8.29 pp [+7.97, +8.60], overlapping V3 and not V2
+  ([A17](ERRATA.md#a17-the-thinking-off-comparisons-are-not-comparisons-of-the-same-amount-of-work)).
+- ~~**Does the predecessor explain `spec-dflash-n2`?**~~ **Answered 2026-08-28,
+  and the answer is no.** W's balanced schedule gives the contrast between
+  running after a capped neighbour and after a free-running one: −1.20 %
+  [−2.61, +0.22] for that arm, the largest of any by six times and pointing the
+  way A17 guessed, with **no arm's interval excluding zero**. Reported as no
+  detectable effect at five sessions, not as absence. It removes the one
+  candidate this repository had been able to name for the V2/V3 gap.
+- **What the gap actually is.** W and V3 agree and the crossover does not, so
+  the difference is between measuring the two modes inside one invocation and
+  across two. That is [A16](ERRATA.md#a16-two-runs-identical-in-every-recorded-respect-and-byte-identical-in-output-differ-by-34--on-one-arm),
+  and it is still unexplained. W reproduces it — 1.69 % within-session CV on
+  that arm against 0.31 % for no speculation, on work identical to the token —
+  on the largest dataset this repository has for it. What would move it next is
+  instrumentation, not another schedule: host CPU load (recordable now, in no
+  run yet) and the GDDR6X memory-junction temperature, which NVML does not
+  expose on Linux at all.
 - **Recompute every `request-mean` from `predicted_n` and `predicted_ms`.**
   [B8](ERRATA.md#b8-every-request-mean-here-counts-one-token-fewer-than-it-timed):
   llama.cpp's `predicted_per_second` is a rate over `n − 1` tokens divided by
