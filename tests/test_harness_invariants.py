@@ -2262,21 +2262,33 @@ class TheWorkflowsMustNameTheirShell(unittest.TestCase):
             self.assertRegex(src, r"defaults:\s*\n\s*run:\s*\n\s*shell:\s*bash",
                              f"{wf} leaves the shell defaulted, so no pipefail")
 
-    def test_no_step_pipes_without_saying_pipefail(self):
-        """Belt and braces: even with the default named, a step that pipes and
-        overrides the shell would be back where it started."""
+    def test_every_piping_step_sets_pipefail(self):
+        """`pipefail` is set once at the top of a step, not on every line.
+
+        The first version of this looked for the word on the SAME line as the
+        pipe, so the moment a correctly-guarded step piped - the static job,
+        which now does `find ... | sort` under `set -euo pipefail` - it was
+        reported as unguarded. The unit of the guarantee is the step.
+        """
         offenders = []
         for wf in ("audit.yml", "evidence.yml"):
             path = self.ROOT / ".github" / "workflows" / wf
-            for i, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-                t = line.strip()
-                if t.startswith("#") or "||" in t:
-                    continue
-                if re.search(r"[^|]\|[^|]", t) and "pipefail" not in t:
-                    offenders.append(f"{wf}:{i} {t[:60]}")
-        # the two that exist are inside steps that set -euo pipefail themselves
-        for o in offenders:
-            self.assertIn("evidence.yml", o, f"unguarded pipe: {o}")
+            step, name = [], ""
+            def flush(step, name, wf=wf):
+                body = "\n".join(step)
+                code = [l for l in step if not l.strip().startswith("#")]
+                pipes = [l.strip() for l in code
+                         if re.search(r"[^|]\|[^|]", l) and "||" not in l]
+                if pipes and "pipefail" not in body:
+                    offenders.append(f"{wf}:{name}: {pipes[0][:60]}")
+            for line in path.read_text(encoding="utf-8").splitlines():
+                if re.match(r"      - (name|uses):", line):
+                    flush(step, name)
+                    step, name = [], line.split(":", 1)[1].strip()[:40]
+                step.append(line)
+            flush(step, name)
+        self.assertEqual(offenders, [],
+                         "step(s) that pipe without setting pipefail: " + str(offenders))
 
 
 class TheTelemetryGapA16NamesMustBeReal(unittest.TestCase):
@@ -3183,6 +3195,70 @@ class EveryTranchePublishedMustBeVerified(unittest.TestCase):
         self.assertEqual(invented, [],
                          f"{len(invented)} digest(s) the workflow checks that "
                          f"appear nowhere in the manifest: {[d[:12] for d in invented]}")
+
+
+class EveryLivePythonFileMustBeLinted(unittest.TestCase):
+    """The static job listed three directories by hand, and `tools/` was a
+    fourth. It was added on 2026-08-28, linted locally on every run, and never
+    by CI.
+
+    The list is a `find` with named exclusions now, so a new directory is
+    covered by default and skipping one takes a deliberate edit. This checks
+    that the exclusions are exactly the archived trees: the artefacts earlier
+    versions published, whose behaviour ERRATA quotes, and which the changelog
+    says were not edited.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+    ARCHIVED = ("./v2_3090_followup/*", "./v3_dflash_2026_05_07/*",
+                "./results/*", "./bench_runner.py")
+
+    def _static_step(self, code_only=False):
+        wf = (self.ROOT / ".github" / "workflows" / "audit.yml") \
+            .read_text(encoding="utf-8")
+        i = wf.index("byte-compile and pyflakes")
+        step = wf[i:wf.index("- name:", i + 10)]
+        if not code_only:
+            return step
+        # the comment explains why the old list was wrong, and a substring
+        # check over the whole step matched that explanation - the same
+        # false positive as `pgrep -f` matching its own command line
+        return "\n".join(l for l in step.splitlines()
+                          if not l.strip().startswith("#"))
+
+    def test_the_step_finds_files_rather_than_naming_directories(self):
+        step = self._static_step(code_only=True)
+        self.assertIn("find . -name '*.py'", step)
+        self.assertNotIn("analysis bench tests", step,
+                         "the hand-written directory list is back")
+
+    def test_the_exclusions_are_exactly_the_archived_trees(self):
+        step = self._static_step(code_only=True)
+        excluded = set(re.findall(r"-not -path '(\S+)'", step)) - {"./.git/*"}
+        self.assertEqual(sorted(excluded), sorted(self.ARCHIVED),
+                         "the lint skips something that is not an archive, or "
+                         "no longer skips an archive")
+
+    def test_every_live_python_file_would_be_reached(self):
+        """Anything outside the archives must be in the set CI checks."""
+        import fnmatch
+        skipped = []
+        for f in sorted(self.ROOT.rglob("*.py")):
+            rel = "./" + str(f.relative_to(self.ROOT))
+            if ".git/" in rel:
+                continue
+            if any(fnmatch.fnmatch(rel, pat) for pat in self.ARCHIVED):
+                continue
+            skipped.append(rel)
+        self.assertIn("./tools/publish_pr_body.py", skipped,
+                      "tools/ is not reached by the lint")
+        self.assertIn("./bench/host_guard.py", skipped)
+        self.assertGreater(len(skipped), 20, f"only {len(skipped)} files reached")
+
+    def test_the_archives_are_the_ones_the_changelog_names(self):
+        ch = (self.ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+        self.assertIn("`results/`, `v2_3090_followup/v2_*/`", ch,
+                      "the changelog no longer names the untouched trees")
 
 
 class TheSplitTimersMustBeRederivable(unittest.TestCase):

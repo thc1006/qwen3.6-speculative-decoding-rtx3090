@@ -387,7 +387,7 @@ this a draft is below, under *Not closed*.
 python analysis/rederive_from_logs.py bench   # raw logs -> the committed JSON
 python analysis/verify_claims.py          # 1816 assertions, re-derived
 python analysis/check_data_integrity.py   # structure of all 65 run directories
-python -m unittest discover tests         # 201 regressions for defects shipped here
+python -m unittest discover tests         # 205 regressions for defects shipped here
 python tests/mutate.py                    # break each fix, require its test to fail
 python tests/data_mutate.py               # perturb a measurement or a published
                                           #   figure, require the checker to fail

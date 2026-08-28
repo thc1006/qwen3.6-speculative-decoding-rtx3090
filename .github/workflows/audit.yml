@@ -32,12 +32,29 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with: { python-version: "3.12" }
-      - name: byte-compile everything
-        run: python -m compileall -q analysis bench tests
-      - name: pyflakes - unused names are usually the residue of an edit
+      - name: byte-compile and pyflakes every live python file
+        # Not a hand-written directory list: `tools/` was added on 2026-08-28
+        # and the old `analysis bench tests` covered neither it nor anything
+        # else added later. Everything is checked except the archived trees,
+        # which are the artefacts earlier versions published and which ERRATA
+        # quotes the behaviour of - `bench_runner.py` down to `content[:120]`
+        # and the text of its --gpu help. Removing an unused import from those
+        # would not change behaviour and would still change a published file.
         run: |
+          set -euo pipefail
           pip install pyflakes==3.4.0
-          pyflakes analysis/*.py bench/*.py tests/*.py
+          files=$(find . -name '*.py' \
+                    -not -path './.git/*' \
+                    -not -path './v2_3090_followup/*' \
+                    -not -path './v3_dflash_2026_05_07/*' \
+                    -not -path './results/*' \
+                    -not -path './bench_runner.py' | sort)
+          echo "$files" | sed 's|^|  |'
+          [ -n "$files" ] || { echo "no python found" >&2; exit 1; }
+          # shellcheck disable=SC2086
+          python -m compileall -q $files
+          # shellcheck disable=SC2086
+          pyflakes $files
       - name: relative links and heading anchors
         run: python analysis/check_links.py
       - name: shellcheck
