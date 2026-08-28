@@ -36,6 +36,10 @@ on:
       - analysis/verify_claims.py
       - .github/workflows/evidence.yml
       - v4_audit_2026_08_25/EVIDENCE_MANIFEST.sha256
+      # the archive step greps each digest in the audit README as well as the
+      # manifest, so a change to it can fail this job with nothing else
+      # touched - which is how a truncated digest reached CI
+      - v4_audit_2026_08_25/README.md
 
 permissions:
   contents: read

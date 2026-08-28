@@ -3141,6 +3141,29 @@ class EveryTranchePublishedMustBeVerified(unittest.TestCase):
                               f"the workflow greps; a truncated one does not "
                               f"count")
 
+    def test_the_path_filter_covers_every_file_the_job_reads_by_name(self):
+        """A file the job reads and the filter omits is a job that goes stale.
+
+        The filter grew twice by CI going red: once for `verify_claims.py`,
+        which the last step runs, and once for the audit README, which the
+        archive step greps. Both were the same omission and both were found by
+        a 40-minute run rather than by reading the file.
+        """
+        wf = (self.ROOT / ".github" / "workflows" / "evidence.yml") \
+            .read_text(encoding="utf-8")
+        paths = re.findall(r"^      - (\S+)$", wf, re.M)
+        # every repository path the steps name, other than the ones they write
+        named = set()
+        for m in re.finditer(r"([A-Za-z0-9_][A-Za-z0-9_./-]*\.(?:py|md|sha256))", wf):
+            cand = m.group(1)
+            if (self.ROOT / cand).exists() and not cand.startswith(".github"):
+                named.add(cand)
+        missing = sorted(n for n in named if n not in paths)
+        self.assertEqual(missing, [],
+                         f"the evidence job reads {missing} and its push filter "
+                         f"does not list them, so a change there would not "
+                         f"re-run the chain it can break")
+
     def test_no_digest_in_the_workflow_is_invented(self):
         """The other direction, and it is the one that caught a real mistake.
 
