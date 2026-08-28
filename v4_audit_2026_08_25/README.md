@@ -1152,7 +1152,8 @@ builds `raw_logs.tar.zst`, **271 028 599 bytes**, sha256
 asset of the release `raw-evidence-2026-08-27`. A second tranche sits beside it
 — `raw_logs_20260827.tar.zst`, **187 358 414 bytes**, sha256
 `d56a7f88a099550bdab229ccb2bd36840f167550cea7689f575fd6d0f11da8ff`, and
-`telemetry_20260827.tar.zst` at `db833395…` — carrying the **618 logs and 2
+`telemetry_20260827.tar.zst` at **46 603 bytes**, sha256
+`db833395470aeaf842225a33fb544e933f1c0a3047cac161524aca1ac1aef061` — carrying the **618 logs and 2
 traces** of the runs the third review asked for: the eight-session crossover
 V2, the within-invocation V3 and the split-timer T4. Two archives rather than
 one rebuilt archive, so the first one's digest keeps meaning what it meant when
@@ -1161,7 +1162,8 @@ manifest verifies, and all **620** of the second tranche's entries did before it
 was published. A third tranche followed on 2026-08-28 for run W —
 `raw_logs_20260828.tar.zst`, **221 242 327 bytes**, sha256
 `5af671bf3cf47a20fa2ca78504c089642b9bb2ea249b8997577b4852caa7a5c2`, 500 logs, with
-`telemetry_20260828.tar.zst` at `72e331bf…` — and all **501** of its entries
+`telemetry_20260828.tar.zst` at **58 905 bytes**, sha256
+`72e331bf0cbfaaee73619acf320523598cab4a46b7a7daa51fabbd6e2c455bf3` — and all **501** of its entries
 were verified against the unpacked archive before publishing, which is the
 check that was missing when the manifest named them one commit early.
 

@@ -3117,6 +3117,30 @@ class EveryTranchePublishedMustBeVerified(unittest.TestCase):
                          f"{len(missing)} digest(s) in the manifest header that "
                          f"the workflow never verifies")
 
+    def test_every_checked_digest_is_in_both_files_the_workflow_greps(self):
+        """`check()` requires the digest in the manifest AND the audit README.
+
+        The guard added alongside it only looked at the workflow, so it passed
+        while two README entries carried a truncated `db833395…` and the job
+        failed on `grep -q` against the full string. A guard narrower than the
+        thing it guards is the defect it is supposed to catch.
+        """
+        wf = (self.ROOT / ".github" / "workflows" / "evidence.yml") \
+            .read_text(encoding="utf-8")
+        man = (self.ROOT / "v4_audit_2026_08_25" / "EVIDENCE_MANIFEST.sha256") \
+            .read_text(encoding="utf-8")
+        rd = (self.ROOT / "v4_audit_2026_08_25" / "README.md") \
+            .read_text(encoding="utf-8")
+        pairs = re.findall(r"check evidence/(\S+)\s*\\\s*\n\s*([0-9a-f]{64})", wf)
+        self.assertGreaterEqual(len(pairs), 6, f"found {len(pairs)} check() calls")
+        for name, d in pairs:
+            with self.subTest(archive=name):
+                self.assertIn(d, man, f"{name}: digest not in the manifest")
+                self.assertIn(d, rd,
+                              f"{name}: digest not in the audit README, which "
+                              f"the workflow greps; a truncated one does not "
+                              f"count")
+
     def test_no_digest_in_the_workflow_is_invented(self):
         """The other direction, and it is the one that caught a real mistake.
 
