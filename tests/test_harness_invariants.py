@@ -2140,6 +2140,16 @@ class TheGitlessAssertionGapMustBeTheDeclaredOne(unittest.TestCase):
                    if l.startswith("  PASS") or l.startswith("  FAIL"))
 
     def test_the_gap_is_what_the_checker_declares(self):
+        # In a shallow clone the with-git arm is refused by design, so the
+        # difference measures a truncated run against a whole one: CI reported
+        # "the checker skips -1012 assertions" before this guard existed.
+        shallow = subprocess.run(
+            ["git", "-C", str(self.ROOT), "rev-parse", "--is-shallow-repository"],
+            capture_output=True, text=True).stdout.strip()
+        if shallow == "true":
+            self.skipTest("shallow clone: the gap cannot be measured here, and "
+                          "the checker refuses such a clone on purpose. Use "
+                          "fetch-depth: 0.")
         src = (self.ROOT / "analysis" / "verify_claims.py").read_text(encoding="utf-8")
         m = re.search(r"^_GITLESS_SKIPPED = (\d+)$", src, re.M)
         self.assertIsNotNone(m, "the checker no longer declares the gap")
@@ -2974,11 +2984,34 @@ class AShallowCloneMustBeDiagnosedNotEndured(unittest.TestCase):
         self.assertIn("SHALLOW clone", blob)
         self.assertIn("fetch-depth: 0", blob)
 
-    def test_the_evidence_workflow_asks_for_full_history(self):
-        wf = (self.ROOT / ".github" / "workflows" / "evidence.yml") \
-            .read_text(encoding="utf-8")
-        self.assertIn("fetch-depth: 0", wf,
-                      "the workflow that runs the checker still clones shallow")
+    def test_every_job_that_reaches_the_checker_asks_for_full_history(self):
+        """Two jobs needed this and only one had it, twice.
+
+        `evidence.yml` runs the checker directly; `audit.yml`'s unit job reaches
+        it through the tests. Both failed in CI for the same reason, three
+        commits apart. Naming the rule is cheaper than diagnosing it again.
+        """
+        import yaml
+        for rel in (".github/workflows/audit.yml", ".github/workflows/evidence.yml"):
+            d = yaml.safe_load((self.ROOT / rel).read_text(encoding="utf-8"))
+            for jn, job in d["jobs"].items():
+                body = " ".join(str(st.get("run", "")) for st in job.get("steps", []))
+                reaches = ("verify_claims" in body
+                           or "unittest discover" in body
+                           or "tests/mutate.py" in body
+                           or "tests/data_mutate.py" in body)
+                if not reaches:
+                    continue
+                depth = None
+                for st in job.get("steps", []):
+                    if "checkout" in str(st.get("uses", "")):
+                        depth = (st.get("with") or {}).get("fetch-depth")
+                with self.subTest(workflow=rel, job=jn):
+                    self.assertEqual(
+                        depth, 0,
+                        f"{rel}:{jn} reaches the claim checker but clones at "
+                        f"depth {depth!r}; the provenance assertions need the "
+                        f"whole history and the checker refuses a shallow clone")
 
 
 class TheSplitTimersMustBeRederivable(unittest.TestCase):
