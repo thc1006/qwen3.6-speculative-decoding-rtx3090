@@ -361,7 +361,7 @@ adversarial pass over this branch's own commits found:
   the checker inside a clean checkout of HEAD, and there it died 373 assertions
   early, so the probe's own baseline was broken and it was measuring nothing.
   The logs are committed now and a test refuses any path the checker opens that
-  a fresh clone would not have. A clean checkout runs all 3521 assertions and
+  a fresh clone would not have. A clean checkout runs all 3523 assertions and
   exits 0, which it did not before.
 
   Two figures in those tables are not re-derivable here and say so rather than
@@ -425,13 +425,15 @@ changed. Nothing in it was rejected.
   | `data/checkpoint_timers_20260827_split.json` | 18 | **18** | 0 |
   | `data/acceptance_counter_comparison.json` | 535 | **526** | 9 |
 
-  **That is the script's output, not CI's.**
-  `.github/workflows/evidence.yml` does the same thing on `workflow_dispatch`,
-  on `release: published` and weekly, and it has **never run**: GitHub
-  registers workflows, schedules and dispatch targets from the default branch,
-  and the file exists only on this one. Dispatching it returns 404. It becomes
-  live when this merges; until then the numbers are what anyone with the
-  release gets from that one command.
+  **That was the script's output, and CI has now reproduced it.**
+  `.github/workflows/evidence.yml` fetched the archive, checked it against the
+  manifest, unpacked it, re-derived the committed JSON from the raw logs and
+  ran the claim checker over the result, on 2026-08-29, and it passed. That was
+  its first run: `workflow_dispatch`, `release: published` and the weekly cron
+  read the workflow from the default branch and the file exists only on this
+  one, so dispatching it returns 404 and the schedule never fires. What fired
+  was the `push` filter, which reads the workflow from the ref being pushed.
+  Those three become live when this merges.
 
   Zero records differ. The nine belong to three exploratory runs whose logs are
   in the archive and whose arm-run JSON is not committed, because they never
@@ -448,7 +450,7 @@ W added 500 more the next day. What keeps this a draft is below, under
 
 ```
 python analysis/rederive_from_logs.py bench   # raw logs -> the committed JSON
-python analysis/verify_claims.py          # 3521 assertions, re-derived
+python analysis/verify_claims.py          # 3523 assertions, re-derived
 python analysis/check_data_integrity.py   # structure of all 65 run directories
 python -m unittest discover tests         # 223 regressions for defects shipped here
 python tests/mutate.py                    # break each fix, require its test to fail

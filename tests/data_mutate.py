@@ -335,9 +335,11 @@ MUTATIONS = [
      edit_doc("v4_audit_2026_08_25/README.md",
               "| `data/checkpoint_timers_20260827_split.json` | 18 | **18** | \u2014 |",
               "| `data/checkpoint_timers_20260827_split.json` | 20 | **20** | \u2014 |")),
-    ("v4 README: it goes back to claiming CI produced the table",
+    # the workflow ran on 2026-08-29 and passed, so the sentence changed; what
+    # has to stay guarded is that the document does not overstate what CI did
+    ("v4 README: it claims CI produced the table rather than reproducing it",
      edit_doc("v4_audit_2026_08_25/README.md",
-              "produced by running the script, not by CI",
+              "produced by running the script. CI has now reproduced it",
               "produced by CI, from the archive alone")),
     ("PR body: the re-derivation count for the split dump becomes 20",
      edit_doc("PULL_REQUEST.md",

@@ -5728,10 +5728,21 @@ for _f, _row in sorted(_V4R.items()):
 # and both must say the workflow has not run, because it has not
 _V4TXT = re.sub(r"\s+", " ", _norm((pathlib.Path(__file__).resolve().parents[1]
                 / "v4_audit_2026_08_25" / "README.md").read_text(encoding="utf-8")))
-chk("the audit README says the table came from the script, not CI",
-    "produced by running the script, not by CI" in _V4TXT, True)
-chk("and says the workflow has never run", "has **never run**" in _V4TXT, True)
-chk("the body says the same", "That is the script's output, not CI's." in _PR, True)
+# The workflow ran for the first time on 2026-08-29, from the `push` filter,
+# and passed: it fetched the archive, checked it against the manifest, unpacked
+# it, re-derived the committed JSON from the raw logs and ran this checker over
+# the result. The three documents said it never had, which was true until that
+# push, and they say what happened now.
+chk("the audit README says the script produced the table and CI reproduced it",
+    "produced by running the script. CI has now reproduced it" in _V4TXT, True)
+chk("and it no longer says the workflow has never run",
+    "has **never run**" in _V4TXT, False)
+chk("and it still says why the other three triggers cannot fire",
+    "**default branch**, and this file lives only on `audit-2026-08-25`"
+    in _V4TXT, True)
+chk("the body says the same", "CI has now reproduced it" in _PR, True)
+chk("and the body no longer says it has never run",
+    "it has **never run**" in _PR, False)
 chk("and neither claims the evidence workflow runs in CI",
     ("evidence.yml` downloads them" in _PR
      or "evidence.yml` does it in CI" in _V4TXT

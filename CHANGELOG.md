@@ -152,15 +152,18 @@ has `-e` and not `-o pipefail`, so `checker.py | tail -1` reports `tail`'s exit
 status and a checker can print FAIL into a green job. No step here pipes today;
 naming the shell is what keeps that true when one does.
 
-**And the workflow that would do that in CI has never run.**
+**And the workflow that would do that in CI had never run, until it did.**
 `.github/workflows/evidence.yml` is wired to `workflow_dispatch`, to
-`release: published` and to a weekly cron, and none of the three can fire:
+`release: published` and to a weekly cron, and none of those three can fire:
 GitHub registers workflows, schedules and dispatch targets from the **default
 branch**, and that file exists only on `audit-2026-08-25`. Dispatching it
-returns 404. Every re-derivation figure this repository publishes was therefore
+returns 404. Every re-derivation figure this repository published was therefore
 produced by running the script, and the documents said "CI does it" in three
-places. All three now say what actually happened and why, and what makes the
-workflow live: merging the branch.
+places. A `push` filter was added so the chain could be demonstrated rather
+than asserted, and on 2026-08-29 it fired for the first time: the workflow
+fetched the archive, verified it against the manifest, unpacked it, re-derived
+the committed JSON from the raw logs and ran the claim checker over the result,
+and it passed. The other three triggers still become live only on merge.
 
 ### Run W, and the question it removes
 

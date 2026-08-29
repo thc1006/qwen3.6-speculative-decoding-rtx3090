@@ -1249,16 +1249,20 @@ they contribute nine of the 535 rows behind [A13](../ERRATA.md#a13-there-are-two
 the claim there survives on the other 526.
 
 > [!IMPORTANT]
-> **That table was produced by running the script, not by CI.**
-> [`.github/workflows/evidence.yml`](../.github/workflows/evidence.yml) does the
-> same thing on `workflow_dispatch`, on `release: published` and weekly, and it
-> has **never run**: GitHub registers workflows, schedules and dispatch targets
-> from the **default branch**, and this file lives only on `audit-2026-08-25`.
-> `gh api .../workflows/evidence.yml/dispatches` returns 404 for that reason.
-> The workflow becomes live when the branch merges. Until then the figures above
-> are what `python analysis/rederive_from_logs.py <bench-root>` prints after
-> unpacking both published tranches into one directory, which is a command
-> anyone with the release can run.
+> **That table was produced by running the script. CI has now reproduced it.**
+> [`.github/workflows/evidence.yml`](../.github/workflows/evidence.yml) fetched
+> the archive, checked it against the manifest, unpacked it, re-derived the
+> committed JSON from the raw logs and ran the claim checker over the result,
+> on 2026-08-29, and it passed. That was its first run: `workflow_dispatch`,
+> `release: published` and the weekly cron all read the workflow from the
+> **default branch**, and this file lives only on `audit-2026-08-25`, so
+> `gh api .../workflows/evidence.yml/dispatches` returns 404 and the schedule
+> never fires. What fired was the `push` filter, which reads the workflow from
+> the ref being pushed and which lists the extractors and everything the
+> checker imports. Those three become live when the branch merges. The figures
+> above are also what `python analysis/rederive_from_logs.py <bench-root>`
+> prints after unpacking both published tranches into one directory, which is a
+> command anyone with the release can run.
 
 Four run directories are archived under their bench-host names rather than the
 descriptive ones used here: `C_master_matrix_think_on`,
