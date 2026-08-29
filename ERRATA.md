@@ -225,8 +225,9 @@ greedy, the ten v1 prompts, ABBA-ordered, three arms interleaved):
 
 The drafted and accepted totals are **byte-identical** across arms on both
 binaries, per prompt as well as in aggregate (`154/576`, `140/647`, `211/404`,
-…). Throughput differs by +0.3 % overall and by −1.2 % to +3.7 % per prompt:
-noise. The translation path was not changing what got drafted. Full data:
+…). Throughput differs by +0.2 % pooled over both binaries, and from
+−2.2 % to +3.7 % across the sixteen (binary, prompt) cells: noise. The
+translation path was not changing what got drafted. Full data:
 [`v4_audit_2026_08_25/`](v4_audit_2026_08_25/).
 
 **Consequence.** The repository's "vocab-matched" and "correct-vocab classic
@@ -464,9 +465,17 @@ this repository has used:**
 
 | build | `p_min` default | what ran on it |
 |---|---:|---|
-| `9789512` | 0.75 | the entire v1 matrix |
-| `bcb5eeb64` | 0.75 | v2, Exp 2, v3, and audit run A |
-| master `3737e4137` | **0.00** | **the whole audit matrix: runs B, C, D, E** |
+| `9789512` † | 0.75 | the entire v1 matrix |
+| `bcb5eeb64` † | 0.75 | v2, Exp 2, v3, and audit run A |
+| master `3737e4137` | **0.00** | **every other audit run: 64 of the 65 directories** |
+
+† The two older defaults are upstream source values and nothing here
+re-derives them. What is measured is master's: run H drafts 16641 tokens on
+`spec-draft-n8` with no `--spec-draft-p-min` flag and 5535 on the same arm at
+0.75, so the default is not 0.75; it also drafts more than the 8424 at 0.50,
+so it is below that. No arm in any other run passes the flag, so every one of
+them ran at its build's default. The row said "runs B, C, D, E" until
+2026-08-29, which was the audit as it stood when the entry was written.
 
 So every archived number was measured with draft truncation **on**, and every
 number the audit's own matrix produced was measured with it **off**, by default,
@@ -1035,28 +1044,52 @@ thermal state and a position in the arm order. What a reader needs is the
 spread when the same arm at the same configuration is measured again in a
 **different** run, and until 2026-08-26 nothing here had measured it.
 
-Ten (arm, configuration) pairs were measured independently two or three times:
+Twelve (arm, configuration) groups were measured independently two or three
+times. A configuration is what that arm ran with: the memory policy, the
+context, the workload, the concurrency, the prompt count and the model that arm
+itself loads. Groups measured more often than three times are the designed
+replications, which have their own entries (A16 for run U, A17 for V2, V3 and
+W), and are excluded here. Every one is listed, so a reader can check any of
+them:
 
-| between-run spread | pairs |
-|---|---|
-| ≤ 0.6 pp | 6 |
-| 0.6 – 1.5 pp | 2 |
-| 2.1 pp (`spec-dflash-n2`) | 1 |
-| **8.6 pp (`spec-mtp-n4`, Q8_0)** | 1 |
+| arm | measured in | between-run spread |
+|---|---|---:|
+| **`spec-mtp-n4`, Q8_0 head** | M1, Q | **8.57 pp** |
+| `ngram-mod-n24` | O, O2, O3 | 0.74 pp |
+| `ngram-cache` | O, O2, O3 | 0.74 pp |
+| `spec-dflash-n4` | K1, L | 0.63 pp |
+| `spec-draft-n8` | C, H, I2 | 0.63 pp |
+| `spec-dflash-n6` | K1, L | 0.62 pp |
+| `ngram-map-k4v-m8` | O, O2, O3 | 0.49 pp |
+| `spec-mtp-n2`, Q4_K_M head | M4, Q | 0.42 pp |
+| `spec-draft-n1` | O, O2, O3 | 0.30 pp |
+| `spec-dflash-n2` | K1, L | 0.23 pp |
+| `spec-draft-n32` | C, E | 0.03 pp |
+| `spec-mtp-n4`, Q4_K_M head | M4, Q | 0.00 pp |
 
-Median **0.56 pp**. So the dataset generally reproduces well, better than the
-size of any effect it reports, and **one pair does not**.
+Median **0.55 pp**, six of the twelve at or under 0.6 pp. So the dataset
+generally reproduces well, better than the size of any effect it reports, and
+**one group does not**.
 
-The 8.6 pp row read 8.5 until 2026-08-29, from rounding each of the two figures
+This replaces a four-row histogram that said ten pairs, a median of 0.56 pp and
+a 2.1 pp row for `spec-dflash-n2`. Those pairs were chosen by hand and this
+file said so: it recorded that they "are not enumerated anywhere, which is why
+only the row that names its pair could be checked". They are not recoverable
+from the data, and the 2.1 pp is what M1 and run O read for that arm, one of
+several pairings available. The definition above is stated so the table can be
+recomputed; what survives the change is the shape, a median near half a point
+and one group an order of magnitude above it.
+
+The top row read 8.5 pp until 2026-08-29, from rounding each of the two figures
 to a tenth before subtracting them: +10.5 and +2.0 differ by 8.5, the
-measurements behind them by 8.573. Every other difference this repository
+measurements behind them by 8.57. Every other difference this repository
 publishes subtracts first and rounds once, and
 [A12](#a12-what-the-checkpoint-path-costs-measured-with-timers-in-the-source)
 already corrects the same double rounding in the checkpoint total, where four
-rounded components added to 39.08 and the figure is 39.07. The other rows of this histogram were
-computed the earlier way and are **not** re-derived by
-`analysis/verify_claims.py`; the ten pairs behind them are not enumerated
-anywhere, which is why only the row that names its pair could be checked.
+rounded components added to 39.08 and the figure is 39.07. Every row above is
+re-derived by `analysis/verify_claims.py` now, which is what enumerating them
+bought: the histogram they replace could only be checked on the one row that
+named its pair.
 
 **That one was chased down and is unexplained.** `spec-mtp-n4` under the Q8_0
 head reads +10.5 % in run M1 (3 repeats, within-run SD 0.53) and +2.0 % in run Q
@@ -1865,8 +1898,8 @@ of each in turn, runs the claim checker, and asks whether an assertion that was
 passing now fails. Measured on the tree this entry is committed in:
 
 Of **136** tables, **11** carry no derivable number (paths, hashes, build
-identifiers) and **125** carry measurements. **119** of those are parsed cell by
-cell by `analysis/verify_claims.py`; **6** are not.
+identifiers) and **125** carry measurements. All **125** of those are parsed
+cell by cell by `analysis/verify_claims.py`; **0** are not.
 
 That count was 44 and 80 when this entry was first written. Eight of the
 difference is a correction to the census rather than work: a table read by a
@@ -1878,7 +1911,7 @@ accounted for.
 
 Perturbing the 80 that were unparsed then: two have no cell that can be
 perturbed, **11** are caught by some other check, and **67 accepted a wrong
-number and nothing noticed**. Seventy-four of those 80 are parsed now. Eleven
+number and nothing noticed**. All 80 of those are parsed now. Eleven
 being caught without being parsed is the general net doing its job (the rule
 that every quoted throughput must equal one derivable for that arm) and it
 catches a typo, not a figure attributed to the wrong run.
@@ -1889,10 +1922,11 @@ tables that had passed the one-cell probe: nearly all of them a second or third
 number inside a cell a parser read the front of, such as the four arms by three
 columns by two interval bounds of A17's crossover table. Guarding those grew
 the parsed set, and the probe over the grown set found more: on 2026-08-29 it
-perturbed **2 252** numbers across the **119** parsed tables and **33** of them
-changed nothing. Every one is read now, and the re-run reports none. The three
-runs it took are the point: the population grows as the coverage does, so a
-clean run is only clean for the tree it was run on.
+perturbed **2 252** numbers across the **119** tables parsed at the time and
+**33** of them changed nothing. Every one of those is read now. The runs it
+took are the point: the population grows as the coverage does, so a clean run
+is only clean for the tree it ran on, and parsing the last six tables grew it
+again, to **2 373** numbers across **125**.
 
 The measurement was wrong three times before it measured anything, and all
 three are recorded in the file. The first used the claim checker's exit status,
@@ -1911,12 +1945,12 @@ the baseline every shard compared against was a broken run.
 return rows, and assert nothing about the column you changed, which is exactly
 what the W three-design table did, in two documents, until this pass.
 
-**The larger half is not tables.** **1 209** decimal numbers sit in prose,
-outside every table; **660** of them do not appear as a string literal anywhere
+**The larger half is not tables.** **1 215** decimal numbers sit in prose,
+outside every table; **645** of them do not appear as a string literal anywhere
 in the checker, counting only literals that are not assertion labels; a label
 is prose about a check and not a check, and leaving them in made the count move
 whenever an assertion was reworded. That criterion is an upper bound on the gap
-rather than the gap, so a fixed sample of **40** of the 660 was perturbed the
+rather than the gap, so a fixed sample of **40** of the 645 was perturbed the
 same way, seed `20260828`: **40 of 40 accepted a wrong number**. The 95 %
 Wilson interval puts the unguarded fraction of that population at **91 % or
 above**. The prose half of this repository is, to a first approximation,
@@ -1944,7 +1978,7 @@ comparison, A16's six invocations, A17's per-repeat rates, B4's family minima,
 the BOS-override table in the two documents that publish it, run I's
 acceptance under batching, and the README's length-matched comparison.
 
-**Twenty-nine published statements were wrong and are corrected.** They are
+**Thirty-one published statements were wrong and are corrected.** They are
 listed rather than summarised, because a count of corrections is itself a
 number and this file exists because of unchecked numbers.
 
@@ -1998,13 +2032,23 @@ number and this file exists because of unchecked numbers.
     host)`; run A's control on that prompt reads 123.3 and 126.0.
 27. A2 reported the vocabulary difference as +0.3 % overall and −1.2 % to
     +3.7 % per prompt; pooled over both binaries it is +0.2 %, and the span
-    across the sixteen (binary, prompt) cells is −2.2 % to +3.7 %.
+    across the sixteen (binary, prompt) cells is −2.2 % to +3.7 %. The status
+    board in [`RETEST_TODO.md`](RETEST_TODO.md) repeated the +0.3 %.
 28. The pull-request body said the uncommitted server logs are 7 GB; the
     script that archives them says ~3 GB in three places.
 29. A17's per-repeat CV table mixed two definitions inside one table, in an
     entry about two definitions being confused: `spec-mtp-n2`'s 0.50 % was
     `carryover.py`'s `spread` rather than the header's mean-of-CV, and
     `spec-dflash-n2-cap`'s 1.71 % was neither.
+30. Four places reported the thinking control as "50/50 in D, 0/50 in C"
+    with nothing to say what the 50 counted. It is the per-arm request
+    count; over the whole run it is 250 of 250 against 0 of 650. The two
+    documents and the status board now say which.
+31. `RETEST_TODO`'s host table called the target model 22 GiB, in a cell
+    arguing that 29 GiB of free disk was too little for it. This
+    repository's own directory listing gives 21G, twice, and the three
+    models together are 21 GiB, 508 MiB and 905 MiB; the cell now says
+    that instead.
 
 A test now refuses any table row with no header above it, and another refuses
 any path the checker opens that a fresh clone would not have.
@@ -2400,8 +2444,9 @@ Exp 2 concluded that the workload-shape hypothesis was "REFUTED". D3 shows it
 could not have tested that, because its thinking control never engaged. The
 audit ran the test it was trying to run: the same five arms with thinking
 verifiably on and verifiably off, 5 repeats each, on post-merge master
-`3737e4137`, with `thinking_suppressed` recorded per request (50/50 in the
-off run, 0/50 in the on run).
+`3737e4137`, with `thinking_suppressed` recorded per request: per arm, 50 of
+50 in the off run against 0 of 50 in the on run, which is 250 of 250 over D
+against 0 of 650 over C.
 
 | method | thinking on | thinking off | draft tokens per generated token |
 |---|---:|---:|---|

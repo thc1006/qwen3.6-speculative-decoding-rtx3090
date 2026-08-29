@@ -308,10 +308,10 @@ adversarial pass over this branch's own commits found:
   five are parsed cell by cell now, but "all of them" was a statement about the
   ones that had been found, not about the class, and each had been found by
   accident. The class is counted instead. Of 136 published tables 125 carry
-  measurements and 119 are parsed cell by cell. When 80 were still unparsed,
+  measurements and 125 are parsed cell by cell. When 80 were still unparsed,
   perturbing one cell of each left 67 that accept a wrong number with nothing
-  noticing; seventy-four of those 80 are parsed now, and the rest are the open
-  work.
+  noticing; all 80 of those are parsed now, and no published table that
+  carries a measurement is left unparsed.
 
   One cell per table was too weak a test to say a table is guarded. Perturbing
   every number instead, 1413 across the parsed tables, found 80 that no
@@ -361,7 +361,7 @@ adversarial pass over this branch's own commits found:
   the checker inside a clean checkout of HEAD, and there it died 373 assertions
   early, so the probe's own baseline was broken and it was measuring nothing.
   The logs are committed now and a test refuses any path the checker opens that
-  a fresh clone would not have. A clean checkout runs all 3523 assertions and
+  a fresh clone would not have. A clean checkout runs all 3643 assertions and
   exits 0, which it did not before.
 
   Two figures in those tables are not re-derivable here and say so rather than
@@ -450,7 +450,7 @@ W added 500 more the next day. What keeps this a draft is below, under
 
 ```
 python analysis/rederive_from_logs.py bench   # raw logs -> the committed JSON
-python analysis/verify_claims.py          # 3523 assertions, re-derived
+python analysis/verify_claims.py          # 3643 assertions, re-derived
 python analysis/check_data_integrity.py   # structure of all 65 run directories
 python -m unittest discover tests         # 223 regressions for defects shipped here
 python tests/mutate.py                    # break each fix, require its test to fail

@@ -1147,7 +1147,9 @@ concurrent MTP smoke test.
 
 Found during the audit. The pre-audit "validation timeline" cited papers and
 unrelated issues; these are the same-class implementation reports, and several
-concern this exact model family.
+concern this exact model family. The left column quotes each report's own
+title, so the figures in it are theirs; every figure in the right column is
+this repository's and is re-derived by `analysis/verify_claims.py`.
 
 | Issue | Why it matters here |
 |---|---|

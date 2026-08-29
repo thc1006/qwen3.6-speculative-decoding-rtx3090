@@ -7,17 +7,23 @@ bench host.
 ## Environment confirmed 2026-08-25
 
 Probed read-only over Tailscale, then used for the runs recorded below.
+† marks a figure that was read off a host on that date and is not
+reproducible from anything in this archive: free disk, driver versions,
+and this box's GPU occupancy and CUDA version. The `3090` column's GPU
+reading is not one of them: every run manifest in
+[`v4_audit_2026_08_25/data/`](v4_audit_2026_08_25/data/) records the same
+`82 MiB, 0 %` from its own `nvidia-smi`.
 
 | | `3090` (100.112.135.98) — the v2/v3 bench host | `thc1006-debian13` (this box) |
 |---|---|---|
-| GPU | 1 × RTX 3090, **82 MiB used, 0 % util — idle** | 1 × RTX 3090, **20.2 GiB used** by a qwen3.8 `llama-server` |
-| driver | 580.173.02 (was 580.126.09 at bench time) | 610.43.02 |
-| disk free | **262 GiB** | 29 GiB — too small for the 22 GiB target |
+| GPU | 1 × RTX 3090, **82 MiB used, 0 % util — idle** | 1 × RTX 3090, **20.2 GiB used** † by a qwen3.8 `llama-server` |
+| driver | 580.173.02 † (was 580.126.09 at bench time) | 610.43.02 † |
+| disk free | **262 GiB** † | 29 GiB † — the three models are 21 GiB, 508 MiB and 905 MiB, and a CUDA build tree beside them does not fit |
 | target model | `~/models/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf` ✅ | absent |
 | draft model | `~/models/Qwen3.5-0.8B-Q4_K_M.gguf` ✅ | absent |
 | DFlash drafter | `~/models/qwen36-dflash.gguf` ✅ | absent |
 | llama.cpp | `~/bench/llama.cpp` @ `bcb5eeb64`, branch `pr-22105` present, libs built for `8863`/`8889`/`8942` | `llamacpp-master` @ `c060ca9`, `llamacpp-dflash2` @ `d1a522f` |
-| toolchain | `nvcc`, `gcc`, `cmake`, `ninja` present; `git fetch` reaches upstream (master now `c1d0e7a00`) | CUDA 13.3, no nvcc on PATH |
+| toolchain | `nvcc`, `gcc`, `cmake`, `ninja` present; `git fetch` reaches upstream (master now `c1d0e7a00`) | CUDA 13.3 †, no nvcc on PATH |
 | `llama-completion` | present ✅ | not built |
 | gguf tooling | `gguf_set_metadata.py` / `gguf_new_metadata.py` present, but system python has **no numpy/tqdm** | — |
 
@@ -39,8 +45,8 @@ should have used and did not:
 
 | # | task | state |
 |---|---|---|
-| P0-1 | draft-GGUF BOS key, matched vs translation A/B | **done** — real defect, worth +0.3 %, not the cause |
-| P0-2 | a thinking control that actually works | **done** — `chat_template_kwargs {"enable_thinking": false}`, verified per request, 50/50 |
+| P0-1 | draft-GGUF BOS key, matched vs translation A/B | **done** — real defect, worth +0.2 %, not the cause |
+| P0-2 | a thinking control that actually works | **done** — `chat_template_kwargs {"enable_thinking": false}`, verified per request, 50 of 50 per arm |
 | P0-3 | true acceptance across configurations | **done** — every arm of the matrix carries honest counters on post-merge master |
 | P1-1 | one binary, ABBA, N ≥ 5, full capture | **done** — 13 arms × 5 repeats, 900 requests, hashed manifest |
 | P1-2 | the missing fp16-KV no-speculation control | **done** — closes ERRATA B7 |
@@ -338,8 +344,9 @@ becomes far stronger and is finally measured on a clean path.
 The switch that works on this stack is the request-level
 `chat_template_kwargs: {"enable_thinking": false}` on `/v1/chat/completions`,
 and `bench/retest_runner.py` records `thinking_suppressed` per request from the
-length of the reasoning channel rather than assuming it. Measured: 50/50
-suppressed with it, 0/50 without, and completions then stop naturally at
+length of the reasoning channel rather than assuming it. Measured, per arm:
+50 of 50 requests suppressed with it and 0 of 50 without, which is 250 of 250
+over run D against 0 of 650 over run C, and completions then stop naturally at
 22–300 tokens instead of every one hitting the cap. Original text below.
 
 

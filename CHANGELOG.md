@@ -12,9 +12,9 @@ publication point with its own data set.
 is now measured rather than assumed.** `analysis/table_coverage.py` counts the
 tables in the nine published documents; `--probe` writes a wrong number into
 one cell of each in turn and asks whether an assertion that was passing now
-fails. Of 136 tables, 125 carry measurements and 119 are parsed cell by cell.
+fails. Of 136 tables, 125 carry measurements and all 125 are parsed cell by cell.
 When 80 were still unparsed, perturbing one cell of each left **67 that accept
-a wrong number and nothing notices**; seventy-four of those 80 are parsed now.
+a wrong number and nothing notices**; all 80 of those are parsed now.
 Full accounting in [`ERRATA.md`](ERRATA.md) A19.
 
 **One cell a table is too weak a test.** Perturbing every number of every
@@ -22,14 +22,15 @@ parsed table instead found 80 more that nothing read, nearly all a second or
 third number inside a cell whose parser read the front and stopped: whole
 interval columns reached through `.split("[")[0]`, a configuration column
 nobody read, the `100 %` on a total row. Guarding those grew the parsed set and
-the probe over the grown set found 33 more; the run after that perturbs all
-2 252 numbers in the 119 parsed tables and none survives. That is what the W three-design table
+the probe over the grown set found 33 more; the run after that perturbed all
+2 252 numbers in the 119 tables parsed at the time and none survived, and
+parsing the last six grew the population again, to 2 373 across 125. That is what the W three-design table
 had done, in both documents that carry it: only the W column was read, so V2's
 `+12.03` and V3's `+12.17`, two thirds of a three-way comparison, could have
 been anything.
 
-The measurement was wrong twice before it measured anything, and both mistakes
-are recorded in the file. The first used the claim checker's exit status, and
+The measurement was wrong three times before it measured anything, and all
+three are recorded in the file. The first used the claim checker's exit status, and
 every table came back caught, because one unrelated assertion was failing at
 the time and the checker exited non-zero whatever was done to the documents; a
 probe whose control and treatment agree measures nothing, so it compares
@@ -37,7 +38,9 @@ failure *sets* now. The second matched a table header against the literals the
 checker parses without asking which document the reader reads, so a table
 duplicated into a second document counted as parsed there too, which is how the
 changelog's own copy of the re-derivation table passed as covered while
-accepting a wrong number.
+accepting a wrong number. The third is below: the checker read a file
+`.gitignore` excluded, so inside the probe's clean checkout it died 373
+assertions early and every shard compared against a broken baseline.
 
 **And it had the defect it exists to find, twice more.** Its number extractor
 fell back to integers only when a cell held no decimal, so `p_min 0 / 0.50 /
@@ -92,14 +95,17 @@ coverage probe's worktree, a clean checkout of HEAD, where the checker died
 nothing. The eight v4 harness logs are committed now and a test refuses any
 path the checker opens that a fresh clone would not have.
 
-**Two figures in those tables cannot be re-derived here and say so.** A14's
+**Figures in those tables that cannot be re-derived here say so.** A14's
 `n_batch 2048, n_ubatch 512` came from a `-v` server log this repository does
-not commit, and C4b's ~83 °C is the card's datasheet slowdown point rather
-than a reading. Both are marked; the alternative was to check a literal
-against itself and call it verified.
+not commit, C4b's ~83 °C is the card's datasheet slowdown point rather than a
+reading, and the host table in [`RETEST_TODO.md`](RETEST_TODO.md) is a
+read-only probe of two machines on one day: free disk, driver versions and
+the other box's GPU and CUDA cannot be recovered from anything committed
+here. Each is marked; the alternative was to check a literal against itself
+and call it verified.
 
-Forty-three tables are parsed that were not, eight of them census corrections
-and thirty-five new readers: every cell of run C's thirteen arms, run O's
+Eighty-one tables are parsed that were not, eight of them census corrections
+and seventy-three new readers: every cell of run C's thirteen arms, run O's
 head-to-head, the v1 representative table including both of its range rows,
 runs J, K, L and N, the V2 and V3 columns of the W table, both run registries,
 A4's log reconstruction, A14's M1-against-Q comparison, A16's six invocations,
@@ -107,7 +113,10 @@ A17's per-repeat rates and its length-matched split, B4's family minima, the
 BOS-override table in the two documents that publish it, run I's acceptance
 under batching, the three batching tables, C4b's thermal table, v3's
 cross-method ranking, Exp 2's variance decomposition, the memory-policy table
-and both file maps. The census itself is now a gate: `verify_claims.py` pins
+and both file maps, and last the six that had held out: the status board and
+the host probe in [`RETEST_TODO.md`](RETEST_TODO.md), A14's between-run
+spreads, A8's `p_min` sweep, the README's upstream-issue table and the v4
+audit's open gaps. The census itself is now a gate: `verify_claims.py` pins
 the table count exactly and the parsed count as a floor, so a new table must be
 parsed or accounted for, and every markdown file must be either censused or
 excluded with a stated reason.
