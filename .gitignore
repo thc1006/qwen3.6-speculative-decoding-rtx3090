@@ -5,6 +5,10 @@ __pycache__/
 # bench evidence: per-prompt llama-cli output and verbose dumps must survive
 # `git clean` and round-trips through `git add -A`.
 !v2_3090_followup/**/*.log
+# and the v4 harness logs, which carry the fitter's placement decision that
+# ERRATA A14 cites. They were ignored, so a fresh clone could not re-derive it
+# and the coverage probe crashed on the first check that read one.
+!v4_audit_2026_08_25/data/*.log
 .DS_Store
 social/
 

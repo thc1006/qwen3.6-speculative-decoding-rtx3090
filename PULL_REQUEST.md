@@ -26,8 +26,9 @@ could be checked was right. The third review's findings are listed under
 
 One RTX 3090, llama.cpp `3737e4137`, Qwen3.6-35B-A3B-UD-Q4_K_XL, greedy, ten
 prompts, thinking on, one request at a time. **Eight speculative configurations
-and one no-speculation baseline** (nine arms) in **one balanced Latin square**:
-nine blocks, every arm in every position exactly once, verified from the
+and one no-speculation baseline** (nine arms) in **one Latin square balanced
+for position**: nine blocks, every arm in every position exactly once, verified
+from the
 arm-runs' own monotonic timestamps rather than from the design.
 
 The interval below is over the nine blocks **of this one invocation**, in one
@@ -306,12 +307,67 @@ adversarial pass over this branch's own commits found:
   the row is 30.4 % and the column consequently added to 100.1 (**B9**). Those
   five are parsed cell by cell now, but "all of them" was a statement about the
   ones that had been found, not about the class, and each had been found by
-  accident. The class is counted instead: of 136 published tables 124 carry
-  measurements, 44 are parsed, and perturbing the other 80 one cell at a time
-  leaves 67 that accept a wrong number with nothing noticing. Perturbing the 44
-  that are parsed catches all 44. `analysis/table_coverage.py` is the
+  accident. The class is counted instead. Of 136 published tables 125 carry
+  measurements and 119 are parsed cell by cell. When 80 were still unparsed,
+  perturbing one cell of each left 67 that accept a wrong number with nothing
+  noticing; seventy-four of those 80 are parsed now, and the rest are the open
+  work.
+
+  One cell per table was too weak a test to say a table is guarded. Perturbing
+  every number instead, 1413 across the parsed tables, found 80 that no
+  assertion notices: whole interval columns read as `.split("[")[0]` and
+  stopped, a configuration column nobody read, the `100 %` on a total row. Each
+  is compared against a value derived from the data, and the measurement says
+  so: on 2026-08-29 the probe perturbed all 2 252 numbers across the 119
+  parsed tables and none of them changed nothing. It took three runs, because
+  the population grows as the coverage does and a clean run is only clean for
+  the tree it ran on.
+  `analysis/table_coverage.py --probe --covered --every-cell` is the
   measurement and **A19** the accounting; 84 data and document perturbations
   remain permanent tests.
+
+  Parsing the rest of them, rather than reading them, found seventeen more
+  published statements wrong. The run registry had run C at three repeats
+  where its manifest says five and run D at thirteen arms where it has five;
+  it said "30 requests each" for runs A and B, which is B, while run A's two
+  speculative arms abort part way at twelve. Run E's row named three of the
+  four draft lengths it swept. A blank line had orphaned the tier registry's
+  **v4 audit** row from its header, so GitHub rendered the controlled tier as
+  literal pipes. A14 called two runs' recorded argv byte-identical when one of
+  the thirty tokens, the listening port, differs. A17's split table carried run
+  V's largest **mode** contrast in a column asking for its largest
+  length-matching shift, said the external drafter appears three times across
+  the thinking-off runs where it appears five, and quoted three coefficients
+  under a four-row table so that a reader lining them up read the wrong arm's.
+  A15's O2-against-T baseline row read +0.54 % where the pooled rates give
+  +0.53 %. `BENCHMARK_ENV.md` put run N in the `-fit on` group when N ran
+  pinned, named no run W, and counted seventeen telemetry traces where the tree
+  holds sixteen. The v4 file map said forty-one directories a line above a row
+  saying sixty-five, and the README's data map counted 62 v2 logs where the
+  three directories hold 61. Four more came out of the last batch: the v4
+  README's prompt-set table put a figure in a column headed "run M3" for an arm
+  run M3 does not carry, and the number it held was run L's thinking-**on**
+  figure; the thinking-off table beside it took one column from run M1's
+  aggregate and the other from run M3's pooled rate without saying so; B8's row
+  census still counted the tree as it stood before run W, 13 344 rows where it
+  now holds 18 344; run W's carryover table said the arms it does not name move
+  under 0.15 % where the largest moves 0.18 %; and the changelog credited run M
+  with a range that is run O's two metrics for the same arm.
+
+  One of the new checks read a file no clone has. The fitter placement A14
+  cites lives in `v4_audit_2026_08_25/data/matrix_M.log`, and `.gitignore`
+  line 4 is `*.log`, so the eight v4 harness logs were on the bench host and in
+  nobody's checkout. It surfaced the only way it could: the coverage probe runs
+  the checker inside a clean checkout of HEAD, and there it died 373 assertions
+  early, so the probe's own baseline was broken and it was measuring nothing.
+  The logs are committed now and a test refuses any path the checker opens that
+  a fresh clone would not have. A clean checkout runs all 3521 assertions and
+  exits 0, which it did not before.
+
+  Two figures in those tables are not re-derivable here and say so rather than
+  being checked against themselves: A14's two batch sizes, read from a server
+  log this repository does not commit, and C4b's ~83 °C, which is the card's
+  datasheet.
 
 ## What the third review found
 
@@ -324,7 +380,7 @@ changed. Nothing in it was rejected.
 - **A12's boundary.** Answered by measurement: run T4 splits the checkpoint
   timers and the wait is **0.002 s of 39.09 s**, above. The four-repeat timer
   matrix has no MTP arm.
-- **Scope.** The controlled tier is runs A to V3, not A to T3. Its findings are
+- **Scope.** The controlled tier is runs A to W, not A to T3. Its findings are
   for llama.cpp `3737e4137` under the recorded configuration, not "current
   llama.cpp": #25004, #27705, #27572 and #24055 are all open and all touch
   recurrent rollback, output row ordering, MTP correctness or hybrid checkpoint
@@ -384,16 +440,17 @@ changed. Nothing in it was rejected.
 
 Both merge blockers that needed GPU time are now closed by measurement (runs V2
 and V3 for P0-1, run T4 for P0-2), and the raw evidence for all three is
-published. **9.5 hours on the bench card, 618 arm-runs, none failed.** What keeps
-this a draft is below, under *Not closed*.
+published. **9.5 hours on the bench card, 618 arm-runs, none failed**, and run
+W added 500 more the next day. What keeps this a draft is below, under
+*Not closed*.
 
 ## Checking it
 
 ```
 python analysis/rederive_from_logs.py bench   # raw logs -> the committed JSON
-python analysis/verify_claims.py          # 2741 assertions, re-derived
+python analysis/verify_claims.py          # 3521 assertions, re-derived
 python analysis/check_data_integrity.py   # structure of all 65 run directories
-python -m unittest discover tests         # 218 regressions for defects shipped here
+python -m unittest discover tests         # 223 regressions for defects shipped here
 python tests/mutate.py                    # break each fix, require its test to fail
 python tests/data_mutate.py               # perturb a measurement or a published
                                           #   figure, require the checker to fail
@@ -423,7 +480,7 @@ literals. Six of them did, and were rewritten.
   ran before it. That is the experiment that would settle its +5.9-vs-+8.7 pp
   disagreement, and it has not been run.
 - **The request-mean columns.** `predicted_per_second` is llama.cpp's own field
-  and it divides `n − 1` tokens by the time for `n`, in 13 300 of 13 344
+  and it divides `n − 1` tokens by the time for `n`, in 18 300 of 18 344
   committed request rows, exactly. Every **request-mean** column in this
   repository inherits that, understating by `(n − 1) / n`: 0.33 % at 300 tokens.
   No headline figure or published delta contains it, because those are pooled
@@ -432,7 +489,7 @@ literals. Six of them did, and were rewritten.
   published request-means to move them by a third of a percent is listed rather
   than done (**B8**), and the relationship is asserted so it cannot change
   silently.
-- The 7 GB of llama-server logs are not committed.
+- The ~3 GB of llama-server logs are not committed. That is the size `bench/collect_evidence.sh` states in three places and the audit README beside it; this line said 7 GB.
   `v4_audit_2026_08_25/EVIDENCE_MANIFEST.sha256` holds the SHA-256 of all 1320
   of them and of the 21 telemetry traces; both compressed tranches are published
   as release assets, and `analysis/rederive_from_logs.py` re-runs the

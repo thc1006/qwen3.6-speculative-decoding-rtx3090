@@ -3100,7 +3100,8 @@ class TheSuiteMustRunOnAStockInterpreter(unittest.TestCase):
         allowed = stdlib | {"host_guard", "publish_pr_body", "carryover",
                             "length_mode", "paired_blocks", "rr_under_test",
                             "rederive_from_logs", "past_threshold_fit",
-                            "verify_claims", "extract_checkpoint_timers"}
+                            "verify_claims", "extract_checkpoint_timers",
+                            "table_coverage"}
         offenders = []
         for f in sorted((self.ROOT / "tests").glob("*.py")):
             tree = _ast.parse(f.read_text(encoding="utf-8"))
@@ -3117,6 +3118,101 @@ class TheSuiteMustRunOnAStockInterpreter(unittest.TestCase):
         self.assertEqual(offenders, [],
                          "the unit job installs nothing, so these imports pass "
                          "locally and ERROR in CI")
+
+
+class TheCheckerMayOnlyReadCommittedFiles(unittest.TestCase):
+    """A claim whose evidence is not in the repository cannot be checked.
+
+    `analysis/verify_claims.py` read `v4_audit_2026_08_25/data/matrix_M.log`
+    for the fitter placement ERRATA A14 cites, and `.gitignore` line 4 is
+    `*.log`, so the file existed on the bench host and in nobody's clone. It
+    surfaced as a crash inside the coverage probe's worktree, which is a clean
+    checkout of HEAD: the probe's baseline was a checker that died 373
+    assertions early, and a probe whose control is broken measures nothing.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    def test_every_path_the_checker_opens_is_tracked(self):
+        import ast as _ast
+        src = (self.ROOT / "analysis" / "verify_claims.py").read_text(
+            encoding="utf-8")
+        tracked = set(subprocess.run(
+            ["git", "ls-files"], cwd=self.ROOT, capture_output=True,
+            text=True, check=True).stdout.split())
+        missing = []
+        for node in _ast.walk(_ast.parse(src)):
+            if not (isinstance(node, _ast.Constant)
+                    and isinstance(node.value, str)):
+                continue
+            rel = node.value
+            if "/" not in rel or rel.startswith(("/", "http", "|")):
+                continue
+            if "*" in rel or "{" in rel:      # a glob names no single file
+                continue
+            # a prose literal can be longer than a path is allowed to be, and
+            # `is_file()` raises rather than returning False on those
+            if len(rel) > 200 or "\n" in rel or " " in rel.rsplit("/", 1)[-1]:
+                continue
+            try:
+                if not (self.ROOT / rel).is_file():
+                    continue
+            except OSError:
+                continue
+            if rel not in tracked:
+                missing.append(rel)
+        self.assertEqual(sorted(set(missing)), [],
+                         "the checker reads these and a fresh clone does not "
+                         "have them")
+
+
+class NoTableRowMayBeOrphanedFromItsHeader(unittest.TestCase):
+    """A blank line inside a table ends it, and the rest renders as text.
+
+    README.md had one before the `**v4 audit**` row: the controlled tier, the
+    row the whole registry exists for, sat alone under a blank line. GitHub
+    needs the delimiter directly under the header, so a lone `| ... |`
+    paragraph is not a table at all and the row published as raw pipes. The
+    census could not see it either, because the reader stops at the blank.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    @staticmethod
+    def _is_rule(s):
+        bare = s.replace("|", "").replace(" ", "")
+        return bool(bare) and set(bare) <= set("-:")
+
+    def test_every_table_row_belongs_to_a_table(self):
+        orphans = []
+        for f in sorted(self.ROOT.rglob("*.md")):
+            if ".git" in f.parts:
+                continue
+            lines = f.read_text(encoding="utf-8").splitlines()
+            fence = intable = False
+            for i, line in enumerate(lines):
+                stripped = line.strip()
+                if stripped.startswith("```") or stripped.startswith("~~~"):
+                    fence, intable = not fence, False
+                    continue
+                if fence:
+                    continue
+                s = stripped.lstrip("> ").strip()
+                if not s.startswith("|"):
+                    intable = False
+                    continue
+                nxt = (lines[i + 1].strip().lstrip("> ").strip()
+                       if i + 1 < len(lines) else "")
+                if nxt.startswith("|") and self._is_rule(nxt):
+                    intable = True
+                    continue
+                prev = lines[i - 1].strip().lstrip("> ").strip() if i else ""
+                if not intable and not prev.startswith("|"):
+                    orphans.append(
+                        f"{f.relative_to(self.ROOT)}:{i + 1} {s[:60]}")
+        self.assertEqual(orphans, [],
+                         "these rows have no header above them and render as "
+                         "literal pipes")
 
 
 class EveryTranchePublishedMustBeVerified(unittest.TestCase):
@@ -3288,6 +3384,62 @@ class EveryTranchePublishedMustBeVerified(unittest.TestCase):
         self.assertEqual(invented, [],
                          f"{len(invented)} digest(s) the workflow checks that "
                          f"appear nowhere in the manifest: {[d[:12] for d in invented]}")
+
+
+class TheTableCensusMustSeeEveryReader(unittest.TestCase):
+    """A bespoke reader is invisible to a scan that looks for named functions.
+
+    `analysis/table_coverage.py` finds a parsed table by looking for its header
+    as an argument to one of the reader functions it knows. Six tables were read
+    by `next(l for l in LINES if l.startswith("| arm | ..."))` instead, and one
+    whole reader - `_pre_table`, for the pre-registration - was missing from the
+    map, so eight tables were counted as unparsed while being checked cell by
+    cell. Two of them were about to be parsed a second time.
+
+    So: every string in the checker that looks like a table header must be
+    something the census can account for.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+    # not a header: an ordering check that the caveat precedes the column
+    FRAGMENTS = {"| request-mean |"}
+
+    def _tc(self):
+        sys.path.insert(0, str(self.ROOT / "analysis"))
+        import table_coverage
+        return table_coverage
+
+    def test_every_header_literal_is_accounted_for(self):
+        tc = self._tc()
+        known = {h for _d, h in tc.parsed_headers()}
+        loose = sorted(l for l in tc.header_literals()
+                       if l not in known and l not in self.FRAGMENTS)
+        self.assertEqual(
+            loose, [],
+            "these look like table headers and the census cannot see which "
+            "document they read; add the reader to READER_DOC or the table to "
+            "HAND_PARSED")
+
+    def test_every_reader_function_is_mapped_to_a_document(self):
+        tc = self._tc()
+        src = (self.ROOT / "analysis" / "verify_claims.py") \
+            .read_text(encoding="utf-8")
+        defined = {n.name for n in ast.parse(src).body
+                   if isinstance(n, ast.FunctionDef)
+                   and re.fullmatch(r"_\w*table", n.name)}
+        # `_pr_tables` lists every table in the PR body rather than reading one
+        unmapped = sorted(defined - set(tc.READER_DOC) - {"_pr_tables"})
+        self.assertEqual(unmapped, [],
+                         "a reader the census does not know about counts the "
+                         "tables it reads as unparsed")
+
+    def test_the_hand_parsed_declarations_name_real_tables(self):
+        tc = self._tc()
+        for doc, header in sorted(tc.HAND_PARSED):
+            with self.subTest(doc=doc, header=header[:40]):
+                text = (self.ROOT / doc).read_text(encoding="utf-8")
+                self.assertIn(header, text,
+                              "declared hand-parsed and not in that document")
 
 
 class EveryCIInstallMustBePinnedByHash(unittest.TestCase):

@@ -61,7 +61,7 @@ common_context_can_seq_rm: the target context does not support partial sequence 
 
 Every partially accepted round therefore takes the `continue`, is dropped from
 both numerator and denominator, and is re-verified next pass against the
-truncated — already known-accepted — prefix. Only rounds accepted in full ever
+truncated, already known-accepted, prefix. Only rounds accepted in full ever
 reach the counter, so `draft_n_accepted / draft_n` can only be 1.0.
 
 **The same log contradicts the headline on the very next line.** The drafter
@@ -99,12 +99,12 @@ reaching verification, and 79 (re-verified) + 36 = 115 reaching the counter.
 
 **Consequence.** `draft_n` in `analysis/summary.csv` is not "draft tokens
 generated". It is "draft tokens in verification rounds that were accepted in
-full", a quantity guaranteed to equal `draft_n_accepted`. A row with
-`draft_n = 0` means "no fully accepted round was recorded", **not**
-"speculation did not run". Every "100 %" in the v1/v2/v3 write-ups has been
-removed or relabelled, and `analysis/plot_accept_vs_speed.png` — whose entire
-x-axis was that artefact, with all 140 points at exactly 100 % — has been
-deleted and replaced by `analysis/plot_acceptance_accounting.png`.
+full", a quantity guaranteed to equal `draft_n_accepted`. A row with `draft_n =
+0` means "no fully accepted round was recorded", **not** "speculation did not
+run". Every "100 %" in the v1/v2/v3 write-ups has been removed or relabelled,
+and `analysis/plot_accept_vs_speed.png` (whose entire x-axis was that artefact,
+with all 140 points at exactly 100 %) has been deleted and replaced by
+`analysis/plot_acceptance_accounting.png`.
 
 **Upstream fixed this, and the audit's post-merge acceptance figures rest on
 the fix.** Every acceptance percentage this audit reports from master — 29.7 %
@@ -118,13 +118,13 @@ commit `3737e4137` rather than assumed to have changed:
 | numerator | after the early `continue` | `server-context.cpp:3859`, with a replay correction |
 | replayed tokens | re-entered both counters | excluded from the denominator |
 
-The partial-accept branch still returns early (`:3835`) — a hybrid target still
-cannot roll back part of a sequence — but the denominator no longer lives behind
+The partial-accept branch still returns early (`:3835`) (a hybrid target still
+cannot roll back part of a sequence) but the denominator no longer lives behind
 it. `slot.stats.n_draft_tokens += draft.size()` runs when the draft is
 *produced*, and a slot replaying a truncated draft never reaches that line,
-because `drafting.push_back(&slot)` at `:2921` sits inside the `else` of
-`if (!slot.spec_draft.empty())` at `:2893`. The numerator then subtracts one on
-a replay (`:3851`) so the token carried over from the truncated draft is not
+because `drafting.push_back(&slot)` at `:2921` sits inside the `else` of `if
+(!slot.spec_draft.empty())` at `:2893`. The numerator then subtracts one on a
+replay (`:3851`) so the token carried over from the truncated draft is not
 counted twice.
 
 Worked through: a round drafts 8 tokens and 3 are accepted. The denominator
@@ -137,10 +137,10 @@ values like 29.7 % where `97895129e` could only ever report 1.00000.
 **That fix is narrower than it looks, and [A13](#a13-there-are-two-acceptance-counters-they-disagree-and-the-disagreement-is-exactly-the-checkpoint-path)
 measures how narrow.** The denominator moved; the early return did not. A round
 that takes the checkpoint branch still leaves the numerator alone, so on paths
-where that branch fires the server counter under-counts — by 11.6 pp for
+where that branch fires the server counter under-counts: by 11.6 pp for
 `spec-draft-n8`, by 53.3 pp for `ngram-map-k4v-m8`. Where it never fires, at
-every DFlash and MTP arm measured here, the server counter and the drafter's own
-counter agree to within 0.5 pp across 31 arm-runs.
+every DFlash and MTP arm measured here, the server counter and the drafter's
+own counter agree to within 0.5 pp across 31 arm-runs.
 
 ---
 
@@ -149,7 +149,7 @@ counter agree to within 0.5 pp across 31 arm-runs.
 **Claimed.** Everywhere: "classic draft with the **vocab-matched**
 `Qwen3.5-0.8B` (vocab 248320)", "correct-vocab classic SD".
 
-**Actual.** The vocabulary *sizes* match — `Qwen/Qwen3.6-35B-A3B`
+**Actual.** The vocabulary *sizes* match: `Qwen/Qwen3.6-35B-A3B`
 `text_config.vocab_size = 248320` and `Qwen/Qwen3.5-0.8B`
 `text_config.vocab_size = 248320`, both verified against the model cards. But
 llama.cpp's compatibility test is stricter, and it fails:
@@ -186,8 +186,8 @@ Exactly one key differs, and it is one the draft GGUF does not have at all:
 | `tokenizer.ggml.add_bos_token` | `false` | absent (default `false`) |
 | BOS as resolved by llama.cpp | `248044 '<\|endoftext\|>'` | **`11 ','`** |
 
-`Qwen/Qwen3.5-0.8B` has **no `generation_config.json` upstream** — HTTP 404 on
-both the Qwen and unsloth repos — so `convert_hf_to_gguf.py` had no
+`Qwen/Qwen3.5-0.8B` has **no `generation_config.json` upstream**, HTTP 404 on
+both the Qwen and unsloth repos, so `convert_hf_to_gguf.py` had no
 `bos_token_id` to write. `src/llama-vocab.cpp:1838` then supplies the
 hard-coded GPT-2 legacy default `special_bos_id = 11`, and the KV loop at line
 2313 never overrides it. Meanwhile **both** models declare `bos_token = None`
@@ -204,8 +204,8 @@ Of the gate's four conditions, exactly one fails:
 | `llama_vocab_bos` | 248044 | **11** | **fail** |
 | `llama_vocab_eos` | 248046 | 248046 | pass |
 
-Adding `--override-kv tokenizer.ggml.bos_token_id=int:248044` at load time — no
-file edit, and a no-op for the target, which already carries that value — flips
+Adding `--override-kv tokenizer.ggml.bos_token_id=int:248044` at load time (no
+file edit, and a no-op for the target, which already carries that value) flips
 `vocab_cmpt` from `0` to `1` and removes the warning. That also proves the two
 token arrays are byte-identical, because the gate's per-token text comparison
 from id 5 to 248320 runs only once the special-token check passes.
@@ -214,7 +214,7 @@ from id 5 to 248320 runs only once the special-token check passes.
 on 2026-08-25 (`llama-server` @ `bcb5eeb64`, `--draft-max 8 --draft-min 4`,
 greedy, the ten v1 prompts, ABBA-ordered, three arms interleaved):
 
-> **`request-mean` is llama.cpp's own `predicted_per_second`, averaged.** That field divides `n − 1` generated tokens by the time for `n`, in 13 300 of 13 344 committed request rows, so every request-mean here is low by `(n − 1) / n` — 0.33 % at 300 tokens and more at shorter lengths. It is uniform across arms on a run where every request hits the same cap, and it is NOT uniform where the arms stop at different lengths, so it must not carry a cross-arm comparison in the thinking-off runs. Every headline figure and every published delta is a **pooled** rate computed from `predicted_n` and `predicted_ms` directly and contains none of this. See [B8](#b8-every-request-mean-here-counts-one-token-fewer-than-it-timed).
+> **`request-mean` is llama.cpp's own `predicted_per_second`, averaged.** That field divides `n − 1` generated tokens by the time for `n`, in 18 300 of 18 344 committed request rows, so every request-mean here is low by `(n − 1) / n`: 0.33 % at 300 tokens and more at shorter lengths. It is uniform across arms on a run where every request hits the same cap, and it is NOT uniform where the arms stop at different lengths, so it must not carry a cross-arm comparison in the thinking-off runs. Every headline figure and every published delta is a **pooled** rate computed from `predicted_n` and `predicted_ms` directly and contains none of this. See [B8](#b8-every-request-mean-here-counts-one-token-fewer-than-it-timed).
 
 | binary | arm | request-mean | drafted / accepted |
 |---|---|---:|---|
@@ -224,13 +224,13 @@ greedy, the ten v1 prompts, ABBA-ordered, three arms interleaved):
 | master `3737e4137` | matched via `--override-kv` | 33.7 | 16590 / 4926 |
 
 The drafted and accepted totals are **byte-identical** across arms on both
-binaries, per prompt as well as in aggregate (`154/576`, `140/647`,
-`211/404`, …). Throughput differs by +0.3 % overall and by −1.2 % to +3.7 %
-per prompt — noise. The translation path was not changing what got drafted.
-Full data: [`v4_audit_2026_08_25/`](v4_audit_2026_08_25/).
+binaries, per prompt as well as in aggregate (`154/576`, `140/647`, `211/404`,
+…). Throughput differs by +0.3 % overall and by −1.2 % to +3.7 % per prompt:
+noise. The translation path was not changing what got drafted. Full data:
+[`v4_audit_2026_08_25/`](v4_audit_2026_08_25/).
 
 **Consequence.** The repository's "vocab-matched" and "correct-vocab classic
-SD" claims were false and have been removed — vocabulary *size* equality was
+SD" claims were false and have been removed; vocabulary *size* equality was
 treated as proof of compatibility, and it is not. But the negative finding
 survives the fix, and is now measured on a genuinely matched path, which makes
 it stronger rather than weaker.
@@ -240,8 +240,8 @@ it stronger rather than weaker.
 ### A3. The tested build had a known-broken speculative path for this model class, and the fix was never merged
 
 The `COMMON_CONTEXT_SEQ_RM_TYPE_FULL` fallback in A1 is not incidental. The
-same string — "the target context does not support partial sequence removal" —
-is the symptom llama.cpp PR #20075 was opened to fix. From its body:
+same string ("the target context does not support partial sequence removal") is
+the symptom llama.cpp PR #20075 was opened to fix. From its body:
 
 > Speculative decoding on hybrid SSM/MoE models is broken right now. With a
 > draft model you either crash immediately ("the target context does not
@@ -274,7 +274,7 @@ reported 63.2 tok/s (≈ 3165 ms of generation):
 Roughly a third of the generation wall-clock is the draft model alone, and
 about 38 % of verification rounds are paid for twice. These terms account for
 the observed slowdown without invoking expert-union loading. They do not rule
-that mechanism out — nothing here measures expert routing — but the repository
+that mechanism out, nothing here measures expert routing, but the repository
 previously presented the expert-union story as the explanation while this
 decomposition sat unread in its own committed log.
 
@@ -297,8 +297,8 @@ With `--jinja` and a reasoning model, llama-server routes `<think>` content to
 `content` with `predicted_n == 300` means the cap was reached **inside the
 thinking block**. v1 never captured `reasoning_content`, so this was invisible.
 
-The two prompts carrying the entire published slow tail — `code_small` and
-`reasoning` — are 19/19 thinking-only. v1 therefore measured decode throughput
+The two prompts carrying the entire published slow tail, `code_small` and
+`reasoning`, are 19/19 thinking-only. v1 therefore measured decode throughput
 on truncated chain-of-thought traces, not on answers, and the "structured
 prompts collapse" narrative is really "the drafter matched inside a long
 reasoning trace". v1 never attempted to disable thinking; v2, v3 and Exp 2
@@ -315,7 +315,7 @@ ratios, and the anomaly disappears.
 and they point in opposite directions. Reporting either without saying which
 one it is would repeat the mistake this audit exists to correct.
 
-**Contrast 1 — within one configuration, across prompts.** Prompts the drafter
+**Contrast 1: within one configuration, across prompts.** Prompts the drafter
 predicts well run faster, almost exactly in proportion. On post-merge master
 `3737e4137`, five repeats of a thirteen-arm matrix, every draft-model
 configuration reproduces this independently:
@@ -330,10 +330,10 @@ configuration reproduces this independently:
 | `--spec-draft-n-max 32` | **+0.999** | 5.2 – 15.7 % |
 | v1's configuration (max 8, min 4) | **+0.999** | 20.4 – 52.2 % |
 
-**Six distinct draft lengths**, spanning acceptance from 5 % to 83 %, all at
-r ≥ +0.996. The seventh row is not an independent configuration and should not
-be counted as one: v1's setting differs from `n_max 8` only in `n_min`, and at
-this draft length that changes almost nothing — 32.27 against 32.10 pooled
+**Six distinct draft lengths**, spanning acceptance from 5 % to 83 %, all at r
+≥ +0.996. The seventh row is not an independent configuration and should not be
+counted as one: v1's setting differs from `n_max 8` only in `n_min`, and at
+this draft length that changes almost nothing, 32.27 against 32.10 pooled
 tok/s, 29.69 % against 29.67 % acceptance, and three of ten prompts drafting a
 byte-identical number of tokens. What it does establish is that `n_min` is not
 the knob that matters here.
@@ -344,12 +344,12 @@ across the ten prompts, a 1.4 % total spread**, so the large per-prompt
 variation inside every speculative arm is driven by speculation rather than by
 some prompts being intrinsically faster to decode.
 
-**Contrast 2 — across configurations.** Here the sign flips:
-r = **−0.544** over the eleven speculative arms. That is not a contradiction,
-it is a different question. A configuration that drafts aggressively achieves
-*higher* acceptance per attempt while paying for far more drafted tokens, so
-across methods the total cost dominates. Draft volume against speed gives
-r = −0.603, and the ordering makes the mechanism plain:
+**Contrast 2: across configurations.** Here the sign flips: r = **−0.544** over
+the eleven speculative arms. That is not a contradiction, it is a different
+question. A configuration that drafts aggressively achieves *higher* acceptance
+per attempt while paying for far more drafted tokens, so across methods the
+total cost dominates. Draft volume against speed gives r = −0.603, and the
+ordering makes the mechanism plain:
 
 | arm | draft tokens per generated token | pooled tok/s | acceptance |
 |---|---:|---:|---:|
@@ -384,7 +384,7 @@ change.
 | 16 | 23.7 | −80.8 % | 53 740 | 15.0 % |
 | 32 | 17.3 | −86.0 % | 102 575 | 8.0 % |
 
-There is an optimum, at n_max = 4 — and it is still 71 % below the
+There is an optimum, at n_max = 4, and it is still 71 % below the
 no-speculation baseline. The peak is real but shallow: per-repeat SD is 0.055
 for n_max 2 and 0.076 for n_max 4, against a 1.4 tok/s gap between them.
 
@@ -409,18 +409,18 @@ ms per generated token = 27.00 + 4.040 × (draft tokens per generated token)
 R² = 0.99303,  n_max = 1 … 128
 ```
 
-No expert term, 99.3 % of the variance, and the slope reads sensibly — 4.04 ms
+No expert term, 99.3 % of the variance, and the slope reads sensibly: 4.04 ms
 per speculated position against a measured 8.11 ms no-speculation decode step,
-almost exactly half a target step per drafted token, which is what an autoregressive
-0.8 B drafter plus its share of the verify pass should cost.
+almost exactly half a target step per drafted token, which is what an
+autoregressive 0.8 B drafter plus its share of the verify pass should cost.
 
 > [!IMPORTANT]
-> **Read this law inside its scope.** Every arm of the sweep ran at
-> `p_min = 0`, post-merge master's default, which means the drafter emitted the
-> full `n_max` every round regardless of confidence. Every archived number in
-> this repository ran at `p_min = 0.75` instead ([A8](#a8-the-audits-own-matrix-has-an-uncontrolled-difference-from-the-archive-p_min)).
+> **Read this law inside its scope.** Every arm of the sweep ran at `p_min =
+> 0`, post-merge master's default, which means the drafter emitted the full
+> `n_max` every round regardless of confidence. Every archived number in this
+> repository ran at `p_min = 0.75` instead ([A8](#a8-the-audits-own-matrix-has-an-uncontrolled-difference-from-the-archive-p_min)).
 > The law is fitted, and holds, only in the first regime. Tested out of sample
-> in the second it fails — see [A10](#a10-the-single-regressor-law-is-falsified-out-of-sample-and-p_min-is-the-lever-that-matters).
+> in the second it fails; see [A10](#a10-the-single-regressor-law-is-falsified-out-of-sample-and-p_min-is-the-lever-that-matters).
 
 **The step in the residuals at the 95.3 % coverage point is −0.39 percentage
 points**: −0.27 % mean below it, −0.67 % at or above, in the same
@@ -431,13 +431,14 @@ hardware. Recomputed by `analysis/past_threshold_fit.py`.
 
 Two tempting wrong answers were eliminated getting here, and both are recorded
 in [`v4_audit_2026_08_25/PREREGISTERED_PREDICTION.md`](v4_audit_2026_08_25/PREREGISTERED_PREDICTION.md):
-that per-drafted-token cost amortises past the threshold (an artefact of fitting
-only the sub-threshold points, which are dominated by `n_max` 1–4), and that
-speculative state checkpointing dominates (refuted by its own test — checkpoint
-traffic per generated token *falls* as cost *rises*, correlation −0.52).
+that per-drafted-token cost amortises past the threshold (an artefact of
+fitting only the sub-threshold points, which are dominated by `n_max` 1–4), and
+that speculative state checkpointing dominates (refuted by its own test,
+checkpoint traffic per generated token *falls* as cost *rises*, correlation
+−0.52).
 
 The model's predictions for 64/96/128 were registered in git **before** those
-measurements existed. They held to −7.5 %, −5.7 % and 0.0 % — though the
+measurements existed. They held to −7.5 %, −5.7 % and 0.0 %, though the
 agreement is partly two errors cancelling, which that file states rather than
 claims as a clean win.
 
@@ -481,7 +482,7 @@ volume and acceptance both behave differently.
 Consequences:
 
 - **Cross-binary absolute comparisons are confounded** by this on top of the
-  binary change already noted. Within-matrix arm contrasts are unaffected —
+  binary change already noted. Within-matrix arm contrasts are unaffected:
   every arm in a run shares the same `p_min`.
 - **The draft-length sweep in A7 measures "always draft `n_max`", not "draft
   until unsure".** The single-regressor law and the absence of a coverage-
@@ -494,8 +495,8 @@ Consequences:
 ### A10. The single-regressor law is falsified out of sample, and `p_min` is the lever that matters
 
 A7's law was fitted entirely at `p_min = 0`. A8 flagged that as a confound. The
-sweep that measures it is now done — 7 arms, 3 repeats, run-to-run SD 0.13 to
-0.36 tok/s across the six speculative arms — and it does two things at once: it
+sweep that measures it is now done (7 arms, 3 repeats, run-to-run SD 0.13 to
+0.36 tok/s across the six speculative arms) and it does two things at once: it
 **falsifies the law** and it produces the cleanest version of this repository's
 original claim. The no-speculation arm scatters far more, 3.16 tok/s on a mean
 of 123.8, because it is four times faster and the same absolute jitter buys a
@@ -531,8 +532,8 @@ driving the cost, it is not the number of drafted tokens. `n_max` 1 pays a
 drafter forward pass for every single token it proposes; `p_min` 0.90 proposes
 several per round and stops early when unsure.
 
-**And this partly rehabilitates the term A7 discarded.** The two-term model —
-rounds and volume — was demoted because rounds earned only 0.064 percentage
+**And this partly rehabilitates the term A7 discarded.** The two-term model,
+rounds and volume, was demoted because rounds earned only 0.064 percentage
 points of R² on the `p_min = 0` sweep. That sweep could not separate them:
 rounds per generated token sat at 0.25–0.26 across almost its whole range. The
 `p_min` sweep varies rounds independently, and refitting across both families,
@@ -543,7 +544,7 @@ rounds per generated token sat at 0.25–0.26 across almost its whole range. The
 | volume only | −10.8 % | +5.0 % | **15.7 pp** |
 | rounds + volume | −5.2 % | +1.6 % | **6.9 pp** |
 
-R² is useless for this — volume alone still reaches 0.988 because `ms/token`
+R² is useless for this: volume alone still reaches 0.988 because `ms/token`
 spans 23 to 112 and a 36 % error at the low end barely registers. The family
 separation is the metric that matters: a model that captured the physics would
 show none. Adding rounds cuts it by 56 % and does not remove it, so **neither
@@ -554,19 +555,20 @@ rather than physical.
 > **This table, the two-configuration comparison above it and the 0.064
 > percentage points were computed from repeat 0 alone until 2026-08-27**, and
 > said so: the drafter's round counts were only extracted from the rep-0 server
-> logs. That constraint was removed when `analysis/compare_acceptance_counters.py`
-> was corrected to read every repeat — the dump went from 73 arm-runs to 517 —
-> and this entry was not revisited. Pooled, the separation is 15.7 pp and
-> 6.9 pp rather than 14.7 and 5.7, the R² the rounds term earns on the
-> `p_min = 0` sweep is 0.064 points rather than 0.096, and the two
-> configurations cost 32.16 and 23.51 ms per token rather than 32.09 and 23.62.
-> Every conclusion is unchanged; the round counts themselves are identical
-> across repeats, because the drafter is deterministic.
+> logs. That constraint was removed when
+> `analysis/compare_acceptance_counters.py` was corrected to read every repeat
+> (the dump went from 73 arm-runs to 517) and this entry was not revisited.
+> Pooled, the separation is 15.7 pp and 6.9 pp rather than 14.7 and 5.7, the R²
+> the rounds term earns on the `p_min = 0` sweep is 0.064 points rather than
+> 0.096, and the two configurations cost 32.16 and 23.51 ms per token rather
+> than 32.09 and 23.62. Every conclusion is unchanged; the round counts
+> themselves are identical across repeats, because the drafter is
+> deterministic.
 
 **`p_min` is the dominant knob, not `n_max`.** Going from 0 to 0.75 at fixed
-`n_max` 8 halves draft volume, raises real acceptance from 29.7 % to 80.2 %, and
-lifts throughput by **31 %**. Meanwhile `n_max` 32 and `n_max` 128 at
-`p_min = 0.75` are not merely similar — they are **identical**, 6159 drafted
+`n_max` 8 halves draft volume, raises real acceptance from 29.7 % to 80.2 %,
+and lifts throughput by **31 %**. Meanwhile `n_max` 32 and `n_max` 128 at
+`p_min = 0.75` are not merely similar; they are **identical**, 6159 drafted
 tokens each, 70.9 % acceptance each, 42.0 tok/s each. Above the confidence
 threshold, `n_max` is inert.
 
@@ -577,8 +579,8 @@ approaches 95 tokens. The threshold-crossing sweep in A7 could only exist
 because `p_min = 0` disabled the mechanism that would otherwise prevent it.
 
 **And this is where the repository's original claim finally gets honest
-evidence.** The published version was "100 % acceptance yet slower, therefore an
-MoE pathology". The 100 % was a counter artefact (A1). But at `p_min = 0.90`
+evidence.** The published version was "100 % acceptance yet slower, therefore
+an MoE pathology". The 100 % was a counter artefact (A1). But at `p_min = 0.90`
 the acceptance rate is a genuine, correctly counted **88.2 %** — and throughput
 is still **−65.6 %**. So the *intuition* was right all along: high acceptance
 does not imply speedup here. It was the evidence that was wrong, and the
@@ -602,12 +604,11 @@ implementer:
 That is the expert-union effect this repository's original write-up asserted,
 and the implementer cross-references a second PR observing it for EAGLE3.
 
-**The cross-check behind that cross-reference is the strongest external evidence
-this repository has ever had, and it was never cited.** In
-[PR #18039](https://github.com/ggml-org/llama.cpp/pull/18039#issuecomment-3755925892)
-the same maintainer reran the comparison on **SGLang** — a different engine —
-on **DGX Spark** with **gpt-oss-120b + EAGLE3**, to check whether llama.cpp was
-at fault:
+**The cross-check behind that cross-reference is the strongest external
+evidence this repository has ever had, and it was never cited.** In [PR #18039](https://github.com/ggml-org/llama.cpp/pull/18039#issuecomment-3755925892)
+the same maintainer reran the comparison on **SGLang**, a different engine, on
+**DGX Spark** with **gpt-oss-120b + EAGLE3**, to check whether llama.cpp was at
+fault:
 
 | prompt | baseline | EAGLE3, draft 8 | speedup | EAGLE3, draft 3 | speedup |
 |---|---:|---:|---:|---:|---:|
@@ -616,7 +617,7 @@ at fault:
 | plan a one-day trip to DC | 52.69 t/s | 24.7 | **0.47×** | 26.53 | 0.50× |
 
 Different engine, different hardware, different model, different speculative
-method — and speculative decoding is still a **29–54 % net loss** on a MoE
+method, and speculative decoding is still a **29–54 % net loss** on a MoE
 target at batch 1. That is this repository's finding, reproduced independently
 by someone who had every incentive to find the opposite.
 
@@ -631,12 +632,11 @@ four H200s, so the positive results live at multi-GPU, multi-batch scale.
 
 This sharpens rather than softens the audit's position. The narrow findings
 stand: no *coverage-threshold* signature appears in the sweep, and a single
-regressor in draft volume accounts for 99.3 % of the cost across `n_max`
-1 → 128. But "no MoE effect exists" was never the claim, upstream evidence for
-a qualitative one predates this repository, and **the untested dimension is
-batching** — which the original README listed as caveat (iv) and never
-pursued. Single-stream is exactly the regime where the effect is expected to be
-worst.
+regressor in draft volume accounts for 99.3 % of the cost across `n_max` 1 →
+128. But "no MoE effect exists" was never the claim, upstream evidence for a
+qualitative one predates this repository, and **the untested dimension is
+batching** — which the original README listed as caveat (iv) and never pursued.
+Single-stream is exactly the regime where the effect is expected to be worst.
 
 > Speedup is intrinsically limited on hybrid target models … each rejected step
 > may require one extra target forward … A more fundamental future improvement
@@ -646,10 +646,11 @@ worst.
 
 That is the replay path behind A1's counter artefact and A6's abort. It is a
 known upstream limitation with a proposed fix, not a discovery of this audit.
-What this audit adds is the measurement: 1639 state checkpoints, which the server reports at 82.079 MiB each
-in one `n_max` 1 arm-run of ten 300-token requests — 163.9 per request, not
-1639, which is what this line said until 2026-08-27 — the counter being unreachable because of it,
-and the abort it caused at `bcb5eeb64`.
+What this audit adds is the measurement: 1639 state checkpoints, which the
+server reports at 82.079 MiB each in one `n_max` 1 arm-run of ten 300-token
+requests (163.9 per request, not 1639, which is what this line said until
+2026-08-27) the counter being unreachable because of it, and the abort it
+caused at `bcb5eeb64`.
 
 ### A6. `llama-server` plus a draft model aborts on this model at `bcb5eeb64`
 
@@ -679,14 +680,14 @@ matched-vocabulary arm, so the vocabulary fallback does not cause it. The
 no-speculation arm completes all ten prompts every time.
 
 This bears on two published claims. First, v2's "cross-checked on master
-`bcb5eeb64`, identical results" is a `llama-cli` cross-check only — the
+`bcb5eeb64`, identical results" is a `llama-cli` cross-check only; the
 `llama-server` path that produced every v1 number does not survive on that
 commit with a draft model attached. Second, the abort sits in the checkpoint
-machinery introduced by PR #22227, in exactly the hybrid-SSM rollback area
-PR #20075 was opened to fix and which was closed unmerged (A3). Whether it
+machinery introduced by PR #22227, in exactly the hybrid-SSM rollback area PR
+#20075 was opened to fix and which was closed unmerged (A3). Whether it
 persists on post-merge master was then tested: it does **not**. All thirty
-requests complete on `3737e4137`. The abort is specific to the tested historical
-commit. Evidence: [`v4_audit_2026_08_25/data/abort_evidence_bcb5eeb64.txt`](v4_audit_2026_08_25/data/abort_evidence_bcb5eeb64.txt).
+requests complete on `3737e4137`. The abort is specific to the tested
+historical commit. Evidence: [`v4_audit_2026_08_25/data/abort_evidence_bcb5eeb64.txt`](v4_audit_2026_08_25/data/abort_evidence_bcb5eeb64.txt).
 
 ---
 
@@ -711,17 +712,16 @@ request and repeat by repeat:
 **The control that makes this readable.** Divergence only means something if the
 engine reproduces itself, and it does, exactly:
 
-- every arm is byte-identical across its own three repeats — 10 / 10 prompts for
+- every arm is byte-identical across its own three repeats: 10 / 10 prompts for
   all five arms;
 - the no-speculation baseline is byte-identical across two *different runs* with
-  different `-fit` settings — 30 / 30;
+  different `-fit` settings: 30 / 30;
 - and the control extends much further than run J could show. Runs T and T3 are
   two hours apart, with the llama.cpp tree reverted to stock and rebuilt twice
-  in between, and all three of their arms — no speculation, an external drafter
-  and DFlash — reproduce **10 / 10 prompts byte-identically**, token ids,
-  `content` and `reasoning_content` alike. Determinism for a fixed configuration
-  is not a within-run property here; it survives a rebuild.
-  ([A16](#a16-two-runs-identical-in-every-recorded-respect-and-byte-identical-in-output-differ-by-34--on-one-arm)
+  in between, and all three of their arms (no speculation, an external drafter
+  and DFlash) reproduce **10 / 10 prompts byte-identically**, token ids,
+  `content` and `reasoning_content` alike. Determinism for a fixed
+  configuration is not a within-run property here; it survives a rebuild. ([A16](#a16-two-runs-identical-in-every-recorded-respect-and-byte-identical-in-output-differ-by-34--on-one-arm)
   is what those two runs do *not* reproduce: the time.)
 
 So the engine is deterministic for a fixed configuration, and turning
@@ -730,22 +730,22 @@ either: the first differing token sits at index 40 at the earliest, median
 110–126 of 300.
 
 **The cause was not isolated, and an earlier version of this item overstated
-it.** It said the mechanism was "ordinary and not a llama.cpp defect" — batched
+it.** It said the mechanism was "ordinary and not a llama.cpp defect": batched
 verification computing the target's logits at a different shape, floating-point
-addition not being associative, a near-tie in the argmax resolving the other way.
-That remains the most likely explanation and it is consistent with what follows,
-but it is a hypothesis, and calling it "not a defect" is stronger than this data
-supports. The same upstream area has produced real correctness bugs: PR #20075
-described a soft rollback that restored position without restoring SSM tensor
-state, and issue #27705 landed a regression test for a token-row/output-row
-permutation mismatch after the commit tested here. Nothing here rules those out;
-nothing here implicates them either.
+addition not being associative, a near-tie in the argmax resolving the other
+way. That remains the most likely explanation and it is consistent with what
+follows, but it is a hypothesis, and calling it "not a defect" is stronger than
+this data supports. The same upstream area has produced real correctness bugs:
+PR #20075 described a soft rollback that restored position without restoring
+SSM tensor state, and issue #27705 landed a regression test for a
+token-row/output-row permutation mismatch after the commit tested here. Nothing
+here rules those out; nothing here implicates them either.
 
 What this measures is that the configurations are **not token-stream
 equivalent**. The benchmark therefore compares end-to-end throughput at equal
-generated-token counts, not acceleration of an identical token trajectory — once
-the streams diverge the arms are decoding different text, with different context,
-different draft candidates and potentially different expert routing.
+generated-token counts, not acceleration of an identical token trajectory; once
+the streams diverge the arms are decoding different text, with different
+context, different draft candidates and potentially different expert routing.
 
 **That mechanism makes a prediction, and the prediction holds.** If divergence
 is per-token near-ties accumulating, its probability should rise with output
@@ -760,7 +760,7 @@ length. Across every run of 2026-08-26:
 
 and within run L's thinking-off half, split at its own median: outputs under 96
 tokens diverge 37.5 % of the time, outputs at or above it 70.8 %. The
-determinism control holds everywhere — 70/70 self-reproducible prompts in K1 and
+determinism control holds everywhere: 70/70 self-reproducible prompts in K1 and
 50/50 in each half of L, on top of J's original 50/50.
 
 So the effect is not a quirk of one run, and it is not constant: at a 300-token
@@ -770,7 +770,7 @@ length.
 **What it changes here.** It does not invalidate run J's +18.7 %: every arm
 generates exactly 300 tokens, so the throughput comparison counts the same
 work, and the no-speculation arm's decode rate varies by only 0.8 % across ten
-very different prompts — content-driven variation of that size cannot produce an
+very different prompts, content-driven variation of that size cannot produce an
 18.7 % difference. What it changes is the description. This is not a lossless
 speedup of the same computation; it is a faster computation that lands on
 slightly different text.
@@ -796,7 +796,7 @@ first.** Run T repeats three of run O2's arms with the same configuration:
 
 | arm | O2, stock, 9 blocks | T, instrumented, 4 blocks | difference |
 |---|---|---|---|
-| no speculation | 115.7 | 116.3 | +0.54 % |
+| no speculation | 115.7 | 116.3 | +0.53 % |
 | `spec-draft-n8` | 30.9 | 30.9 | **−0.00 %** |
 | `spec-dflash-n2` | 146.2 | 146.5 | +0.22 % |
 
@@ -807,7 +807,7 @@ its own instrumentation.
 > **What the boundary is.** The timers surround `ckpt.update_tgt`,
 > `ckpt.update_dft`, `ckpt.load_tgt` and `ckpt.load_dft`, and those call
 > `llama_state_seq_get_data_ext` / `set_data_ext`, which at `3737e4137` begin
-> with `ctx->synchronize()` — verified in the tested tree, `llama-context.cpp`
+> with `ctx->synchronize()`: verified in the tested tree, `llama-context.cpp`
 > lines 4083–4092. So every figure in this section is **elapsed time inside the
 > instrumented checkpoint API calls**, and that includes waiting for backend
 > work queued before the call to finish, as well as the serialisation, the
@@ -821,8 +821,8 @@ its own instrumentation.
 > `bench/apply_split_timers.py` drains the queue explicitly, immediately before
 > each of the four calls, and times the drain; the call's own internal
 > `synchronize()` then finds nothing outstanding, so what is left is the state
-> work. Total work is unchanged — the wait happened either way, a microsecond
-> earlier — and the field names are kept, so `update_tgt` still means the whole
+> work. Total work is unchanged (the wait happened either way, a microsecond
+> earlier) and the field names are kept, so `update_tgt` still means the whole
 > call and the total must still reproduce 39.07 s. Six repeats, the same three
 > arms, `--fit-target 3072`, thinking on, on a build whose only difference from
 > the one A12 used is the extra timers:
@@ -833,12 +833,12 @@ its own instrumentation.
 > | of which, waiting on `synchronize()` | **0.002** | **0.003 %** |
 > | of which, state work | **39.09** | **54.7 %** |
 >
-> Two milliseconds of thirty-nine seconds. The queue is already drained when the
-> checkpoint is taken, which is what one would expect: the sampler has just read
-> the logits back. Every component reproduces — `update_tgt` 17.336 s against
-> 17.34, `load_tgt` 16.346 against 16.33, `load_dft` 5.412 against 5.41 — and so
-> do the event counts, 785 creates and 728 restores in every one of six repeats.
-> The excess itself lands at 71.49 s against 71.4.
+> Two milliseconds of thirty-nine seconds. The queue is already drained when
+> the checkpoint is taken, which is what one would expect: the sampler has just
+> read the logits back. Every component reproduces — `update_tgt` 17.336 s
+> against 17.34, `load_tgt` 16.346 against 16.33, `load_dft` 5.412 against 5.41
+> — and so do the event counts, 785 creates and 728 restores in every one of
+> six repeats. The excess itself lands at 71.49 s against 71.4.
 >
 > So the boundary question is answered by measurement rather than by wording:
 > **the 54.7 % is post-drain checkpoint state-save/restore API work.** It is
@@ -874,23 +874,23 @@ component fields and published 39.08.
 
 Median cost of one create is **21.9 ms** and of one `load_tgt` **22.4 ms**. The
 total is reproducible to two hundredths of a second: 39.10, 39.07, 39.06, 39.07
-across the four arm-runs, and the event counts are identical in all four — 785
+across the four arm-runs, and the event counts are identical in all four, 785
 creates and 728 restores every time.
 
 **Both controls were measured at the same depth.** All twelve logs of run T are
 extracted, four repeats per arm, not one log per control: `baseline` and
 `spec-dflash-n2` emit **0** `AUDIT_US` records in every one of their four
-arm-runs, and `spec-draft-n8` emits exactly **1513** (785 + 728) in every one of
-its four. The first version of `analysis/extract_checkpoint_timers.py` stripped
-only the literal `__rep0.log` when deriving the arm name, so repeats 1–3 were
-filed under `spec-draft-n8__rep1` and the like, and the controls — which were
-extracted for rep0 alone — rested on a single log each. The extractor now strips
-`__rep\d+` and records the repeat index separately; per-log SHA-256 sums are in
-`v4_audit_2026_08_25/data/checkpoint_timers_sha256.txt`.
+arm-runs, and `spec-draft-n8` emits exactly **1513** (785 + 728) in every one
+of its four. The first version of `analysis/extract_checkpoint_timers.py`
+stripped only the literal `__rep0.log` when deriving the arm name, so repeats
+1–3 were filed under `spec-draft-n8__rep1` and the like, and the controls
+(which were extracted for rep0 alone) rested on a single log each. The
+extractor now strips `__rep\d+` and records the repeat index separately;
+per-log SHA-256 sums are in `v4_audit_2026_08_25/data/checkpoint_timers_sha256.txt`.
 
-The corresponding volume, at the 82.079 MiB the server reports per checkpoint —
-`common_prompt_checkpoint::size()` returns `data_tgt + data_dft + data_spec`, so
-that figure is already the total and the separately logged 19.266 MiB draft
+The corresponding volume, at the 82.079 MiB the server reports per checkpoint:
+`common_prompt_checkpoint::size()` returns `data_tgt + data_dft + data_spec`,
+so that figure is already the total and the separately logged 19.266 MiB draft
 component is part of it, not additional:
 
 | | creates | restores | combined, GiB |
@@ -899,7 +899,7 @@ component is part of it, not additional:
 | run J, the earlier log-counted run | 772 → 61.88 | 709 → 56.83 | **118.71** |
 
 The two runs are the same arm on the same build and differ by 13 creates and 19
-restores — 1.7 % and 2.6 % — which is the run-to-run variation in how often the
+restores, 1.7 % and 2.6 %, which is the run-to-run variation in how often the
 sampler diverges from the draft, not a discrepancy. They are separated here
 because an earlier version of this section quoted run T's event counts in the
 timing table and run J's in the volume table without saying so, which read as
@@ -913,7 +913,7 @@ draft component a second time on every create and reported 76.4 and 133.2 GiB.
 Both were wrong and appeared in this file, in `README.md` and in the pull-request
 description.
 
-**So the withdrawn estimate was not merely unsound, it was low — and the reason
+**So the withdrawn estimate was not merely unsound, it was low, and the reason
 is now quantified.** The retracted figure said 24.2 s, from the interval after
 each checkpoint log line. The create message is emitted *after* `update_tgt()`
 and the restore message *before* `load_tgt()`, so that rule could only see the
@@ -923,7 +923,7 @@ was exactly the half of the operation the log placement hides.
 
 **Three scope notes, none of which the numbers depend on.**
 
-- `update_dft` on the speculative checkpoint **never fires** — 0 of 785 — because
+- `update_dft` on the speculative checkpoint **never fires**, 0 of 785, because
   it is gated on the draft context reporting `SEQ_RM_TYPE_FULL` and it does not.
   The 19.266 MiB of draft state inside each checkpoint is written by the
   *prompt*-checkpoint path at `:2248`, which is ungated, and the restore side
@@ -948,9 +948,9 @@ drafter is 71.4 s slower.
 
 Every acceptance figure this repository has ever published comes from the
 server's `timings.draft_n_accepted / timings.draft_n`. llama.cpp keeps a second
-counter and prints it one line away in the `-v` log — the speculator's own
-`statistics <type>: #gen tokens / #acc tokens`. Until 2026-08-26 nobody here had
-compared them.
+counter and prints it one line away in the `-v` log: the speculator's own
+`statistics <type>: #gen tokens / #acc tokens`. Until 2026-08-26 nobody here
+had compared them.
 
 Across **517 single-request arm-runs** for which both survive, the split is
 absolute and there are no exceptions either way:
@@ -962,12 +962,12 @@ absolute and there are no exceptions either way:
 
 The two groups do not overlap, by 0.20 pp.
 
-> This was first published over **73** arm-runs, at 0.5 pp against 1.0 pp — a
+> This was first published over **73** arm-runs, at 0.5 pp against 1.0 pp: a
 > 0.5 pp separation. The comparison script read only `*__rep0.log`, so each arm
-> contributed one arm-run however many repeats it had, and it predated runs
-> O2, O3, T, T3, U and V entirely. Over every repeat of every run the split
-> survives on seven times the data and the margin narrows to 0.20 pp: the widest
-> agreement is `matrix_V_hardcap`'s `spec-dflash-n2` at 0.80 pp with no
+> contributed one arm-run however many repeats it had, and it predated runs O2,
+> O3, T, T3, U and V entirely. Over every repeat of every run the split
+> survives on seven times the data and the margin narrows to 0.20 pp: the
+> widest agreement is `matrix_V_hardcap`'s `spec-dflash-n2` at 0.80 pp with no
 > checkpoints, and the narrowest disagreement is run E's `spec-draft-n128` at
 > 1.00 pp with 737 of them.
 
@@ -983,22 +983,22 @@ Representative rows:
 | `spec-draft-n1` | 68.7 % | **100.0 %** | 31.3 pp | 1639 |
 
 **This narrows what A1 says about the upstream fix.** A1 records that master
-moved the denominator out from behind the early `continue`, and it did — for
+moved the denominator out from behind the early `continue`, and it did: for
 rounds that reach the counters. Rounds that take the checkpoint-and-restore
-branch still return before the numerator, so on any path where that branch fires
-the server counter is an under-count, and the size of the under-count is the
-size of that branch.
+branch still return before the numerator, so on any path where that branch
+fires the server counter is an under-count, and the size of the under-count is
+the size of that branch.
 
-**Which counter is right is not settled here.** `spec-draft-n1` reports
-**100.0 % — 1639 of 1639 —** from the drafter and 68.7 % from the server. An
-earlier version of this item argued that 100 % cannot be real on an arm running
-at a quarter of the baseline. **That inference does not hold**: a drafter can
-have every proposal accepted and still be slower than not drafting at all,
-because producing the proposal and verifying it both cost time. Throughput is
-not a validity test for an acceptance counter.
+**Which counter is right is not settled here.** `spec-draft-n1` reports **100.0
+%: 1639 of 1639 —** from the drafter and 68.7 % from the server. An earlier
+version of this item argued that 100 % cannot be real on an arm running at a
+quarter of the baseline. **That inference does not hold**: a drafter can have
+every proposal accepted and still be slower than not drafting at all, because
+producing the proposal and verifying it both cost time. Throughput is not a
+validity test for an acceptance counter.
 
 What the data does establish is a **path-dependent difference in accounting
-semantics** between the two counters — they agree where no full checkpoint is
+semantics** between the two counters; they agree where no full checkpoint is
 taken and diverge where one is. Deciding which is ground truth needs
 instrumentation at the verification step: the proposed prefix and the accepted
 prefix, per round. That is not in these logs.
@@ -1042,10 +1042,21 @@ Ten (arm, configuration) pairs were measured independently two or three times:
 | ≤ 0.6 pp | 6 |
 | 0.6 – 1.5 pp | 2 |
 | 2.1 pp (`spec-dflash-n2`) | 1 |
-| **8.5 pp (`spec-mtp-n4`, Q8_0)** | 1 |
+| **8.6 pp (`spec-mtp-n4`, Q8_0)** | 1 |
 
-Median **0.56 pp**. So the dataset generally reproduces well — better than the
-size of any effect it reports — and **one pair does not**.
+Median **0.56 pp**. So the dataset generally reproduces well, better than the
+size of any effect it reports, and **one pair does not**.
+
+The 8.6 pp row read 8.5 until 2026-08-29, from rounding each of the two figures
+to a tenth before subtracting them: +10.5 and +2.0 differ by 8.5, the
+measurements behind them by 8.573. Every other difference this repository
+publishes subtracts first and rounds once, and
+[A12](#a12-what-the-checkpoint-path-costs-measured-with-timers-in-the-source)
+already corrects the same double rounding in the checkpoint total, where four
+rounded components added to 39.08 and the figure is 39.07. The other rows of this histogram were
+computed the earlier way and are **not** re-derived by
+`analysis/verify_claims.py`; the ten pairs behind them are not enumerated
+anywhere, which is why only the row that names its pair could be checked.
 
 **That one was chased down and is unexplained.** `spec-mtp-n4` under the Q8_0
 head reads +10.5 % in run M1 (3 repeats, within-run SD 0.53) and +2.0 % in run Q
@@ -1056,28 +1067,38 @@ overlapping. Everything that could differ was checked and does not:
 |---|---|---|
 | server binary sha256 | `b6a5c490…` | same |
 | drafter file sha256 | `5b1e4937…` | same |
-| recorded argv | 30 tokens | byte-identical |
-| what the memory fitter chose | `n_ctx 8192, n_batch 2048, n_ubatch 512`, 41/41 + 42/42 layers | identical |
+| recorded argv | 30 tokens | identical but for the listening port |
+| what the memory fitter chose | `n_ctx 8192`, 41/41 + 42/42 layers; `n_batch 2048, n_ubatch 512` † | identical |
 | draft tokens per prompt | 331, 369, 368, 310, 290, 360, 324, 383, 377, 344 | identical |
 | draft acceptance | 61.4 % | 61.4 % |
 | temperature under load | 66.1 °C mean | 65.8 °C |
 | SM clock under load | 1938 MHz mean | 1934 MHz |
 | the no-speculation baseline beside it | 115.8 pooled | 116.6 |
 
-Identical work, identical configuration, identical thermal state — and the
-speculative arm is uniformly 6–8 % slower in run Q on **all ten prompts**, while
-the baseline measured beside it is not. A third measurement of the same arm, on
-the extended prompt set, reads +2.7 %, so M1's is the outlier and the effect is
-not a property of run Q.
+† `n_ctx` and the placement are in the manifest and in
+[`data/matrix_M.log`](v4_audit_2026_08_25/data/matrix_M.log), which was
+ignored by `.gitignore` until 2026-08-29 and is committed now, because a figure
+whose evidence is not in the repository cannot be checked by anyone who clones
+it.
+The two batch sizes were read from the `-v` server log, which is not committed
+([BENCHMARK_ENV](BENCHMARK_ENV.md)), so they are the one pair of figures in
+this table that `analysis/verify_claims.py` cannot re-derive; it holds them to
+the other place this file states them instead.
 
-**What follows for every number here.** A delta measured over three repeats in a
-single run should be read as accurate to about a point, not to the two decimal
-places its SD suggests, and one case in ten was off by eight. Where a figure
-matters, this repository now measures it in more than one run and says so:
-`spec-dflash-n2` at +24.6 % and +26.7 %, `spec-mtp-n2` at +21.6 %, +22.1 % and
-+21.0 % across three, `spec-draft-n8` at −74.3 % and −74.2 %. The headline
-ordering — self-speculation above no speculation above external speculation, by
-factors, not points — is far larger than this and is unaffected.
+Identical work, identical configuration, identical thermal state, and the
+speculative arm is uniformly 6–8 % slower in run Q on **all ten prompts**,
+while the baseline measured beside it is not. A third measurement of the same
+arm, on the extended prompt set, reads +2.7 %, so M1's is the outlier and the
+effect is not a property of run Q.
+
+**What follows for every number here.** A delta measured over three repeats in
+a single run should be read as accurate to about a point, not to the two
+decimal places its SD suggests, and one case in ten was off by eight. Where a
+figure matters, this repository now measures it in more than one run and says
+so: `spec-dflash-n2` at +24.6 % and +26.7 %, `spec-mtp-n2` at +21.6 %, +22.1 %
+and +21.0 % across three, `spec-draft-n8` at −74.3 % and −74.2 %. The headline
+ordering (self-speculation above no speculation above external speculation, by
+factors, not points) is far larger than this and is unaffected.
 
 Committed evidence: the manifests and per-request JSON of every run named above;
 the reproducibility table is recomputed from them by `analysis/verify_claims.py`.
@@ -1112,17 +1133,17 @@ marker in the shared object and not in the launcher, so this is not a build-orde
 artefact.
 
 **What it does not mean.** No run here used a binary other than the one
-intended. There is one checkout, it sat at `3737e4137` throughout — checkable
-with `git -C llama-retest rev-parse HEAD` — and run O2 additionally reads the
-build and commit back out of *each server's own startup log*, recording a single
-identity, `build 10622 (3737e4137)`, across all 81 arm-runs. That is a real
-identity check and it passes.
+intended. There is one checkout, it sat at `3737e4137` throughout, checkable
+with `git -C llama-retest rev-parse HEAD`, and run O2 additionally reads the
+build and commit back out of *each server's own startup log*, recording a
+single identity, `build 10622 (3737e4137)`, across all 81 arm-runs. That is a
+real identity check and it passes.
 
-**What it does mean.** The manifest field could never have *detected* a rebuild,
-which is the entire reason to record a hash. For runs A through O the only
-evidence that the binary was what the manifest says is the checkout state and
-the absence of any rebuild between them — an argument from circumstance rather
-than from a recorded fact. Run O2 onward carry the real evidence.
+**What it does mean.** The manifest field could never have *detected* a
+rebuild, which is the entire reason to record a hash. For runs A through O the
+only evidence that the binary was what the manifest says is the checkout state
+and the absence of any rebuild between them: an argument from circumstance
+rather than from a recorded fact. Run O2 onward carry the real evidence.
 
 **Fixed.** The runner now records `server_lib_sha256`: every shared object beside
 the binary, de-duplicated by the file each symlink resolves to, since `libfoo.so`
@@ -1156,7 +1177,7 @@ did the same work in the same order both times.
 | `spec-draft-n8` | 30.85 | 30.82 | −0.11 % |
 | `spec-dflash-n2` | 146.48 | 141.50 | **−3.40 %** |
 
-The DFlash shortfall is on **every prompt** — −0.6 % to −4.7 %, never positive —
+The DFlash shortfall is on **every prompt** (−0.6 % to −4.7 %, never positive)
 and the three T3 repeats agree among themselves to 0.7 %. It is a shift of the
 whole run, not one bad arm-run.
 
@@ -1169,17 +1190,17 @@ the same fit: 41/41 target layers and 9/9 drafter layers offloaded, `n_batch`
 82 (with bs=1)`).
 
 One thing in those traces is *not* comparable and this entry claimed it was.
-The two runs were sampled at different rates — T at 5 s in the `compact` schema,
-T3 at 1 s in `raw` — so their **throttle fractions** cannot be set beside each
-other: `sw_power_cap` is flagged on 29 of T's 156 loaded samples and 27 of T3's
-599, and at 5 s each flagged sample is credited five seconds of coverage while
-at 1 s it is credited one. What that comparison would say if taken at face value
-also points the wrong way for the hypothesis: the run with *more* apparent
-capping is the **faster** one. No thermal slowdown flag is raised on any loaded
-sample of either run.
+The two runs were sampled at different rates — T at 5 s in the `compact`
+schema, T3 at 1 s in `raw` — so their **throttle fractions** cannot be set
+beside each other: `sw_power_cap` is flagged on 29 of T's 156 loaded samples
+and 27 of T3's 599, and at 5 s each flagged sample is credited five seconds of
+coverage while at 1 s it is credited one. What that comparison would say if
+taken at face value also points the wrong way for the hypothesis: the run with
+*more* apparent capping is the **faster** one. No thermal slowdown flag is
+raised on any loaded sample of either run.
 
 **It happened again, on a different pair, and only to that arm.** Run O3 is the
-nine-arm headline matrix repeated five hours after run O2 — same stock
+nine-arm headline matrix repeated five hours after run O2: same stock
 `libllama-server-impl.so` `a0cbe4d0…`, asserted per arm-run, same models, nine
 balanced blocks each. All **810 of 810 request-pairs are byte-identical** and
 acceptance matches to a tenth of a point on every arm. The changes:
@@ -1195,16 +1216,16 @@ acceptance matches to a tenth of a point on every arm. The changes:
 | `spec-draft-n8` | −73.3 % | −73.5 % | −0.2 pp |
 | `spec-draft-n1` | −74.8 % | −75.0 % | −0.2 pp |
 
-Eight arms move by 0.2 to 1.0 pp. `spec-dflash-n2` moves by 2.9. Two independent
-pairs, both on byte-identical output, both singling out the same arm: this is a
-property of that configuration and not a stray measurement. `spec-dflash-n4` —
-the same drafter at twice the draft length — moves a third as far, so it is not
-simply "DFlash".
+Eight arms move by 0.2 to 1.0 pp. `spec-dflash-n2` moves by 2.9. Two
+independent pairs, both on byte-identical output, both singling out the same
+arm: this is a property of that configuration and not a stray measurement.
+`spec-dflash-n4`, the same drafter at twice the draft length, moves a third as
+far, so it is not simply "DFlash".
 
 Ordered by clock, that arm reads 146.66 (M1, 08:00), 145.83 (O, 09:01), 146.16
 (O2, 15:37), 146.48 (T, 18:27), 141.50 (T3, 20:33), 143.79 (O3, 20:44) tok/s
 while its baseline stays inside 115.5–117.3. The two lowest are the two latest,
-which is suggestive of a state change rather than noise — and it is two points,
+which is suggestive of a state change rather than noise, and it is two points,
 so it is not evidence yet.
 
 **Run U measures it instead of observing it.** Two pairs is two pairs, so: six
@@ -1223,13 +1244,13 @@ in a quarter of an hour. That is not drift across the day, and no statistic
 computed inside one run can see it.
 
 **What it actually is: the run, not the block.** Pool every block of every
-comparable run — 43 measurements of this one arm on 2026-08-26, same policy,
+comparable run, 43 measurements of this one arm on 2026-08-26, same policy,
 same models, same prompts:
 
 ![One arm, 43 blocks, one day](analysis/plot_two_levels.png)
 
-They span **+17.0 % to +27.8 %**, and **`draft_n` is 2441 with acceptance 72.3 %
-in every one of the 43** — the speculative work is identical to the token and
+They span **+17.0 % to +27.8 %**, and **`draft_n` is 2441 with acceptance 72.3
+% in every one of the 43** — the speculative work is identical to the token and
 only the time differs.
 
 The values cluster by run rather than scattering within one. Splitting at +23 %,
@@ -1242,7 +1263,7 @@ within 0.6 pp of each other while sitting 5 pp apart from one another.
 > does not support the word.** The widest gap in the sorted values is 2.06 pp
 > and it isolates run U3 at the bottom, not the +23 % split, where the gap is
 > 1.32 pp. Runs O2 and O3 each span more than 3 pp internally. What the data
-> shows is clustering by run with a heavy low tail — not a clean two-state
+> shows is clustering by run with a heavy low tail, not a clean two-state
 > system, and the figure is titled accordingly.
 
 Run O3 is the one that crosses, and it is the informative one: blocks 0–3 at
@@ -1250,26 +1271,26 @@ Run O3 is the one that crosses, and it is the informative one: blocks 0–3 at
 only this arm moves.** Against its own block 0, `spec-dflash-n2` reads −4.45,
 −4.66, −3.33, −2.93 % while the no-speculation baseline, `spec-draft-n1`,
 `spec-draft-n8`, `spec-mtp-n2`, `ngram-cache`, `ngram-mod-n24`,
-`ngram-map-k4v-m8` and — decisively — **`spec-dflash-n4`, the same DFlash
-drafter at twice the draft length** — never leave ±1.24 %, and `spec-dflash-n4`
-never leaves ±1.01 %. The excursion is nearly four times the next largest in the
-run.
+`ngram-map-k4v-m8` and, decisively, **`spec-dflash-n4`, the same DFlash drafter
+at twice the draft length** — never leave ±1.24 %, and `spec-dflash-n4` never
+leaves ±1.01 %. The excursion is nearly four times the next largest in the run.
 
 So whatever moves is not the machine, not the GPU, and not DFlash as such. It
-attaches to one configuration, survives the server restart between arm-runs —
-every arm-run is a fresh `llama-server` process — and can change inside a single
-run.
+attaches to one configuration, survives the server restart between arm-runs
+(every arm-run is a fresh `llama-server` process) and can change inside a
+single run.
 
 **This corrects the framing above.** "The variance is between invocations" is
 what run U shows, because none of U's six straddled a transition; run O3 shows
 one happening inside a single invocation. The 33× ratio is arithmetic on U's
 numbers, not a law.
 
-**The cause is not isolated.** Nothing recorded distinguishes a high run from a low one:
-the same argv, the same fit decisions, the same 82 MiB of GPU memory free at
-start, the same 11–16 s to become healthy, the same clocks and temperatures, the
-same draft counts and acceptance, and byte-identical output. What sits between T and T3 is machine history — two rebuilds and a killed
-rehearsal — which changes page cache and allocator state and is captured by no
+**The cause is not isolated.** Nothing recorded distinguishes a high run from a
+low one: the same argv, the same fit decisions, the same 82 MiB of GPU memory
+free at start, the same 11–16 s to become healthy, the same clocks and
+temperatures, the same draft counts and acceptance, and byte-identical output.
+What sits between T and T3 is machine history, two rebuilds and a killed
+rehearsal, which changes page cache and allocator state and is captured by no
 field here. That is a hypothesis, not a finding, and it is written as one.
 
 **What it means for the numbers.** The arm that [A12](#a12-what-the-checkpoint-path-costs-measured-with-timers-in-the-source)
@@ -1280,16 +1301,15 @@ share of the excess it explains is 54.7 % against 54.6 %. That attribution
 replicates.
 
 The headline DFlash figure does not replicate at that precision, and run U says
-by how much.
-[A14](#a14-within-run-repeats-are-not-an-error-bar) already said within-run
-repeats are not a between-run error bar; this is that statement applied to the
-headline arm, with the confounds removed one at a time. The 95 % paired-block
-interval on `spec-dflash-n2` in run O2 is `[+25.5 %, +27.1 %]`, a width of
-1.6 pp. Run O3's is `[+21.4 %, +25.6 %]`. **The two intervals barely overlap — by
-0.1 pp, out of widths of 1.6 and 4.2 — on byte-identical output from the same
-binary.** Twelve runs of the configuration span
-**+17.3 % to +26.7 %**. The interval describes the invocation, not the
-configuration, and the README quotes the range beside it for that reason.
+by how much. [A14](#a14-within-run-repeats-are-not-an-error-bar) already said
+within-run repeats are not a between-run error bar; this is that statement
+applied to the headline arm, with the confounds removed one at a time. The 95 %
+paired-block interval on `spec-dflash-n2` in run O2 is `[+25.5 %, +27.1 %]`, a
+width of 1.6 pp. Run O3's is `[+21.4 %, +25.6 %]`. **The two intervals barely
+overlap (by 0.1 pp, out of widths of 1.6 and 4.2) on byte-identical output from
+the same binary.** Twelve runs of the configuration span **+17.3 % to +26.7
+%**. The interval describes the invocation, not the configuration, and the
+README quotes the range beside it for that reason.
 
 **Run T4 catches it stepping, inside one invocation, with the telemetry
 running.** Six repeats of three arms on the split-timer build, 2026-08-27,
@@ -1307,7 +1327,7 @@ hold 0.12 % and 0.55 %. Two things this run could test and the others could not:
 
 - **It is not the preceding arm.** Three arms rotating means the predecessor
   varies. `spec-dflash-n2` reads 139.36, 139.72, 145.04 and 146.01 after
-  `spec-draft-n8`, and 139.93 and 144.43 after `baseline` — both predecessors
+  `spec-draft-n8`, and 139.93 and 144.43 after `baseline`: both predecessors
   produce both levels. The other two arms move by less than 1 % whatever
   precedes them. Run V2 and run V3 could not test this at all: a cyclic
   rotation balances position and fixes the neighbour, which is why
@@ -1315,9 +1335,9 @@ hold 0.12 % and 0.55 %. Two things this run could test and the others could not:
   `baseline-cap` in 18 of V3's 20.
 - **It is not thermal, clock or power.** 272 telemetry samples at 5 s. Across
   the step the card gets *hotter* (63.4 → 64.9 °C) and *slower to clock down*
-  is not what happens either — the SM clock is flat at 1942 → 1944 MHz and
-  power at 238.8 → 239.4 W. `sw_power_cap` is asserted in **17** samples while
-  the arm is slow and **36** while it is fast. Every physical quantity recorded
+  is not what happens either; the SM clock is flat at 1942 → 1944 MHz and power
+  at 238.8 → 239.4 W. `sw_power_cap` is asserted in **17** samples while the
+  arm is slow and **36** while it is fast. Every physical quantity recorded
   either does not move or moves the wrong way.
 
 So A16's "nothing recorded distinguishes them" now survives continuous
@@ -1330,25 +1350,25 @@ records predicts which one you get.
 that matter here were never in it.** Saying no field explains the step invites
 the reading that no physical cause is left, which is not what was measured.
 Both of these were identified on 2026-08-27, after the fact, and neither is
-offered as the explanation — they are named because a reader is entitled to
-know what the telemetry could not have seen.
+offered as the explanation; they are named because a reader is entitled to know
+what the telemetry could not have seen.
 
 - **GDDR6X memory-junction temperature, which NVML does not expose on Linux.**
   `temperature.gpu` is the core sensor. The memory modules on a 3090 have their
   own junction sensor and their own throttle point, and the controller reduces
-  **memory bandwidth** when it is exceeded — a core reading in the sixties says
+  **memory bandwidth** when it is exceeded: a core reading in the sixties says
   nothing about it. NVIDIA has an open request to surface it through nvidia-smi
-  or NVML on Linux and had not done so; Windows tools read it through NVAPI.
-  So every `temp_c` column in this repository is the core, and a
-  bandwidth-bound decode on a memory-throttling card would look exactly like
-  "the clock is flat and the arm is slower". Direction is against it here — the
-  card is *hotter* while the arm is *faster* — which is a reason to doubt it,
-  not a measurement of it. What would settle it is a junction reading, and this
-  host cannot produce one.
+  or NVML on Linux and had not done so; Windows tools read it through NVAPI. So
+  every `temp_c` column in this repository is the core, and a bandwidth-bound
+  decode on a memory-throttling card would look exactly like "the clock is flat
+  and the arm is slower". Direction is against it here (the card is *hotter*
+  while the arm is *faster*) which is a reason to doubt it, not a measurement
+  of it. What would settle it is a junction reading, and this host cannot
+  produce one.
 - **Host CPU load, which this repository never sampled at all.**
-  `bench/gpu_telemetry.sh` queries `nvidia-smi` and nothing else — no load
+  `bench/gpu_telemetry.sh` queries `nvidia-smi` and nothing else (no load
   average, no `/proc/stat`, no per-process attribution in any of its three
-  schemas — so no run here can say what else the bench host was doing while it
+  schemas) so no run here can say what else the bench host was doing while it
   decoded. That gap is this repository's own and is checkable: read the script.
 
   Whether a stray process can move a decode rate by the order this section is
@@ -1365,9 +1385,9 @@ Neither is an explanation and neither is dismissed. The honest form of the
 finding is: **this one arm has two levels, and the instrument list that failed
 to distinguish them was `nvidia-smi` alone.**
 
-`bench/host_guard.py --sample` records host load — busy percent, load average,
-and the largest process that is not the benchmark's own descendant — so a
-future run can test the second of these. **No run in this repository has it**,
+`bench/host_guard.py --sample` records host load (busy percent, load average,
+and the largest process that is not the benchmark's own descendant) so a future
+run can test the second of these. **No run in this repository has it**,
 including V2, V3 and T4; it was written on 2026-08-27, after they finished, and
 retrofitting a column to a trace that never had one is not something this
 repository does. The junction temperature needs a sensor the platform does not
@@ -1386,14 +1406,14 @@ requests in the controlled tier, across 35 run directories, returned
 early.
 
 With thinking **off** it does arise, and **881 of the 1440** thinking-off
-requests stopped before the cap — every one of them in a run that did not force
-`ignore_eos`. What causes it is
-[A11](#a11-speculative-decoding-is-not-output-preserving-on-this-build-and-the-engine-is-deterministic-enough-to-prove-it): speculation is not output-preserving on this build, so the arms
-produce different text and stop in different places. In run R the baseline
-generates **300** tokens on `code_bash` where the speculative arms generate
-**187, 188 and 188**, and **203** on `code_rust` where all three generate
-**300** — 38 % short in one direction and 48 % long in the other, on two prompts
-of the same set.
+requests stopped before the cap; every one of them in a run that did not force
+`ignore_eos`. What causes it is [A11](#a11-speculative-decoding-is-not-output-preserving-on-this-build-and-the-engine-is-deterministic-enough-to-prove-it):
+speculation is not output-preserving on this build, so the arms produce
+different text and stop in different places. In run R the baseline generates
+**300** tokens on `code_bash` where the speculative arms generate **187, 188
+and 188**, and **203** on `code_rust` where all three generate **300** — 38 %
+short in one direction and 48 % long in the other, on two prompts of the same
+set.
 
 `analysis/length_matching.py` recomputes every run's arm-vs-baseline change
 twice: over all prompts, and over only those prompts where every arm in the run
@@ -1407,27 +1427,27 @@ generated exactly the same number of tokens. The split is clean:
 | `matrix_M3_thinkoff` | off | 10 | 5 | 10.15 pp |
 | `matrix_R_ext_thinkoff` | off | 20 | 6 | 7.49 pp |
 | `D_master_matrix_think_off` | off | 10 | 5 | 6.37 pp *(the only run whose largest is negative)* |
-| `matrix_V_freerun` | off | 10 | 5 | 11.90 pp |
+| `matrix_V_freerun` | off | 10 | 5 | 14.02 pp |
 
-**A published sign flips.** Run L's `spec-dflash-n4` at thinking off is reported
-as **−2.7 %** in `v4_audit_2026_08_25/README.md` and in the v4.1 changelog entry
-— "`n_max 4` goes negative". On the five prompts where every arm generated the
-same 300 tokens it is **+14.1 %**.
+**A published sign flips.** Run L's `spec-dflash-n4` at thinking off is
+reported as **−2.7 %** in `v4_audit_2026_08_25/README.md` and in the v4.1
+changelog entry; "`n_max 4` goes negative". On the five prompts where every arm
+generated the same 300 tokens it is **+14.1 %**.
 
 Across the five uncapped thinking-off runs there are eighteen arm-vs-baseline
-comparisons. **Every one of the sixteen arms that drafts from a model** — DFlash,
-MTP, or the external drafter — moves in the same direction, +2.52 pp to
-+16.79 pp: `spec-dflash-n2` +7.6 % → +17.4 %, `spec-dflash-n6` −24.7 % →
-−10.9 %, `spec-mtp-n2` +11.4 % → +18.2 %, `spec-mtp-n4` −8.2 % → −0.3 %, run R's
+comparisons. **Every one of the sixteen arms that drafts from a model**
+(DFlash, MTP, or the external drafter) moves in the same direction, +2.52 pp to
++16.79 pp: `spec-dflash-n2` +7.6 % → +17.4 %, `spec-dflash-n6` −24.7 % → −10.9
+%, `spec-mtp-n2` +11.4 % → +18.2 %, `spec-mtp-n4` −8.2 % → −0.3 %, run R's
 `spec-dflash-n2` +8.6 % → +16.1 %, and the external drafter +2.5 to +3.8 pp on
-each of its three appearances. For those arms, the thinking-off figures this
+each of its five appearances. For those arms, the thinking-off figures this
 repository publishes **understate** speculation.
 
 The two exceptions are the n-gram arms, and they are both in run D:
 `ngram-cache` moves −6.37 pp (−32.6 % → −39.0 %) and `ngram-mod-n24` −0.17 pp.
 An n-gram drafter has no model to diverge with; what changes its length is the
 target's own output, and on the five long prompts it does worse rather than
-better. Two of eighteen, in the opposite direction, in one run — the confound is
+better. Two of eighteen, in the opposite direction, in one run; the confound is
 one-directional for the arms this repository draws conclusions about, and not a
 law.
 
@@ -1445,13 +1465,12 @@ checkpoint attribution are all thinking-on, all at 300 tokens on every request,
 and all shift by 0.00 pp under the same test.
 
 **Run V is a fixed-order sensitivity analysis, not an identified effect.**
-`BENCH_IGNORE_EOS=on` sends
-`ignore_eos` with every request, so each arm generates exactly
-`BENCH_MAX_TOKENS` wherever it would have stopped. Run V is the same five arms,
-five balanced blocks, thinking off, run twice back to back in one session — once
-as the archive did it, once with the hard cap. The freerun half produced
-**fourteen distinct output lengths from 22 to 300**; the hardcap half produced
-**one, 300**, on every request of every arm.
+`BENCH_IGNORE_EOS=on` sends `ignore_eos` with every request, so each arm
+generates exactly `BENCH_MAX_TOKENS` wherever it would have stopped. Run V is
+the same five arms, five balanced blocks, thinking off, run twice back to back
+in one session; once as the archive did it, once with the hard cap. The freerun
+half produced **fourteen distinct output lengths from 22 to 300**; the hardcap
+half produced **one, 300**, on every request of every arm.
 
 Two decimals, because two of these land exactly on a half and the direction a
 half rounds is not something a published table should depend on.
@@ -1476,8 +1495,8 @@ freerun half to its own length-matched prompts gives +21.25, +17.55, +12.67 and
 > effect of `ignore_eos`.** Every freerun block ran before every hard-cap
 > block. The runner stamps `created` before the first server starts, so the
 > freerun matrix began at `2026-08-26T22:31:46+0800` and the hard-cap matrix at
-> `22:48:08`; the freerun half's own measured work — 565 s of decode plus 373 s
-> of server startup, 938 s — fits inside that 982 s gap, so the two halves did
+> `22:48:08`; the freerun half's own measured work (565 s of decode plus 373 s
+> of server startup, 938 s) fits inside that 982 s gap, so the two halves did
 > not overlap and could not have been interleaved. Each half carries its own
 > position-balanced schedule, but the *mode* is confounded with sixteen minutes
 > of elapsed time and with whatever differs between two invocations of the
@@ -1515,9 +1534,9 @@ freerun half to its own length-matched prompts gives +21.25, +17.55, +12.67 and
 **Run V2 is the crossover, and it settles it.** Eight sessions of two halves
 each on 2026-08-27, in `AB BA BA AB BA AB AB BA` order so each mode ran first
 four times and second four times with the two orders balanced in mean time
-position — 4.5 each, so neither the mode nor the order is confounded with drift
-across the night. Five arms, five repeats a half, `latin`, thinking off, run V's
-configuration otherwise verbatim. **400 of 400 arm-runs, 16 of 16 halves
+position: 4.5 each, so neither the mode nor the order is confounded with drift
+across the night. Five arms, five repeats a half, `latin`, thinking off, run
+V's configuration otherwise verbatim. **400 of 400 arm-runs, 16 of 16 halves
 complete, none failed.** The session is the resampling unit and the contrast is
 
 ```
@@ -1559,7 +1578,7 @@ that moves every arm equally cancels.
 > percentage-point form and say so.
 
 **The hard cap moves every arm, and the sign flip is real.** Every interval
-excludes zero. `spec-dflash-n4` — the arm A17 was written about — is negative
+excludes zero. `spec-dflash-n4` (the arm A17 was written about) is negative
 free-running and positive under the cap, with both intervals clear of zero on
 opposite sides. So the published "`n_max 4` goes negative" with thinking off
 **is not robust to the stopping policy**.
@@ -1575,11 +1594,11 @@ a treatment that changes several at once, which is the mistake
 [A12](#a12-what-the-checkpoint-path-costs-measured-with-timers-in-the-source)
 was written about.
 
-**And run V overstated one of them.** Its `spec-dflash-n2` shift, +9.26 pp, lies
-outside [+4.86, +6.99] and above **all eight** sessions, whose maximum is
+**And run V overstated one of them.** Its `spec-dflash-n2` shift, +9.26 pp,
+lies outside [+4.86, +6.99] and above **all eight** sessions, whose maximum is
 +8.07 pp. The inflation is in the hard-cap half: run V read +20.60 % there
 against a typical +16.63 % [+15.69, +17.58]. The other three of run V's four
-numbers land inside the eight-session intervals — +11.90 against [+11.67,
+numbers land inside the eight-session intervals: +11.90 against [+11.67,
 +12.38], +9.68 against [+9.14, +9.93], +6.31 against [+6.29, +6.33]. So the
 review's objection was right, and the size of what it was right about is
 **about 3.3 pp on one arm**.
@@ -1597,10 +1616,10 @@ shift is not the same for every arm:
 
 The arm A16 identified as carrying an unexplained invocation state is the one
 whose *contrast* is three times less stable than the other model-drafting arms
-and sixty times less stable than the external drafter — measured here by a
+and sixty times less stable than the external drafter: measured here by a
 design that knows nothing about A16. The no-speculation baseline holds a CV of
-**0.21 %** free-running and **0.11 %** capped across all eight sessions, so this
-is not a run-wide effect; it is that arm.
+**0.21 %** free-running and **0.11 %** capped across all eight sessions, so
+this is not a run-wide effect; it is that arm.
 
 **Order was not the problem.** Splitting the eight sessions by which mode ran
 first gives +5.22 against +6.62 for `spec-dflash-n2` (−1.40 pp), and −0.18,
@@ -1611,7 +1630,7 @@ effect visible and there is barely one. What contaminated run V was the
 **And the work was identical every time.** Across all **4000 request rows** of
 the 400 arm-runs, every arm in every mode produced **one** distinct set of
 generated text and **one** distinct drafted/accepted pair over the eight
-sessions — byte-identical output on eight independent invocations, hours apart,
+sessions: byte-identical output on eight independent invocations, hours apart,
 with a server restart between every arm-run:
 
 | arm | freerun drafted / accepted | hard cap drafted / accepted |
@@ -1623,9 +1642,9 @@ with a server restart between every arm-run:
 
 Identical to the token, in both modes, in all eight. So the 1.27 pp
 between-session spread on `spec-dflash-n2` is not the arm doing different work
-in different sessions — it did exactly the same work — and neither is the
-+5.92 pp the cap buys it. **Only the time differs**, which is A16's finding
-stated on a dataset eight times the size and with the mode contrast controlled.
+in different sessions (it did exactly the same work) and neither is the +5.92
+pp the cap buys it. **Only the time differs**, which is A16's finding stated on
+a dataset eight times the size and with the mode contrast controlled.
 
 > [!NOTE]
 > **No GPU telemetry was recorded for run V2.** `bench/gpu_telemetry.sh` takes
@@ -1637,13 +1656,14 @@ stated on a dataset eight times the size and with the mode contrast controlled.
 > equally, and the baseline's CV of 0.11–0.21 % across five and a half hours is
 > itself evidence that there was no drift to correct for.
 
-**Run V3 puts both modes inside one square, and for one arm it disagrees.**
-The crossover still measures the two modes in different invocations. `BENCH_HARDCAP_SUFFIX`
-makes `<arm>-cap` run `<arm>`'s server flags and send `ignore_eos` on its own
-requests, so ten arms — five configurations in both modes — are one 10×10 Latin
-square, every arm in every position exactly once, the two modes of a
-configuration minutes apart instead of sixteen. Two sessions, 200 of 200
-arm-runs, both validated, thinking off, everything else as run V2.
+**Run V3 puts both modes inside one square, and for one arm it disagrees.** The
+crossover still measures the two modes in different invocations.
+`BENCH_HARDCAP_SUFFIX` makes `<arm>-cap` run `<arm>`'s server flags and send
+`ignore_eos` on its own requests, so ten arms, five configurations in both
+modes, are one 10×10 Latin square, every arm in every position exactly once,
+the two modes of a configuration minutes apart instead of sixteen. Two
+sessions, 200 of 200 arm-runs, both validated, thinking off, everything else as
+run V2.
 
 | arm | V3 session 1 | V3 session 2 | V3 mean | V2, eight sessions |
 |---|---:|---:|---:|---:|
@@ -1670,7 +1690,7 @@ eight span 4.15.
 
 Four of five reproduce between the two designs to 0.01–0.3 tok/s, the baseline
 to a hundredth. `spec-dflash-n2` moves −0.95 % free-running and **+1.4 % under
-the cap — in opposite directions**, which is the whole of the 2.7 pp
+the cap; in opposite directions**, which is the whole of the 2.7 pp
 disagreement.
 
 **And the state is finer-grained than [A16](#a16-two-runs-identical-in-every-recorded-respect-and-byte-identical-in-output-differ-by-34--on-one-arm)
@@ -1685,19 +1705,19 @@ the invocation, arm-run to arm-run, with a server restarted between each:
 | `spec-dflash-n2` | 126.7 130.0 130.1 128.9 129.1 **123.9** 129.5 **124.8** 125.4 129.0 | **1.82 %** |
 | `spec-dflash-n2-cap` | 136.0 141.5 141.3 **133.0** 142.1 135.7 140.8 135.1 137.7 139.6 | **2.31 %** |
 
-Session 2 repeats it: 0.33 %, 1.84 % and 2.24 %. So it is not that some
-invocations are fast and others slow — **consecutive arm-runs of the same
-configuration inside one invocation differ by 6 tok/s**, on byte-identical
-output, while the no-speculation arm interleaved with them holds 0.3 %. Every
-one of the ten arms produced exactly one distinct output set across both V3
-sessions, so this is not different work either.
+Session 2 repeats it, row for row: 0.33 %, 0.49 %, 1.84 % and 2.24 %. So it is
+not that some invocations are fast and others slow; **consecutive arm-runs of
+the same configuration inside one invocation differ by 6 tok/s**, on
+byte-identical output, while the no-speculation arm interleaved with them holds
+0.3 %. Every one of the ten arms produced exactly one distinct output set
+across both V3 sessions, so this is not different work either.
 
 **What neither design can test.** Both schedules are cyclic rotations, which
 balance *position* and not *predecessor*: in V2 `spec-dflash-n2` is preceded by
 `baseline` in 32 of 40 arm-runs, in V3 by `baseline-cap` in 18 of 20. The one
 predecessor contrast available is between the two designs, and it is confounded
-with the design. It points the same way each time — the arm is slower after a
-capped neighbour and faster after a free-running one, in both of its own modes —
+with the design. It points the same way each time (the arm is slower after a
+capped neighbour and faster after a free-running one, in both of its own modes)
 but a fixed rotation cannot separate that from anything else, and this
 repository has said the wrong thing about `spec-dflash-n2` twice already.
 
@@ -1706,11 +1726,12 @@ sessions of a 10 × 10 Williams square on 2026-08-28, row order shuffled from a
 per-session seed, 500 of 500 arm-runs. It is run V3 verbatim except for
 `BENCH_ORDER`; the exported treatment variables differ in three places and all
 three are the schedule. Every arm visits every position exactly once **and** is
-preceded by every other arm exactly once within a repeat — verified from the
-arm-runs' own `t_start` order, not from the manifest, in all five sessions.
-The analysis plan was committed in
-[`PREREGISTERED_W.md`](v4_audit_2026_08_25/PREREGISTERED_W.md) while the run was at 360 of 500,
-and `analysis/verify_claims.py` asserts that commit is an ancestor of this one.
+preceded by every other arm exactly once within a repeat; verified from the
+arm-runs' own `t_start` order, not from the manifest, in all five sessions. The
+analysis plan was committed in
+[`PREREGISTERED_W.md`](v4_audit_2026_08_25/PREREGISTERED_W.md) while the run
+was at 360 of 500, and `analysis/verify_claims.py` asserts that commit is an
+ancestor of this one.
 
 | arm | V2, 8 sessions, between | V3, 2 sessions, within | **W, 5 sessions, within and carryover-balanced** |
 |---|---:|---:|---:|
@@ -1719,8 +1740,8 @@ and `analysis/verify_claims.py` asserts that commit is an ancestor of this one.
 | `spec-dflash-n2` | **+5.92** [+4.86, +6.99] | **+8.65** | **+8.29** [+7.97, +8.60] |
 | `spec-draft-n8` | +6.31 [+6.29, +6.33] | +6.30 | **+6.35** [+6.32, +6.38] |
 
-Three of four agree with both earlier designs. `spec-dflash-n4`'s sign flip —
-the strongest result in this section — now holds at +12.03, +12.17 and +12.10
+Three of four agree with both earlier designs. `spec-dflash-n4`'s sign flip,
+the strongest result in this section, now holds at +12.03, +12.17 and +12.10
 across three schedules, so it is not an artefact of any of them.
 
 **And the fourth arm resolves, but not the way the schedule was supposed to
@@ -1737,11 +1758,11 @@ not. With every arm preceded by every other exactly once, the contrast between
 | `spec-dflash-n2` | **−1.20 %** | [−2.61 %, +0.22 %] |
 | `spec-dflash-n4-cap` | −0.21 % | [−0.66 %, +0.24 %] |
 | `spec-dflash-n2-cap` | +0.19 % | [−0.95 %, +1.32 %] |
-| every other arm | under 0.15 % | all containing zero |
+| every other arm | under 0.18 % | all containing zero |
 
 **No arm's interval excludes zero.** `spec-dflash-n2` is the largest by six
-times and points the way A17 guessed — slower after a capped neighbour, in four
-sessions of five — but at five sessions the interval spans zero. Per the
+times and points the way A17 guessed (slower after a capped neighbour, in four
+sessions of five) but at five sessions the interval spans zero. Per the
 pre-registered plan this is reported as **no detectable predecessor effect at
 this power**, with the interval, and not as "there is none". What it does rule
 out is first-order carryover as the *explanation* for a 2.4 pp gap between V2
@@ -1756,20 +1777,27 @@ five,
 | arm | mean per-repeat CV inside a session |
 |---|---:|
 | `spec-dflash-n2` | **1.69 %** |
-| `spec-dflash-n2-cap` | **1.71 %** |
-| `spec-mtp-n2` | 0.50 % |
+| `spec-dflash-n2-cap` | **1.63 %** |
+| `spec-mtp-n2` | 0.52 % |
 | no speculation | **0.31 %** |
 | `spec-draft-n8` | 0.14 % |
 
+Two of those five read 1.71 % and 0.50 % until 2026-08-29, and they came from
+the other definition: `carryover.py`'s `spread`, which averages over
+predecessors before taking the coefficient, gives 1.68 % and 0.50 % for those
+arms. This table is the header's definition throughout now, which is the one
+the paragraph above it argues for. Neither definition produced 1.71 %; the
+three that were tried give 1.630 %, 1.622 % and 1.684 %.
+
 Five times the baseline, on work that is identical to the token: across all
 5000 request rows of the 500 arm-runs, every arm produced **one** distinct set
-of generated text and **one** distinct drafted/accepted pair — the same
-1253/732 = 58.4 % and 2556/1710 = 66.9 % that V2 and V3 recorded, over five
-more independent invocations.
+of generated text and **one** distinct drafted/accepted pair, the same 1253/732
+= 58.4 % and 2556/1710 = 66.9 % that V2 and V3 recorded, over five more
+independent invocations.
 
 **What to take from all four designs.** The hard cap raises every arm
 measurably, and `spec-dflash-n4` changes sign under it at +12.03, +12.17 and
-+12.10 pp across three schedules — the strongest result in this section. The
++12.10 pp across three schedules: the strongest result in this section. The
 effect on `spec-dflash-n2` is **+8.29 pp [+7.97, +8.60] when the two modes are
 measured inside one invocation**, and the crossover's +5.92 pp is what the same
 contrast reads when the two modes sit in different invocations. The difference
@@ -1811,7 +1839,7 @@ is a factor of 1.8, not the fourfold gap 0.48 implies. It is still the largest,
 and this audit still has no explanation for it, but the margin was overstated.
 
 Two things follow, and both are now enforced rather than intended. The caption
-states which estimator the column is — the SD of the five repeats' request
+states which estimator the column is; the SD of the five repeats' request
 means, not of the pooled rate printed beside it, which is a different number:
 recomputing the column from per-repeat pooled rates reproduces 3 of the 13
 published values and the request mean reproduces 13 of 13. And all 65 cells of
@@ -1836,28 +1864,59 @@ the nine published documents, and `--probe` writes a wrong number into one cell
 of each in turn, runs the claim checker, and asks whether an assertion that was
 passing now fails. Measured on the tree this entry is committed in:
 
-Of **136** tables, **12** carry no derivable number — paths, hashes, build
-identifiers — and **124** carry measurements. **44** of those are parsed cell by
-cell by `analysis/verify_claims.py`; **80** are not.
+Of **136** tables, **11** carry no derivable number (paths, hashes, build
+identifiers) and **125** carry measurements. **119** of those are parsed cell by
+cell by `analysis/verify_claims.py`; **6** are not.
 
-Perturbing all **80**: two have no cell that can be perturbed, **11** are caught
-by some other check, and **67 accept a wrong number and nothing notices**.
-Eleven being caught without being parsed is the general net doing its job — the
-rule that every quoted throughput must equal one derivable for that arm — and it
+That count was 44 and 80 when this entry was first written. Eight of the
+difference is a correction to the census rather than work: a table read by a
+bespoke loop, or by a reader the census did not know about, was counted as
+unparsed while being checked cell by cell. `analysis/table_coverage.py` now
+finds every header literal in the checker, resolves the generic readers through
+the variable naming the document, and a test requires each header to be
+accounted for.
+
+Perturbing the 80 that were unparsed then: two have no cell that can be
+perturbed, **11** are caught by some other check, and **67 accepted a wrong
+number and nothing noticed**. Seventy-four of those 80 are parsed now. Eleven
+being caught without being parsed is the general net doing its job (the rule
+that every quoted throughput must equal one derivable for that arm) and it
 catches a typo, not a figure attributed to the wrong run.
 
-Perturbing all **44** that are parsed: **44 are caught, none survives**. That
-number is the point of running it. "Parsed" is a claim about what a parser does,
-and a parser can match a header, return rows, and assert nothing about the
-column you changed — which is exactly what the W three-design table did, in two
-documents, until this pass.
+**One cell a table does not say a table is guarded.** Perturbing every number
+of every parsed table, rather than one cell of each, found **80** numbers in
+tables that had passed the one-cell probe: nearly all of them a second or third
+number inside a cell a parser read the front of, such as the four arms by three
+columns by two interval bounds of A17's crossover table. Guarding those grew
+the parsed set, and the probe over the grown set found more: on 2026-08-29 it
+perturbed **2 252** numbers across the **119** parsed tables and **33** of them
+changed nothing. Every one is read now, and the re-run reports none. The three
+runs it took are the point: the population grows as the coverage does, so a
+clean run is only clean for the tree it was run on.
 
-**The larger half is not tables.** **1 155** decimal numbers sit in prose,
-outside every table; **647** of them do not appear as a string literal anywhere
-in the checker, counting only literals that are not assertion labels — a label
+The measurement was wrong three times before it measured anything, and all
+three are recorded in the file. The first used the claim checker's exit status,
+and every table came back caught, because one unrelated assertion was failing
+at the time and the checker exited non-zero whatever was done to the documents;
+a probe whose control and treatment agree measures nothing, so it compares
+failure *sets* now. The second matched a table header against the literals the
+checker parses without asking which document the reader reads, so a table
+duplicated into a second document counted as parsed there too; that is how the
+changelog's copy of the re-derivation table passed as covered while accepting a
+wrong number. The third is above: the checker read a file `.gitignore`
+excluded, so inside the probe's clean checkout it died 373 assertions early and
+the baseline every shard compared against was a broken run.
+
+"Parsed" is a claim about what a parser does, and a parser can match a header,
+return rows, and assert nothing about the column you changed, which is exactly
+what the W three-design table did, in two documents, until this pass.
+
+**The larger half is not tables.** **1 209** decimal numbers sit in prose,
+outside every table; **660** of them do not appear as a string literal anywhere
+in the checker, counting only literals that are not assertion labels; a label
 is prose about a check and not a check, and leaving them in made the count move
 whenever an assertion was reworded. That criterion is an upper bound on the gap
-rather than the gap, so a fixed sample of **40** of the 647 was perturbed the
+rather than the gap, so a fixed sample of **40** of the 660 was perturbed the
 same way, seed `20260828`: **40 of 40 accepted a wrong number**. The 95 %
 Wilson interval puts the unguarded fraction of that population at **91 % or
 above**. The prose half of this repository is, to a first approximation,
@@ -1866,7 +1925,7 @@ unchecked.
 **The measurement was wrong twice before it measured anything.** The first
 version used the claim checker's exit status, and every table came back caught,
 because one unrelated assertion was failing at the time and the checker exited
-non-zero whatever was done to the documents — a probe whose control and
+non-zero whatever was done to the documents: a probe whose control and
 treatment agree measures nothing. It compares failure *sets* now. The second
 matched a table header against the literals the checker parses without asking
 which document the reader reads, so a table duplicated into a second document
@@ -1875,24 +1934,105 @@ re-derivation table passed as covered while accepting a wrong number. Each
 reader is bound to its document now. Both mistakes are recorded in the file,
 because the shape of a wrong measurement outlives the number it produced.
 
-**What this pass changed.** Twenty tables are parsed that were not, about nine
-hundred assertions' worth, including every cell of the thirteen-arm run C
-table, run O's head-to-head, the v1 representative table with both of its
-range rows, run J and run K, run L's two halves, and the V2 and V3 columns of
-the W table in both documents that carry it. Four published statements were wrong and are corrected:
-[A18](#a18-run-cs-spread-claim-excluded-five-arms-without-saying-so),
-[B1](#b1-mean-toks-was-the-request-mean-only-pooled-throughput-is-materially-worse),
-run N's two counter spans, and `n_max 8`'s prompt split, which the run J table
-had contained since it was published and no sentence had drawn out.
+**What this pass changed.** Seventy-five tables count as parsed that did not:
+eight are the census correction above and sixty-seven are new readers. They
+include every cell of the thirteen-arm run C table, run O's head-to-head, the
+v1 representative table with both of its range rows, run J and run K, run L's
+two halves, the V2 and V3 columns of the W table in both documents that carry
+it, both run registries, A4's log reconstruction, A14's M1-against-Q
+comparison, A16's six invocations, A17's per-repeat rates, B4's family minima,
+the BOS-override table in the two documents that publish it, run I's
+acceptance under batching, and the README's length-matched comparison.
 
-**What it did not change.** Sixty-seven tables and most of the prose are still
-unguarded. The probe is not run in CI: at about twenty seconds a table it is
-close to an hour, and it needs a git worktree. What CI does hold is the census —
-`verify_claims.py` pins the table count exactly and the parsed count as a floor,
-so a new table has to be parsed or accounted for, and a parser that is deleted
-fails. The numbers above are reproduced by
-`python analysis/table_coverage.py --probe`, `--probe --covered` and
-`--prose --probe`.
+**Twenty-nine published statements were wrong and are corrected.** They are
+listed rather than summarised, because a count of corrections is itself a
+number and this file exists because of unchecked numbers.
+
+1. [A18](#a18-run-cs-spread-claim-excluded-five-arms-without-saying-so), run
+   C's spread claim, which excluded five arms without saying so.
+2. [B1](#b1-mean-toks-was-the-request-mean-only-pooled-throughput-is-materially-worse):
+   `mean tok/s` was the request mean only.
+3. Run N's two counter spans, quoted from different denominators.
+4. `n_max 8`'s prompt split, which run J's table had contained since it was
+   published and no sentence had drawn out.
+5. The run registry published run C as three repeats; its manifest says five.
+6. The same row published run D as thirteen arms; it has five of run C's.
+7. The registry, and the README's data map, said "30 requests each" for runs A
+   and B. That is B; run A's two speculative arms abort part way at twelve.
+8. Run E's row named three of the four draft lengths it swept.
+9. Run K's row named a range containing lengths it never ran.
+10. A blank line inside the tier registry orphaned its **v4 audit** row from
+    the header, so GitHub rendered the controlled tier as literal pipes.
+11. [A14](#a14-within-run-repeats-are-not-an-error-bar) called two runs' argv
+    byte-identical; one of the thirty tokens, the listening port, differs.
+12. The session 2 coefficients under A17's per-repeat table listed three
+    figures for a four-row table, so a reader lining them up read `baseline`'s
+    as `spec-mtp-n2`'s.
+13. A17's length-matched split carried run V's largest *mode* contrast,
+    11.90 pp, in a column asking for its largest length-matching shift, which
+    is 14.02 pp.
+14. The same entry said the external drafter appears three times across the
+    thinking-off runs; it appears five.
+15. A15's O2-against-T baseline row read +0.54 %; the pooled rates give
+    +0.53 %, and no other definition reaches +0.54 %.
+16. `BENCHMARK_ENV.md` put run N in the `-fit on` group; N ran pinned at
+    `-ngl 999 -c 16384`.
+17. The same table named no run W at all.
+18. The same file counted seventeen telemetry traces and twelve compact ones;
+    the tree holds sixteen and eleven.
+19. The v4 file map's lead-in said forty-one directories a line above a row
+    saying sixty-five.
+20. The README's data map counted 62 v2 logs; the three `v2_*` directories
+    hold 61, one of them the verbose trace it counts separately.
+21. The v4 README's prompt-set table put a figure in a column headed "run M3"
+    for an arm run M3 does not carry, and the figure was run L's
+    thinking-**on** one.
+22. The table beside it took one column from run M1's aggregate and the other
+    from run M3's pooled rate without saying so.
+23. B8's row census still described the tree as it stood before run W.
+24. Run W's carryover table said the arms it does not name move under 0.15 %;
+    the largest moves 0.18 %.
+25. The changelog credited run M with "+17.5 to +21.8 %", which is run O's two
+    metrics for the same arm.
+26. `RETEST_TODO`'s A2 table gave the baseline as `~125-129 tok/s (quiet
+    host)`; run A's control on that prompt reads 123.3 and 126.0.
+27. A2 reported the vocabulary difference as +0.3 % overall and −1.2 % to
+    +3.7 % per prompt; pooled over both binaries it is +0.2 %, and the span
+    across the sixteen (binary, prompt) cells is −2.2 % to +3.7 %.
+28. The pull-request body said the uncommitted server logs are 7 GB; the
+    script that archives them says ~3 GB in three places.
+29. A17's per-repeat CV table mixed two definitions inside one table, in an
+    entry about two definitions being confused: `spec-mtp-n2`'s 0.50 % was
+    `carryover.py`'s `spread` rather than the header's mean-of-CV, and
+    `spec-dflash-n2-cap`'s 1.71 % was neither.
+
+A test now refuses any table row with no header above it, and another refuses
+any path the checker opens that a fresh clone would not have.
+
+One of them was not a number at all. The check that reads run M's placement
+opens `v4_audit_2026_08_25/data/matrix_M.log`, and `.gitignore` line 4 is
+`*.log`, so the file was on the bench host and in nobody's clone. It showed up
+as a crash inside the coverage probe's worktree, which is a clean checkout of
+HEAD: the probe's baseline was a checker that died 373 assertions early, and a
+probe whose control is broken measures nothing, which is the second time this
+file has had to record that. The eight v4 harness logs are committed now, 452
+kB of them, and a test refuses any path the checker opens that a fresh clone
+would not have.
+
+**What it did not change.** Six tables and most of the prose are still
+unguarded. The six are named rather than counted, because each is unread for
+its own reason: `RETEST_TODO`'s status board and its host probe, the first
+because every figure in it is a cross-reference and the second because nothing
+here can re-derive a host's free disk on 2026-08-25; the v4 README's open-gaps
+table and the README's upstream-issue table, both cross-references; A8's
+`p_min` defaults, which are a property of three llama.cpp builds rather than of
+any measurement here; and A14's between-run histogram, whose ten pairs this
+file already says are not enumerated anywhere. The probe is not run in CI: at about twenty seconds a table it is
+close to an hour, and it needs a git worktree. What CI does hold is the census:
+`verify_claims.py` pins the table count exactly and the parsed count as a
+floor, so a new table has to be parsed or accounted for, and a parser that is
+deleted fails. The numbers above are reproduced by `python
+analysis/table_coverage.py --probe`, `--probe --covered` and `--prose --probe`.
 
 ---
 
@@ -1928,7 +2068,7 @@ text rather than assumed, so a cell that names the wrong one fails.
 ### B2. The `±` column was across-prompt spread, not repeated-run uncertainty
 
 Each v1 cell is one measurement of one prompt. The ten values behind a `std`
-are ten *different prompts*, so the column is workload heterogeneity — not a
+are ten *different prompts*, so the column is workload heterogeneity, not a
 standard error, confidence interval, or run-to-run noise estimate. The charts
 now draw min–max and say so; the CSV column is renamed `across_prompt_sd`.
 
@@ -1950,10 +2090,10 @@ README methodology: "Output capped at 300 tokens (and 1000 tokens in the
 `-1000tok` variants); all completions reach the cap, so `predicted_n` is
 constant across runs within a config."
 
-True for the 300-token group — every one of those 150 requests returned
-exactly 300. False for the 1000-token group. `baseline-1000tok` returned
-`[354, 514, 801, 427, 1000, 891, 1000, 384, 1000, 484]`: three of ten hit the
-cap. The other three 1000-token configs differ from it *and from each other* in
+True for the 300-token group: every one of those 150 requests returned exactly
+300. False for the 1000-token group. `baseline-1000tok` returned `[354, 514,
+801, 427, 1000, 891, 1000, 384, 1000, 484]`: three of ten hit the cap. The
+other three 1000-token configs differ from it *and from each other* in
 per-request length, so their aggregates must use actual token counts and must
 be compared against `baseline-1000tok`, never against the 300-token baseline.
 
@@ -1984,8 +2124,8 @@ cannot find hits stay at ~135 tok/s; structured prompts (`reasoning`,
 
 Per-request `draft_n` says otherwise. For `ngram-mod-n24`, draft rounds were
 recorded on `short_q`, `medium_chat`, `medium_rec`, `reasoning`,
-`long_explain`, `multi_turn_1`, `multi_turn_2`, `zh_cn` — that is, on the chat
-prompts the sentence says cannot find hits — and **not** on `code_small`.
+`long_explain`, `multi_turn_1`, `multi_turn_2`, `zh_cn` (that is, on the chat
+prompts the sentence says cannot find hits) and **not** on `code_small`.
 Classic draft is the opposite: rounds only on `long_explain` and `code_small`,
 with `reasoning` at full baseline speed. Two different configurations, two
 different prompt partitions, neither matching the published taxonomy. Ten
@@ -2002,13 +2142,13 @@ and **5** recorded none: `baseline`, `baseline-rerun`, `baseline-1000tok`,
 that includes three baselines and a control inflates the claim.
 
 A further gap: `run_verify_matrix.sh` defines an H1 `ngcache-nofa` condition,
-but no `results/verify/ngcache-nofa.json` exists — `-fa off` is incompatible
+but no `results/verify/ngcache-nofa.json` exists, `-fa off` is incompatible
 with `-ctk q8_0`, so that hypothesis was never tested. `run_p0_matrix.sh` says
 so in a comment; the README never mentioned it.
 
 ### B7. The fp16-KV row is a one-sided control — now closed by measurement
 
-`ngcache-kv-fp16` was read as "fp16 KV does not rescue — KV quant is not the
+`ngcache-kv-fp16` was read as "fp16 KV does not rescue; KV quant is not the
 cause". There is no no-speculation fp16-KV baseline in the v1 matrix, so the
 row cannot separate a speculation effect from a KV-precision effect. It is
 visible in the heatmap: on the seven prompts with no draft round it runs at
@@ -2026,26 +2166,26 @@ The audit matrix adds the control v1 lacked. Post-merge master `3737e4137`,
 | `ngram-cache-kvfp16` | 70.9 | −42.5 % |
 
 So fp16 KV is about 2 % faster than q8_0 KV with no speculation running, and it
-does **not** help when speculation is on — the speculative arm is slightly
-worse with fp16 KV, not better. The original reading happened to reach a
-defensible conclusion, but it could not have known that: it was comparing a
-speculative fp16-KV row against a non-speculative q8_0-KV row and attributing
-the whole difference to speculation.
+does **not** help when speculation is on; the speculative arm is slightly worse
+with fp16 KV, not better. The original reading happened to reach a defensible
+conclusion, but it could not have known that: it was comparing a speculative
+fp16-KV row against a non-speculative q8_0-KV row and attributing the whole
+difference to speculation.
 
 ---
 
 ### B8. Every `request-mean` here counts one token fewer than it timed
 
 `predicted_per_second` is llama.cpp's own field, and every table in this
-repository with a **request-mean** column is the arithmetic mean of it —
+repository with a **request-mean** column is the arithmetic mean of it:
 `analysis/matrix_report.py`, `analysis/plot.py` and `analysis/plot_v4_runs.py`
 all read it rather than dividing tokens by time themselves.
 
-Across all **13 344** request rows of all **1305** committed arm-run files:
+Across all **18 344** request rows of all **1805** committed arm-run files:
 
 | what the server reported | rows |
 |---|---:|
-| `1000 × (n − 1) / predicted_ms` | **13 300** |
+| `1000 × (n − 1) / predicted_ms` | **18 300** |
 | `1000 × n / predicted_ms` | 44 |
 | neither | **0** |
 
@@ -2061,7 +2201,7 @@ exactly `(n − 1) / n`, so it depends on output length:
 | 1000 | 0.10 % |
 
 **What this does not touch.** Every headline figure and every published *delta*
-is a **pooled** rate — `1000 × Σn / Σms`, computed from the two raw fields — so
+is a **pooled** rate (`1000 × Σn / Σms`, computed from the two raw fields) so
 none of them contains this. And on a run where every request hits the same cap,
 the bias is identical on every arm: run O2's baseline, `spec-dflash-n2` and
 `spec-draft-n8` request-means are each **0.33 %** low, so the ratios between
@@ -2078,7 +2218,7 @@ them are exact.
 - **Comparability across binaries.** The 44 rows that report `1000 × n / ms` are
   the legacy `bcb5eeb64` runs. The definition changed between the archival and
   controlled tiers, so request-means from the two are not comparable at this
-  precision — pooled rates are.
+  precision; pooled rates are.
 
 **Not corrected here.** Recomputing the request-mean from `predicted_n` and
 `predicted_ms` would move several dozen published figures by 0.33 % and change
@@ -2094,7 +2234,7 @@ change without failing the build, and recomputation is listed in
 publishes the checkpoint cost in four rows, splitting the restore into
 `load_tgt` and `load_dft` with a share each. The top-level
 [`README.md`](README.md) and the pull request body merge those two into one
-**restore** row, and they carried its share as **30.5 %**, which is 22.9 + 7.6 —
+**restore** row, and they carried its share as **30.5 %**, which is 22.9 + 7.6:
 the two shares each rounded to one decimal and then added. The merged row is
 21.74 s of 71.4 s, which is **30.4 %**.
 
@@ -2103,11 +2243,11 @@ One tenth of a point, and it is the tenth that makes the column add up: with
 they were 100.1. A reader checking the arithmetic would have found the table
 inconsistent with itself.
 
-**How it survived.** A12's own four-row table has been parsed cell by cell since
-2026-08-26. The two-document merged version was not parsed anywhere — the same
-defect as the four tables the second review's pass found and the run-M table the
-mutation suite found on 2026-08-27, in a third place. Both copies are parsed
-now, against each other as well as against the data, and
+**How it survived.** A12's own four-row table has been parsed cell by cell
+since 2026-08-26. The two-document merged version was not parsed anywhere: the
+same defect as the four tables the second review's pass found and the run-M
+table the mutation suite found on 2026-08-27, in a third place. Both copies are
+parsed now, against each other as well as against the data, and
 `tests/data_mutate.py` perturbs both.
 
 The 39.07 s, the 54.7 %, the 24.3 %, the 24.2 % and the 21.1 % are unaffected.
@@ -2116,31 +2256,30 @@ The 39.07 s, the 54.7 %, the 24.3 %, the 24.2 % and the 21.1 % are unaffected.
 
 ### C1. The target quantisation is `UD-Q4_K_XL`, not `Q4_K_M`
 
-The v1/v2 conclusion sentence — "no spec-decode configuration on a consumer
-3090 is a net win for Qwen3.6-35B-A3B **at Q4_K_M**" — names the wrong
-artefact. `Q4_K_M` is the *draft* model's quantisation
-(`Qwen3.5-0.8B-Q4_K_M.gguf`) and the Ollama comparison's, not the target's.
-The tested target is `Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf`,
-sha256 `707a55a8…f4450`. Quantisation recipe is a treatment dimension; the
-generic "Q4" must not stand in for it.
+The v1/v2 conclusion sentence ("no spec-decode configuration on a consumer 3090
+is a net win for Qwen3.6-35B-A3B **at Q4_K_M**") names the wrong artefact.
+`Q4_K_M` is the *draft* model's quantisation (`Qwen3.5-0.8B-Q4_K_M.gguf`) and
+the Ollama comparison's, not the target's. The tested target is
+`Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf`, sha256 `707a55a8…f4450`. Quantisation recipe
+is a treatment dimension; the generic "Q4" must not stand in for it.
 
 ### C2. The `zh_cn` prompt is Traditional Chinese
 
-`bench_runner.py` prompt 10 is `你是桌面機器人。` / `請用一到兩句話介紹你自己。`
-— Traditional Chinese, tagged `zh_cn`. The raw JSON keeps the historical tag;
-charts and prose now use `zh_hant`.
+`bench_runner.py` prompt 10 is `你是桌面機器人。` / `請用一到兩句話介紹你自己。`: Traditional
+Chinese, tagged `zh_cn`. The raw JSON keeps the historical tag; charts and
+prose now use `zh_hant`.
 
 ### C3. `multi_turn_1` / `multi_turn_2` are not multi-turn
 
 Each entry in `PROMPTS` is sent as a fresh two-message conversation. No state
 carries between them, so they measure two independent single-turn requests.
-`medium_rec` — "Earlier the user said their name is Hctsai. What did they tell
-you?" — refers to a turn that never happened. A genuine multi-turn workload
+`medium_rec` ("Earlier the user said their name is Hctsai. What did they tell
+you?") refers to a turn that never happened. A genuine multi-turn workload
 would need conversation state and prefix reuse, which this harness does not do.
 
 ### C4b. "Stock clocks" was measured once, before the load
 
-`BENCHMARK_ENV.md` states "**Stock clocks — no overclocking.** GPU is at the
+`BENCHMARK_ENV.md` states "**Stock clocks; no overclocking.** GPU is at the
 factory-default power limit of 350 W", citing a single `nvidia-smi` snapshot
 taken at bench start:
 
@@ -2153,8 +2292,8 @@ The *no-overclocking* half is sound: `power.limit == power.default_limit` is a
 real OC fingerprint. The rest is an idle-state reading, taken before any model
 was loaded, and it says nothing about clocks under sustained load. No v1, v2 or
 v3 run captured a clock, power or temperature trace **during** benchmarking, so
-none of them can rule out thermal or power-cap drift across a run — and v1's
-19 configs, v2's 9 and v3's 7 were each executed as one long sequence.
+none of them can rule out thermal or power-cap drift across a run, and v1's 19
+configs, v2's 9 and v3's 7 were each executed as one long sequence.
 
 The audit added a continuous trace ([`bench/gpu_telemetry.sh`](bench/gpu_telemetry.sh),
 5 s sampling of clocks, power, temperature, pstate and the
@@ -2167,7 +2306,7 @@ Measured across the audit's own matrix run
 | quantity | observed |
 |---|---|
 | `power.limit` / `power.default_limit` / `power.max_limit` | 350 / 350 / 350 W — **not overclocked** |
-| GPU temperature | 58–75 °C, mean 64.7, against a ~83 °C throttle point |
+| GPU temperature | 58–75 °C, mean 64.7, against a ~83 °C throttle point † |
 | graphics clock | 1800–1965 MHz of a 2100 MHz maximum, mean 1937 |
 | `clocks_throttle_reasons.sw_power_cap` | active on **636 of 1272** loaded samples — the normal state for a GeForce card under load |
 | `clocks_throttle_reasons.sw_thermal_slowdown` | active on **2 of 1272**, at 64 °C and 65 °C |
@@ -2175,25 +2314,30 @@ Measured across the audit's own matrix run
 | `clocks_throttle_reasons.hw_power_brake_slowdown` | never active |
 | `temperature.memory` | `N/A` — this card does not expose GDDR6X junction temperature through `nvidia-smi`, so the memory junction is not observable here |
 
+† The 83 °C is the card's documented slowdown temperature, not a measurement
+from this trace, and it is the one figure in the table `nvidia-smi` never
+recorded here; everything else in it comes back from the trace itself. What the
+trace supports is the comparison: the run's maximum was 75 °C.
+
 All three thermal-flag samples were taken with the clock at **1950, 1950 and
 1935 MHz** against a run maximum of 1965, so none of them carried a meaningful
 downclock.
 
-> An earlier version of this table read `223 of 343`, `1 of 343` and `1 of 343`,
-> with temperature 59–75 °C mean 65.5 and clocks 1815–1950 mean 1934, and said
-> "both thermal flags". Every one of those figures was wrong against
-> [`v4_audit_2026_08_25/data/gpu_telemetry_20260825.csv`](v4_audit_2026_08_25/data/gpu_telemetry_20260825.csv),
+> An earlier version of this table read `223 of 343`, `1 of 343` and `1 of
+> 343`, with temperature 59–75 °C mean 65.5 and clocks 1815–1950 mean 1934, and
+> said "both thermal flags". Every one of those figures was wrong against [`v4_audit_2026_08_25/data/gpu_telemetry_20260825.csv`](v4_audit_2026_08_25/data/gpu_telemetry_20260825.csv),
 > the file this table cites: the trace has 1317 rows and 1272 under load, not
 > 343, and there are three flag samples, not two. The numbers above are derived
 > from that file by `analysis/verify_claims.py` and will now fail the build if
-> they drift again. The conclusion is unchanged — the card is not overclocked,
-> never near its throttle point, and does not downclock across the run. And the drift runs the wrong way for
+> they drift again. The conclusion is unchanged; the card is not overclocked,
+> never near its throttle point, and does not downclock across the run. And the
+> drift runs the wrong way for
 a thermal-bias worry: comparing the first half of the trace with the second,
 the clock rose 1929 → 1940 MHz (+0.62 %) while temperature fell 66.9 → 64.0 °C.
 The card got slightly cooler and slightly faster as the run went on.
 
 An earlier draft of this section said no thermal bit was ever set. That was
-written from the first 18 samples and it is wrong — two transient flags appear
+written from the first 18 samples and it is wrong: two transient flags appear
 later in the trace. Neither has a performance consequence, so the conclusion is
 unchanged, but the claim had to be narrowed as data arrived. That is the whole
 argument for keeping a trace instead of a single snapshot.
@@ -2201,7 +2345,7 @@ argument for keeping a trace instead of a single snapshot.
 The matrix additionally repeats its no-speculation baseline across the run, so
 drift is testable from the measurement itself and not only from telemetry: on
 the three-repeat master run already committed, baseline reads 133.5 / 132.7 /
-132.5 tok/s — a first-to-last change of −0.75 % and a full swing of 0.76 % of
+132.5 tok/s, a first-to-last change of −0.75 % and a full swing of 0.76 % of
 the mean.
 
 ### C4. GPU 0 was running another workload
@@ -2226,10 +2370,10 @@ Every v2, v3, and Exp 2 script passes `-no-cnv` to `llama-cli` and appends
 please use llama-completion instead
 ```
 
-present in **61 of 62** v2 logs and **30 of 33** v3 logs — and the same logs
-then contain `[Start thinking]` followed by a full reasoning trace, in 61/62
-v2 and 30/33 v3 logs. The measured workload is long chain-of-thought output,
-not the intended direct answer.
+present in **61 of 62** v2 logs and **30 of 33** v3 logs, and the same logs
+then contain `[Start thinking]` followed by a full reasoning trace, in 61/62 v2
+and 30/33 v3 logs. The measured workload is long chain-of-thought output, not
+the intended direct answer.
 
 `BENCHMARK_ENV.md` described the tool as "`llama-cli -st -no-cnv` (single-turn
 non-conversational)". That description is not what ran.
@@ -2237,13 +2381,13 @@ non-conversational)". That description is not what ran.
 ### D3. Exp 2 cannot be audited, so it cannot refute anything
 
 `run_n3_codejson.sh` writes per-prompt logs to
-`$HOME/bench/n3_codejson_*/trial_N/cfg/pI.log`; only `master.log` — 125 lines
-of timing summaries — and `results.json` were committed. The generated text,
-token IDs, and stop reasons are gone. Exp 2 ran on build `8889 (bcb5eeb64)`,
-the same binary whose committed v2 cross-check logs prove `-no-cnv` is rejected
-and `/no_think` inert, so there is no reason to believe the intended
-"structured, low-entropy, thinking-off code/JSON" distribution was produced,
-and no way to check.
+`$HOME/bench/n3_codejson_*/trial_N/cfg/pI.log`; only `master.log`, 125 lines of
+timing summaries, and `results.json` were committed. The generated text, token
+IDs, and stop reasons are gone. Exp 2 ran on build `8889 (bcb5eeb64)`, the same
+binary whose committed v2 cross-check logs prove `-no-cnv` is rejected and
+`/no_think` inert, so there is no reason to believe the intended "structured,
+low-entropy, thinking-off code/JSON" distribution was produced, and no way to
+check.
 
 `results.json` previously ended: "Workload-shape hypothesis (joshua Spark
 NVFP4 idea) is **REFUTED** for this hardware/engine." That has been replaced
@@ -2266,13 +2410,13 @@ off run, 0/50 in the on run).
 | draft model, n_max 8 | −74.0 % | −76.4 % | 1.85 → **2.14** |
 
 **Workload shape changes the ngram result almost completely.** With thinking
-off, `ngram-mod` stops drafting altogether — zero draft tokens across all 50
-requests — and its deficit collapses from −6.8 % to −0.7 %. A chain-of-thought
+off, `ngram-mod` stops drafting altogether, zero draft tokens across all 50
+requests, and its deficit collapses from −6.8 % to −0.7 %. A chain-of-thought
 trace is long and formulaic, which is exactly the repetitive text an n-gram
 lookup feeds on; a direct answer is short and is not.
 
 For the draft model the effect runs the other way. Acceptance falls from 29.7 %
-to 23.0 % and drafted tokens per generated token rise from 1.85 to 2.14, so
+to 23.1 % and drafted tokens per generated token rise from 1.85 to 2.14, so
 turning thinking off makes it slightly *worse*. Reasoning traces are easier for
 a 0.8 B drafter to predict than real answers.
 
@@ -2281,15 +2425,15 @@ Two consequences.
 First, Exp 2's conclusion is not merely unverifiable, it is backwards for the
 family of methods where workload shape matters most.
 
-Second — and this needs stating per family, because a single sentence about it
+Second, and this needs stating per family, because a single sentence about it
 would be wrong for half the methods. Every historical number here was taken on
 the thinking workload: 76 % of v1's requests were truncated reasoning (A5), and
 v2, v3 and Exp 2 all believed they had disabled it and had not (D1, D2). What
 that means depends on the method:
 
 - **Draft-model speculation was measured on its favourable workload.** Thinking
-  traces are easier for a 0.8 B drafter to predict — 29.7 % acceptance against
-  23.1 % on real answers — and the net result is better too, −74.0 % against
+  traces are easier for a 0.8 B drafter to predict, 29.7 % acceptance against
+  23.1 % on real answers, and the net result is better too, −74.0 % against
   −76.4 %. It still lost. For this family the negative direction is more robust
   than when it was published.
 - **ngram methods were measured on their *unfavourable* workload.** Thinking
@@ -2322,8 +2466,8 @@ one drafter re-converted by post-merge master, three repeats per arm. At
 `--spec-draft-n-max 4`, DFlash is **+18.7 %** against no speculation on
 aggregate throughput (130.2 against 109.7 tok/s) and **+24.0 %** pooled (151.6
 against 122.3), and it is faster on all ten prompts, not on average across
-them. The archived v3 direction — DFlash slower — reappears only at longer
-draft windows: −14.8 % at n_max 8 and −47.4 % at n_max 16.
+them. The archived v3 direction, DFlash slower, reappears only at longer draft
+windows: −14.8 % at n_max 8 and −47.4 % at n_max 16.
 
 So v3's number was not merely unattributable, it pointed the wrong way about
 the method. What v3 measured at n_max 4 was a binary change, and what it read
@@ -2348,8 +2492,8 @@ one that generated the committed logs. No script at all is committed for
 Compounding this, no v2 or v3 log records its own argv. The mapping from a
 directory name to the flags that produced it rests entirely on prose. Config
 identity for v2/v3 is therefore asserted, not archived. The v2 aggregate
-numbers themselves do reproduce exactly from the logs — every value in
-`SUMMARY.md` was re-derived during this audit — but which flags produced which
+numbers themselves do reproduce exactly from the logs (every value in
+`SUMMARY.md` was re-derived during this audit) but which flags produced which
 directory cannot be verified from the repository.
 
 ### D6. `--spec-type` is not "missing from master"; it is server-only
@@ -2362,7 +2506,7 @@ error: invalid argument: --spec-type
 
 The argument exists at both tested revisions. At `97895129e` and at
 `bcb5eeb64`, `common/arg.cpp` registers it as
-`.set_examples({LLAMA_EXAMPLE_SERVER})` — it is accepted by `llama-server` and
+`.set_examples({LLAMA_EXAMPLE_SERVER})`; it is accepted by `llama-server` and
 rejected by `llama-cli`. v1 used `llama-server` and exercised the flag
 successfully; v2/v3 used `llama-cli` and could not. The ngram-mod family is
 therefore v1-only in this repository for a tooling reason, not an upstream one.
@@ -2394,7 +2538,7 @@ README: "A10B has a 3.3× larger active footprint and a correspondingly lower
 `T_thres`, which is why it gains where A3B loses."
 
 `Qwen/Qwen3.5-122B-A10B` `text_config`: `num_experts = 256`,
-`num_experts_per_tok = 8` — identical to Qwen3.6-35B-A3B. Under the formula the
+`num_experts_per_tok = 8`, identical to Qwen3.6-35B-A3B. Under the formula the
 README itself cites, ρ and therefore `T_95` are the same for both models.
 Larger active parameter count is a different quantity and does not move this
 threshold. The A10B result is a genuine counterexample to any universal
@@ -2432,7 +2576,7 @@ the attribution were not.
 
 `bcb5eeb64` was master on 2026-04-22. It has not been master for four months.
 The claim is now phrased as a dated snapshot cross-check. Only
-`v2_master_cross_check/` was run on it — `v2_oleg_suggestions/` and
+`v2_master_cross_check/` was run on it: `v2_oleg_suggestions/` and
 `v2_controls/` are `b8863-97895129e`.
 
 ### F3. "first public benchmark / first public datapoint"
@@ -2452,12 +2596,12 @@ documentation, CC0-1.0 for benchmark data with `DATA_LICENSE` and
 
 ### F5. The reproduce section could not reproduce the result
 
-It ran `git clone --depth 1 … && cmake` — i.e. built whatever master happened
-to be — for a benchmark pinned to `97895129e`. It also hard-coded
+It ran `git clone --depth 1 … && cmake`, i.e. built whatever master happened to
+be, for a benchmark pinned to `97895129e`. It also hard-coded
 `~/benchmarks/...` paths and a `/home/reachym/dev/reachy-agent/robot/.venv`
 interpreter, and conflated the driver-supported CUDA 13.0 reported by
-`nvidia-smi` with the CUDA 12.6 toolkit used to build. Fixed: exact
-`git checkout`, model SHA-256 verification, and env-var overrides for every
+`nvidia-smi` with the CUDA 12.6 toolkit used to build. Fixed: exact `git
+checkout`, model SHA-256 verification, and env-var overrides for every
 host-specific path.
 
 ---
@@ -2466,16 +2610,15 @@ host-specific path.
 
 - **No measurement was edited**, and three files are not byte-identical to the
   published release, which is not the same statement. `results/`,
-  `results/verify/`, `v2_3090_followup/v2_*/`, `exp2_codejson_n3/master.log` and
-  `v3_dflash_2026_05_07/data/` are byte-identical. `results_v2.json`,
+  `results/verify/`, `v2_3090_followup/v2_*/`, `exp2_codejson_n3/master.log`
+  and `v3_dflash_2026_05_07/data/` are byte-identical. `results_v2.json`,
   `n3_results_20260426.json` and `exp2_codejson_n3/results.json` each gained an
   `audit_2026_08_25` block and had their `draft_model` and `interpretation`
-  strings corrected — the first described a drafter as vocabulary-matched, which
-  [A2](#a2-the-draft-model-was-not-vocabulary-compatible-the-run-used-the-token-translation-fallback)
+  strings corrected; the first described a drafter as vocabulary-matched, which [A2](#a2-the-draft-model-was-not-vocabulary-compatible-the-run-used-the-token-translation-fallback)
   refutes. Every number outside the new block is unchanged: 241, 149 and 215
   values, fingerprinted in `analysis/verify_claims.py` against what master
-  holds, so the "measurements unchanged" each file claims is checked rather than
-  asserted.
+  holds, so the "measurements unchanged" each file claims is checked rather
+  than asserted.
 - Every v1, v2, v3, and Exp 2 aggregate was re-derived from the raw files
   during the audit and reproduced exactly. The arithmetic was never the problem.
 - The narrow negative observation survives **inside its own scope**: under the
@@ -2483,11 +2626,10 @@ host-specific path.
   activity beat its matched no-speculation reference in aggregate. What does not
   survive is the acceptance anomaly, the mechanism, and the generality.
 - That scope turned out to matter. Every method v1 tested drives an **external**
-  drafter, and every one of them still loses on the controlled tier — batching
-  included, which widens the gap rather than closing it. Methods that draft from
-  the target's *own* layers were never in the archive, and they win: see
+  drafter, and every one of them still loses on the controlled tier: batching
+  included, which widens the gap rather than closing it. Methods that draft
+  from the target's *own* layers were never in the archive, and they win: see
   [D4](#d4-v3-dflash-compares-two-different-binaries) and the run J, K and L
-  sections of
-  [`v4_audit_2026_08_25/README.md`](v4_audit_2026_08_25/README.md). "Speculative
-  decoding loses on this hardware" was a statement about a regime this
-  repository had not separated, not about the hardware.
+  sections of [`v4_audit_2026_08_25/README.md`](v4_audit_2026_08_25/README.md).
+  "Speculative decoding loses on this hardware" was a statement about a regime
+  this repository had not separated, not about the hardware.

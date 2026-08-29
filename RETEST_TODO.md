@@ -28,9 +28,9 @@ place: no models, not enough disk, and its GPU is busy with other work.
 Two flags confirmed live on `bcb5eeb64`, both of which the historical scripts
 should have used and did not:
 
-- `--spec-type` — present in `llama-server --help`, **absent** from
+- `--spec-type`: present in `llama-server --help`, **absent** from
   `llama-completion --help`. Confirms [D6](ERRATA.md#d6---spec-type-is-not-missing-from-master-it-is-server-only) by execution, not just by source.
-- `-rea off` / `--reasoning-budget 0` / `--reasoning-format` — the real
+- `-rea off` / `--reasoning-budget 0` / `--reasoning-format`: the real
   thinking switches. `/no_think` in the prompt text was never one.
 
 ---
@@ -71,16 +71,16 @@ New work the audit generated that was not on the original list:
   documented concurrent dispatch and issued the prompts one at a time, so
   `--parallel N` allocated slots that stayed idle. How many client requests
   were **outstanding at once** is now read back out of the request timestamps
-  and asserted. That is not the server's decode batch width — how many
-  sequences shared a decode graph is not something the harness observes — and
-  nothing here should be read as measuring it.
+  and asserted. That is not the server's decode batch width (how many sequences
+  shared a decode graph is not something the harness observes) and nothing here
+  should be read as measuring it.
 - `bench/stage_mtp_source.py`, which makes the target's own multi-token
   prediction head exportable as a drafter without modifying llama.cpp
 - ERRATA A11: speculation is not output-preserving on this build, established
   against a determinism control that holds in every run
-- the acceptance threshold — **45–48 %**, quoted as a range because half its
+- the acceptance threshold: **45–48 %**, quoted as a range because half its
   fitted points come from a thinking-off run whose arms generated different
-  token counts — and, more importantly, the out-of-sample test showing that the
+  token counts; and, more importantly, the out-of-sample test showing that the
   threshold transfers and the slope does not
 - the checkpoint path, timed in the source rather than inferred from log
   intervals: 39.07 s of a 71.4 s excess, replicated in a second balanced run
@@ -119,11 +119,16 @@ ABBA-ordered, 2 repeats:
 
 | arm | `long_explain` | counted draft tokens | `code_small` |
 |---|---:|---|---|
-| translation fallback | 48.4 tok/s | 97 / 97 | **abort** |
+| translation fallback | 48.4, 49.6 tok/s | 97 / 97 | **abort** |
 | matched vocabulary | 51.1, 50.0 tok/s | 97 / 97 | **abort** |
-| baseline (quiet host) | ~125–129 tok/s | — | fine |
+| baseline, measured beside them | 123.3, 126.0 tok/s | — | fine |
 
-**Verdict: the gate defect costs about 3–5 %, not 60 %.** The counted
+The baseline row read `~125–129 tok/s (quiet host)` until 2026-08-29. Run A's
+own baseline on that prompt is 123.3 and 126.0, and the translation row showed
+one of its two repeats where the matched row showed both.
+
+**Verdict: the gate defect costs 3.2 % on this prompt and 0.2 % overall, not
+60 %.** The counted
 draft-token totals are identical across arms, so the translation path was not
 changing what got drafted. The negative finding survives and is now measured on
 a matched path. Written up as ERRATA A2.
@@ -146,8 +151,8 @@ upstream since `bcb5eeb64`:
   `--spec-draft-n-max` / `--spec-draft-n-min`.
 - `--spec-type` gained `draft-simple`, `draft-eagle3`, `draft-mtp`,
   `draft-dflash`, `draft-dspark` alongside the ngram family. **DFlash is now
-  `--spec-type draft-dflash`**, and EAGLE-3 and MTP — which this repository's
-  older text listed as "not evaluated here" — are available on one binary.
+  `--spec-type draft-dflash`**, and EAGLE-3 and MTP, which this repository's
+  older text listed as "not evaluated here", are available on one binary.
 
 **Trap worth recording:** on master, `--spec-type` defaults to `none`, so
 passing `-md` alone loads the draft model and then never speculates. A first
@@ -162,7 +167,7 @@ requests. Any master comparison must pass `--spec-type` explicitly.
   acceptance going to exactly 0.00000 under parallel slots on a hybrid Qwen3.x
   target, with generation falling below no-speculation speed and completions
   coming back with empty `content`. That report is HIP + `draft-mtp` and this
-  work is CUDA + `draft-simple`, so it probably does not apply — but the
+  work is CUDA + `draft-simple`, so it probably does not apply, but the
   batching run must **verify** acceptance is non-zero rather than presume it,
   because the symptom is silent.
 - **Checkpoint invalidation on hybrid targets.**
@@ -203,8 +208,8 @@ requests. Any master comparison must pass `--spec-type` explicitly.
 - **What the gap actually is.** W and V3 agree and the crossover does not, so
   the difference is between measuring the two modes inside one invocation and
   across two. That is [A16](ERRATA.md#a16-two-runs-identical-in-every-recorded-respect-and-byte-identical-in-output-differ-by-34--on-one-arm),
-  and it is still unexplained. W reproduces it — 1.69 % within-session CV on
-  that arm against 0.31 % for no speculation, on work identical to the token —
+  and it is still unexplained. W reproduces it (1.69 % within-session CV on
+  that arm against 0.31 % for no speculation, on work identical to the token)
   on the largest dataset this repository has for it. What would move it next is
   instrumentation, not another schedule: host CPU load (recordable now, in no
   run yet) and the GDDR6X memory-junction temperature, which NVML does not
@@ -238,23 +243,23 @@ requests. Any master comparison must pass `--spec-type` explicitly.
 - No-speculation baseline is **~6 % faster on master** than on `bcb5eeb64`
   on the same host (133–137 vs 125–129 tok/s), so absolute rates must not be
   compared across those two binaries.
-- **`draft-mtp` — nothing was blocking it. It had simply never been tried.**
+- **`draft-mtp`; nothing was blocking it. It had simply never been tried.**
   This line has now been wrong twice. It first said both `draft-eagle3` and
-  `draft-mtp` "need head weights this repository does not have"; that was written
-  without checking, and `~/models/qwen36-awq` holds **785 plain BF16 `mtp.*`
-  tensors** for this exact target with `text_config.mtp_num_hidden_layers = 1`.
-  It was then rewritten to say the blocker was a converter gap — that
-  `_QwenMtpMixin` (`conversion/qwen.py:277`) is inherited by `Qwen3NextModel`
-  (`:372`) but not by the class registered for this checkpoint's architecture
-  (`:636`). **That was also wrong**, and it was wrong in a way that a patch
-  attempt exposed immediately: adding the mixin raised
-  `TypeError: Cannot create a consistent MRO`, because the class already has it.
-  The real chain is
-  `Qwen3_5MoeTextModel → _Qwen35MRopeMixin → _LinearAttentionVReorderBase →
-  Qwen3NextModel → _QwenMtpMixin → Qwen2MoeModel → TextModel`, and
-  `supports_mtp_export` reads `True` on the **stock** converter. The runtime side
-  was never in doubt either: `LLM_ARCH_QWEN35MOE` declares 17 `NEXTN` tensor
-  entries in `src/llama-arch.cpp`, the same count as `LLM_ARCH_QWEN3NEXT`.
+  `draft-mtp` "need head weights this repository does not have"; that was
+  written without checking, and `~/models/qwen36-awq` holds **785 plain BF16
+  `mtp.*` tensors** for this exact target with
+  `text_config.mtp_num_hidden_layers = 1`. It was then rewritten to say the
+  blocker was a converter gap; that `_QwenMtpMixin` (`conversion/qwen.py:277`)
+  is inherited by `Qwen3NextModel` (`:372`) but not by the class registered for
+  this checkpoint's architecture (`:636`). **That was also wrong**, and it was
+  wrong in a way that a patch attempt exposed immediately: adding the mixin
+  raised `TypeError: Cannot create a consistent MRO`, because the class already
+  has it. The real chain is `Qwen3_5MoeTextModel → _Qwen35MRopeMixin →
+  _LinearAttentionVReorderBase → Qwen3NextModel → _QwenMtpMixin → Qwen2MoeModel
+  → TextModel`, and `supports_mtp_export` reads `True` on the **stock**
+  converter. The runtime side was never in doubt either: `LLM_ARCH_QWEN35MOE`
+  declares 17 `NEXTN` tensor entries in `src/llama-arch.cpp`, the same count as
+  `LLM_ARCH_QWEN3NEXT`.
 
   So `--mtp` works with an unmodified llama.cpp, on both the converter and the
   runtime, and the only reason this arm was missing is that nobody ran it. The
@@ -262,10 +267,10 @@ requests. Any master comparison must pass `--spec-type` explicitly.
   modification of that repository is involved in any measurement here.
 
 - **Coverage of `--spec-type` is now complete for what this model can run.**
-  Master exposes eleven values. Nine are measured here — `none`,
-  `draft-simple`, `draft-dflash`, `draft-mtp`, `ngram-simple`, `ngram-mod`,
-  `ngram-cache`, `ngram-map-k`, `ngram-map-k4v`. The other two are blocked for
-  reasons that were checked rather than assumed:
+  Master exposes eleven values. Nine are measured here: `none`, `draft-simple`,
+  `draft-dflash`, `draft-mtp`, `ngram-simple`, `ngram-mod`, `ngram-cache`,
+  `ngram-map-k`, `ngram-map-k4v`. The other two are blocked for reasons that
+  were checked rather than assumed:
 
   | type | why it cannot run here |
   |---|---|
@@ -302,7 +307,7 @@ llama.cpp silently switches to the token-translation path
 Every classic-draft number this repository has ever published was measured on
 that path.
 
-The working recipe — no file edit needed, and a no-op for the target:
+The working recipe: no file edit needed, and a no-op for the target:
 
 ```bash
 ./build/bin/llama-server -m ~/models/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf \
@@ -312,7 +317,7 @@ The working recipe — no file edit needed, and a no-op for the target:
 # vocab_cmpt = 1, and the "not compatible" line is gone
 ```
 
-Then run the A/B — same target, same draft weights, same binary, same flags,
+Then run the A/B: same target, same draft weights, same binary, same flags,
 only the BOS key differs:
 
 - arm A: `-md Qwen3.5-0.8B-Q4_K_M.gguf` (translation path, reproduces history)
@@ -383,8 +388,8 @@ n = 1, and gives the real acceptance-vs-speedup scatter that
 ### P1-1 · One binary, ABBA order, N ≥ 5, full capture
 
 Everything the v1 matrix lacked. Skeleton is in
-[`bench/retest_runner.py`](bench/retest_runner.py) — **never executed**;
-review before trusting it.
+[`bench/retest_runner.py`](bench/retest_runner.py): **never executed**; review
+before trusting it.
 
 Requirements:
 
@@ -442,7 +447,7 @@ Two further factors no historical run controlled, now instrumented
 ([C4b](ERRATA.md#c4b-stock-clocks-was-measured-once-before-the-load)):
 
 - **Overclocking.** `power.limit` vs `power.default_limit` vs `power.max_limit`
-  is the fingerprint. Measured 350 / 350 / 350 W — stock.
+  is the fingerprint. Measured 350 / 350 / 350 W: stock.
 - **Thermal and power-cap downclocking across a multi-hour run.**
   [`bench/gpu_telemetry.sh`](bench/gpu_telemetry.sh) samples clocks, power,
   temperature, pstate and `clocks_throttle_reasons` every 5 s for the whole
@@ -465,8 +470,7 @@ rep 0 and rep 4 of `baseline` agree, no drift large enough to matter occurred.
 
 PR #22105 merged upstream on **2026-06-28**, so current master carries DFlash.
 The archived v3 comparison used `b8889-bcb5eeb64` for baseline and
-`b8942-67cb0d507` (the pre-merge PR branch) for DFlash — two different binaries
-([D4](ERRATA.md#d4-v3-dflash-compares-two-different-binaries)).
+`b8942-67cb0d507` (the pre-merge PR branch) for DFlash: two different binaries ([D4](ERRATA.md#d4-v3-dflash-compares-two-different-binaries)).
 
 ```bash
 # on 3090; upstream master is c1d0e7a00 as of this probe
@@ -477,13 +481,13 @@ cmake --build build-retest -j
 sha256sum build-retest/bin/llama-server   # goes in the manifest
 ```
 
-Pin an explicit SHA — do not track a moving master. **Cost** ~30–45 min CPU
-with ccache warm.
+Pin an explicit SHA; do not track a moving master. **Cost** ~30–45 min CPU with
+ccache warm.
 
 ### P2-2 · DFlash off vs on, one binary — **DONE 2026-08-26, and it reverses the sign**
 
 Run J: one binary, one placement policy, three repeats per arm. The archived
-drafter did need re-conversion — post-merge master rejects it for lacking
+drafter did need re-conversion: post-merge master rejects it for lacking
 `target_layers`. No BOS problem: DFlash reuses the target's vocabulary, so the
 special-token gate that broke P0-1 is not in play.
 
@@ -496,10 +500,10 @@ special-token gate that broke P0-1 is not in play.
 
 Three repeats rather than five, and the control is the part that took the work:
 `-fit on` is required for the BF16 drafter to load, so it was applied to every
-arm including the baseline, and that baseline lands within −0.01 % of the pinned
-one at identical 41/41 placement. D4 is closed and v3's conclusion is retracted
-— what v3 measured was a binary change, and the method it blamed is the fastest
-thing in this repository at a short draft window.
+arm including the baseline, and that baseline lands within −0.01 % of the
+pinned one at identical 41/41 placement. D4 is closed and v3's conclusion is
+retracted; what v3 measured was a binary change, and the method it blamed is
+the fastest thing in this repository at a short draft window.
 
 Still open from this: the configuration is marginal on a 24 GiB card (peaks at
 23946 MiB of 24576), five repeats were not run, and the draft-length optimum is
@@ -526,26 +530,25 @@ the MoE story is unnecessary. **Cost** ~1.5 h.
 
 The `COMMON_CONTEXT_SEQ_RM_TYPE_FULL` → `continue` path is what makes the
 acceptance counter a tautology and what forces a 62.8 MiB checkpoint restore on
-every partial accept ([A1](ERRATA.md#a1-100--draft-acceptance-is-a-counter-artefact-not-a-measurement),
-[A3](ERRATA.md#a3-the-tested-build-had-a-known-broken-speculative-path-for-this-model-class-and-the-fix-was-never-merged)).
+every partial accept ([A1](ERRATA.md#a1-100--draft-acceptance-is-a-counter-artefact-not-a-measurement), [A3](ERRATA.md#a3-the-tested-build-had-a-known-broken-speculative-path-for-this-model-class-and-the-fix-was-never-merged)).
 PR #20075, which fixed the underlying hybrid-SSM rollback, was **closed without
 merge**. Check current master's `server-context.cpp` and re-run
 `common_context_can_seq_rm` against this target on the post-merge binary. If it
-still returns `FULL`, that is a reportable upstream finding in its own right —
+still returns `FULL`, that is a reportable upstream finding in its own right,
 and a defensible reason to open an issue with this repository's data attached.
 **Cost** ~20 min.
 
-**DONE 2026-08-26 — the path still exists; the counter no longer depends on
+**DONE 2026-08-26; the path still exists; the counter no longer depends on
 it.** At `3737e4137` the partial-accept branch still returns early
 (`server-context.cpp:3835`) and the checkpoint restore still happens: a hybrid
 Gated-DeltaNet/MoE target still cannot roll back part of a sequence. What moved
-is the denominator, which is what made the ratio a tautology.
-`n_draft_tokens += draft.size()` now runs at `:2939`, when the draft is
-*produced*, and a replaying slot never reaches it because
-`drafting.push_back(&slot)` at `:2921` sits inside the `else` of
-`if (!slot.spec_draft.empty())` at `:2893`. The numerator subtracts one on a
-replay (`:3851`). So master reports honest ratios — 29.7 %, 55.8 % — where
-`97895129e` could only report 1.00000. Full derivation in ERRATA A1.
+is the denominator, which is what made the ratio a tautology. `n_draft_tokens
++= draft.size()` now runs at `:2939`, when the draft is *produced*, and a
+replaying slot never reaches it because `drafting.push_back(&slot)` at `:2921`
+sits inside the `else` of `if (!slot.spec_draft.empty())` at `:2893`. The
+numerator subtracts one on a replay (`:3851`). So master reports honest ratios
+(29.7 %, 55.8 %) where `97895129e` could only report 1.00000. Full derivation
+in ERRATA A1.
 
 ### P3-3 · Expert-routing instrumentation (optional, expensive)
 
@@ -558,7 +561,7 @@ draft-path terms do **not** account for the slowdown. **Cost** days.
 
 Dense-model control, FP16/BF16 target control, and a second-GPU control are all
 absent. The 3090's 24 GiB cannot hold a BF16 35B target, so the FP16 control
-needs different hardware or a smaller target — note it as out of scope rather
+needs different hardware or a smaller target: note it as out of scope rather
 than leaving it as an unstated gap.
 
 ---

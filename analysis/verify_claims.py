@@ -100,6 +100,24 @@ chk("checkpoints created", len(ck), 33); chk("checkpoint MiB", round(ck[0],1), 6
 chk("GiB written", round(sum(ck)/1024,2), 2.02, 0.01); chk("GiB restored", round(sum(rs)/2**30,2), 1.23, 0.01)
 chk("drafter gen ms", round(dg,1), 999.6, 0.1)
 chk("drafter share %", round(100*dg/(1000*200/63.2),1), 31.6, 0.06)
+# kept under names nothing later reuses, because the table that publishes this
+# reconstruction is read further down, once ERRATA's lines are loaded
+_A4 = {"gen_drafts": gd, "gen_tokens": gt, "impl_calls": len(gen),
+       "empty": small.count(0), "size1": sum(1 for _x in small if _x == 1),
+       "dropped_lines": len(small), "dropped_tokens": sum(small),
+       "attempts": len(att), "full": sum(1 for _a, _b in att if _b == _a + 1),
+       "partial": sum(1 for _a, _b in att if _b < _a + 1), "restores": len(rs),
+       "acc_tokens": at,
+       "min_flag": sorted({int(_b) for _, _b in re.findall(
+           r"ignoring small draft: (\d+) < (\d+)", t)})[0],
+       "counter": sum(_a for _a, _b in att if _b == _a + 1),
+       "log": t, "small": list(small),
+       "gen_ms": dg, "wall_ms": 1000 * 200 / 63.2,
+       "ckpts": len(ck), "ckpt_mib": ck[0],
+       "gib_written": sum(ck) / 1024, "gib_read": sum(rs) / 2 ** 30}
+_A4["events"] = _A4["impl_calls"] + _A4["empty"]
+_A4["fresh"] = _A4["events"] - _A4["dropped_lines"]
+_A4["fresh_tokens"] = _A4["gen_tokens"] - _A4["dropped_tokens"]
 
 print("\n=== v4 audit runs ===")
 def load(d):
@@ -525,6 +543,64 @@ _DASH_EARLY = {"\u2212": "-", "\u2013": "-", "\u2014": "-",
                "\u00a0": " ", "\u2009": " ", "\u202f": " "}
 
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import table_coverage as _tcovn                                    # noqa: E402
+
+
+_V1CSV = list(csv.DictReader(
+    open(pathlib.Path(__file__).resolve().parent / "summary.csv", encoding="utf-8")))
+
+
+def _num_rows(lines, header_startswith, label_col=0):
+    """{first cell: [every number in the row]} for one markdown table.
+
+    The same extractor the coverage probe perturbs with, so a row that passes
+    here has no number left for the probe to change unnoticed. Reading a table
+    any other way is how eighty numbers sat in "parsed" tables unread.
+    """
+    i = next(i for i, l in enumerate(lines)
+             if l.strip().lstrip("> ").strip().startswith(header_startswith))
+    out = {}
+    for l in lines[i + 2:]:
+        raw = l.strip().lstrip("> ").strip()
+        if not raw.startswith("|"):
+            break
+        cells = [c.strip() for c in raw.strip("|").split("|")]
+        # a footnote marker is not part of a row's identity
+        out[cells[label_col].replace("`", "").replace("*", "")
+            .replace("\u2020", "").strip()] = [
+            x[2] for sp in _tcovn._pipe_spans(raw)
+            for x in _tcovn._numbers_in(raw, sp)]
+    return out
+
+
+def _num_rows_seq(lines, header_startswith, nth=0):
+    """The same, in document order, for tables whose first cell repeats.
+
+    `nth` selects among tables that share a header. The census marks every
+    table matching a header as parsed once that header reaches a reader, so a
+    document with two `| Path | Contents |` tables needs both read or the
+    coverage it reports is a table it never looked at.
+    """
+    _hits = [i for i, l in enumerate(lines)
+             if l.strip().lstrip("> ").strip().startswith(header_startswith)]
+    i = _hits[nth]
+    out = []
+    for l in lines[i + 2:]:
+        raw = l.strip().lstrip("> ").strip()
+        if not raw.startswith("|"):
+            break
+        out.append(([c.strip() for c in raw.strip("|").split("|")],
+                    [x[2] for sp in _tcovn._pipe_spans(raw)
+                     for x in _tcovn._numbers_in(raw, sp)]))
+    return out
+
+
+def _num_row_check(label, got, want, tol=0.0):
+    chk(f"{label}: every number in the row",
+        [float(x) for x in got], [float(x) for x in want])
+
+
 def _norm_early(t: str) -> str:
     for _a, _b in _DASH_EARLY.items():
         t = t.replace(_a, _b)
@@ -559,6 +635,12 @@ chk("M1 DFlash beats MTP at the same draft length",
 # the data and comparing it with a literal proves the literal, not the document:
 # `tests/data_mutate.py` changed run M's published aggregate from 127.3 to 130.3
 # and nothing here noticed, because nothing here read that cell.
+_RM_LINES = (pathlib.Path(__file__).resolve().parents[1]
+             / "README.md").read_text(encoding="utf-8").splitlines()
+_RT_LINES = (pathlib.Path(__file__).resolve().parents[1]
+             / "RETEST_TODO.md").read_text(encoding="utf-8").splitlines()
+
+
 _V4R_TEXT = (pathlib.Path(__file__).resolve().parents[1] / "v4_audit_2026_08_25"
              / "README.md").read_text(encoding="utf-8")
 _V4R_LINES = (pathlib.Path(__file__).resolve().parents[1] / "v4_audit_2026_08_25"
@@ -870,8 +952,9 @@ chk("v4 README N: and the drafts they came in",
 # of its twelve rows were checked against literals; the other eight were not,
 # and the two range rows never had been. Table driven now, so a row added to
 # the document is a row that has to reconcile with `analysis/summary.csv`.
-_ROOT_LINES = (pathlib.Path(__file__).resolve().parents[1]
-               / "README.md").read_text(encoding="utf-8").splitlines()
+_ROOT_TEXT = (pathlib.Path(__file__).resolve().parents[1]
+              / "README.md").read_text(encoding="utf-8")
+_ROOT_LINES = _ROOT_TEXT.splitlines()
 
 
 def _root_table(header_startswith):
@@ -931,6 +1014,27 @@ def _v1agg(c):
 
 _v1_base = _v1agg("baseline")
 _V1T = _root_table("| condition | request-mean | pooled | median | min |")
+# The one number in that table's label column: the 0.6B drafter's vocabulary,
+# which is why the draft never attached. It is not derivable from anything
+# committed here - the 0.6B GGUF is not in the archive - so what can be checked
+# is that the three documents quoting it quote the same number, and that it
+# really differs from the target vocabulary they compare it against. Perturbing
+# it produced no failure on 2026-08-29 because nothing read the cell at all.
+_VOCAB_DRAFT, _VOCAB_TARGET = 151936, 248320
+_ER_EARLY = pathlib.Path(__file__).resolve().parents[1] \
+    .joinpath("ERRATA.md").read_text(encoding="utf-8")
+_PRC_EARLY = pathlib.Path(__file__).resolve().parents[1] \
+    .joinpath("pr_comment.md").read_text(encoding="utf-8")
+chk("README labels the 0.6B drafter with its vocabulary",
+    f"vocab {_VOCAB_DRAFT}, draft never attached" in _ROOT_TEXT, True)
+chk("ERRATA quotes the same vocabulary, against the target's",
+    f"vocab {_VOCAB_DRAFT} \u2260 {_VOCAB_TARGET}" in _ER_EARLY, True)
+chk("and the PR comment that started it quotes the drafter's too",
+    f"(vocab {_VOCAB_DRAFT})" in _PRC_EARLY, True)
+chk("the target vocabulary is the one the README declares",
+    f"declare `vocab_size = {_VOCAB_TARGET}`" in _ROOT_TEXT, True)
+chk("and the two really differ, which is the point of the row",
+    _VOCAB_DRAFT != _VOCAB_TARGET, True)
 # The transposed n_max table: six draft lengths as columns, and the "six
 # distinct draft lengths each reproduce this at r >= +0.996" sentence beside it.
 # Its Pearson r row was never computed from anything - only the single +0.998
@@ -1150,6 +1254,25 @@ for _row in _PWT:
     chk(f"v4 README power {_name} Δ pooled (%)", round(_dp, 1), _cellv4(_row[4]), 0.06)
     _pw_agg.append(_da)
     _pw_pool.append(_dp)
+# the configuration column was unread, so a row could have claimed any context
+# or fitter margin; each is checked against that run's manifest
+# from `common_args`, not the `ctx` field: run J2's manifest leaves `ctx` null
+# and records the flag in the argument list, so reading the field would have
+# called a correct row wrong
+_PW_MAN = {}
+for _tag, _dir in _PW_RUN.items():
+    _m = json.load(open(f"v4_audit_2026_08_25/data/{_dir}/manifest.json"))
+    _ca = _m.get("common_args") or []
+    _ctx = _ca[_ca.index("-c") + 1] if "-c" in _ca else str(_m.get("ctx"))
+    _PW_MAN[_tag] = (str(_ctx), str(_m.get("fit_target")))
+for _row in _PWT:
+    _ctx, _fit = _PW_MAN[_row[0]]
+    chk(f"v4 README power {_row[0]}: the context its row names",
+        f"-c {_ctx}" in _row[5], True)
+    chk(f"v4 README power {_row[0]}: and the fitter margin",
+        (f"--fit-target {_fit}" in _row[5]) if "fit-target" in _row[5]
+        else _fit in ("None", "3072"), True)
+
 chk("v4 README power: the aggregate span it quotes",
     (round(min(_pw_agg), 1), round(max(_pw_agg), 1)), (16.1, 18.7))
 chk("v4 README power: and the pooled span",
@@ -1202,6 +1325,237 @@ chk("v4 README J table: and acceptance falls with it",
     [round(_agg(_J2, f"spec-dflash-n{_n}")["acc"], 1) for _n in (4, 8, 16)],
     sorted((round(_agg(_J2, f"spec-dflash-n{_n}")["acc"], 1) for _n in (4, 8, 16)),
            reverse=True))
+
+# Runs A and B, the two tables the audit README opens with. Their headline
+# figures are asserted further up this file against literals; the tables
+# themselves were not read, so the `min` column and the completed counts - which
+# are what "the abort is gone" rests on - were unchecked.
+_AB_ARM = {"baseline": "baseline",
+           "draft, translation fallback": "draft-max8-translate",
+           "draft, matched vocabulary": "draft-max8-matched"}
+
+
+def _ab_row(runs):
+    _r = [x for _run in runs for x in _run["rows"]]
+    _n = sum(x["predicted_n"] for x in _r)
+    _ms = sum(x["predicted_ms"] for x in _r)
+    return {"mean": st.mean(x["predicted_per_second"] for x in _r),
+            "pooled": 1000 * _n / _ms,
+            "min": min(x["predicted_per_second"] for x in _r),
+            "drafted": sum(x["draft_n"] for x in _r),
+            "accepted": sum(x["draft_n_accepted"] for x in _r),
+            "complete": sum(1 for _run in runs if len(_run["rows"]) == 10),
+            "reps": len(runs)}
+
+
+# `_v4_table` finds the FIRST table with a header, and these two share one, so
+# they are located by index rather than by name.
+_AB_LINES = _V4R_LINES
+_ab_seen = []
+for _tag, _runs in (("A", A), ("B", B)):
+    _hits = [_k for _k, _l in enumerate(_AB_LINES)
+             if _l.startswith("| arm | request-mean | pooled | min |")]
+    chk("v4 README: the run A and B tables both exist", len(_hits), 2)
+    _start = _hits[0 if _tag == "A" else 1]
+    _rows = []
+    for _l in _AB_LINES[_start + 2:]:
+        if not _l.startswith("|"):
+            break
+        _rows.append([_c.strip().strip("*` ").replace("**", "").strip()
+                      for _c in _norm_early(_l).strip("|").split("|")])
+    chk(f"v4 README run {_tag}: three arms", len(_rows), 3)
+    for _row in _rows:
+        _arm = _AB_ARM[_row[0]]
+        _v = _ab_row(_runs[_arm])
+        _ab_seen.append((_tag, _arm))
+        chk(f"v4 README {_tag} {_arm} request-mean",
+            round(_v["mean"], 1), _cellv4(_row[1]), 0.06)
+        chk(f"v4 README {_tag} {_arm} pooled",
+            round(_v["pooled"], 1), _cellv4(_row[2]), 0.06)
+        chk(f"v4 README {_tag} {_arm} min", round(_v["min"], 1), _cellv4(_row[3]), 0.06)
+        _comp, _of = (int(_cellv4(_x)) for _x in _row[5].split("/"))
+        chk(f"v4 README {_tag} {_arm} completed",
+            (_v["complete"], _v["reps"]), (_comp, _of))
+        if _v["drafted"]:
+            _acc, _dr, _pct = (_cellv4(_x) for _x in
+                               _row[4].replace("=", "/").split("/"))
+            chk(f"v4 README {_tag} {_arm} accepted / drafted",
+                (_v["accepted"], _v["drafted"]), (int(_acc), int(_dr)))
+            chk(f"v4 README {_tag} {_arm} acceptance (%)",
+                round(100 * _v["accepted"] / _v["drafted"], 1), _pct, 0.06)
+        else:
+            chk(f"v4 README {_tag} {_arm} drafts nothing, so no ratio cell",
+                any(_c.isdigit() for _c in _row[4]), False)
+chk("v4 README: both runs' tables were read, six rows",
+    sorted(_ab_seen), sorted(set(_ab_seen)))
+chk("v4 README A: neither draft arm completed a single repeat",
+    [_ab_row(A[_a])["complete"] for _a in
+     ("draft-max8-translate", "draft-max8-matched")], [0, 0])
+chk("v4 README B: both of them complete every repeat",
+    [_ab_row(B[_a])["complete"] for _a in
+     ("draft-max8-translate", "draft-max8-matched")], [3, 3])
+
+# The thinking on/off comparison, which three documents carry and none read.
+# Runs C and D, same ten prompts, and the claim it supports is that `ngram-mod`
+# stops drafting altogether when the thinking block goes away.
+_D = "v4_audit_2026_08_25/data/D_master_matrix_think_off/%s__rep*.json"
+
+
+def _cd(pattern, arm):
+    _rs = [json.load(open(_f)) for _f in sorted(glob.glob(pattern % arm))]
+    _n = sum(x["predicted_n"] for r in _rs for x in r["rows"])
+    _ms = sum(x["predicted_ms"] for r in _rs for x in r["rows"])
+    _dn = sum(x["draft_n"] for r in _rs for x in r["rows"])
+    _da = sum(x["draft_n_accepted"] for r in _rs for x in r["rows"])
+    return {"pooled": 1000 * _n / _ms, "draft_per_gen": _dn / _n,
+            "acc": 100 * _da / _dn if _dn else None, "reps": len(_rs)}
+
+
+_TH_ARM = {"ngram-mod n=24": "ngram-mod-n24", "ngram-cache": "ngram-cache",
+           "draft model n_max 8": "spec-draft-n8"}
+_TH_BASE = {"C": _cd(_C, "baseline")["pooled"], "D": _cd(_D, "baseline")["pooled"]}
+_TH_SEEN = {}
+# ERRATA's own line list is built further down this file, so this reads it here
+_TH_ER = (pathlib.Path(__file__).resolve().parents[1]
+          / "ERRATA.md").read_text(encoding="utf-8").splitlines()
+for _doc, _lines in (("v4 README", _V4R_LINES), ("README", _ROOT_LINES),
+                     ("ERRATA", _TH_ER)):
+    _k = next((_j for _j, _l in enumerate(_lines)
+               if _l.startswith("| method | thinking on")), None)
+    chk(f"{_doc}: it carries the thinking on/off table", _k is not None, True)
+    _rows = []
+    for _l in _lines[_k + 2:]:
+        if not _l.startswith("|"):
+            break
+        _rows.append([_c.replace("`", "").replace("*", "").strip()
+                      for _c in _norm_early(_l).strip("|").split("|")])
+    chk(f"{_doc} thinking table: three methods", len(_rows), 3)
+    for _row in _rows:
+        # one copy writes `draft model, n_max 8` and another `draft model
+        # n_max 8`; the comma is the only difference between them
+        _a = _TH_ARM[_row[0].replace("draft model,", "draft model")]
+        _on, _off = _cd(_C, _a), _cd(_D, _a)
+        chk(f"{_doc} thinking {_a} on (%)",
+            round(100 * (_on["pooled"] / _TH_BASE["C"] - 1), 1), _cellv4(_row[1]), 0.06)
+        chk(f"{_doc} thinking {_a} off (%)",
+            round(100 * (_off["pooled"] / _TH_BASE["D"] - 1), 1), _cellv4(_row[2]), 0.06)
+        _a_on, _a_off = (_cellv4(_x) for _x in
+                         _norm_early(_row[3]).replace("\u2192", "->").split("->"))
+        chk(f"{_doc} thinking {_a} draft per generated token, on then off",
+            (round(_on["draft_per_gen"], 2), round(_off["draft_per_gen"], 2)),
+            (_a_on, _a_off), 0.006)
+        _TH_SEEN.setdefault(_a, []).append(
+            (_cellv4(_row[1]), _cellv4(_row[2]), _a_on, _a_off))
+chk("the three copies of the thinking table agree cell for cell",
+    sorted((_a, len(set(_v))) for _a, _v in _TH_SEEN.items()),
+    sorted((_a, 1) for _a in _TH_ARM.values()))
+chk("with thinking off ngram-mod drafts nothing at all",
+    (_cd(_D, "ngram-mod-n24")["draft_per_gen"], _cd(_D, "ngram-mod-n24")["acc"]),
+    (0.0, None))
+# 23.09 %, which three documents printed as 23.0 until 2026-08-29. Every other
+# percentage in this repository is rounded, and no definition of this one gives
+# 23.0: pooled and the mean of the five repeats both give 23.09, the mean over
+# the ten prompts gives 27.3. It was a truncation, in three places.
+_TH_ACC = (round(_cd(_C, "spec-draft-n8")["acc"], 1),
+           round(_cd(_D, "spec-draft-n8")["acc"], 1))
+chk("the draft model's acceptance, thinking on then off", _TH_ACC, (29.7, 23.1))
+for _doc in ("README.md", "ERRATA.md", "v4_audit_2026_08_25/README.md"):
+    _t = (pathlib.Path(__file__).resolve().parents[1] / _doc) \
+        .read_text(encoding="utf-8")
+    chk(f"{_doc} prints the rounded value, not the truncated one",
+        (f"to {_TH_ACC[1]} %" in _t, "to 23.0 %" in _t), (True, False))
+
+# Run P against run O: the same four arms on two prompt sets sharing no prompt.
+# Sixteen cells and the sentence "the result generalises" rest on them; the
+# aggregate column is parenthesised as not comparable and was unread with the
+# rest.
+_P = "matrix_P_extended_20260826_110747"
+_PT_O, _PT_P = _agg(_O_DIR, "baseline"), _agg(_P, "baseline")
+_PGT = _v4_table("| arm | v1 ten, pooled | extended twenty, pooled | shift |")
+chk("v4 README run P table: four arms", len(_PGT), 4)
+for _row in _PGT:
+    _a = _row[0]
+    _o, _p = _agg(_O_DIR, _a), _agg(_P, _a)
+    _d_o = 100 * (_o["pooled"] / _PT_O["pooled"] - 1)
+    _d_p = 100 * (_p["pooled"] / _PT_P["pooled"] - 1)
+    chk(f"v4 README P {_a}: three repeats on each set", (_o["reps"], _p["reps"]), (3, 3))
+    chk(f"v4 README P {_a} on the v1 ten (%)", round(_d_o, 1), _cellv4(_row[1]), 0.06)
+    chk(f"v4 README P {_a} on the extended twenty (%)",
+        round(_d_p, 1), _cellv4(_row[2]), 0.06)
+    chk(f"v4 README P {_a} shift (pp)",
+        round(_d_p - _d_o, 1), _cellv4(_row[3]), 0.06)
+    _ag_o, _ag_p = (_cellv4(_x) for _x in
+                    _norm_early(_row[4]).replace("\u2192", "->").split("->"))
+    chk(f"v4 README P {_a} aggregate, O then P (%)",
+        (round(100 * (_o["agg"] / _PT_O["agg"] - 1), 1),
+         round(100 * (_p["agg"] / _PT_P["agg"] - 1), 1)), (_ag_o, _ag_p), 0.06)
+# "one arm moves upward" was two: spec-dflash-n4 gains 3.3 pp and
+# spec-draft-n8 loses 0.6 pp less than it did. The sentence names the arm now.
+chk("v4 README P: the largest shift, and how many move upward",
+    (max(abs(_cellv4(_r[3])) for _r in _PGT),
+     sum(1 for _r in _PGT if _cellv4(_r[3]) > 0)), (4.3, 2))
+chk("v4 README P: the arm the sentence names is the one that gains most",
+    max(_PGT, key=lambda _r: _cellv4(_r[3]))[0], "spec-dflash-n4")
+chk("v4 README P: and the sentence no longer says one",
+    "and one arm moves *upward*" in _V4R_TEXT, False)
+# the same sentence is in the root README, and only the audit copy was fixed
+# first; and the root README also had the acceptance ordering backwards
+chk("README P: it does not say one arm either",
+    "and one arm moves *upward*" in _ROOT_TEXT, False)
+
+chk("v4 README P: on aggregate it would have read as the win halving, which is "
+    "the artefact the section is about",
+    round(100 * (_agg(_P, "spec-dflash-n2")["agg"] / _PT_P["agg"] - 1), 1)
+    < round(100 * (_agg(_O_DIR, "spec-dflash-n2")["agg"] / _PT_O["agg"] - 1), 1) / 2 + 1,
+    True)
+
+# Run Q against runs M1 and M4: three of four reproduce, and the fourth is the
+# measurement that created the anomaly. Twelve cells and the whole argument that
+# M1's +10.5 % is the outlier.
+_Q = {("spec-mtp-n2", "Q8_0"): ("matrix_M1_20260826_075816",
+                                "matrix_Q_q8_20260826_110747"),
+      ("spec-mtp-n2", "Q4_K_M"): ("matrix_M4_q4km_20260826_081806",
+                                  "matrix_Q_q4km_20260826_110747"),
+      ("spec-mtp-n4", "Q4_K_M"): ("matrix_M4_q4km_20260826_081806",
+                                  "matrix_Q_q4km_20260826_110747"),
+      ("spec-mtp-n4", "Q8_0"): ("matrix_M1_20260826_075816",
+                                "matrix_Q_q8_20260826_110747")}
+
+
+def _q_delta(run, arm):
+    _v, _b = _agg(run, arm), _agg(run, "baseline")
+    return 100 * (_v["pooled"] / _b["pooled"] - 1), _v["reps"]
+
+
+_QT = _v4_table("| arm | drafter | 3 repeats (M1 / M4) |")
+chk("v4 README run Q table: four rows", len(_QT), 4)
+for _row in _QT:
+    _key = (_row[0], _row[1])
+    chk(f"v4 README Q {_key}: the row names a pair this repository ran",
+        _key in _Q, True)
+    _old_run, _new_run = _Q[_key]
+    _d_old, _n_old = _q_delta(_old_run, _row[0])
+    _d_new, _n_new = _q_delta(_new_run, _row[0])
+    chk(f"v4 README Q {_key} repeats, three then five", (_n_old, _n_new), (3, 5))
+    chk(f"v4 README Q {_key} the three-repeat figure (%)",
+        round(_d_old, 1), _cellv4(_row[2]), 0.06)
+    chk(f"v4 README Q {_key} the five-repeat figure (%)",
+        round(_d_new, 1), _cellv4(_row[3]), 0.06)
+    chk(f"v4 README Q {_key} difference (pp)",
+        round(abs(_d_new - _d_old), 1), _cellv4(_row[4]), 0.06)
+chk("v4 README Q: three of the four reproduce to within 0.5 pp",
+    sum(1 for _r in _QT if _cellv4(_r[4]) <= 0.5), 3)
+chk("v4 README Q: and the one that does not is the arm that made the anomaly",
+    max(_QT, key=lambda _r: _cellv4(_r[4]))[:2], ["spec-mtp-n4", "Q8_0"])
+# the third, independent reading of that arm, on the extended prompt set
+chk("v4 README Q: run P reads the same arm at +2.7 %",
+    round(_q_delta(_P, "spec-mtp-n4")[0], 1), 2.7, 0.06)
+chk("v4 README Q: so +2.0, +2.7 and +3.6 cluster and +10.5 is the outlier",
+    sorted(round(_x, 1) for _x in
+           (_q_delta("matrix_Q_q8_20260826_110747", "spec-mtp-n4")[0],
+            _q_delta(_P, "spec-mtp-n4")[0],
+            _q_delta("matrix_Q_q4km_20260826_110747", "spec-mtp-n4")[0])),
+    [2.0, 2.7, 3.6])
 
 _M1T = {r[0]: r[1:] for r in
         _v4_table("| arm | aggregate | vs no speculation | acceptance |")}
@@ -1387,6 +1741,7 @@ chk("A13 checkpointing: smallest gap between the counters (pp)",
 chk("A13 every repeat is present, not just rep0",
     sorted({r.get("repeat") for r in _cc if r["run"].startswith("matrix_O2")}),
     [0, 1, 2, 3, 4, 5, 6, 7, 8])
+_A13_NOCK, _A13_CK = list(_z), list(_n)
 chk("A13 the two groups do not overlap",
     max(abs(r["server_pct"] - r["drafter_pct"]) for r in _z) <
     min(abs(r["server_pct"] - r["drafter_pct"]) for r in _n), True)
@@ -1466,10 +1821,18 @@ chk("Q the Q4_K_M head beats Q8_0 at BOTH draft lengths at five repeats",
     (round(100*(_pl("matrix_Q_q4km_*","spec-mtp-n4")["pooled"]/_pl("matrix_Q_q4km_*","baseline")["pooled"]-1),1) >
      round(100*(_pl("matrix_Q_q8_*","spec-mtp-n4")["pooled"]/_pl("matrix_Q_q8_*","baseline")["pooled"]-1),1)), True)
 def _d(pat, arm="spec-mtp-n4"):
+    """Unrounded. Rounding each side and then subtracting gave 8.5 where the
+    measurements are 8.573 apart, which is the double rounding A12 already
+    corrects elsewhere (four rounded components adding to 39.08 where the
+    figure is 39.07). Every other difference column
+    here - run P's shift, the O2/O3 replication table, A17's - subtracts first
+    and rounds once; this was the one that did not."""
     b = _pl(pat, "baseline"); v = _pl(pat, arm)
-    return round(100*(v["pooled"]/b["pooled"] - 1), 1)
+    return 100 * (v["pooled"] / b["pooled"] - 1)
 _m1, _q8, _pe = _d("matrix_M1_*"), _d("matrix_Q_q8_*"), _d("matrix_P_extended_*")
-chk("A14 the non-replicating pair, gap (pp)", round(_m1 - _q8, 1), 8.5, 0.05)
+chk("A14 the non-replicating pair, gap (pp)", round(_m1 - _q8, 1), 8.6, 0.05)
+chk("A14: rounding each side first is what gave 8.5",
+    round(round(_m1, 1) - round(_q8, 1), 1), 8.5, 0.005)
 chk("A14 spec-mtp-n4 Q8_0 outlier is M1, not run Q",
     max([(_m1, "M1"), (_q8, "Q"), (_pe, "P")])[1], "M1")
 chk("A14 the other two cluster within 1 pp", abs(_q8 - _pe) < 1.0, True)
@@ -1574,6 +1937,8 @@ for idx, lbl in ((3, "server"), (4, "drafter")):
     chk(f"threshold ({lbl}): overall",
         (sum(v[0] for v in f.values()), sum(v[1] for v in f.values())),
         (78, 86) if lbl == "server" else (79, 86))
+_SCORECARD = _sc(_kept, 3)
+_SC_KEPT = list(_kept)
 # without the exclusion the two counters disagree, which is why it exists
 chk("threshold: without the exclusion the counters disagree",
     (sum(v[0] for v in _sc(_all, 3).values()), sum(v[0] for v in _sc(_all, 4).values())),
@@ -1852,7 +2217,7 @@ DOC_CLAIMS = [
     ("v4_audit_2026_08_25/README.md", "78 / 86", "threshold scorecard"),
     ("v4_audit_2026_08_25/README.md", "57 / 59", "threshold, self-speculative"),
     ("README.md",   "57 / 59",   "README threshold scorecard"),
-    ("ERRATA.md",   "8.5 pp",    "A14 the pair that did not replicate"),
+    ("ERRATA.md",   "8.6 pp",    "A14 the pair that did not replicate"),
     ("README.md",   "+26.7 %",   "README discloses the same-config replicate"),
     ("v4_audit_2026_08_25/README.md", "292.1 s", "P pooled includes the draft cost"),
     ("v4_audit_2026_08_25/README.md", "72.8 %",  "P acceptance not inflated"),
@@ -1885,8 +2250,10 @@ DOC_CLAIMS = [
 ]
 root = pathlib.Path(__file__).resolve().parents[1]
 for f, needle, what in DOC_CLAIMS:
-    txt = _norm((root / f).read_text(encoding="utf-8"))
-    ok = _norm(needle) in txt
+    # whitespace-collapsed: a claim is the same claim wherever the line wraps,
+    # and two of these broke on a re-wrap that changed no word
+    txt = " ".join(_norm((root / f).read_text(encoding="utf-8")).split())
+    ok = " ".join(_norm(needle).split()) in txt
     print(f"  {'PASS' if ok else 'FAIL'}  {f:32s} quotes {needle!r:20s} ({what})")
     RAN.append(f"{f}:{needle}")     # these are assertions too, and are counted
     if not ok:
@@ -2285,11 +2652,147 @@ def _md_table(header_startswith, quoted=False):
     return rows
 
 
+# --- A4's reconstruction table, whose every number was derived above and
+# compared against a literal instead of against the table that prints it -----
+# The chain length is the one figure that needed the log's ORDER: a run of
+# consecutive verifications between two draft generations is one chain, and
+# the longest is 2 because every partial accept was re-verified exactly once.
+_a4_runs, _a4_cur = [], 0
+for _m in re.finditer(
+        r"called impl \w+, hist size = \d+, call_count = \d+, gen = \d+"
+        r"|ignoring small draft: \d+ < \d+"
+        r"|update_slots: n_draft=\d+, accepted=\d+", _A4["log"]):
+    if _m.group(0).startswith("update_slots"):
+        _a4_cur += 1
+    else:
+        if _a4_cur:
+            _a4_runs.append(_a4_cur)
+        _a4_cur = 0
+if _a4_cur:
+    _a4_runs.append(_a4_cur)
+chk("A4: the verification chains account for every attempt",
+    sum(_a4_runs), _A4["attempts"])
+chk("A4: and there is one chain per draft that reached verification",
+    len(_a4_runs), _A4["fresh"])
+_A4_SIZE1 = 1
+_A4_EXPECT = {
+    "drafts generated": [_A4["gen_drafts"], _A4["gen_tokens"]],
+    "dropped by --draft-min 2 before any verification": [
+        _A4["min_flag"], _A4["dropped_lines"], _A4["dropped_tokens"],
+        _A4["empty"], _A4["size1"], _A4_SIZE1, _A4["events"],
+        _A4["dropped_lines"], _A4["fresh"]],
+    "reached verification as a fresh draft": [
+        _A4["fresh"], _A4["fresh_tokens"], _A4["gen_tokens"],
+        _A4["dropped_tokens"], _A4["fresh_tokens"]],
+    "verification attempts": [_A4["attempts"], _A4["fresh"], _A4["partial"]],
+    "partially accepted -> discarded and redone": [_A4["partial"]],
+    "longest verify chain": [max(_a4_runs)],
+    "server counter": [_A4["acc_tokens"], _A4["counter"], _A4["full"]],
+}
+_A4T = _num_rows(_ER_LINES, "| quantity | value | independent check |")
+chk("A4 reconstruction table: one row per quantity",
+    sorted(_A4T), sorted(_A4_EXPECT))
+for _q, _want in sorted(_A4_EXPECT.items()):
+    _num_row_check(f"A4 table {_q}", _A4T[_q], _want)
+chk("A4: every small draft that was not empty had exactly one token",
+    sorted({_x for _x in _A4["small"] if _x}), [_A4_SIZE1])
+chk("A4: the partial accepts equal the checkpoint restores",
+    (_A4["partial"], _A4["restores"]), (20, 20))
+
+
+# --- A16's six invocations: the clock they started at and what each measured
+# Fifteen minutes apart by the manifests' own timestamps, so the start row is
+# not decoration - it is the evidence that the scatter is not drift.
+def _pool_dir(run_dir, arm):
+    """Pooled decode rate over every repeat, without importing `length_mode`,
+    whose name is not free this early in the file."""
+    _ms = _n = 0
+    for _f in sorted(glob.glob(os.path.join(run_dir, f"{arm}__rep*.json"))):
+        _b = json.loads(pathlib.Path(_f).read_text(encoding="utf-8"))
+        if _b.get("crashed"):
+            continue
+        _ms += sum(_r["timings"]["predicted_ms"] for _r in _b["rows"])
+        _n += sum(_r["timings"]["predicted_n"] for _r in _b["rows"])
+    return 1000.0 * _n / _ms
+
+
+_UDIRS = sorted(glob.glob("v4_audit_2026_08_25/data/matrix_U*"))
+_u_start, _u_shift = [], []
+for _d in _UDIRS:
+    _m = json.loads((pathlib.Path(_d) / "manifest.json").read_text(encoding="utf-8"))
+    _hh, _mm = _m["created"][11:13], _m["created"][14:16]
+    _u_start += [int(_hh), int(_mm)]
+    _u_shift.append(round(100 * (_pool_dir(_d, "spec-dflash-n2")
+                                 / _pool_dir(_d, "baseline") - 1), 1))
+_UT = _num_rows(_ER_LINES, "| | U1 | U2 | U3 | U4 | U5 | U6 |")
+chk("A16 invocation table: six invocations", len(_UDIRS), 6)
+chk("A16 invocation table: its two rows", sorted(_UT),
+    ["spec-dflash-n2 vs baseline", "start"])
+_num_row_check("A16 invocation start times", _UT["start"], _u_start)
+_num_row_check("A16 invocation shifts", _UT["spec-dflash-n2 vs baseline"],
+               _u_shift)
+chk("A16: they really are about a quarter of an hour apart end to end",
+    (_u_start[-2] * 60 + _u_start[-1]) - (_u_start[0] * 60 + _u_start[1]), 15)
+
+
+# --- B4's family minima: four rows of v1 per-prompt worst cases ------------
+# Every one of them is a min over `analysis/summary.csv`, and the table was
+# read by nothing. The band quoted under it is the min and max of the two
+# families it names, so a wrong cell there had to stay consistent with both.
+_B4MIN = {_c: min(float(_r["tok_s"]) for _r in _V1CSV if _r["config"] == _c)
+          for _c in {_r["config"] for _r in _V1CSV}}
+_B4_EXPECT = {
+    "ngram-mod n = 8 / 12 / 16 / 20 / 24": [
+        8, 12, 16, 20, 24,
+        _B4MIN["ngmod-n8"], _B4MIN["ngmod-n12"], _B4MIN["ngmod-n16"],
+        _B4MIN["ngmod-n20"], _B4MIN["ngram-mod-n24"]],
+    "ngram-cache family": [
+        _B4MIN["ngram-cache"], _B4MIN["ngcache-rerun"], _B4MIN["ngcache-1000tok"]],
+    "ngcache-kv-fp16": [_B4MIN["ngcache-kv-fp16"]],
+    "classic draft max 8 / 16 / 32": [
+        8, 16, 32, _B4MIN["draft-q35-08b-max8"], _B4MIN["draft-q35-08b-max16"],
+        _B4MIN["draft-q35-08b-max32"]],
+}
+_B4T = _num_rows(_ER_LINES, "| family | minimum |")
+chk("B4 family table: one row per family", sorted(_B4T), sorted(_B4_EXPECT))
+for _f, _want in sorted(_B4_EXPECT.items()):
+    _num_row_check(f"B4 {_f}", _B4T[_f], [round(_x, 1) for _x in _want])
+_b4_band = [_B4MIN[_c] for _c in ("ngram-cache", "ngcache-rerun",
+                                  "ngcache-1000tok", "ngcache-kv-fp16",
+                                  "draft-q35-08b-max8", "draft-q35-08b-max16",
+                                  "draft-q35-08b-max32")]
+chk("B4: the band under it is the range of the rows it attributes it to",
+    f"The {int(min(_b4_band))}\u2013{round(max(_b4_band))} band belongs to specific"
+    in " ".join(_ER_LINES_TEXT.split()), True)
+_b4_ngmod = min(_B4MIN[_c] for _c in
+                ("ngmod-n8", "ngmod-n12", "ngmod-n16", "ngmod-n20",
+                 "ngram-mod-n24"))
+chk("B4: and the ngram-mod family's worst really is inside 12 % of baseline",
+    math.ceil(100 * (1 - _b4_ngmod / _B4MIN["baseline"])), 12)
+
+
 # A7 contrast 1: the per-configuration Pearson r and the per-prompt acceptance
 # range behind the README's "5 % to 83 %". Seven rows, twenty-one cells, and
 # the paragraph under it that argues the seventh is not independent.
 _A7R = _md_table("| configuration | Pearson r | acceptance range across prompts |")
 chk("ERRATA A7 correlation table: seven rows", len(_A7R), 7)
+# the seventh row's label carries v1's two draft-length flags, and they are in
+# the manifest of the run that reproduced that configuration
+_v1cfg = json.loads(pathlib.Path(
+    "v4_audit_2026_08_25/data/C_master_matrix_think_on/manifest.json")
+    .read_text(encoding="utf-8"))["arms"]["spec-draft-v1cfg"]
+chk("A7: v1's configuration is max 8, min 4, as the run that reran it recorded",
+    (_v1cfg[_v1cfg.index("--spec-draft-n-max") + 1],
+     _v1cfg[_v1cfg.index("--spec-draft-n-min") + 1]), ("8", "4"))
+chk("A7: and the row is labelled with both",
+    f"v1's configuration (max {_v1cfg[_v1cfg.index('--spec-draft-n-max') + 1]}, "
+    f"min {_v1cfg[_v1cfg.index('--spec-draft-n-min') + 1]})" in _ER_LINES_TEXT,
+    True)
+chk("A7: it differs from n_max 8 only in n_min",
+    [_x for _x in _v1cfg
+     if _x not in json.loads(pathlib.Path(
+         "v4_audit_2026_08_25/data/C_master_matrix_think_on/manifest.json")
+         .read_text(encoding="utf-8"))["arms"]["spec-draft-n8"]], ["4"])
 
 
 def _c_prompt_acc(arm):
@@ -2480,6 +2983,10 @@ chk("A12 table: the shares add up to 100 %",
     round(sum(_f(_acc[k][1]) for k in
               ("speculative checkpoint, total", "drafter generate()", "unattributed")), 1),
     100.0, 0.15)
+chk("A12 table: and the row they are shares OF says so",
+    _f(_acc["excess to account for"][1]), 100.0)
+chk("A12 table: which is the excess divided by itself",
+    round(100 * _excess / _excess, 1), _f(_acc["excess to account for"][1]))
 
 # --- A13's counter comparison --------------------------------------------
 _a13 = {r[0]: r[1:] for r in
@@ -2838,12 +3345,30 @@ chk("V2 arms contrasted", sorted(_v2_shift),
 _A17T = {r[0]: r[1:] for r in _md_table(
     "| arm | freerun | hard cap | shift, 95 % t over 8 sessions |")}
 chk("A17's crossover table rows", len(_A17T), 4)
+def _iv2(cell):
+    """`**-1.66 %** [-1.98, -1.35]` -> (point, low, high).
+
+    `.split("[")[0]` reads the point estimate and stops. Every interval bound
+    in this table, and in the three copies of it elsewhere, was unread until
+    2026-08-29: twenty-four numbers in this one, found by perturbing each in
+    turn rather than one per table."""
+    _head, _, _rest = _norm(cell).partition("[")
+    _pt = _cell(_head)
+    if not _rest:
+        return (_pt, None, None)
+    _lo, _hi = (_cell(_x) for _x in _rest.rstrip("] ").split(","))
+    return (_pt, _lo, _hi)
+
+
 for _a, _row in sorted(_A17T.items()):
     _f = _lm.interval(_v2_free[_a]); _c = _lm.interval(_v2_cap[_a])
     _sh = _lm.interval(_v2_shift[_a])
-    chk(f"V2 {_a} freerun (%)", round(_f[0], 2), _cell(_row[0].split("[")[0]), 0.005)
-    chk(f"V2 {_a} hard cap (%)", round(_c[0], 2), _cell(_row[1].split("[")[0]), 0.005)
-    chk(f"V2 {_a} shift (pp)", round(_sh[0], 2), _cell(_row[2].split("[")[0]), 0.005)
+    for _k, (_label, _iv) in enumerate((("freerun (%)", _f), ("hard cap (%)", _c),
+                                        ("shift (pp)", _sh))):
+        _pt, _lo, _hi = _iv2(_row[_k])
+        chk(f"V2 {_a} {_label}", round(_iv[0], 2), _pt, 0.005)
+        chk(f"V2 {_a} {_label} interval",
+            (round(_iv[1], 2), round(_iv[2], 2)), (_lo, _hi))
     chk(f"V2 {_a} the hard cap moved it", _sh[1] > 0, True)
 # the sign flip, which is what A17 was written about
 chk("V2 spec-dflash-n4 is negative free-running", round(_lm.interval(_v2_free["spec-dflash-n4"])[2], 2) < 0, True)
@@ -2939,6 +3464,13 @@ for _d in _V3:
 _V3T = {r[0]: r[1:] for r in _md_table(
     "| arm | V3 session 1 | V3 session 2 | V3 mean | V2, eight sessions |")}
 chk("A17's V3 table rows", len(_V3T), 4)
+# its last column is V2 again, and it was unread in both documents
+for _a, _row in sorted(_V3T.items()):
+    _pt, _lo, _hi = _iv2(_row[3])
+    _v2i = _lm.interval(_v2_shift[_a])
+    chk(f"V3 table {_a}: the V2 column is V2's own shift", round(_v2i[0], 2), _pt, 0.005)
+    chk(f"V3 table {_a}: and V2's own interval",
+        (round(_v2i[1], 2), round(_v2i[2], 2)), (_lo, _hi))
 for _a, _row in sorted(_V3T.items()):
     chk(f"V3 {_a} session 1 (pp)", round(_v3_shift[_a][0], 2), _cell(_row[0]), 0.005)
     chk(f"V3 {_a} session 2 (pp)", round(_v3_shift[_a][1], 2), _cell(_row[1]), 0.005)
@@ -2967,6 +3499,63 @@ chk("A17 reports the predecessor result as a null at this power, not as absence"
     "no detectable predecessor effect at" in " ".join(_ER_V3.split()), True)
 chk("A17 rules out carryover as the explanation for the gap",
     "not first-order carryover" in " ".join(_ER_V3.split()), True)
+
+# The per-repeat table under it: ten rates an arm, four arms, and the CV that
+# each row's spread comes to. Forty-four numbers, none of which anything read,
+# and it is the table the whole within-invocation argument rests on.
+def _per_repeat(run_dir, arm):
+    """One pooled rate per repeat file, in repeat order."""
+    _out = []
+    for _f in sorted(glob.glob(os.path.join(run_dir, f"{arm}__rep*.json"))):
+        _b = json.loads(pathlib.Path(_f).read_text(encoding="utf-8"))
+        if _b.get("crashed"):
+            continue
+        _ms = sum(_r["timings"]["predicted_ms"] for _r in _b["rows"])
+        _n = sum(_r["timings"]["predicted_n"] for _r in _b["rows"])
+        _out.append(1000.0 * _n / _ms)
+    return _out
+
+
+_PRT = {r[0]: r[1:] for r in _md_table(
+    "| arm, V3 session 1 | per-repeat pooled tok/s | CV |")}
+chk("A17 per-repeat table: four rows", len(_PRT), 4)
+_ARM_OF = {"no speculation": "baseline", "spec-mtp-n2": "spec-mtp-n2",
+           "spec-dflash-n2": "spec-dflash-n2",
+           "spec-dflash-n2-cap": "spec-dflash-n2-cap"}
+chk("A17 per-repeat table: the rows it names", sorted(_PRT), sorted(_ARM_OF))
+for _label, _row in sorted(_PRT.items()):
+    _arm = _ARM_OF[_label]
+    _pub = [float(_x) for _x in _row[0].replace("*", "").split()]
+    _got = _per_repeat(str(_V3[0]), _arm)
+    chk(f"A17 per-repeat {_label}: ten repeats", len(_pub), 10)
+    chk(f"A17 per-repeat {_label}: every rate",
+        [round(_x, 1) for _x in _got], _pub, 0.005)
+    chk(f"A17 per-repeat {_label}: the CV of them",
+        round(st.stdev(_got) / st.mean(_got) * 100, 2),
+        _cell(_row[1]), 0.005)
+# Session 2's CVs, quoted as prose under the table. It listed three, and the
+# table above it has four rows, so a reader lining them up read the second
+# arm's figure as the third's: the 0.33 % is `baseline`, not `spec-mtp-n2`,
+# whose own session 2 CV is 0.49 %. All four are quoted now, in row order.
+_s2_cv = [round(st.stdev(_v) / st.mean(_v) * 100, 2)
+          for _a in ("baseline", "spec-mtp-n2", "spec-dflash-n2",
+                     "spec-dflash-n2-cap")
+          for _v in [_per_repeat(str(_V3[1]), _a)]]
+chk("A17: session 2 repeats it, one figure per row of the table above",
+    f"Session 2 repeats it, row for row: {_s2_cv[0]:.2f} %, {_s2_cv[1]:.2f} %, "
+    f"{_s2_cv[2]:.2f} % and {_s2_cv[3]:.2f} %" in " ".join(_ER_V3.split()), True)
+chk("A17: and there are as many figures as rows", (len(_s2_cv), len(_PRT)), (4, 4))
+# and the sentence that reads the table: the spread it names, and the arm it
+# contrasts against. The 6 is `spec-dflash-n2`, whose own row spans 6.2 tok/s.
+_dn2 = _per_repeat(str(_V3[0]), "spec-dflash-n2")
+chk("A17: the within-invocation spread it quotes",
+    round(max(_dn2) - min(_dn2)), 6)
+chk("A17: and it is stated as a spread between arm-runs of one configuration",
+    "consecutive arm-runs of the same configuration inside one invocation "
+    "differ by 6 tok/s" in " ".join(_ER_V3.split()).replace("**", ""), True)
+_bl = _per_repeat(str(_V3[0]), "baseline")
+chk("A17: the interleaved no-speculation arm holds 0.3 %",
+    round(st.stdev(_bl) / st.mean(_bl) * 100, 1), 0.3, 0.005)
 # The absolute-rate table was computed and compared against `_moved` below,
 # and the TABLE itself was never read - the defect this repository has now
 # found in six places. Probing it on 2026-08-28 by adding 7 to one cell
@@ -3113,6 +3702,9 @@ chk("and the wait's own share is what A12 published",
     _cell(_A12T["of which, waiting on synchronize()"][1]), 0.0005)
 chk("and the share is the one A12 published",
     round(100 * _t4_state / _t4_excess, 1), _cell(_A12T["of which, state work"][1]), 0.05)
+chk("and so is the whole call's, which was compared against a literal only",
+    round(100 * _t4_call / _t4_excess, 1),
+    _cell(_A12T["inside the checkpoint calls"][1]), 0.05)
 chk("which reproduces run T's 54.7 % on a different build",
     round(100 * _t4_call / _t4_excess, 1), 54.7, 0.05)
 # the components A12 says reproduce, against run T's own dump
@@ -3786,6 +4378,143 @@ for _arm, _cells in _table.items():
         round(100 * _da / _dn, 1), _cell_pct(_cells[4]), 0.05)
 
 
+_o2_acc = {}
+for _a in {_f.split("/")[-1].split("__rep")[0] for _f in glob.glob(f"{_O2}/*__rep*.json")}:
+    _dn = _da = 0
+    for _f in glob.glob(f"{_O2}/{_a}__rep*.json"):
+        for _x in json.load(open(_f))["rows"]:
+            _dn += _x["draft_n"]
+            _da += _x["draft_n_accepted"]
+    if _dn:
+        _o2_acc[_a] = 100 * _da / _dn
+_o2_win = [_a for _a in _o2_acc if _pooled_arm(_O2, _a) > _pooled_arm(_O2, "baseline")]
+chk("README: spec-draft-n1 is above one winning arm and below two",
+    (sum(1 for _a in _o2_win if _o2_acc[_a] < _o2_acc["spec-draft-n1"]),
+     sum(1 for _a in _o2_win if _o2_acc[_a] > _o2_acc["spec-draft-n1"])), (1, 2))
+chk("README: and it is third-highest acceptance in that table",
+    sorted(_o2_acc, key=_o2_acc.get, reverse=True).index("spec-draft-n1") + 1, 3)
+chk("README no longer claims it beats all but one winner",
+    "more than every winning arm but one" in _ROOT_TEXT, False)
+
+# --- the experiment registry has to name every run that exists --------------
+# It said "runs A-L" and listed eight while the data held thirty-five labels,
+# including run O2, which the headline table above it is built from. A registry
+# that stops before the headline is worse than none: it reads as complete.
+_REG_DIRS = {}
+for _d in sorted(glob.glob("v4_audit_2026_08_25/data/*/")):
+    if not glob.glob(f"{_d}*__rep*.json"):
+        continue
+    _name = os.path.basename(_d.rstrip("/"))
+    _m = re.match(r"matrix_([A-Za-z]+[0-9]*)", _name)
+    _tag = _m.group(1) if _m else _name.split("_")[0]
+    _REG_DIRS.setdefault(_tag, []).append(_name)
+_REG_ALL = [_d for _d in sorted(glob.glob("v4_audit_2026_08_25/data/*/"))
+            if glob.glob(f"{_d}*__rep*.json")]
+_REG_SMOKE = [_d for _d in _REG_ALL if "smoke" in _d]
+chk("registry: directories carrying arm-runs, and how many are start-up checks",
+    (len(_REG_ALL), len(_REG_SMOKE)), (65, 3))
+_REG_ARMRUNS = sum(len(glob.glob(f"{_d}*__rep*.json"))
+                   for _d in _REG_ALL if _d not in _REG_SMOKE)
+chk("registry: arm-runs outside the start-up checks", _REG_ARMRUNS, 1802)
+# counted, not tested for membership: the README says it twice, once in prose
+# and once in the tier registry, and `in` is satisfied by either
+chk("registry: and the README quotes that number, in both places it states it",
+    " ".join(_ROOT_TEXT.split()).count(f"{_REG_ARMRUNS} arm-runs"), 2)
+chk("registry: with the directory count beside it",
+    f"{len(_REG_ALL) - len(_REG_SMOKE)} directories" in _ROOT_TEXT
+    or f"{len(_REG_ALL) - len(_REG_SMOKE)} committed directories" in _ROOT_TEXT, True)
+# the letter families the registry table is allowed to group under one row
+_REG_FAMILY = {re.match(r"([A-Z]+)", _t).group(1) for _t in _REG_DIRS
+               if re.match(r"[A-Z]", _t)}
+_reg_text = _ROOT_TEXT.split("The v4 runs, and what each one is for:")[1] \
+    .split("The v2 / Exp 2 / v3 files")[0]
+_reg_named = set(re.findall(r"^\| ([A-Z][A-Za-z0-9 /]*?) \|", _reg_text, re.M))
+_reg_named = {_x.strip() for _r in _reg_named for _x in _r.split("/")}
+_reg_missing = sorted(_f for _f in _REG_FAMILY
+                      if not any(_n == _f or _n.startswith(_f) for _n in _reg_named))
+chk("registry: every run family the data holds is named in the table",
+    _reg_missing, [])
+chk("registry: and run W is one of them", "W" in _reg_named, True)
+chk("registry: the tier description gives the full date span",
+    ("2026-08-25 to\n> 2026-08-28" in _ROOT_TEXT
+     or "2026-08-25 to 2026-08-28" in " ".join(_ROOT_TEXT.split())), True)
+chk("registry: it no longer says runs A to L",
+    ("runs A–L" in _ROOT_TEXT or "runs A-L" in _ROOT_TEXT), False)
+
+# --- five statements the line-by-line README review found imprecise ---------
+# Each was true-ish and narrower or wider than the data behind it. The pattern
+# is the one A18 records: a range that does not contain what it describes.
+chk("README: the thinking-on count separates verified from inferred",
+    ("5770 requests recorded" in _ROOT_TEXT
+     and "134 in runs A and B" in _ROOT_TEXT
+     and "all 5904 thinking-on requests" not in _ROOT_TEXT), True)
+_th_field = _th_cap = _no_field = _no_field_cap = 0
+for _f in glob.glob("v4_audit_2026_08_25/data/*/*__rep*.json"):
+    for _x in json.load(open(_f))["rows"]:
+        if _x.get("thinking_suppressed") is False:
+            _th_field += 1
+            _th_cap += _x["predicted_n"] == 300
+        elif "thinking_suppressed" not in _x:
+            _no_field += 1
+            _no_field_cap += _x["predicted_n"] == 300
+chk("README: 5770 requests carry the field and all of them hit the cap",
+    (_th_field, _th_cap), (5770, 5770))
+chk("README: and 134 predate it, also all at the cap",
+    (_no_field, _no_field_cap), (134, 134))
+
+chk("README: run O2 is called a Latin square balanced for position, not balanced",
+    ("**Latin square balanced for position**" in _ROOT_TEXT
+     and "as a **balanced Latin square**" not in _ROOT_TEXT), True)
+chk("README: and it says which run is carryover balanced",
+    "Run W is the design that balances both" in _ROOT_TEXT, True)
+
+_th_acc_vals = []
+for _half in ("thinkon", "thinkoff"):
+    _da, _dn = defaultdict(int), defaultdict(int)
+    for _f in sorted(glob.glob(f"v4_audit_2026_08_25/data/matrix_L_{_half}_20260826_032652/spec-dflash-n2__rep*.json")):
+        for _x in json.load(open(_f))["rows"]:
+            _da[_x["tag"]] += _x["draft_n_accepted"]
+            _dn[_x["tag"]] += _x["draft_n"]
+    _th_acc_vals += [100 * _da[_t] / _dn[_t] for _t in ("reasoning", "code_small")]
+chk("README: the constrained prompts' acceptance band contains all four values",
+    (round(min(_th_acc_vals)) >= 82, round(max(_th_acc_vals)) <= 92), (True, True))
+chk("README: and the band it prints is that one",
+    ("between 82 % and 92 %" in _ROOT_TEXT
+     and "stays ~85–90 %" not in _ROOT_TEXT), True)
+
+_sa = json.load(open("v4_audit_2026_08_25/data/spec_accounting_20260826.json"))
+_gen = {(_r["arm"], _r["run"]): _r["drafter_generate_s"] for _r in _sa
+        if _r.get("drafter_generate_s") is not None}
+chk("README: the dense drafter's generate() second, from the committed dump",
+    _gen[("spec-draft-n8", "matrix_J2_20260826_014750")], 17.24, 0.005)
+_self_spec = [_v for (_a, _r), _v in _gen.items() if _a != "spec-draft-n8"]
+chk("README: the self-speculative heads span 1.89 s to 6.27 s, not 1.89 to 3.43",
+    (round(min(_self_spec), 2), round(max(_self_spec), 2)), (1.89, 6.27))
+chk("README: and it now says so",
+    ("1.89 s to 6.27 s" in _ROOT_TEXT
+     and "against 1.89–3.43 s for a head" not in _ROOT_TEXT), True)
+
+# The band is given as the measured range, not as a fraction. "A fifth to a
+# quarter" excluded both ends; "a sixth to a quarter" still excluded +26.7 %,
+# because a quarter is 25. A fraction that has to contain 17.3 and 26.7 does not
+# exist in small integers, so the sentence quotes the numbers.
+chk("README: the headline band is the measured range, not a fraction",
+    ("spans **+17.3 % to +26.7 %**" in _ROOT_TEXT
+     and "a fifth to a quarter" not in _ROOT_TEXT
+     and "sixth and a quarter" not in _ROOT_TEXT), True)
+chk("README: the n-gram draft volume names both values it generalises over",
+    ("a sixth to a fifth of tokens, 0.17 and 0.19" in " ".join(_ROOT_TEXT.split())), True)
+_ng_dpg = {}
+for _a in ("ngram-mod-n24", "ngram-cache"):
+    _dn = _ng = 0
+    for _f in glob.glob(f"{_O2}/{_a}__rep*.json"):
+        for _x in json.load(open(_f))["rows"]:
+            _dn += _x["draft_n"]
+            _ng += _x["predicted_n"]
+    _ng_dpg[_a] = round(_dn / _ng, 2)
+chk("README: and those two values are what run O2 measured",
+    sorted(_ng_dpg.values()), [0.17, 0.19])
+
 print("\n=== the headline draft/gen column ===")
 # Acceptance without draft volume reads as success for an arm that never fires:
 # ngram-map-k4v-m8 shows 50.0 % from 216 draft tokens over 27 000 generated.
@@ -3932,9 +4661,46 @@ chk("they overlap by less than either is wide",
     round(min(_pb2["spec-dflash-n2"][1], _pb3["spec-dflash-n2"][1])
           - max(_pb2["spec-dflash-n2"][0], _pb3["spec-dflash-n2"][0]), 1), 0.1, 0.05)
 chk("ERRATA says they barely overlap",
-    "barely overlap" in _norm(pathlib.Path(__file__).resolve().parents[1]
-                              .joinpath("ERRATA.md").read_text(encoding="utf-8")), True)
+    "barely overlap" in " ".join(_norm(
+        pathlib.Path(__file__).resolve().parents[1]
+        .joinpath("ERRATA.md").read_text(encoding="utf-8")).split()), True)
 
+
+print("\n=== the same headline table in the audit README ===")
+# 42 cells, the largest in that document. It is run O2 again, one column
+# different from the copy in the root README: absolute draft tokens where that
+# one prints draft per generated token. Both are parsed now, and required to
+# agree where they overlap - two copies of one table drifting apart is a defect
+# this repository has already had once, in the checkpoint cost table.
+_V4O2 = {}
+for _r in _v4_table("| arm | pooled tok/s | change | 95 % CI | acceptance"):
+    if len(_r) >= 6:
+        _V4O2[_r[0].replace("**", "").strip("` ")] = _r[1:6]
+chk("v4 README O2 table: nine arms", len(_V4O2), 9)
+for _arm, _c in sorted(_V4O2.items()):
+    _key = "baseline" if _arm.startswith("no speculation") else _arm
+    _dn = _da = 0
+    for _f in glob.glob(f"{_O2}/{_key}__rep*.json"):
+        for _x in json.load(open(_f))["rows"]:
+            _dn += _x["draft_n"]
+            _da += _x["draft_n_accepted"]
+    chk(f"v4 README O2 {_arm}: pooled",
+        round(_pooled_arm(_O2, _key), 1), _cellv4(_c[0]), 0.06)
+    chk(f"v4 README O2 {_arm}: draft tokens", _dn, int(_cellv4(_c[4])))
+    if _key == "baseline":
+        chk(f"v4 README O2 {_arm}: the reference has no change, interval or acceptance",
+            (any(ch.isdigit() for ch in _c[1] + _c[2] + _c[3]), _dn), (False, 0))
+        continue
+    chk(f"v4 README O2 {_arm}: change (%)",
+        round(_pb_o2[_key]["point_pct"], 1), _cellv4(_c[1]), 0.06)
+    _lo, _hi = (_cellv4(_x) for _x in _norm_early(_c[2]).strip("[] ").split(","))
+    chk(f"v4 README O2 {_arm}: interval",
+        [round(_x, 1) for _x in _pb_o2[_key]["ci95_t_pct"]], [_lo, _hi], 0.06)
+    chk(f"v4 README O2 {_arm}: acceptance (%)",
+        round(100 * _da / _dn, 1), _cellv4(_c[3]), 0.06)
+chk("v4 README O2 table: it is sorted by pooled rate, descending",
+    [_cellv4(_c[0]) for _c in _V4O2.values()],
+    sorted((_cellv4(_c[0]) for _c in _V4O2.values()), reverse=True))
 
 print("\n=== the O2/O3 replication table and the footnote, parsed ===")
 # Same weakness as the headline table had: greping for a value proves the string
@@ -4636,7 +5402,7 @@ chk("footnote: spec-dflash-n2's spread is now the largest",
     _all_spreads.index(round(_spread, 10)) if round(_spread, 10) in _all_spreads
     else [round(x, 10) for x in _all_spreads].index(round(_spread, 10)), 0)
 chk("footnote: run U3 is the lowest, so O2 is not", min(_dfl, key=_dfl.get), "U3")
-chk("README names the lowest", "run U3 is, at +17.3 %" in _README, True)
+chk("README names the lowest", "un U3 is, at +17.3 %" in _README, True)
 chk("README says the interval describes the run, not the configuration",
     "describe run O2, not the configuration" in " ".join(_README.split()), True)
 chk("README quotes the between-run range",
@@ -4722,6 +5488,41 @@ for _arm, _row in sorted(_PRH.items()):
         round(_pv, 1), _cell(_row[0]), 0.05)
     chk(f"PR body headline {_arm} change (%)",
         round(100 * (_pv / _pr_base - 1), 1), _cell(_row[1]), 0.05)
+    # The three columns to the right of `change` were unread until 2026-08-29.
+    # Perturbing any of them left the checker at exit 0 with no new failure, in
+    # the one document that is published outside this repository. Found by
+    # perturbing every number of every table the census calls parsed, rather
+    # than one number per table, which is what let it pass before.
+    _lo, _hi = (_cell(_x) for _x in _norm(_row[2]).strip("[] ").split(","))
+    chk(f"PR body headline {_arm} interval",
+        [round(_x, 1) for _x in _pb_o2[_arm]["ci95_t_pct"]], [_lo, _hi], 0.05)
+    _dn = _da = _ng = 0
+    for _f in glob.glob(f"{_O2}/{_arm}__rep*.json"):
+        for _x in json.load(open(_f))["rows"]:
+            _dn += _x["draft_n"]
+            _da += _x["draft_n_accepted"]
+            _ng += _x["predicted_n"]
+    chk(f"PR body headline {_arm} draft per generated token",
+        round(_dn / _ng, 2), _cell(_row[3]), 0.005)
+    chk(f"PR body headline {_arm} acceptance (%)",
+        round(100 * _da / _dn, 1), _cell(_row[4]), 0.05)
+# and the row that is the reference: it drafts nothing, so three of its cells
+# are dashes and must stay that way
+# the reference row: no delta, no interval, no acceptance - but a real 0.00 in
+# the draft column, which is a measurement and is checked as one
+_pr_ns = _PRH["no speculation"]
+chk("PR body headline: the no-speculation row carries no delta, interval or "
+    "acceptance",
+    [_i for _i in (1, 2, 4) if any(_ch.isdigit() for _ch in _pr_ns[_i])], [])
+chk("PR body headline: and it drafts nothing",
+    (_cell(_pr_ns[3]),
+     sum(x["draft_n"] for _f in glob.glob(f"{_O2}/baseline__rep*.json")
+         for x in json.load(open(_f))["rows"])), (0.0, 0))
+chk("PR body headline: every cell of it agrees with the audit README's copy",
+    {_a: [_cell(_x) for _x in _r[:2]] for _a, _r in _PRH.items()
+     if _a != "no speculation"},
+    {_a: [_cellv4(_c[0]), _cellv4(_c[1])] for _a, _c in _V4O2.items()
+     if not _a.startswith("no speculation")})
 chk("PR body headline: the ordering it presents is by pooled rate, descending",
     [a for a, r in sorted(_PRH.items(), key=lambda kv: -_cell(kv[1][0]))],
     [r[0] for r in _pr_table("| arm | pooled tok/s | change |")])
@@ -4750,6 +5551,8 @@ for _row in ("speculative checkpoint save (785)",
              "drafter generate()", "unattributed"):
     chk(f"PR body cost: {_row} share of the excess (%)",
         round(100 * _cell(_PRC[_row][0]) / _exc, 1), _cell(_PRC[_row][1]), 0.05)
+chk("PR body cost: the excess row's own share is the whole of it",
+    _cell(_PRC["excess over no speculation"][1]), 100.0, 0.05)
 chk("PR body cost: the four rows add up to the excess",
     round(sum(_cell(_PRC[k][0]) for k in
               ("speculative checkpoint save (785)",
@@ -4813,6 +5616,14 @@ chk("PR body T4: and the share of the excess",
 chk("PR body T4: the wait's share, to three decimals",
     round(100 * _t4_sync / _t4_excess, 3),
     _cell(_PRT4["of which, waiting on synchronize()"][1]), 0.0005)
+# the third row was unread in both copies: state work is the call time minus
+# the wait, and it is the row the "API boundary" objection turns on
+chk("PR body T4: the state-work row, seconds",
+    round(_t4_call - _t4_sync, 2),
+    _cell(_PRT4["of which, state work"][0]), 0.005)
+chk("PR body T4: and its share",
+    round(100 * (_t4_call - _t4_sync) / _t4_excess, 1),
+    _cell(_PRT4["of which, state work"][1]), 0.05)
 chk("PR body T4: the excess in its table header matches the data",
     round(_t4_excess, 1), 71.5, 0.05)
 
@@ -4822,13 +5633,19 @@ _PRV2 = {r[0]: r[1:] for r in
 chk("the PR body's V2 table rows", len(_PRV2), 4)
 chk("and it names the same four arms the data has",
     sorted(_PRV2), sorted(_v2_shift))
+# `.split("[")[0]` is the shape this body calls out two sections down, and it
+# was still here: three of these cells carry an interval and only the point
+# estimate was read, so the bounds were the last unguarded numbers in it.
 for _a, _row in sorted(_PRV2.items()):
-    chk(f"PR body V2 {_a} freerun (%)",
-        round(_lm.interval(_v2_free[_a])[0], 2), _cell(_row[0].split("[")[0]), 0.005)
-    chk(f"PR body V2 {_a} hard cap (%)",
-        round(_lm.interval(_v2_cap[_a])[0], 2), _cell(_row[1].split("[")[0]), 0.005)
-    chk(f"PR body V2 {_a} shift (pp)",
-        round(_lm.interval(_v2_shift[_a])[0], 2), _cell(_row[2].split("[")[0]), 0.005)
+    for _k, (_what, _vals) in enumerate((("freerun (%)", _v2_free[_a]),
+                                         ("hard cap (%)", _v2_cap[_a]),
+                                         ("shift (pp)", _v2_shift[_a]))):
+        _pt, _lo, _hi = _iv2(_row[_k])
+        _mine = _lm.interval(_vals)
+        chk(f"PR body V2 {_a} {_what}", round(_mine[0], 2), _pt, 0.005)
+        if _lo is not None:
+            chk(f"PR body V2 {_a} {_what}, both bounds",
+                (round(_mine[1], 2), round(_mine[2], 2)), (_lo, _hi))
 
 # --- run V3 against V2, which is the disagreement the body reports -----------
 _PRV3 = {r[0]: r[1:] for r in
@@ -4903,6 +5720,11 @@ for _f, _row in sorted(_V4R.items()):
     chk(f"audit README re-derivation: {_f} record count", _n, int(_cellv4(_row[0])))
     chk(f"audit README and the body agree on {_f}",
         [_row[0], _row[1]], [_PRR[_f][0], _PRR[_f][1]])
+    # the third column is the remainder, and nothing read it
+    _not_repro = _row[2].strip()
+    chk(f"audit README re-derivation: {_f} accounts for every record",
+        int(_cellv4(_row[1])) + (0 if _not_repro in ("-", "\u2014", "")
+                                 else int(_cellv4(_not_repro))), _n)
 # and both must say the workflow has not run, because it has not
 _V4TXT = re.sub(r"\s+", " ", _norm((pathlib.Path(__file__).resolve().parents[1]
                 / "v4_audit_2026_08_25" / "README.md").read_text(encoding="utf-8")))
@@ -4970,6 +5792,40 @@ chk("PR body: the mutation counts it quotes are the two suites' own",
     True)
 # the same number, quoted a second time 90 lines earlier, where it had gone
 # stale at 73 while the suite grew to 84
+# --- the body's own prose about coverage, which went stale twice -----------
+# the census section runs after this one, so it is computed here
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import table_coverage as _tcov_pr                                  # noqa: E402
+_cov = _tcov_pr.census()
+chk("PR body: the parsed count it quotes is the census's",
+    f"{_cov['parsed']} are parsed" in _PR, True)
+chk("PR body: the survivor count is reported against the census it was measured on",
+    ("When 80 were still unparsed" in " ".join(_PR.split())
+     and "left 67 that accept a wrong number" in " ".join(_PR.split())), True)
+chk("PR body: and it says how many of those are parsed since",
+    "seventy-four of those 80 are parsed now" in " ".join(_PR.split()), True)
+chk("PR body: which is the difference the census records",
+    80 - _cov["not_parsed"], 74)
+chk("PR body: it no longer claims one cell per table proves a table guarded",
+    "that are parsed catches all 44" in _PR, False)
+chk("PR body: it names the per-number probe",
+    "--probe --covered --every-cell" in _PR, True)
+chk("PR body: its scope bullet reaches the last run",
+    ("controlled tier is runs A to W" in _PR
+     and "controlled tier is runs A to V3" not in _PR), True)
+chk("PR body: and it does not call run O2 carryover balanced",
+    ("Latin square balanced\nfor position" in _PR
+     or "Latin square balanced for position" in " ".join(_PR.split())), True)
+chk("PR body: the 618 arm-runs are V2, V3 and T4, and W is named beside them",
+    (sum(len(glob.glob(f"{_d}/*__rep*.json"))
+         for _p in ("matrix_V2_*", "matrix_V3_*", "matrix_T4_*")
+         for _d in glob.glob(f"v4_audit_2026_08_25/data/{_p}")),
+     "run\nW added 500 more" in _PR or "run W added 500 more" in " ".join(_PR.split())),
+    (618, True))
+chk("PR body: and W really is 500",
+    sum(len(glob.glob(f"{_d}/*__rep*.json"))
+        for _d in glob.glob("v4_audit_2026_08_25/data/matrix_W_*")), 500)
+
 chk("PR body: and the second time it quotes the perturbation count",
     f"{_n_mutations('tests/data_mutate.py')} data and document perturbations" in _PR,
     True)
@@ -5113,7 +5969,8 @@ chk("A17 reports it as a null at this power, with the interval",
 # Q3, and that the work was identical
 _wcv = defaultdict(list)
 for _d in _W:
-    for _a in ("baseline", "spec-dflash-n2"):
+    for _a in ("baseline", "spec-dflash-n2", "spec-dflash-n2-cap",
+               "spec-mtp-n2", "spec-draft-n8"):
         _r = [1000 * sum(x["predicted_n"] for x in json.load(open(f))["rows"])
               / sum(x["predicted_ms"] for x in json.load(open(f))["rows"])
               for f in sorted(_d.glob(f"{_a}__rep*.json"))]
@@ -5128,10 +5985,34 @@ chk("W per-repeat CV, no speculation (%)",
     round(st.mean(_wcv["baseline"]), 2), 0.31, 0.005)
 _WCVT = {r[0]: r[1:] for r in _md_table("| arm | mean per-repeat CV inside a session |")}
 chk("A17's CV table rows", len(_WCVT), 5)
-chk("A17 publishes the computed CV for that arm",
-    round(st.mean(_wcv["spec-dflash-n2"]), 2), _cell(_WCVT["spec-dflash-n2"][0]), 0.005)
-chk("and for no speculation",
-    round(st.mean(_wcv["baseline"]), 2), _cell(_WCVT["no speculation"][0]), 0.005)
+# all five rows, not the two the argument leans on: the other three were the
+# last unread cells in this entry
+_WCV_ARM = {"spec-dflash-n2": "spec-dflash-n2",
+            "spec-dflash-n2-cap": "spec-dflash-n2-cap",
+            "spec-mtp-n2": "spec-mtp-n2",
+            "no speculation": "baseline",
+            "spec-draft-n8": "spec-draft-n8"}
+chk("A17's CV table names five of run W's ten arms",
+    sorted(_WCVT), sorted(_WCV_ARM))
+for _label, _arm in sorted(_WCV_ARM.items()):
+    chk(f"A17 CV table {_label}",
+        round(st.mean(_wcv[_arm]), 2), _cell(_WCVT[_label][0]), 0.005)
+# and the other definition, so the two cannot be confused again
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import carryover as _co_cv                                         # noqa: E402
+_wspread = {_a: st.mean([_co_cv.spread_by_predecessor(
+    _co_cv.arm_runs(str(_d)))[_a]["cv_pct"] for _d in _W])
+    for _a in _WCV_ARM.values()}
+chk("A17 CV: the other definition, which two of these cells used to carry",
+    (round(_wspread["spec-dflash-n2-cap"], 2), round(_wspread["spec-mtp-n2"], 2)),
+    (1.68, 0.50))
+chk("A17 CV: and the entry now says so",
+    "gives 1.68 % and 0.50 % for those" in " ".join(_ER_LINES_TEXT.split()), True)
+chk("A17 CV table: the rows are in descending order, as printed",
+    [_cell(_WCVT[_l][0]) for _l in
+     ("spec-dflash-n2", "spec-dflash-n2-cap", "spec-mtp-n2", "no speculation",
+      "spec-draft-n8")],
+    sorted((_cell(_WCVT[_l][0]) for _l in _WCV_ARM), reverse=True))
 chk("the unstable arm is five times the baseline",
     st.mean(_wcv["spec-dflash-n2"]) > 5 * st.mean(_wcv["baseline"]), True)
 _wtxt = defaultdict(set)
@@ -5187,6 +6068,18 @@ for _a, _row in sorted(_PRW.items()):
     # the two documents carry the same table; every cell of it must agree
     chk(f"PR body W {_a}: every cell agrees with A17's copy",
         [_iv_cell(_x) for _x in _row[:3]], [_iv_cell(_x) for _x in _WT[_a][:3]])
+_PRV3 = {r[0]: r[1:] for r in
+         _pr_table("| arm | V3, within invocation | V2, between invocations |")}
+chk("the PR body's V3-against-V2 table rows", len(_PRV3), 4)
+for _a, _row in sorted(_PRV3.items()):
+    _v3m = round(st.mean(_v3_shift[_a]), 2)
+    chk(f"PR body V3 {_a}: the within-invocation mean", _v3m, _cell(_row[0]), 0.005)
+    _pt, _lo, _hi = _iv2(_row[1])
+    _v2i = _lm.interval(_v2_shift[_a])
+    chk(f"PR body V3 {_a}: the V2 column", round(_v2i[0], 2), _pt, 0.005)
+    chk(f"PR body V3 {_a}: and its interval",
+        (round(_v2i[1], 2), round(_v2i[2], 2)), (_lo, _hi))
+
 chk("PR body: the predecessor result is the one computed",
     round(_lm.interval(_wcarry["spec-dflash-n2"])[0], 2), -1.20, 0.005)
 chk("PR body quotes it",
@@ -5220,8 +6113,9 @@ chk("CITATION.cff no longer says the controlled-tier logs are unpublished",
     "logs themselves are not published" in _CFF, False)
 chk("CITATION.cff says they are published",
     "published as release assets" in _CFF, True)
-chk("the README's controlled tier reaches V3",
-    "controlled tier** is runs A-V3" in _RDME, True)
+chk("the README's controlled tier reaches the last run, not V3",
+    ("controlled tier** is runs A to W" in _RDME
+     and "controlled tier** is runs A-V3" not in _RDME), True)
 chk("RETEST_TODO no longer calls the crossover script unrun",
     "written and unrun" in _TODO, False)
 chk("RETEST_TODO marks the crossover done",
@@ -5336,6 +6230,1781 @@ for _n in _ast.walk(_tree):
         _label = _n.args[0]
         _literal_only.append(getattr(_label, "value", None)
                              or _ast.unparse(_label)[:60])
+print("\n=== A17's length-matched split table, and the cell that held the "
+      "wrong quantity ===")
+# Its `matrix_V_freerun` row published 11.90 pp in a column asking for the
+# largest length-matching shift. 11.90 is run V's largest MODE contrast, hard
+# cap against free running, which is a different measurement in a different
+# entry; the length-matching shift is 14.02 pp on `spec-dflash-n4`. The cell
+# looked right because the number was real, which is the hard kind to find.
+_LMR = {_r["run"]: _r for _r in json.loads(
+    (pathlib.Path(__file__).resolve().parent / "length_matching.json")
+    .read_text(encoding="utf-8"))["runs"]}
+
+
+def _lm_max_shift(run):
+    return round(max(abs(_v.get("shift_pp") or 0.0)
+                     for _v in _LMR[run]["arms"].values()), 2)
+
+
+_lm_on = [_r for _r in _LMR.values() if _r["think"] != "off"]
+_LMS_EXPECT = {
+    "every thinking-on run with a computable comparison (31)": [
+        len(_lm_on), 10, 20, 0.00],
+    "matrix_V_hardcap, thinking off with the cap forced": [
+        _LMR["matrix_V_hardcap_20260826_210956"]["prompts"], 0.00],
+    "matrix_L_thinkoff": [10, 5, _lm_max_shift("matrix_L_thinkoff_20260826_032652")],
+    "matrix_M3_thinkoff": [10, 5, _lm_max_shift("matrix_M3_thinkoff_20260826_081806")],
+    "matrix_R_ext_thinkoff": [20, 6,
+                              _lm_max_shift("matrix_R_ext_thinkoff_20260826_110747")],
+    "D_master_matrix_think_off": [10, 5,
+                                  _lm_max_shift("D_master_matrix_think_off")],
+    "matrix_V_freerun": [10, 5, _lm_max_shift("matrix_V_freerun_20260826_210956")],
+}
+_LMST = _num_rows(_ER_LINES, "| run | thinking | prompts | length-matched |")
+chk("A17 length-matched split: one row per run or class",
+    sorted(_LMST), sorted(_LMS_EXPECT))
+for _row, _want in sorted(_LMS_EXPECT.items()):
+    _num_row_check(f"A17 split {_row}", _LMST[_row], _want)
+chk("A17 split: every thinking-on run really is fully length-matched",
+    sorted({_r["prompts"] == _r["length_matched_prompts"] for _r in _lm_on}),
+    [True])
+chk("A17 split: and they run either ten prompts or twenty",
+    sorted({_r["prompts"] for _r in _lm_on}), [10, 20])
+chk("A17 split: the thinking-off runs are the other six",
+    sorted(_r["run"] for _r in _LMR.values() if _r["think"] == "off"),
+    ["D_master_matrix_think_off", "matrix_L_thinkoff_20260826_032652",
+     "matrix_M3_thinkoff_20260826_081806", "matrix_R_ext_thinkoff_20260826_110747",
+     "matrix_V_freerun_20260826_210956", "matrix_V_hardcap_20260826_210956"])
+chk("A17 split: the capped one is the only thinking-off run with no shift",
+    [_r["run"] for _r in _LMR.values()
+     if _r["think"] == "off" and _lm_max_shift(_r["run"]) == 0.0],
+    ["matrix_V_hardcap_20260826_210956"])
+# and the quantity that was in that cell, so the two cannot be confused again
+_v_fr = {_a: _v["all_prompts_pct"] for _a, _v
+         in _LMR["matrix_V_freerun_20260826_210956"]["arms"].items()}
+_v_hc = {_a: _v["all_prompts_pct"] for _a, _v
+         in _LMR["matrix_V_hardcap_20260826_210956"]["arms"].items()}
+_v_mode = sorted(round(_v_hc[_a] - _v_fr[_a], 2) for _a in _v_fr)
+chk("A17: 11.90 is run V's largest mode contrast, not its largest shift",
+    (min(_v_mode), max(_v_mode)), (6.31, 11.90))
+chk("A17: and the two really are different numbers for that run",
+    _lm_max_shift("matrix_V_freerun_20260826_210956") != max(_v_mode), True)
+
+# the paragraph under the table, which counts the comparisons and quotes six
+# of them. It said the external drafter appears three times; `spec-draft-n8`
+# appears in four of the five runs and `spec-draft-v1cfg` in a fifth.
+_lm_off = [_r for _r in _LMR.values()
+           if _r["think"] == "off" and not _r["run"].startswith("matrix_V_hardcap")]
+_lm_pairs = [(_r["run"], _a, _v) for _r in _lm_off
+             for _a, _v in sorted(_r["arms"].items())]
+_lm_model = [_p for _p in _lm_pairs if not _p[1].startswith("ngram")]
+_lm_ngram = [_p for _p in _lm_pairs if _p[1].startswith("ngram")]
+chk("A17: five uncapped thinking-off runs", len(_lm_off), 5)
+chk("A17: eighteen arm-vs-baseline comparisons in them", len(_lm_pairs), 18)
+chk("A17: sixteen of them draft from a model", len(_lm_model), 16)
+chk("A17: and every one of those moves the same way",
+    sorted({_v["shift_pp"] > 0 for _, _, _v in _lm_model}), [True])
+chk("A17: over the span the paragraph quotes",
+    (round(min(_v["shift_pp"] for _, _, _v in _lm_model), 2),
+     round(max(_v["shift_pp"] for _, _, _v in _lm_model), 2)), (2.52, 16.79))
+_lm_ext = [_p for _p in _lm_model if _p[1].startswith("spec-draft")]
+chk("A17: the external drafter appears five times, not three", len(_lm_ext), 5)
+chk("A17: and the document says five",
+    "each of its five appearances" in " ".join(_ER_LINES_TEXT.split()), True)
+chk("A17: over the span it quotes for that arm",
+    (round(min(_v["shift_pp"] for _, _, _v in _lm_ext), 1),
+     round(max(_v["shift_pp"] for _, _, _v in _lm_ext), 1)), (2.5, 3.8))
+chk("A17: the two exceptions are the n-gram arms and both are in run D",
+    sorted((_a, _r.split("_")[0]) for _r, _a, _ in _lm_ngram),
+    [("ngram-cache", "D"), ("ngram-mod-n24", "D")])
+chk("A17: and they move the other way",
+    sorted(round(_v["shift_pp"], 2) for _, _, _v in _lm_ngram), [-6.37, -0.17])
+# the two run R prompts the entry opens with
+_r_len = defaultdict(lambda: defaultdict(set))
+for _f in sorted(glob.glob("v4_audit_2026_08_25/data/"
+                           "matrix_R_ext_thinkoff_20260826_110747/*__rep*.json")):
+    _b = json.loads(pathlib.Path(_f).read_text(encoding="utf-8"))
+    for _r in _b["rows"]:
+        _r_len[_r["tag"]][_b["arm"]].add(_r["timings"]["predicted_n"])
+_bash = {_a: sorted(_v) for _a, _v in _r_len["code_bash"].items()}
+_rust = {_a: sorted(_v) for _a, _v in _r_len["code_rust"].items()}
+chk("A17: run R's code_bash lengths, baseline against the three speculative arms",
+    (_bash["baseline"], sorted(_v[0] for _a, _v in _bash.items() if _a != "baseline")),
+    ([300], [187, 188, 188]))
+chk("A17: and code_rust the other way",
+    (_rust["baseline"], sorted({_v[0] for _a, _v in _rust.items() if _a != "baseline"})),
+    ([203], [300]))
+chk("A17: 38 % short in one direction",
+    round(100 * (1 - min(_v[0] for _a, _v in _bash.items() if _a != "baseline")
+                 / _bash["baseline"][0])), 38)
+chk("A17: and 48 % long in the other",
+    round(100 * (300 / _rust["baseline"][0] - 1)), 48)
+
+
+print("\n=== C4b's thermal table, eighteen cells against the trace itself ===")
+# The entry that corrects "stock clocks, measured once before the load"
+# published its replacement as a table nothing read. `thermal_report.py` is
+# the tool the entry names; every row is checked against the trace directly
+# here, and against the tool's own output beside it, so a change in either
+# that the other does not follow shows up as a disagreement.
+# This trace is the `full` schema: values carry their units (` 87 %`, ` 350.00
+# W`) and the throttle columns are ` Active` / ` Not Active` rather than bits.
+# Reading them as bare numbers silently produced an empty sample set, which is
+# a measurement of nothing that looks like a measurement of zero.
+_C4B_TRACE = "v4_audit_2026_08_25/data/gpu_telemetry_20260825.csv"
+_C4B_ALL = list(csv.DictReader(open(_C4B_TRACE, encoding="utf-8")))
+
+
+def _c4b_num(cell):
+    return float(re.search(r"-?[\d.]+", cell).group(0))
+
+
+_c4b = [_r for _r in _C4B_ALL if _c4b_num(_r["util_pct"]) > 50]
+_c4b_t = [int(_c4b_num(_r["temp_c"])) for _r in _c4b]
+_c4b_g = [int(_c4b_num(_r["gfx_mhz"])) for _r in _c4b]
+
+
+def _c4b_flag(key):
+    return [_r for _r in _c4b if _r[key].strip() == "Active"]
+_C4B_SLOWDOWN = 83                 # the card's documented slowdown point, not
+                                   # a reading: marked in the table as such
+_C4B_EXPECT = {
+    "power.limit / power.default_limit / power.max_limit": [
+        int(_c4b_num(_c4b[0]["power_limit_w"])),
+        int(_c4b_num(_c4b[0]["power_default_w"])), 350],
+    "GPU temperature": [min(_c4b_t), max(_c4b_t),
+                        round(st.mean(_c4b_t), 1), _C4B_SLOWDOWN],
+    "graphics clock": [min(_c4b_g), max(_c4b_g),
+                       int(_c4b_num(_c4b[0]["gfx_max_mhz"])),
+                       round(st.mean(_c4b_g))],
+    "clocks_throttle_reasons.sw_power_cap": [
+        len(_c4b_flag("thr_sw_power_cap")), len(_c4b)],
+    "clocks_throttle_reasons.sw_thermal_slowdown": (
+        [len(_c4b_flag("thr_sw_thermal")), len(_c4b)]
+        + [int(_c4b_num(_r["temp_c"])) for _r in _c4b_flag("thr_sw_thermal")]),
+    "clocks_throttle_reasons.hw_thermal_slowdown": (
+        [len(_c4b_flag("thr_hw_thermal")), len(_c4b)]
+        + [int(_c4b_num(_r["temp_c"])) for _r in _c4b_flag("thr_hw_thermal")]),
+    "clocks_throttle_reasons.hw_power_brake_slowdown": [],
+    "temperature.memory": [],
+}
+_C4BT = _num_rows(_ER_LINES, "| quantity | observed |")
+chk("C4b thermal table: one row per quantity",
+    sorted(_C4BT), sorted(_C4B_EXPECT))
+for _q, _want in sorted(_C4B_EXPECT.items()):
+    _num_row_check(f"C4b {_q}", _C4BT[_q], _want)
+chk("C4b: the trace really has that many loaded samples, of that many",
+    (len(_c4b), len(_C4B_ALL)), (1272, 1317))
+chk("C4b: hw_power_brake never fired, which is why its row has no count",
+    len(_c4b_flag("thr_hw_power_brake")), 0)
+chk("C4b: the card does not report a memory junction temperature",
+    sorted({_r.get("temp_mem_c", "N/A") for _r in _c4b}), ["N/A"])
+chk("C4b: the three thermal-flag samples' clocks, as the sentence prints them",
+    sorted(int(_c4b_num(_r["gfx_mhz"])) for _r in _c4b_flag("thr_sw_thermal")
+           + _c4b_flag("thr_hw_thermal")), [1935, 1950, 1950])
+chk("C4b: and none of them is near the run maximum's floor",
+    max(_c4b_g), 1965)
+chk("C4b: the slowdown point is marked as a datasheet figure",
+    "throttle point \u2020" in _ER_LINES_TEXT, True)
+chk("C4b: and the trace's own maximum is below it",
+    max(_c4b_t) < _C4B_SLOWDOWN, True)
+
+
+print("\n=== the three batching tables, thirty-nine cells nothing read ===")
+# Run I's aggregate table, run K's collapse table, and the one under it that
+# says the drafts do not get worse. Aggregate throughput is the harness's own
+# `aggregate_tok_s`: generated tokens over wall clock for the whole ten-prompt
+# set, which is the figure that moves under concurrency while the per-request
+# decode rate does not.
+def _aggregates(run_dir, arm):
+    return [json.loads(pathlib.Path(_f).read_text(encoding="utf-8"))["aggregate_tok_s"]
+            for _f in sorted(glob.glob(os.path.join(run_dir, f"{arm}__rep*.json")))]
+
+
+def _ms(vals, dp=1):
+    return [round(st.mean(vals), dp), round(st.stdev(vals), 2)]
+
+
+_I_DIRS = {_c: f"v4_audit_2026_08_25/data/matrix_I2_conc{_c}_20260826_014750"
+           for _c in (1, 4, 8)}
+_IT_EXPECT = {}
+for _c, _d in _I_DIRS.items():
+    _bl, _spec = _aggregates(_d, "baseline"), _aggregates(_d, "spec-draft-n8")
+    _IT_EXPECT[str(_c)] = ([_c] + _ms(_bl) + _ms(_spec)
+                           + [round(st.mean(_spec) / st.mean(_bl), 2)])
+_IT = _num_rows(_V4R_LINES, "| concurrency | no speculation | `spec-draft-n8` |")
+chk("run I aggregate table: one row per level", sorted(_IT), sorted(_IT_EXPECT))
+for _lvl, _want in sorted(_IT_EXPECT.items()):
+    _num_row_check(f"run I aggregate c={_lvl}", _IT[_lvl], _want)
+
+_K_DIRS = {1: "v4_audit_2026_08_25/data/matrix_K1_sweep_20260826_025615",
+           4: "v4_audit_2026_08_25/data/matrix_K_conc4_20260826_025615",
+           8: "v4_audit_2026_08_25/data/matrix_K_conc8_20260826_025615"}
+_KB_EXPECT, _KL_EXPECT = {}, {}
+for _c, _d in _K_DIRS.items():
+    _bl, _spec = _aggregates(_d, "baseline"), _aggregates(_d, "spec-dflash-n4")
+    _delta = round(100 * (st.mean(_spec) / st.mean(_bl) - 1), 1)
+    # the c=1 row prints no spread; the other two do
+    _KB_EXPECT["1 request in flight" if _c == 1 else f"{_c} in flight"] = (
+        [_c, round(st.mean(_bl), 1), round(st.mean(_spec), 1), abs(_delta)]
+        if _c == 1 else
+        [_c] + _ms(_bl) + _ms(_spec) + [abs(_delta)])
+    _dn = _da = _pn = 0
+    for _f in sorted(glob.glob(os.path.join(_d, "spec-dflash-n4__rep*.json"))):
+        for _r in json.loads(pathlib.Path(_f).read_text(encoding="utf-8"))["rows"]:
+            _dn += _r["draft_n"]
+            _da += _r["draft_n_accepted"]
+            _pn += _r["timings"]["predicted_n"]
+    _KL_EXPECT[f"{_c} in flight"] = [_c, round(_dn / _pn, 3),
+                                     round(100 * _da / _dn, 1),
+                                     round(st.mean(_spec), 1)]
+_KBT = _num_rows(_V4R_LINES, "| | no speculation | `spec-dflash-n4` | vs baseline |")
+chk("run K batching table: one row per level", sorted(_KBT), sorted(_KB_EXPECT))
+for _lvl, _want in sorted(_KB_EXPECT.items()):
+    _num_row_check(f"run K batching {_lvl}", _KBT[_lvl], _want)
+_KLT = _num_rows(_V4R_LINES,
+                 "| level | drafted per generated token | acceptance | aggregate |")
+chk("run K draft-quality table: one row per level",
+    sorted(_KLT), sorted(_KL_EXPECT))
+for _lvl, _want in sorted(_KL_EXPECT.items()):
+    _num_row_check(f"run K draft quality {_lvl}", _KLT[_lvl], _want)
+chk("run K: the aggregate column of the two tables is the same measurement",
+    [_KL_EXPECT[_k][3] for _k in sorted(_KL_EXPECT)],
+    [round(st.mean(_aggregates(_K_DIRS[_c], "spec-dflash-n4")), 1) for _c in (1, 4, 8)])
+chk("run K: the drafts really do not get worse, the clock does",
+    (_KL_EXPECT["8 in flight"][1] > _KL_EXPECT["1 in flight"][1],
+     round(_KL_EXPECT["1 in flight"][2] - _KL_EXPECT["8 in flight"][2], 1)),
+    (True, 4.4))
+
+
+print("\n=== A14's M1-against-Q table, nine rows and none of them read ===")
+# The entry's whole argument is that nothing differs between the two runs, and
+# the table listing what was compared had no reader. Everything in it comes
+# back from the manifests, the rep files and the telemetry except the two
+# batch sizes, which were read from a server log this repository does not
+# commit; those are held to the other place the file states them.
+_M1D = "v4_audit_2026_08_25/data/matrix_M1_20260826_075816"
+_QD = "v4_audit_2026_08_25/data/matrix_Q_q8_20260826_110747"
+_M1M = json.loads((pathlib.Path(_M1D) / "manifest.json").read_text(encoding="utf-8"))
+_QM = json.loads((pathlib.Path(_QD) / "manifest.json").read_text(encoding="utf-8"))
+_M1R = json.loads((pathlib.Path(_M1D) / "spec-mtp-n4__rep0.json")
+                  .read_text(encoding="utf-8"))
+_QR = json.loads((pathlib.Path(_QD) / "spec-mtp-n4__rep0.json")
+                 .read_text(encoding="utf-8"))
+
+
+def _a14_draft_per_prompt(run_dir):
+    """Counted draft tokens a prompt, per repeat, in the order the rows ran."""
+    _fs = sorted(glob.glob(os.path.join(run_dir, "spec-mtp-n4__rep*.json")))
+    _first = json.loads(pathlib.Path(_fs[0]).read_text(encoding="utf-8"))
+    _per = defaultdict(int)
+    for _f in _fs:
+        for _r in json.loads(pathlib.Path(_f).read_text(encoding="utf-8"))["rows"]:
+            _per[_r["tag"]] += _r["draft_n"]
+    return [_per[_r["tag"]] // len(_fs) for _r in _first["rows"]]
+
+
+def _a14_acc(run_dir):
+    _dn = _da = 0
+    for _f in sorted(glob.glob(os.path.join(run_dir, "spec-mtp-n4__rep*.json"))):
+        for _r in json.loads(pathlib.Path(_f).read_text(encoding="utf-8"))["rows"]:
+            _dn += _r["draft_n"]
+            _da += _r["draft_n_accepted"]
+    return round(100.0 * _da / _dn, 1)
+
+
+def _a14_tel(pat, lo, hi):
+    """Loaded telemetry samples in one wall-clock window, as (temp, SM clock).
+
+    Its own copy of the reader: this file reuses short names freely and by
+    here `_tel` is a string, `_c1` a dict and `_lm` a list. Every one of those
+    was a TypeError before it was a wrong number, which is the lucky way round.
+    """
+    _out = []
+    for _f in sorted(glob.glob(f"v4_audit_2026_08_25/data/{pat}")):
+        for _r in csv.reader(open(_f, encoding="utf-8")):
+            if len(_r) != 9 or not _r[1].isdigit():
+                continue
+            _m = re.search(r"(\d{2}):(\d{2}):(\d{2})", _r[0])
+            if _m and lo <= _m.group(0) <= hi and int(_r[1]) > 50:
+                _out.append((int(_r[3]), int(_r[5])))
+    return _out
+
+
+_a14_m1_tel = _a14_tel("gpu_telemetry_M_*.csv", "08:00:00", "08:15:00")
+_a14_q_tel = _a14_tel("gpu_telemetry_chain2_*.csv", "11:33:00", "11:52:00")
+chk("A14: both telemetry windows still hold loaded samples",
+    (len(_a14_m1_tel) > 0, len(_a14_q_tel) > 0), (True, True))
+_a14_place = re.search(r"placement (\d+)/(\d+), (\d+)/(\d+)",
+                       pathlib.Path("v4_audit_2026_08_25/data/matrix_M.log")
+                       .read_text(encoding="utf-8"))
+_A14_EXPECT = {
+    "server binary sha256": [],
+    "drafter file sha256": [],
+    "recorded argv": [len(_M1R["argv"])],
+    "what the memory fitter chose": [_M1M["ctx"]]
+        + [int(_x) for _x in _a14_place.groups()] + [2048, 512],
+    "draft tokens per prompt": _a14_draft_per_prompt(_M1D),
+    "draft acceptance": [_a14_acc(_M1D), _a14_acc(_QD)],
+    "temperature under load": [round(st.mean([_x[0] for _x in _a14_m1_tel]), 1),
+                               round(st.mean([_x[0] for _x in _a14_q_tel]), 1)],
+    "SM clock under load": [round(st.mean([_x[1] for _x in _a14_m1_tel])),
+                            round(st.mean([_x[1] for _x in _a14_q_tel]))],
+    "the no-speculation baseline beside it": [round(_pool_dir(_M1D, "baseline"), 1),
+                                              round(_pool_dir(_QD, "baseline"), 1)],
+}
+_A14T = _num_rows(_ER_LINES, "| checked | M1 | run Q |")
+chk("A14 comparison table: one row per thing checked",
+    sorted(_A14T), sorted(_A14_EXPECT))
+for _row, _want in sorted(_A14_EXPECT.items()):
+    if _row == "what the memory fitter chose":
+        # the row prints n_ctx, then the placement, then the two batch sizes
+        _num_row_check(f"A14 {_row}", _A14T[_row],
+                       [_want[0]] + _want[1:5] + _want[5:])
+    else:
+        _num_row_check(f"A14 {_row}", _A14T[_row], _want)
+chk("A14: the two runs ran the same binary and the same MTP head",
+    (_M1M["server_sha256"] == _QM["server_sha256"],
+     _M1M["mtp_sha256"] == _QM["mtp_sha256"]), (True, True))
+chk("A14: and the table's abbreviated hashes are those files'",
+    (_M1M["server_sha256"].startswith("b6a5c490"),
+     _M1M["mtp_sha256"].startswith("5b1e4937")), (True, True))
+# It said "byte-identical" and one of the thirty tokens differs: the listening
+# port, 18861 against 18902. Irrelevant to the measurement and still not what
+# the word means, so the row says what is actually true.
+_a14_argv_diff = [_k for _k, (_x, _y) in enumerate(zip(_M1R["argv"], _QR["argv"]))
+                  if _x != _y]
+chk("A14: the recorded argv differs in exactly one position",
+    len(_a14_argv_diff), 1)
+chk("A14: and that position is the port the server listened on",
+    _M1R["argv"][_a14_argv_diff[0] - 1], "--port")
+chk("A14: which is what the row now says",
+    "identical but for the listening port" in _ER_LINES_TEXT, True)
+chk("A14: and the draft tokens a prompt really are identical",
+    _a14_draft_per_prompt(_M1D) == _a14_draft_per_prompt(_QD), True)
+chk("A14: the two batch sizes are marked as not re-derivable here",
+    "`n_batch 2048, n_ubatch 512` \u2020" in _ER_LINES_TEXT, True)
+chk("A14: and they agree with the only other place this file states them",
+    "`n_batch` 2048, `n_ubatch` 512"
+    in " ".join(_ER_LINES_TEXT.split()), True)
+
+
+print("\n=== the README's length-matched table, eight cells nothing read ===")
+# The paragraph around it was corrected once already - it used to say
+# acceptance falls with thinking off, which was the short outputs and not the
+# workload. The table that carries the correction had no reader.
+# Computed from the run data at full precision, not from
+# `length_matching.json`, whose fields are already rounded to two places:
+# ngram-cache's length-matched acceptance is 1.8469 %, the file says 1.85, and
+# rounding that again gives 1.9 against the published 1.8. That is A12's double
+# rounding, and it appeared here in the checker written to catch it.
+def _lm_cells(run_dir):
+    """(present prompts, length-matched prompts, per-arm figures) for one run."""
+    _man = json.loads((pathlib.Path(run_dir) / "manifest.json")
+                      .read_text(encoding="utf-8"))
+    _rows = defaultdict(lambda: defaultdict(list))
+    for _f in sorted(glob.glob(os.path.join(run_dir, "*__rep*.json"))):
+        _r = json.loads(pathlib.Path(_f).read_text(encoding="utf-8"))
+        if _r.get("crashed"):
+            continue
+        for _x in _r["rows"]:
+            _rows[_x["tag"]][_r["arm"]].append(
+                (_x["predicted_n"], _x["predicted_ms"],
+                 _x["draft_n"], _x["draft_n_accepted"]))
+    _arms = [_a for _a in _man["arms"] if _a != "baseline"]
+    _present = [_t for _t, _d in _rows.items()
+                if "baseline" in _d and all(_a in _d for _a in _arms)]
+    _matched = [_t for _t in _present
+                if len({_r[0] for _a in _rows[_t] for _r in _rows[_t][_a]}) == 1]
+
+    def _p(tags, arm):
+        return (1000 * sum(_r[0] for _t in tags for _r in _rows[_t][arm])
+                / sum(_r[1] for _t in tags for _r in _rows[_t][arm]))
+
+    def _acc(tags, arm):
+        _d = sum(_r[2] for _t in tags for _r in _rows[_t][arm])
+        if not _d:                     # an arm that never drafted, such as a
+            return None                # no-speculation control under another name
+        return 100 * sum(_r[3] for _t in tags for _r in _rows[_t][arm]) / _d
+
+    _out = {}
+    for _a in _arms:
+        _out[_a] = {
+            "pct": 100 * (_p(_present, _a) / _p(_present, "baseline") - 1),
+            "acc": _acc(_present, _a),
+            "m_pct": 100 * (_p(_matched, _a) / _p(_matched, "baseline") - 1)
+                     if _matched else None,
+            "m_acc": _acc(_matched, _a) if _matched else None}
+    return len(_present), len(_matched), _out
+
+
+_LM_ON_N, _LM_ON_M, _LM_ON = _lm_cells(
+    "v4_audit_2026_08_25/data/C_master_matrix_think_on")
+_LM_OFF_N, _LM_OFF_M, _LM_OFF = _lm_cells(
+    "v4_audit_2026_08_25/data/D_master_matrix_think_off")
+
+
+def _lm_row(arm, key):
+    _mk = "m_pct" if key == "pct" else "m_acc"
+    return [round(_LM_ON[arm][key], 1), round(_LM_OFF[arm][key], 1),
+            round(_LM_OFF[arm][_mk], 1)]
+
+
+_LMT = _num_rows_seq(_RM_LINES, "| | thinking on | thinking off, as above |")
+chk("README length-matched table: four rows", len(_LMT), 4)
+chk("README length-matched table: the rows it names",
+    [_c[0].strip("`* ") for _c, _ in _LMT],
+    ["draft model `n_max 8`".strip("`* "), "its acceptance",
+     "ngram-cache", "its acceptance"])
+_LM_WANT = [
+    ("draft model n_max 8", [8] + _lm_row("spec-draft-n8", "pct")),
+    ("its acceptance, draft", _lm_row("spec-draft-n8", "acc")),
+    ("ngram-cache", _lm_row("ngram-cache", "pct")),
+    ("its acceptance, ngram-cache", _lm_row("ngram-cache", "acc")),
+]
+for (_lbl, _want), (_cells, _nums) in zip(_LM_WANT, _LMT):
+    _num_row_check(f"README length-matched {_lbl}", _nums,
+                   [abs(_x) for _x in _want])
+chk("README length-matched: thinking on had nothing to match, so all ten count",
+    (_LM_ON_N, _LM_ON_M), (10, 10))
+chk("and thinking off matched five of its ten", (_LM_OFF_N, _LM_OFF_M), (10, 5))
+chk("README length-matched: the paragraph's own two acceptance figures",
+    (f"{round(_LM_OFF['spec-draft-n8']['m_acc'], 1)} % against "
+     f"{round(_LM_ON['spec-draft-n8']['acc'], 1)} % with thinking on")
+    in " ".join(_ROOT_TEXT.replace("*", "").split()), True)
+
+
+print("\n=== the BOS-override table, published twice and read in neither ===")
+# A2's central claim: the drafted and accepted totals are identical whether the
+# vocabulary is matched by override or reached through the translation
+# fallback. Eight numbers a copy, in two documents, and both copies were
+# unread; `--override-kv` is what the row labels differ by.
+_BOS_ARMS = [("A_bcb5eeb64_legacy", "draft-max8-translate"),
+             ("A_bcb5eeb64_legacy", "draft-max8-matched"),
+             ("B_master_3737e4137", "draft-max8-translate"),
+             ("B_master_3737e4137", "draft-max8-matched")]
+_bos = []
+for _run, _arm in _BOS_ARMS:
+    _rows = []
+    for _f in sorted(glob.glob(
+            f"v4_audit_2026_08_25/data/{_run}/{_arm}__rep*.json")):
+        _rows += json.loads(pathlib.Path(_f).read_text(encoding="utf-8"))["rows"]
+    _bos.append([round(st.mean(_x["timings"]["predicted_per_second"]
+                               for _x in _rows), 1),
+                 sum(_x["draft_n"] for _x in _rows),
+                 sum(_x["draft_n_accepted"] for _x in _rows)])
+for _doc, _lines in (("README", _RM_LINES), ("ERRATA", _ER_LINES)):
+    _rows_pub = _num_rows_seq(
+        _lines, "| binary | arm | request-mean | drafted / accepted |")
+    chk(f"{_doc} BOS table: four rows", len(_rows_pub), 4)
+    for _k, ((_cells, _nums), _want) in enumerate(zip(_rows_pub, _bos)):
+        _num_row_check(f"{_doc} BOS row {_k + 1} ({_cells[1][:28]})",
+                       _nums, _want)
+    chk(f"{_doc} BOS table: the two binaries, in order",
+        [_c[0].replace("master ", "").strip("`* ") for _c, _ in _rows_pub],
+        ["bcb5eeb64", "bcb5eeb64", "3737e4137", "3737e4137"])
+chk("A2: the drafted and accepted totals really are equal within each binary",
+    [(_bos[0][1], _bos[0][2]) == (_bos[1][1], _bos[1][2]),
+     (_bos[2][1], _bos[2][2]) == (_bos[3][1], _bos[3][2])], [True, True])
+chk("A2: and the two documents publish the same four rows",
+    [_n for _, _n in _num_rows_seq(
+        _RM_LINES, "| binary | arm | request-mean | drafted / accepted |")],
+    [_n for _, _n in _num_rows_seq(
+        _ER_LINES, "| binary | arm | request-mean | drafted / accepted |")])
+
+
+print("\n=== run I's acceptance-under-batching table, which nothing read ===")
+# Upstream issue #27572 reports acceptance collapsing to zero under `-np N`.
+# The table that says it did not happen here was itself unchecked.
+_I2_EXPECT = {}
+for _c in (1, 4, 8):
+    _d = f"v4_audit_2026_08_25/data/matrix_I2_conc{_c}_20260826_014750"
+    _dn, _da, _ratio, _zero, _rows = [], [], [], [], []
+    for _f in sorted(glob.glob(os.path.join(_d, "spec-draft-n8__rep*.json"))):
+        _r = json.loads(pathlib.Path(_f).read_text(encoding="utf-8"))["rows"]
+        _dn.append(sum(_x["draft_n"] for _x in _r))
+        _da.append(sum(_x["draft_n_accepted"] for _x in _r))
+        _ratio.append(round(100.0 * _da[-1] / _dn[-1], 1))
+        _zero.append(sum(1 for _x in _r if _x["draft_n"] == 0))
+        _rows.append(len(_r))
+    chk(f"run I c={_c}: the three repeats all ran ten requests",
+        sorted(set(_rows)), [10])
+    chk(f"run I c={_c}: no request went without a draft", sorted(set(_zero)), [0])
+    _dspan = ([min(_dn)] if len(set(_dn)) == 1 else [min(_dn), max(_dn)])
+    _aspan = ([min(_da)] if len(set(_da)) == 1 else [min(_da), max(_da)])
+    _rspan = ([min(_ratio)] if len(set(_ratio)) == 1
+              else [min(_ratio), max(_ratio)])
+    _I2_EXPECT[f"c={_c}"] = ([_c] + _dspan + _aspan + _rspan
+                             + [_zero[0], _rows[0]])
+_I2T = _num_rows(_V4R_LINES, "| level | drafted | accepted | counted ratio |")
+chk("run I table: one row per concurrency level",
+    sorted(_I2T), sorted(_I2_EXPECT))
+for _lvl, _want in sorted(_I2_EXPECT.items()):
+    _num_row_check(f"run I {_lvl}", _I2T[_lvl], _want)
+chk("run I: the acceptance really is flat across the three levels",
+    round(max(_x for _v in _I2_EXPECT.values() for _x in _v if 20 < _x < 40)
+          - min(_x for _v in _I2_EXPECT.values() for _x in _v if 20 < _x < 40), 1),
+    1.4, 0.05)
+chk("run I: and the issue it answers is named",
+    "issue #27572" in _V4R_TEXT, True)
+
+
+print("\n=== the archives' own tables: v3's ranking and Exp 2's variance ===")
+# The v3 cross-method ranking in CHANGELOG.md is a mean over five per-prompt
+# `llama-cli` logs a config, and the logs are committed, so it re-derives.
+_V3LOG = (pathlib.Path(__file__).resolve().parents[1] / "v3_dflash_2026_05_07"
+          / "data" / "out_20260507_183341")
+_V3GEN = re.compile(r"Generation:\s*([\d.]+) t/s")
+
+
+def _v3_mean(sub):
+    _v = []
+    for _f in sorted((_V3LOG / sub).glob("p*.log")):
+        _m = _V3GEN.findall(_f.read_text(errors="replace"))
+        if _m:
+            _v.append(float(_m[-1]))
+    return st.mean(_v), len(_v)
+
+
+_V3_ROWS = {"no spec (baseline)": "01_baseline",
+            "Oleg draft-spec max=32": "03_oleg_draft_2_32",
+            "Oleg draft-spec max=16": "04_oleg_draft_2_16",
+            "DFlash --draft-max 16": "05_dflash_max16",
+            "DFlash --draft-max 8": "06_dflash_max8",
+            "DFlash --draft-max 4": "07_dflash_max4"}
+_v3_base, _v3_n = _v3_mean("01_baseline")
+chk("v3 ranking: five prompt logs behind every row",
+    sorted({_v3_mean(_d)[1] for _d in _V3_ROWS.values()}), [5])
+_V3T = _num_rows(_CH_LINES, "| method | tok/s (mean) | vs baseline |")
+chk("v3 ranking table: one row per method", sorted(_V3T), sorted(_V3_ROWS))
+for _label, _sub in sorted(_V3_ROWS.items()):
+    _m, _ = _v3_mean(_sub)
+    _want = [round(_m, 1)]
+    # the draft length is in the label of the four that name one
+    _want = ([float(_x) for _x in re.findall(r"(?<![\w.])\d+(?![\w.])", _label)]
+             + _want)
+    if _sub != "01_baseline":
+        _want.append(abs(round(100 * (_m / _v3_base - 1), 1)))
+    _num_row_check(f"v3 ranking {_label}", _V3T[_label], _want)
+chk("v3 ranking: the best DFlash row is the one the table marks",
+    max(_V3_ROWS, key=lambda _k: _v3_mean(_V3_ROWS[_k])[0] if "DFlash" in _k else -1),
+    "DFlash --draft-max 8")
+
+# Exp 2's variance decomposition. Its cells come from the RAW list in
+# `exp2_codejson_n3/results.json`, not from the summary file beside it, whose
+# `configs` hold a different set of numbers entirely.
+_X2 = json.loads((pathlib.Path(__file__).resolve().parents[1] / "v2_3090_followup"
+                  / "exp2_codejson_n3" / "results.json").read_text(encoding="utf-8"))
+
+
+def _x2_sd(name):
+    _raw = _X2["configs"][name]["raw"]          # (trial, prompt, wall_ms, tok_s)
+    _bt, _bp = defaultdict(list), defaultdict(list)
+    for _t, _pr, _w, _v in _raw:
+        _bt[_t].append(_v)
+        _bp[_pr].append(_v)
+    return [round(st.stdev([_r[3] for _r in _raw]), 3),
+            round(st.stdev([st.mean(_v) for _v in _bt.values()]), 3),
+            round(st.mean([st.stdev(_v) for _v in _bp.values()]), 3)]
+
+
+_X2T = _num_rows(_ER_LINES, "| config | SD over all 15 cells |")
+chk("Exp 2 variance table: one row per configuration",
+    sorted(_X2T), sorted(_X2["configs"]))
+for _cfg in sorted(_X2["configs"]):
+    _num_row_check(f"Exp 2 variance {_cfg}", _X2T[_cfg], _x2_sd(_cfg))
+chk("Exp 2: fifteen cells a configuration, three trials by five prompts",
+    sorted({len(_X2["configs"][_c]["raw"]) for _c in _X2["configs"]}), [15])
+chk("Exp 2: and the mean the paragraph quotes beside the spread",
+    (round(st.mean([_r[3] for _r
+                    in _X2["configs"]["02_oleg_draft_2_32"]["raw"]]), 2),
+     _x2_sd("02_oleg_draft_2_32")[0]), (66.57, 7.566))
+
+
+print("\n=== the EAGLE3 cross-check, which is a quotation and still checks ===")
+# Not this repository's data: it is quoted from an upstream PR comment. What
+# can be checked is that the table is internally consistent - every speedup is
+# its own row's ratio - and that the range the paragraph draws from it is the
+# range of those speedups.
+_EGT = _num_rows_seq(_ER_LINES,
+                     "| prompt | baseline | EAGLE3, draft 8 | speedup |")
+chk("EAGLE3 table: three prompts", len(_EGT), 3)
+_eg_speedups = []
+for _cells, _nums in _EGT:
+    _base, _d8, _s8, _d3, _s3 = _nums
+    chk(f"EAGLE3 {_cells[0][:28]}: draft 8 speedup is its own row's ratio",
+        round(float(_d8) / float(_base), 2), float(_s8))
+    chk(f"EAGLE3 {_cells[0][:28]}: and draft 3's",
+        round(float(_d3) / float(_base), 2), float(_s3))
+    _eg_speedups += [float(_s8), float(_s3)]
+chk("EAGLE3: the net loss the paragraph quotes is the span of those six",
+    (round(100 * (1 - max(_eg_speedups))), round(100 * (1 - min(_eg_speedups)))),
+    (29, 54))
+chk("EAGLE3: and the table says whose measurement it is",
+    "pull/18039" in _ER_LINES_TEXT, True)
+
+
+print("\n=== A11's two identity tables, and the thermals across the day ===")
+_A11J = _num_rows(_ER_LINES, "| arm | token streams identical to no speculation |")
+chk("A11 run J identity table: four arms", len(_A11J), 4)
+for _arm, _n in (("spec-dflash-n4", 3), ("spec-dflash-n8", 0),
+                 ("spec-dflash-n16", 3), ("spec-draft-n8", 0)):
+    _num_row_check(f"A11 run J identity {_arm}", _A11J[_arm], [_n, 30])
+_A11X = _num_rows(_ER_LINES, "| run | output length | token streams identical")
+chk("A11 cross-run identity table: four rows", len(_A11X), 4)
+for _row, _want in (("J", [300, 6, 120]), ("K1", [300, 0, 180]),
+                    ("L, thinking on", [300, 0, 200]),
+                    ("L, thinking off", [96, 85, 200])):
+    _num_row_check(f"A11 cross-run identity {_row}", _A11X[_row], _want)
+
+_TH_RUNS = {"I + J": "gpu_telemetry_IJ_*", "K": "gpu_telemetry_K_*",
+            "L": "gpu_telemetry_L_*"}
+_TH_EXPECT = {}
+for _lbl, _pat in _TH_RUNS.items():
+    _f = sorted(glob.glob(f"v4_audit_2026_08_25/data/{_pat}.csv"))[0]
+    _rows = [_r for _r in csv.reader(open(_f, encoding="utf-8"))
+             if len(_r) == 9 and _r[1].isdigit() and int(_r[1]) > 50]
+    _t = [int(_r[3]) for _r in _rows]
+    _g = [int(_r[5]) for _r in _rows]
+    _h = len(_g) // 2
+    _drift = round(100 * (st.mean(_g[_h:]) / st.mean(_g[:_h]) - 1), 2)
+    _TH_EXPECT[_lbl] = ([len(_rows), min(_t), max(_t), round(st.mean(_t), 1),
+                         min(_g), max(_g), round(st.mean(_g))]
+                        + ([] if _lbl == "I + J" else [abs(_drift)]))
+_THT = _num_rows(_V4R_LINES, "| run | loaded samples | temperature | SM clock |")
+chk("v4 thermal table: one row per run", sorted(_THT), sorted(_TH_EXPECT))
+for _lbl, _want in sorted(_TH_EXPECT.items()):
+    _num_row_check(f"v4 thermals {_lbl}", _THT[_lbl], _want)
+chk("v4 thermals: the I+J row prints no drift, and the trace is one run's",
+    _THT["I + J"][-1], "1939")
+
+
+print("\n=== the twelve measurements of one arm, and the memory policy ===")
+# README's twelve-cell table. Its inclusion rule is in the sentence above it:
+# the same memory policy, the same ten prompts, thinking on, one at a time, on
+# 2026-08-26. Applying that rule to the data returns exactly those twelve.
+_TWELVE = []
+for _d in sorted(glob.glob("v4_audit_2026_08_25/data/*/")):
+    _d = _d.rstrip("/")
+    _fs = glob.glob(f"{_d}/spec-dflash-n2__rep*.json")
+    if not _fs:
+        continue
+    _m = json.loads((pathlib.Path(_d) / "manifest.json").read_text(encoding="utf-8"))
+    if _m.get("fit_target") != "3072" or _m.get("ignore_eos"):
+        continue
+    if _m.get("think") not in (None, "on", "think_on"):
+        continue
+    if not _m["created"].startswith("2026-08-26"):
+        continue
+    if len({_r["tag"] for _r
+            in json.loads(pathlib.Path(_fs[0]).read_text(encoding="utf-8"))["rows"]}) != 10:
+        continue
+    _TWELVE.append((_m["created"][11:16], os.path.basename(_d),
+                    100 * (_pool_dir(_d, "spec-dflash-n2")
+                           / _pool_dir(_d, "baseline") - 1),
+                    _pool_dir(_d, "baseline")))
+_TWELVE.sort()
+chk("README twelve-measurement table: twelve of them", len(_TWELVE), 12)
+_TWT = _num_rows_seq(_RM_LINES, "| | | | | | |")
+chk("README twelve-measurement table: two rows of six", len(_TWT), 2)
+_tw_pub = [_x for _cells, _nums in _TWT for _x in _nums]
+_tw_want = []
+for _t, _n, _v, _b in _TWELVE:
+    _tw_want += [round(abs(_v), 1), int(_t[:2]), int(_t[3:])]
+chk("README twelve measurements: every shift and every clock time",
+    [float(_x) for _x in _tw_pub], [float(_x) for _x in _tw_want])
+_tw_v = [_v for _, _, _v, _ in _TWELVE]
+_tw_b = [_b for _, _, _, _b in _TWELVE]
+chk("README twelve: the range and SD the sentence quotes",
+    (round(max(_tw_v) - min(_tw_v), 1), round(st.stdev(_tw_v), 1)), (9.4, 2.9))
+chk("README twelve: the baseline band and its CV",
+    (round(min(_tw_b), 2), round(max(_tw_b), 2),
+     round(100 * st.stdev(_tw_b) / st.mean(_tw_b), 2)), (115.72, 117.25, 0.42))
+
+_BE_LINES = (pathlib.Path(__file__).resolve().parents[1]
+             / "BENCHMARK_ENV.md").read_text(encoding="utf-8").splitlines()
+# BENCHMARK_ENV's memory-policy table says it is derived from the manifests,
+# so it is. It had run N in the `-fit on` row when N ran pinned at 16384, and
+# it had no row mentioning run W at all.
+_POL = defaultdict(set)
+for _d in sorted(glob.glob("v4_audit_2026_08_25/data/*/")):
+    _d = _d.rstrip("/")
+    _name = os.path.basename(_d)
+    if not glob.glob(f"{_d}/*__rep*.json"):
+        continue
+    _m = json.loads((pathlib.Path(_d) / "manifest.json").read_text(encoding="utf-8"))
+    _ca = _m.get("common_args", [])
+    _ngl = _ca[_ca.index("-ngl") + 1] if "-ngl" in _ca else "unset"
+    _ctx = _ca[_ca.index("-c") + 1] if "-c" in _ca else None
+    _ft = _m.get("fit_target") or ("1024" if _m.get("fit") else None)
+    # the start-up checks carry the run letter, which is how the table names
+    # run J: one matrix directory, `matrix_J2`, and a `smoke_J` beside it
+    _tag = re.match(r"(?:matrix|smoke)_([A-Za-z]+[0-9]*)", _name)
+    _POL[(_ngl, _ctx, _ft)].add(_tag.group(1) if _tag else _name.split("_")[0])
+chk("memory policy: the manifests fall into four groups", len(_POL), 4)
+_POLT = _num_rows(_BE_LINES, "| runs | `-ngl` | `-c` | `--fit-target` | why |")
+chk("memory policy table: four rows", len(_POLT), 4)
+_pol_named = {tuple(sorted(_k.replace(" ", "").split(","))): _v
+              for _k, _v in _POLT.items()}
+chk("memory policy: every row names exactly the runs with that policy",
+    sorted(tuple(sorted(_v)) for _v in _POL.values()),
+    sorted(_k for _k in _pol_named))
+# the `why` column carries numbers too: the fit-target the row is contrasted
+# against, and run J's measured headroom
+_ij_rows = [_r for _r in csv.reader(open(sorted(glob.glob(
+    "v4_audit_2026_08_25/data/gpu_telemetry_IJ_*.csv"))[0], encoding="utf-8"))
+    if len(_r) == 9 and _r[1].isdigit()]
+_CARD_MIB = 24576
+_headroom = _CARD_MIB - max(int(_r[2]) for _r in _ij_rows)
+chk("memory policy: run J's measured headroom on a 24 GiB card", _headroom, 630)
+_POL_WHY = {("999", "16384", None): [],
+            ("unset", "16384", "1024"): [],
+            ("unset", "8192", "2048"): [1024],
+            ("unset", "8192", "3072"): [2048, _headroom, 3072]}
+for _key, _grp in sorted(_POL.items()):
+    _row = _pol_named[tuple(sorted(_grp))]
+    _want = (([999] if _key[0] != "unset" else []) + [int(_key[1])]
+             + ([int(_key[2])] if _key[2] else []) + _POL_WHY[_key])
+    _num_row_check(f"memory policy {sorted(_grp)[0]}...", _row, _want)
+chk("memory policy: run N is in the pinned group, where its manifest puts it",
+    sorted(_k for _k, _v in _POL.items() if "N" in _v)[0][0], "999")
+chk("memory policy: and run W is in the 3072 group",
+    sorted(_k for _k, _v in _POL.items() if "W" in _v)[0][2], "3072")
+
+
+print("\n=== the two file maps, which count what is on disk ===")
+# Both are lists of paths with counts in them, and both counts had gone stale:
+# the v4 map's lead-in said 41 directories while the row under it said 65, and
+# the README's map said 62 v2 logs where the three `v2_*` directories hold 61,
+# one of which is the verbose trace it counts separately.
+_RUN_DIRS = [_d for _d in sorted(glob.glob("v4_audit_2026_08_25/data/*/"))
+             if glob.glob(f"{_d}*__rep*.json")]
+_SMOKE = [_d for _d in _RUN_DIRS if "smoke" in _d]
+chk("v4 file map: the lead-in counts the directories under data/",
+    f"There are\n{len(_RUN_DIRS)}, of which {len(_RUN_DIRS) - len(_SMOKE)} are "
+    f"runs and three are start-up checks." in _V4R_TEXT, True)
+_FM = _num_rows(_V4R_LINES, "| Path | Contents |")
+chk("v4 file map: its first row counts the same directories and every arm-run",
+    [float(_x) for _x in _FM["data/<run>/"]],
+    [float(len(_RUN_DIRS)),
+     float(sum(len(glob.glob(f"{_d}*__rep*.json")) for _d in _RUN_DIRS))])
+_v2_logs = sorted(_p for _d in ("v2_controls", "v2_master_cross_check",
+                                "v2_oleg_suggestions")
+                  for _p in glob.glob(f"v2_3090_followup/{_d}/**/*.log",
+                                      recursive=True))
+_v2_verbose = [_p for _p in _v2_logs if os.path.basename(_p) == "verbose.log"]
+chk("README data map: the v2 log count is what the three directories hold",
+    f"{len(_v2_logs) - len(_v2_verbose)} v2 raw `llama-cli` logs + one "
+    f"`--verbose` trace" in _ROOT_TEXT, True)
+chk("README data map: and exactly one of them is the verbose trace",
+    len(_v2_verbose), 1)
+chk("README data map: the v1 label count is summary.csv's",
+    f"v1 raw per-request JSON, {len({_r['config'] for _r in _V1CSV})} run labels"
+    in _ROOT_TEXT, True)
+
+
+print("\n=== the A4 terms and counters, in the four places they appear ===")
+# One reconstruction, four tables: ERRATA's counter table and its cost table,
+# and the README's copy of each. Every figure is already derived above; none of
+# the four tables had a reader.
+_A4_COUNTERS = {
+    "server draft_n_accepted / draft_n": [_A4["counter"], _A4["acc_tokens"],
+                                          round(100.0, 1)],
+    "drafter #acc tokens / #gen tokens": [
+        _A4["acc_tokens"], _A4["gen_tokens"],
+        round(100 * _A4["acc_tokens"] / _A4["gen_tokens"], 1)],
+    "drafter #acc drafts / #gen drafts": [
+        _A4["full"], _A4["gen_drafts"],
+        round(100 * _A4["full"] / _A4["gen_drafts"], 1)],
+}
+_A4C_ER = _num_rows(_ER_LINES, "| counter | value | meaning |")
+chk("A4 counter table (ERRATA): three counters",
+    sorted(_A4C_ER), sorted(_A4_COUNTERS))
+for _k, _want in sorted(_A4_COUNTERS.items()):
+    _num_row_check(f"A4 counter (ERRATA) {_k}", _A4C_ER[_k], _want)
+_A4C_RM = _num_rows(_RM_LINES, "| counter | value | what it counts |")
+chk("A4 counter table (README): the same three, one relabelled",
+    len(_A4C_RM), 3)
+chk("A4 counter table (README): and the same numbers in the same order",
+    [_x for _v in _A4C_RM.values() for _x in _v],
+    [_x for _v in _A4C_ER.values() for _x in _v])
+
+_A4_TERMS = [
+    [round(_A4["gen_ms"], 1), round(100 * _A4["gen_ms"] / _A4["wall_ms"], 1)],
+    [_A4["ckpts"], round(_A4["ckpt_mib"], 1), round(_A4["gib_written"], 2)],
+    [_A4["restores"], round(_A4["gib_read"], 2)],
+    [_A4["partial"], _A4["attempts"],
+     round(100 * _A4["partial"] / _A4["attempts"], 1)],
+]
+# spelled out rather than looped: the census resolves a reader's document from
+# the variable passed to it, and a loop variable tells it nothing
+for _doc, _rows in (
+        ("ERRATA", _num_rows_seq(_ER_LINES, "| term | value | source |")),
+        ("README", _num_rows_seq(_RM_LINES, "| term | measured |"))):
+    chk(f"A4 cost table ({_doc}): four terms", len(_rows), 4)
+    for _k, ((_cells, _nums), _want) in enumerate(zip(_rows, _A4_TERMS)):
+        _num_row_check(f"A4 cost ({_doc}) {_cells[0][:30]}", _nums, _want)
+
+print("\n=== B8's understatement table, which is one over n ===")
+_B8T = _num_rows(_ER_LINES, "| tokens generated | understated by |")
+chk("B8 table: four lengths", len(_B8T), 4)
+# the row key IS the first cell, so deriving the second from it checks the
+# cell against itself: perturbing 300 to 307 leaves 100/307 rounding to the
+# published 0.33 and the check passes. The lengths are pinned to what the
+# repository measured instead, and three of the four are in the data.
+_B8_LENGTHS = [20, 187, 300, 1000]
+chk("B8 table: the lengths it tabulates",
+    sorted(int(_k) for _k in _B8T), _B8_LENGTHS)
+chk("B8: 300 is the cap every v4 request runs to",
+    sorted({_r["timings"]["predicted_n"] for _f in
+            sorted(glob.glob("v4_audit_2026_08_25/data/matrix_O2_latin_*/"
+                             "baseline__rep0.json"))
+            for _r in json.loads(pathlib.Path(_f).read_text(encoding="utf-8"))["rows"]}),
+    [300])
+chk("B8: 1000 is v1's long-output cap",
+    sorted({int(_r["max_tokens"]) for _r in _V1CSV
+            if _r["config"] == "baseline-1000tok"}), [1000])
+chk("B8: 187 is the shortest run R generated on the prompt A17 opens with",
+    min(_r["timings"]["predicted_n"] for _f in
+        sorted(glob.glob("v4_audit_2026_08_25/data/matrix_R_ext_thinkoff_*/"
+                         "spec-*__rep*.json"))
+        for _r in json.loads(pathlib.Path(_f).read_text(encoding="utf-8"))["rows"]
+        if _r["tag"] == "code_bash"), 187)
+for _n, _row in sorted(_B8T.items(), key=lambda _x: int(_x[0])):
+    _num_row_check(f"B8 at {_n} tokens", _row,
+                   [int(_n), round(100.0 / int(_n), 2)])
+chk("B8: the 300-token figure is the one the note beside every table quotes",
+    f"{round(100.0 / 300, 2)} % at 300 tokens" in " ".join(_ER_LINES_TEXT.split()),
+    True)
+
+
+# named here because three sections below use them and the order they run in
+# is the order they were written, which is not the order they depend on
+_JD = "v4_audit_2026_08_25/data/matrix_J2_20260826_014750"
+_M1D2 = "v4_audit_2026_08_25/data/matrix_M1_20260826_075816"
+_M3D = "v4_audit_2026_08_25/data/matrix_M3_thinkoff_20260826_081806"
+_RD = "v4_audit_2026_08_25/data/matrix_R_ext_thinkoff_20260826_110747"
+
+print("\n=== the threshold scorecard and the two run tables beside it ===")
+_SCT = _num_rows(_V4R_LINES, "| family | sign predicted correctly |")
+_SC_ROWS = {"self-speculative (DFlash and MTP)": "self",
+            "drafter-free n-gram": "ngram",
+            "external 0.8 B drafter": "external"}
+chk("threshold scorecard table: three families and a total",
+    sorted(_SCT), sorted(list(_SC_ROWS) + ["all"]))
+for _label, _fam in sorted(_SC_ROWS.items()):
+    _got, _tot = _SCORECARD[_fam]
+    _num_row_check(f"threshold scorecard {_label}", _SCT[_label],
+                   ([0.8] if "0.8 B" in _label else []) + [_got, _tot])
+_num_row_check("threshold scorecard all", _SCT["all"],
+               [sum(_v[0] for _v in _SCORECARD.values()),
+                sum(_v[1] for _v in _SCORECARD.values())])
+chk("threshold scorecard: the families partition the kept arm-runs",
+    sum(_v[1] for _v in _SCORECARD.values()), len(_SC_KEPT))
+
+# the two misses the text calls informative, and run C's sweep of the drafter
+_MISS = _num_rows(_V4R_LINES, "| arm | acceptance | measured | why it is interesting |")
+chk("threshold misses table: two arms", len(_MISS), 2)
+_m_mtp = [_x for _x in _SC_KEPT if _x[2] == "spec-mtp-n4"
+          and (_x[3] >= _BRK) != (_x[5] > 0)][0]
+_num_row_check("threshold miss spec-mtp-n4, thinking off",
+               _MISS["spec-mtp-n4, thinking off"],
+               [round(_m_mtp[3], 1), abs(round(_m_mtp[5], 1)),
+                round(_m_mtp[3] - _BRK, 1)])
+_m_d1 = [_x for _x in _SC_KEPT if _x[2] == "spec-draft-n1"
+         and (_x[3] >= _BRK) != (_x[5] > 0)]
+chk("threshold miss spec-draft-n1: it misses in three runs", len(_m_d1), 3)
+# the row quotes run O's head-to-head, which is the largest of the three and
+# the run the section is about; the other two are O2 and O3 at -74.8 and -75.0
+_m_o = [_x for _x in _m_d1 if _x[1].startswith("matrix_O_headtohead")][0]
+_num_row_check("threshold miss spec-draft-n1", _MISS["spec-draft-n1"],
+               [round(_m_o[3], 1), round(_m_o[4], 1), abs(round(_m_o[5], 1))])
+chk("threshold miss spec-draft-n1: the three runs it misses in",
+    sorted(_x[1].split("_2026")[0] for _x in _m_d1),
+    ["matrix_O2_latin", "matrix_O3_latin", "matrix_O_headtohead"])
+
+_CSWEEP = _num_rows(_V4R_LINES, "| arm | acceptance | measured | threshold says |")
+chk("run C drafter sweep table: three arms", len(_CSWEEP), 3)
+# run C is the one directory whose name in the counter dump (`matrix_C_...`)
+# is not the name on disk (`C_master_matrix_think_on`), so the scorecard's own
+# join drops it and its acceptance has to be read from the dump directly
+_CD = "v4_audit_2026_08_25/data/C_master_matrix_think_on"
+_c_base = _pool_dir(_CD, "baseline")
+_c_acc = {_k[1]: _v2["server_pct"] for _k, _v2 in _cc2.items()
+          if _k[0].startswith("matrix_C_")}
+chk("run C sweep: the counter dump carries run C under its own name",
+    len(_c_acc) > 0, True)
+for _n_max in (1, 2, 4):
+    _arm = f"spec-draft-n{_n_max}"
+    _delta = 100 * (_pool_dir(_CD, _arm) / _c_base - 1)
+    _num_row_check(f"run C sweep {_arm}", _CSWEEP[_arm],
+                   [round(_c_acc[_arm], 1), abs(round(_delta, 1))])
+chk("run C sweep: the threshold calls the first two faster and they are not",
+    [(_c_acc[f"spec-draft-n{_n}"] >= _BRK,
+      _pool_dir(_CD, f"spec-draft-n{_n}") > _c_base) for _n in (1, 2, 4)],
+    [(True, False), (True, False), (False, False)])
+
+
+print("\n=== four more v4 tables: the head, the batching pair, and the sets ===")
+_Q8D = "v4_audit_2026_08_25/data/matrix_M1_20260826_075816"
+_Q4D = "v4_audit_2026_08_25/data/matrix_M4_q4km_20260826_081806"
+
+
+def _q_pair(run_dir, arm):
+    _v = 100 * (st.mean(_aggregates(run_dir, arm))
+                / st.mean(_aggregates(run_dir, "baseline")) - 1)
+    _dn = _da = 0
+    for _f in sorted(glob.glob(os.path.join(run_dir, f"{arm}__rep*.json"))):
+        for _r in json.loads(pathlib.Path(_f).read_text(encoding="utf-8"))["rows"]:
+            _dn += _r["draft_n"]
+            _da += _r["draft_n_accepted"]
+    return [abs(round(_v, 1)), round(100 * _da / _dn, 1)]
+
+
+_QT = _num_rows(_V4R_LINES, "| arm | Q8_0 drafter | Q4_K_M drafter |")
+chk("run Q drafter-quantisation table: two arms", len(_QT), 2)
+for _arm in ("spec-mtp-n2", "spec-mtp-n4"):
+    _num_row_check(f"run Q {_arm}", _QT[_arm],
+                   _q_pair(_Q8D, _arm) + _q_pair(_Q4D, _arm))
+
+_MB = _num_rows(_V4R_LINES, "| requests in flight | DFlash `n4` | MTP `n2` |")
+chk("run M batching table: three levels", sorted(_MB), ["1", "4", "8"])
+_MB_DIRS = {1: ("v4_audit_2026_08_25/data/matrix_K1_sweep_20260826_025615",
+                "v4_audit_2026_08_25/data/matrix_M1_20260826_075816"),
+            4: ("v4_audit_2026_08_25/data/matrix_K_conc4_20260826_025615",
+                "v4_audit_2026_08_25/data/matrix_M2_conc4_20260826_081806"),
+            8: ("v4_audit_2026_08_25/data/matrix_K_conc8_20260826_025615",
+                "v4_audit_2026_08_25/data/matrix_M2_conc8_20260826_081806")}
+for _c, (_kd, _md) in sorted(_MB_DIRS.items()):
+    _dfl = 100 * (st.mean(_aggregates(_kd, "spec-dflash-n4"))
+                  / st.mean(_aggregates(_kd, "baseline")) - 1)
+    _mtp = 100 * (st.mean(_aggregates(_md, "spec-mtp-n2"))
+                  / st.mean(_aggregates(_md, "baseline")) - 1)
+    _num_row_check(f"run M batching c={_c}", _MB[str(_c)],
+                   [_c, abs(round(_dfl, 1)), abs(round(_mtp, 1))])
+chk("run M batching: only one of the two falls off a cliff",
+    (100 * (st.mean(_aggregates(_MB_DIRS[8][0], "spec-dflash-n4"))
+            / st.mean(_aggregates(_MB_DIRS[8][0], "baseline")) - 1) < -50,
+     100 * (st.mean(_aggregates(_MB_DIRS[8][1], "spec-mtp-n2"))
+            / st.mean(_aggregates(_MB_DIRS[8][1], "baseline")) - 1) > -20), (True, True))
+
+_JKT = _num_rows(_V4R_LINES, "| `n_max` | run J | run K |")
+chk("J-against-K table: the two shared draft lengths", sorted(_JKT), ["4", "8"])
+for _n_max in (4, 8):
+    _j = 100 * (st.mean(_aggregates(_JD, f"spec-dflash-n{_n_max}"))
+                / st.mean(_aggregates(_JD, "baseline")) - 1)
+    _k = 100 * (st.mean(_aggregates(_MB_DIRS[1][0], f"spec-dflash-n{_n_max}"))
+                / st.mean(_aggregates(_MB_DIRS[1][0], "baseline")) - 1)
+    _num_row_check(f"J against K at n_max {_n_max}", _JKT[str(_n_max)],
+                   [_n_max, abs(round(_j, 1)), abs(round(_k, 1))])
+
+_LOFF = "v4_audit_2026_08_25/data/matrix_L_thinkoff_20260826_032652"
+_SETT = _num_rows(_V4R_LINES, "| arm | v1 ten (run M3) | extended twenty (run R) |")
+chk("prompt-set table: three arms", len(_SETT), 3)
+chk("prompt set: run M3 really does not carry the external drafter",
+    glob.glob(os.path.join(_M3D, "spec-draft-n8__rep*.json")), [])
+for _arm, _v1 in (("spec-dflash-n2", _M3D), ("spec-mtp-n2", _M3D),
+                  ("spec-draft-n8", _LOFF)):
+    _a = 100 * (_pool_dir(_v1, _arm) / _pool_dir(_v1, "baseline") - 1)
+    _b = 100 * (_pool_dir(_RD, _arm) / _pool_dir(_RD, "baseline") - 1)
+    _num_row_check(f"prompt set {_arm}", _SETT[_arm],
+                   [abs(round(_a, 1)), abs(round(_b, 1))])
+chk("prompt set: the row that is not M3's is marked",
+    "`spec-draft-n8` \u2020" in _V4R_TEXT, True)
+chk("prompt set: and the -75.1 % it used to carry was run L thinking ON",
+    round(100 * (_pool_dir("v4_audit_2026_08_25/data/"
+                           "matrix_L_thinkon_20260826_032652", "spec-draft-n8")
+                 / _pool_dir("v4_audit_2026_08_25/data/"
+                             "matrix_L_thinkon_20260826_032652", "baseline") - 1), 1),
+    -75.1, 0.05)
+chk("prompt set: the spread the sentence now quotes",
+    sorted(abs(round(abs(100 * (_pool_dir(_v1, _a2) / _pool_dir(_v1, "baseline") - 1))
+                     - abs(100 * (_pool_dir(_RD, _a2) / _pool_dir(_RD, "baseline") - 1)), 1))
+           for _a2, _v1 in (("spec-dflash-n2", _M3D), ("spec-mtp-n2", _M3D),
+                            ("spec-draft-n8", _LOFF))),
+    [0.1, 1.8, 3.2])
+
+
+print("\n=== A5's empty-content split, and two run tables in other files ===")
+_a5_empty = defaultdict(int)
+_a5_total = defaultdict(int)
+for _f in sorted(glob.glob("results/*.json")):
+    for _r in json.loads(pathlib.Path(_f).read_text(encoding="utf-8"))["rows"]:
+        _a5_total[_r["tag"]] += 1
+        _a5_empty[_r["tag"]] += not (_r.get("content_head") or "").strip()
+for _f in sorted(glob.glob("results/verify/*.json")):
+    for _r in json.loads(pathlib.Path(_f).read_text(encoding="utf-8"))["rows"]:
+        _a5_total[_r["tag"]] += 1
+        _a5_empty[_r["tag"]] += not (_r.get("content_head") or "").strip()
+_A5T = _num_rows_seq(_ER_LINES, "| prompt | requests with empty `message.content` |")
+chk("A5 empty-content table: four rows", len(_A5T), 4)
+_a5_by = sorted(_a5_empty, key=lambda _t: (-_a5_empty[_t], _t))
+_num_row_check("A5 reasoning", _A5T[0][1],
+               [_a5_empty["reasoning"], _a5_total["reasoning"]])
+_num_row_check("A5 code_small", _A5T[1][1],
+               [_a5_empty["code_small"], _a5_total["code_small"]])
+_a5_mid = ["short_q", "medium_chat", "medium_rec", "long_explain",
+           "multi_turn_1", "multi_turn_2", "zh_cn"]
+chk("A5: the seven prompts the third row groups all read the same",
+    sorted({(_a5_empty[_t], _a5_total[_t]) for _t in _a5_mid}), [(15, 19)])
+_num_row_check("A5 the seven at 15 of 19", _A5T[2][1],
+               [_a5_empty["short_q"], _a5_total["short_q"]])
+_num_row_check("A5 short_greet", _A5T[3][1],
+               [_a5_empty["short_greet"], _a5_total["short_greet"]])
+chk("A5: the totals the paragraph quotes",
+    (sum(_a5_empty.values()), sum(_a5_total.values()),
+     round(100 * sum(_a5_empty.values()) / sum(_a5_total.values()), 1)),
+    (144, 190, 75.8))
+
+_RT_J = _num_rows(_RT_LINES, "| arm | aggregate | vs no speculation |")
+_j_base = st.mean(_aggregates(_JD, "baseline"))
+chk("RETEST run J table: four rows", len(_RT_J), 4)
+for _arm in ("spec-dflash-n4", "spec-dflash-n8", "spec-dflash-n16"):
+    _v = st.mean(_aggregates(_JD, _arm))
+    _num_row_check(f"RETEST run J {_arm}", _RT_J[_arm],
+                   [round(_v, 1), abs(round(100 * (_v / _j_base - 1), 1))])
+_num_row_check("RETEST run J no speculation", _RT_J["no speculation"],
+               [round(_j_base, 1)])
+
+_M3T = _num_rows(_V4R_LINES,
+                 "| | thinking on (run M1, aggregate) | "
+                 "thinking off (run M3, 5 repeats, pooled) |")
+chk("run M think-off table: three arms", len(_M3T), 3)
+for _arm in ("spec-mtp-n2", "spec-dflash-n2", "spec-mtp-n4"):
+    # the left column is run M1's AGGREGATE, the metric its own table uses;
+    # the right is run M3's pooled rate. The header says so now.
+    _on = 100 * (st.mean(_aggregates(_M1D2, _arm))
+                 / st.mean(_aggregates(_M1D2, "baseline")) - 1)
+    _off = 100 * (_pool_dir(_M3D, _arm) / _pool_dir(_M3D, "baseline") - 1)
+    _dn = _da = 0
+    for _f in sorted(glob.glob(os.path.join(_M3D, f"{_arm}__rep*.json"))):
+        for _r in json.loads(pathlib.Path(_f).read_text(encoding="utf-8"))["rows"]:
+            _dn += _r["draft_n"]
+            _da += _r["draft_n_accepted"]
+    _num_row_check(f"run M think-off {_arm}", _M3T[_arm],
+                   [abs(round(_on, 1)), abs(round(_off, 1)),
+                    round(100 * _da / _dn, 1)])
+chk("run M: the table names the metric in each column",
+    "thinking on (run M1, aggregate)" in _V4R_TEXT
+    and "thinking off (run M3, 5 repeats, pooled)" in _V4R_TEXT, True)
+chk("run M: and the flip holds on pooled rates in both columns, as it says",
+    (round(100 * (_pool_dir(_M1D2, "spec-dflash-n2")
+                  / _pool_dir(_M1D2, "baseline") - 1), 1),
+     round(100 * (_pool_dir(_M1D2, "spec-mtp-n2")
+                  / _pool_dir(_M1D2, "baseline") - 1), 1)), (26.7, 22.1))
+chk("run M: the ranking really flips between the two workloads",
+    (_pool_dir(_M1D2, "spec-dflash-n2") / _pool_dir(_M1D2, "baseline")
+     > _pool_dir(_M1D2, "spec-mtp-n2") / _pool_dir(_M1D2, "baseline"),
+     _pool_dir(_M3D, "spec-mtp-n2") / _pool_dir(_M3D, "baseline")
+     > _pool_dir(_M3D, "spec-dflash-n2") / _pool_dir(_M3D, "baseline")),
+    (True, True))
+
+
+print("\n=== A13's split table and B7's fp16-KV control ===")
+_A13T = _num_rows(_ER_LINES,
+                  "| | arm-runs | largest / smallest gap between the two counters |")
+chk("A13 split table: two groups", len(_A13T), 2)
+_num_row_check("A13 split, no checkpoint",
+               _A13T["speculative checkpoints never taken"],
+               [len(_A13_NOCK),
+                round(max(abs(_r["server_pct"] - _r["drafter_pct"])
+                          for _r in _A13_NOCK), 2)])
+_num_row_check("A13 split, checkpointing",
+               _A13T["speculative checkpoints taken"],
+               [len(_A13_CK),
+                round(min(abs(_r["server_pct"] - _r["drafter_pct"])
+                          for _r in _A13_CK), 2)])
+chk("A13: the gap between the groups, as the sentence under it states",
+    round(min(abs(_r["server_pct"] - _r["drafter_pct"]) for _r in _A13_CK)
+          - max(abs(_r["server_pct"] - _r["drafter_pct"])
+                for _r in _A13_NOCK), 2), 0.20)
+
+_B7_ARMS = {"baseline (q8_0 KV)": "baseline",
+            "baseline-kvfp16": "baseline-kvfp16",
+            "ngram-cache (q8_0 KV)": "ngram-cache",
+            "ngram-cache-kvfp16": "ngram-cache-kvfp16"}
+_B7D = "v4_audit_2026_08_25/data/C_master_matrix_think_on"
+_b7_base = _pool_dir(_B7D, "baseline")
+_B7T = _num_rows(_ER_LINES, "| arm | pooled tok/s | vs `baseline` |")
+chk("B7 fp16-KV table: four arms", sorted(_B7T), sorted(_B7_ARMS))
+for _label, _arm in sorted(_B7_ARMS.items()):
+    _v = _pool_dir(_B7D, _arm)
+    _want = [round(_v, 1)] + ([] if _arm == "baseline"
+                              else [abs(round(100 * (_v / _b7_base - 1), 1))])
+    # the two KV-fp16 rows carry a 16 in their arm name, which is a value
+    _num_row_check(f"B7 {_label}", _B7T[_label], _want)
+chk("B7: fp16 KV is faster with no speculation and not with it",
+    (_pool_dir(_B7D, "baseline-kvfp16") > _b7_base,
+     _pool_dir(_B7D, "ngram-cache-kvfp16") < _pool_dir(_B7D, "ngram-cache")),
+    (True, True))
+
+
+print("\n=== B8's row census over every committed request ===")
+# The claim is about which formula `predicted_per_second` follows, over every
+# committed row of every committed arm-run file. Counting it is the check.
+_b8_n1 = _b8_n = _b8_neither = _b8_rows = 0
+_b8_files = 0
+for _f in sorted(glob.glob("v4_audit_2026_08_25/data/*/*__rep*.json")):
+    _b = json.loads(pathlib.Path(_f).read_text(encoding="utf-8"))
+    _b8_files += 1
+    for _r in _b["rows"]:
+        _t = _r["timings"]
+        # not `_n`/`_ms`: `_ms` is the mean-and-SD helper by this point in the
+        # file, and rebinding it turned the next section into a TypeError
+        _bn, _bms, _got = (_t["predicted_n"], _t["predicted_ms"],
+                           _t["predicted_per_second"])
+        _b8_rows += 1
+        if abs(1000 * (_bn - 1) / _bms - _got) < 1e-6:
+            _b8_n1 += 1
+        elif abs(1000 * _bn / _bms - _got) < 1e-6:
+            _b8_n += 1
+        else:
+            _b8_neither += 1
+_B8R = _num_rows(_ER_LINES, "| what the server reported | rows |")
+chk("B8 row census: three outcomes", len(_B8R), 3)
+def _grouped(n):
+    """The digits of `n` the way this repository writes them.
+
+    Four figures run together (`6265`); five and above take a thin space
+    (`12 780`), which anything reading the cell sees as two numbers. Grouping
+    unconditionally splits `6265` into 6 and 265, which is how this check
+    failed the first time.
+    """
+    return [n] if n < 10000 else [int(_g) for _g in f"{n:,}".split(",")]
+
+
+for _k, _want in (("1000 × (n − 1) / predicted_ms", [1000, 1] + _grouped(_b8_n1)),
+                  ("1000 × n / predicted_ms", [1000] + _grouped(_b8_n)),
+                  ("neither", _grouped(_b8_neither))):
+    _num_row_check(f"B8 rows following {_k}", _B8R[_k], _want)
+chk("B8: the totals the paragraph above it quotes",
+    (_b8_rows, _b8_files), (18344, 1805))
+
+
+print("\n=== the -fit on control, and the CHANGELOG's run summary ===")
+_FITT = _num_rows_seq(_V4R_LINES, "| control | aggregate |")
+chk("J fit control table: three rows", len(_FITT), 3)
+_fit_pinned = _aggregates("v4_audit_2026_08_25/data/matrix_I2_conc1_20260826_014750",
+                   "baseline")
+_fit_on = _aggregates("v4_audit_2026_08_25/data/matrix_J2_20260826_014750", "baseline")
+_num_row_check("J fit control, pinned", _FITT[0][1],
+               [999, 1] + _ms(_fit_pinned, 2))
+_num_row_check("J fit control, -fit on", _FITT[1][1], _ms(_fit_on, 2))
+_num_row_check("J fit control, difference", _FITT[2][1],
+               [abs(round(100 * (st.mean(_fit_on) / st.mean(_fit_pinned) - 1), 2))])
+chk("J fit control: the control is not handicapped",
+    abs(100 * (st.mean(_fit_on) / st.mean(_fit_pinned) - 1)) < 0.1, True)
+
+_CHR = _num_rows(_CH_LINES, "| run | question | answer |")
+chk("CHANGELOG run summary: seven runs", sorted(_CHR),
+    ["I", "J", "K", "L", "M", "N", "O"])
+# every figure in it is quoted from a section that derives it, so the check is
+# that the two agree rather than that the changelog is right on its own
+_K1D = "v4_audit_2026_08_25/data/matrix_K1_sweep_20260826_025615"
+_k1_base = _pool_dir(_K1D, "baseline")
+_k1 = {_x: 100 * (_pool_dir(_K1D, f"spec-dflash-n{_x}") / _k1_base - 1)
+       for _x in (1, 2, 3, 4, 6, 8)}
+_k1_plat = sorted(_x for _x in _k1 if _k1[_x] >= max(_k1.values()) - 1)
+chk("CHANGELOG run K: the plateau its row names, within a point of the best",
+    _k1_plat, [2, 3, 4])
+chk("CHANGELOG run K: and a cliff after it",
+    [_k1[_x] < 0 for _x in (6, 8)], [True, True])
+chk("CHANGELOG run M: its row quotes run M1's own aggregate, not run O's",
+    round(100 * (st.mean(_aggregates(_M1D2, "spec-mtp-n2"))
+                 / st.mean(_aggregates(_M1D2, "baseline")) - 1), 1), 18.6, 0.05)
+chk("CHANGELOG run M: which really is its best MTP arm on that metric",
+    max(("spec-mtp-n1", "spec-mtp-n2", "spec-mtp-n4", "spec-mtp-n8"),
+        key=lambda _a: st.mean(_aggregates(_M1D2, _a))), "spec-mtp-n2")
+chk("CHANGELOG run M: and +17.5 to +21.8 was run O's two metrics for that arm",
+    (round(100 * (st.mean(_aggregates("v4_audit_2026_08_25/data/"
+                                      "matrix_O_headtohead_20260826_081806",
+                                      "spec-mtp-n2"))
+                  / st.mean(_aggregates("v4_audit_2026_08_25/data/"
+                                        "matrix_O_headtohead_20260826_081806",
+                                        "baseline")) - 1), 1),
+     round(100 * (_pool_dir("v4_audit_2026_08_25/data/"
+                            "matrix_O_headtohead_20260826_081806", "spec-mtp-n2")
+                  / _pool_dir("v4_audit_2026_08_25/data/"
+                              "matrix_O_headtohead_20260826_081806",
+                              "baseline") - 1), 1)), (17.5, 21.8))
+for _run, _needle in (("I", "+64 %"), ("J", "+18.7 %"), ("L", "+14.1 %"),
+                      ("N", "0.0 %"), ("O", "a factor of five")):
+    chk(f"CHANGELOG run {_run}: its answer is quoted elsewhere too",
+        " ".join(_norm(_needle).split()) in " ".join(_norm(_V4R_TEXT).split())
+        or " ".join(_norm(_needle).split()) in " ".join(_norm(_ROOT_TEXT).split()),
+        True)
+_num_row_check("CHANGELOG run I", _CHR["I"], [64, 8])
+_num_row_check("CHANGELOG run J", _CHR["J"], [18.7])
+_num_row_check("CHANGELOG run K", _CHR["K"], [2, 4])
+_num_row_check("CHANGELOG run L", _CHR["L"], [4, 4, 14.1])
+_num_row_check("CHANGELOG run M", _CHR["M"], [18.6, 2])
+_num_row_check("CHANGELOG run N", _CHR["N"], [0.0])
+_num_row_check("CHANGELOG run O", _CHR["O"], [])
+
+
+print("\n=== run I's concurrency check, eighteen arm-runs of it ===")
+# `max_in_flight` is the client's own count from the request timestamps, and
+# the paragraph is explicit that it is not the server's batch width. The table
+# exists to rule out the negative case, so every cell of it matters.
+_CONC_EXPECT = {}
+for _c in (1, 4, 8):
+    _d = f"v4_audit_2026_08_25/data/matrix_I2_conc{_c}_20260826_014750"
+    _seen = [json.loads(pathlib.Path(_f).read_text(encoding="utf-8"))["max_in_flight"]
+             for _f in sorted(glob.glob(os.path.join(_d, "*__rep*.json")))]
+    _CONC_EXPECT[f"c={_c}"] = [_c, _c] + _seen
+_CONCT = _num_rows(_V4R_LINES,
+                   "| level | requested | observed client requests in flight |")
+chk("run I concurrency table: one row per level",
+    sorted(_CONCT), sorted(_CONC_EXPECT))
+for _lvl, _want in sorted(_CONC_EXPECT.items()):
+    _num_row_check(f"run I concurrency {_lvl}", _CONCT[_lvl], _want)
+chk("run I: eighteen arm-runs across the three levels",
+    sum(len(_v) - 2 for _v in _CONC_EXPECT.values()), 18)
+chk("run I: and every one of them reached its configured level",
+    sorted({tuple(sorted(set(_v[2:]))) == (_v[0],)
+            for _v in _CONC_EXPECT.values()}), [True])
+
+
+print("\n=== run V2's four tables, and the estimand its own docs disagreed on ===")
+_V2D = sorted(glob.glob("v4_audit_2026_08_25/data/matrix_V2_s*"))
+_V2_FREE = sorted(_d for _d in _V2D if "freerun" in _d)
+_V2_CAP = sorted(_d for _d in _V2D if "hardcap" in _d)
+chk("V2: eight sessions in each mode", (len(_V2_FREE), len(_V2_CAP)), (8, 8))
+_V2_ARMS = ["spec-dflash-n2", "spec-dflash-n4", "spec-mtp-n2", "spec-draft-n8"]
+_v2_pp, _v2_log = defaultdict(list), defaultdict(list)
+for _f, _c in zip(_V2_FREE, _V2_CAP):
+    for _a in _V2_ARMS:
+        _fr = _pool_dir(_f, _a) / _pool_dir(_f, "baseline")
+        _ca = _pool_dir(_c, _a) / _pool_dir(_c, "baseline")
+        _v2_pp[_a].append(100 * (_ca - _fr))
+        # the log form: a ratio of ratios, reported as a percentage change.
+        # `length_mode.py` documented this one and averaged the other, which
+        # is what A17's table exists to show; they differ by 21 points on the
+        # arm that sits furthest from its baseline.
+        _v2_log[_a].append(100 * (math.exp(math.log(_ca) - math.log(_fr)) - 1))
+_V2LT = _num_rows(_ER_LINES, "| arm | published, pp | log contrast |")
+chk("A17 estimand table: four arms", sorted(_V2LT), sorted(_V2_ARMS))
+for _a in sorted(_V2_ARMS):
+    _num_row_check(f"A17 estimand {_a}", _V2LT[_a],
+                   [round(st.mean(_v2_pp[_a]), 2), round(st.mean(_v2_log[_a]), 2)])
+chk("A17: the two agree near the baseline and part where the arm is far from it",
+    max(abs(st.mean(_v2_log[_a]) - st.mean(_v2_pp[_a])) for _a in _V2_ARMS) > 20,
+    True)
+_V2SD = _num_rows(_ER_LINES, "| arm | SD over 8 sessions | range |")
+chk("A17 between-session table: four arms", sorted(_V2SD), sorted(_V2_ARMS))
+for _a in sorted(_V2_ARMS):
+    _num_row_check(f"A17 between-session {_a}", _V2SD[_a],
+                   [round(st.stdev(_v2_pp[_a]), 2),
+                    round(max(_v2_pp[_a]) - min(_v2_pp[_a]), 2)])
+
+
+def _v2_counts(dirs, arm):
+    """The one distinct (drafted, accepted) pair a session produced, summed
+    over its five arm-runs. Every session produced the same pair, which is the
+    claim the table is making."""
+    _per = set()
+    for _d in dirs:
+        _dn = _da = 0
+        for _f in sorted(glob.glob(os.path.join(_d, f"{arm}__rep*.json"))):
+            _b = json.loads(pathlib.Path(_f).read_text(encoding="utf-8"))
+            _dn += sum(_r["draft_n"] for _r in _b["rows"])
+            _da += sum(_r["draft_n_accepted"] for _r in _b["rows"])
+        _per.add((_dn, _da))
+    return _per
+
+
+_V2CT = _num_rows(_ER_LINES,
+                  "| arm | freerun drafted / accepted | hard cap drafted / accepted |")
+chk("A17 work table: four arms", sorted(_V2CT), sorted(_V2_ARMS))
+for _a in sorted(_V2_ARMS):
+    _fp, _cp = _v2_counts(_V2_FREE, _a), _v2_counts(_V2_CAP, _a)
+    chk(f"A17 work {_a}: every session produced the same drafted/accepted pair",
+        (len(_fp), len(_cp)), (1, 1))
+    (_fd, _fa), (_cd, _ca) = next(iter(_fp)), next(iter(_cp))
+    _num_row_check(f"A17 work {_a}", _V2CT[_a],
+                   _grouped(_fd) + _grouped(_fa) + [round(100 * _fa / _fd, 1)]
+                   + _grouped(_cd) + _grouped(_ca)
+                   + [round(100 * _ca / _cd, 1)])
+chk("A17: the request rows the paragraph counts across V2",
+    sum(len(json.loads(pathlib.Path(_f).read_text(encoding="utf-8"))["rows"])
+        for _d in _V2D for _f in glob.glob(os.path.join(_d, "*__rep*.json"))),
+    4000)
+chk("A17: over that many arm-runs",
+    sum(len(glob.glob(os.path.join(_d, "*__rep*.json"))) for _d in _V2D), 400)
+
+
+print("\n=== run W's carryover contrast, arm by arm ===")
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import carryover as _co_w                                          # noqa: E402
+_W_DIRS = sorted(glob.glob("v4_audit_2026_08_25/data/matrix_W_s*"))
+_w_rep = _co_w.report(_W_DIRS, True)["across_sessions"]
+_WCT = _num_rows(_ER_LINES, "| arm | rate after capped vs free | 95 % t over 5 sessions |")
+chk("W carryover table: three named arms and one catch-all row",
+    sorted(_WCT), ["every other arm", "spec-dflash-n2", "spec-dflash-n2-cap",
+                   "spec-dflash-n4-cap"])
+for _a in ("spec-dflash-n2", "spec-dflash-n2-cap", "spec-dflash-n4-cap"):
+    _v = _w_rep[_a]
+    _num_row_check(f"W carryover {_a}", _WCT[_a],
+                   [abs(round(_v["mean_delta_pct"], 2)),
+                    abs(round(_v["lo"], 2)), abs(round(_v["hi"], 2))])
+_w_rest = {_a: _v for _a, _v in _w_rep.items()
+           if _a not in ("spec-dflash-n2", "spec-dflash-n2-cap",
+                         "spec-dflash-n4-cap")}
+_w_rest_max = max(abs(_v["mean_delta_pct"]) for _v in _w_rest.values())
+chk("W carryover: the largest arm the table does not name",
+    sorted(_a for _a, _v in _w_rest.items()
+           if abs(_v["mean_delta_pct"]) == _w_rest_max), ["spec-dflash-n4"])
+_num_row_check("W carryover every other arm", _WCT["every other arm"],
+               [math.ceil(_w_rest_max * 100) / 100])
+chk("W carryover: no arm's interval excludes zero",
+    sorted({_v["lo"] <= 0 <= _v["hi"] for _v in _w_rep.values()}), [True])
+chk("W carryover: and the largest is that arm, by six times",
+    round(abs(_w_rep["spec-dflash-n2"]["mean_delta_pct"])
+          / max(abs(_v["mean_delta_pct"]) for _a, _v in _w_rep.items()
+                if _a != "spec-dflash-n2")), 6)
+
+
+print("\n=== the instrumented build against stock, and T against T3 ===")
+_O2D = "v4_audit_2026_08_25/data/matrix_O2_latin_20260826_153711"
+_TD = "v4_audit_2026_08_25/data/matrix_T_timers_20260826_182639"
+_T3D = "v4_audit_2026_08_25/data/matrix_T3_timers_20260826_203251"
+_T_ARMS = {"no speculation": "baseline", "spec-draft-n8": "spec-draft-n8",
+           "spec-dflash-n2": "spec-dflash-n2"}
+_OTT = _num_rows(_ER_LINES,
+                 "| arm | O2, stock, 9 blocks | T, instrumented, 4 blocks |")
+chk("A12 instrumentation control: three arms", sorted(_OTT), sorted(_T_ARMS))
+for _label, _arm in sorted(_T_ARMS.items()):
+    _a, _b = _pool_dir(_O2D, _arm), _pool_dir(_TD, _arm)
+    _num_row_check(f"A12 instrumentation {_label}", _OTT[_label],
+                   [round(_a, 1), round(_b, 1), abs(round(100 * (_b / _a - 1), 2))])
+chk("A12: the timers cost under a tenth of a percent on the arm they time",
+    abs(round(100 * (_pool_dir(_TD, "spec-dflash-n2")
+                     / _pool_dir(_O2D, "spec-dflash-n2") - 1), 2)) < 0.5, True)
+_T3T = _num_rows(_ER_LINES, "| arm | run T | run T3 | change |")
+chk("A16 T-against-T3 table: three arms", sorted(_T3T), sorted(_T_ARMS))
+for _label, _arm in sorted(_T_ARMS.items()):
+    _a, _b = _pool_dir(_TD, _arm), _pool_dir(_T3D, _arm)
+    _num_row_check(f"A16 T against T3 {_label}", _T3T[_label],
+                   [round(_a, 2), round(_b, 2), abs(round(100 * (_b / _a - 1), 2))])
+chk("A16: the shortfall is on the DFlash arm and only on it",
+    [_l for _l, _a in sorted(_T_ARMS.items())
+     if 100 * (_pool_dir(_T3D, _a) / _pool_dir(_TD, _a) - 1) < -1],
+    ["spec-dflash-n2"])
+
+
+print("\n=== the checkpoint volume table, the schema table, and the BOS trio ===")
+# A12's two-run volume table: counts from the timer extract, GiB from the
+# count times the logged per-checkpoint total. The J row is the earlier
+# log-counted run and the T row the source-timed one, and the entry's point is
+# that they differ by under three per cent.
+_CKT = _num_rows_seq(_ER_LINES, "| | creates | restores | combined, GiB |")
+chk("A12 volume table: two runs", len(_CKT), 2)
+_ck_mib = _e["checkpoint_total_mib"]
+_t_cr = sorted({_r["creates"] for _r in _ext})[0]
+_t_rs = sorted({_r["restores"] for _r in _ext})[0]
+_num_row_check("A12 volume, run T", _CKT[0][1],
+               [_t_cr, round(_t_cr * _ck_mib / 1024, 2),
+                _t_rs, round(_t_rs * _ck_mib / 1024, 2),
+                round((_t_cr + _t_rs) * _ck_mib / 1024, 2)])
+_num_row_check("A12 volume, run J", _CKT[1][1],
+               [_e["checkpoints_created"], _e["nominal_state_written_gib"],
+                _e["checkpoints_restored"], _e["nominal_state_read_back_gib"],
+                _e["nominal_state_total_gib"]])
+chk("A12: the two runs differ by the percentages the sentence quotes",
+    (round(100 * (_t_cr / _e["checkpoints_created"] - 1), 1),
+     round(100 * (_t_rs / _e["checkpoints_restored"] - 1), 1)), (1.7, 2.7))
+
+# the telemetry schema table, counted from the committed traces themselves
+_SCHEMA = defaultdict(list)
+for _f in sorted(glob.glob("v4_audit_2026_08_25/data/gpu_telemetry_*.csv")):
+    _rows = list(csv.reader(open(_f, encoding="utf-8")))
+    _SCHEMA[len(_rows[0])].append(_f)
+
+
+def _schema_interval(path):
+    """Seconds between the first two samples, whichever timestamp form."""
+    _rows = list(csv.reader(open(path, encoding="utf-8")))[1:4]
+    _ts = []
+    for _r in _rows:
+        _m = re.search(r"(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?", _r[0])
+        if _m:
+            _ts.append(int(_m.group(1)) * 3600 + int(_m.group(2)) * 60
+                       + int(_m.group(3)) + float("0." + (_m.group(4) or "0")))
+    return round(_ts[1] - _ts[0]) if len(_ts) > 1 else None
+
+
+_SCHT = _num_rows(_BE_LINES, "| schema | fields | interval | traces | what reads it |")
+chk("telemetry schema table: three schemas", sorted(_SCHT),
+    ["compact", "full", "raw"])
+for _name, _fields in (("full", 19), ("compact", 9), ("raw", 10)):
+    _files = _SCHEMA[_fields]
+    _num_row_check(f"telemetry schema {_name}", _SCHT[_name],
+                   [_fields, _schema_interval(_files[0]), len(_files)])
+chk("telemetry: sixteen traces in total, and the file says so",
+    (sum(len(_v) for _v in _SCHEMA.values()),
+     "sixteen traces the repository carries" in " ".join(
+         pathlib.Path("BENCHMARK_ENV.md").read_text(encoding="utf-8").split())),
+    (16, True))
+chk("telemetry: every trace of one schema samples at one interval",
+    sorted({len({_schema_interval(_f) for _f in _v}) for _v in _SCHEMA.values()}),
+    [1])
+
+# the BOS gate, published in three places and derivable in none: the GGUF
+# metadata is not committed. What is checkable is that the three agree and
+# that the inequality the gate turns on really is one.
+_BOS_TGT, _BOS_DFT, _EOS = 248044, 11, 248046
+_BOS1 = _num_rows(_ER_LINES, "| | target `UD-Q4_K_XL` | draft `0.8B-Q4_K_M` |")
+_num_row_check("A2 BOS key, target", _BOS1["tokenizer.ggml.bos_token_id"],
+               [_BOS_TGT])
+_num_row_check("A2 BOS as resolved", _BOS1["BOS as resolved by llama.cpp"],
+               [_BOS_TGT, _BOS_DFT])
+_BOS2 = _num_rows(_ER_LINES, "| condition | target | draft | |")
+chk("A2 gate table: four conditions", len(_BOS2), 4)
+_num_row_check("A2 gate, llama_vocab_bos", _BOS2["llama_vocab_bos"],
+               [_BOS_TGT, _BOS_DFT])
+_num_row_check("A2 gate, llama_vocab_eos", _BOS2["llama_vocab_eos"], [_EOS, _EOS])
+chk("A2: exactly one of the four conditions fails, and it is the BOS one",
+    [_k for _k, _v in _BOS2.items() if len(set(_v)) > 1], ["llama_vocab_bos"])
+_BOS3 = _num_rows(_RT_LINES, "| | target `Q4_K_XL` | draft `0.8B-Q4_K_M` |")
+_num_row_check("RETEST BOS key", _BOS3["tokenizer.ggml.bos_token_id"], [_BOS_TGT])
+_num_row_check("RETEST BOS resolved", _BOS3["resolved BOS"], [_BOS_TGT, _BOS_DFT])
+chk("the override the runs actually passed carries the target's own id",
+    all(f"tokenizer.ggml.bos_token_id=int:{_BOS_TGT}" in " ".join(_v)
+        for _v in json.loads((pathlib.Path(
+            "v4_audit_2026_08_25/data/C_master_matrix_think_on/manifest.json"))
+            .read_text(encoding="utf-8"))["arms"].values()
+        if "--override-kv" in _v), True)
+
+
+print("\n=== run O's headline table names the drafter, and that is a value ===")
+# `spec-draft-n8 - external 0.8 B drafter`: the 0.8 is the drafter's parameter
+# count, sits in the label column, and was the last number in that table that
+# nothing read. It is in the manifest, in the file the run actually loaded.
+_OD = "v4_audit_2026_08_25/data/matrix_O_headtohead_20260826_081806"
+_o_draft = json.loads((pathlib.Path(_OD) / "manifest.json")
+                      .read_text(encoding="utf-8"))["draft"]
+_o_size = re.search(r"-([\d.]+)B-", os.path.basename(_o_draft)).group(1)
+chk("run O: the drafter the manifest names", os.path.basename(_o_draft),
+    "Qwen3.5-0.8B-Q4_K_M.gguf")
+# by position, not containment: the same phrase appears in the scorecard, so
+# `in _V4R_TEXT` is satisfied by the other occurrence and perturbing this one
+# passed. Both rows are addressed as rows now.
+_OHT = _num_rows_seq(_V4R_LINES, "| arm | pooled tok/s | \u0394 pooled |")
+_o_row = next(_c for _c, _n in _OHT if _c[0].startswith("`spec-draft-n8`"))
+chk("run O: the headline table's external-drafter row labels it with its size",
+    _o_row[0].endswith(f"external {_o_size} B drafter"), True)
+_o_sc = next(_c for _c, _n in
+             _num_rows_seq(_V4R_LINES, "| family | sign predicted correctly |")
+             if "external" in _c[0])
+chk("run O: and so does the scorecard's row",
+    _o_sc[0].strip("* ") == f"external {_o_size} B drafter", True)
+chk("run O: every run that loads a drafter loads that one",
+    sorted({os.path.basename(json.loads((pathlib.Path(_d) / "manifest.json")
+                                        .read_text(encoding="utf-8"))["draft"])
+            for _d in glob.glob("v4_audit_2026_08_25/data/*/")
+            if glob.glob(f"{_d}spec-draft-n*__rep*.json")}),
+    ["Qwen3.5-0.8B-Q4_K_M.gguf"])
+
+
+print("\n=== the audit README's file map, and the size the logs really are ===")
+# addressed by row rather than by key: the key strips `*`, which is what makes
+# a bold cell readable and what makes a glob unrecognisable
+_V4FM = _num_rows_seq(_V4R_LINES, "| Path | Contents |")
+chk("v4 file map: fifteen rows", len(_V4FM), 15)
+_v4fm_by = {_c[0]: _n for _c, _n in _V4FM}
+_o2o3 = next(_n for _c, _n in _V4FM if "matrix_O2_latin" in _c[0])
+chk("v4 file map: the O2/O3 row counts the request-pairs both runs hold",
+    [float(_x) for _x in _o2o3],
+    [float(sum(len(json.loads(pathlib.Path(_f).read_text(encoding="utf-8"))["rows"])
+               for _f in glob.glob("v4_audit_2026_08_25/data/"
+                                   "matrix_O2_latin_*/*__rep*.json")))] * 2)
+# that row spells its two counts as words, so it offers nothing to perturb;
+# the words still have to be right
+_tim_c, _tim = next((_c, _n) for _c, _n in _V4FM
+                    if "checkpoint_timers_20260826" in _c[0])
+chk("v4 file map: the timer row carries no digit to check", _tim, [])
+_tim_n = len(json.loads(pathlib.Path(
+    "v4_audit_2026_08_25/data/checkpoint_timers_20260826.json")
+    .read_text(encoding="utf-8")))
+chk("v4 file map: and its words are run T's record and repeat counts",
+    (_tim_n, sorted({_r["repeat"] for _r in json.loads(pathlib.Path(
+        "v4_audit_2026_08_25/data/checkpoint_timers_20260826.json")
+        .read_text(encoding="utf-8"))})),
+    (12, [0, 1, 2, 3]))
+chk("v4 file map: which is what the row says",
+    "twelve timer records, four repeats per arm" in _tim_c[1], True)
+# the size of the uncommitted logs is stated in four places and one disagreed
+_CES = pathlib.Path("bench/collect_evidence.sh").read_text(encoding="utf-8")
+chk("the archive script states the log volume three times",
+    _CES.count("3 GB"), 3)
+chk("the audit README states the same", "~3 GB of server logs" in _V4R_TEXT, True)
+chk("and so does the body, which said 7 GB until 2026-08-29",
+    ("~3 GB of llama-server logs are not committed" in _PR
+     and "7 GB of llama-server logs" not in _PR), True)
+
+
+print("\n=== the README's three file maps, which share a header ===")
+# `| Path | Contents |` appears three times in README.md, and the census marks
+# all three parsed the moment the header reaches a reader. Reading only the
+# first would make the coverage number describe two tables nothing looked at.
+_DM = [_num_rows_seq(_RM_LINES, "| Path | Contents |", _k) for _k in range(3)]
+chk("README file maps: three tables under one header",
+    [len(_t) for _t in _DM], [11, 11, 8])
+chk("README data map: the v1 label count, the v2 logs and the Exp 2 label",
+    [float(_x) for _c, _n in _DM[0] for _x in _n],
+    [float(len({_r["config"] for _r in _V1CSV})),
+     float(len(_v2_logs) - len(_v2_verbose)), 2.0])
+chk("README v4 map: run B's requests an arm, run A's short arms, the "
+    "concurrency levels and the telemetry interval",
+    [float(_x) for _c, _n in _DM[1] for _x in _n],
+    [30.0, 12.0, 1.0, 4.0, 8.0, 5.0])
+chk("README v4 map: the smoke row it ends on names the start-up checks",
+    "the gate runs that decide a matrix is safe to start" in _ROOT_TEXT, True)
+chk("README harness map: it carries no measurement at all",
+    [_x for _c, _n in _DM[2] for _x in _n], [])
+chk("README v4 map: the telemetry interval it names is the schemas' own",
+    sorted({_schema_interval(_f) for _v in _SCHEMA.values() for _f in _v}), [1, 5])
+
+
+print("\n=== the honest headline, and the A2 rate table in the TODO ===")
+_HEAD = _num_rows_seq(_RM_LINES, "| | |")
+chk("README honest-headline table: three rows", len(_HEAD), 3)
+_num_row_check("README headline, across invocations", _HEAD[0][1],
+               [int(min(_tw_v)), round(max(_tw_v))])
+_num_row_check("README headline, O2 point", _HEAD[1][1],
+               [round([_v for _t, _n, _v, _b in _TWELVE if "O2" in _n][0], 1)])
+_num_row_check("README headline, O2 interval", _HEAD[2][1],
+               [round(_pb2["spec-dflash-n2"][0], 1),
+                round(_pb2["spec-dflash-n2"][1], 1)])
+
+_A2R = _num_rows(_RT_LINES,
+                 "| arm | `long_explain` | counted draft tokens | `code_small` |")
+chk("RETEST A2 table: three arms", len(_A2R), 3)
+# every rate in it is run A's own `long_explain` decode rate, per repeat. The
+# baseline row quoted `~125-129 tok/s (quiet host)` until 2026-08-29, which is
+# neither repeat of the control measured beside them.
+_AD = "v4_audit_2026_08_25/data/A_bcb5eeb64_legacy"
+
+
+def _a2_rates(arm):
+    _out = []
+    for _f in sorted(glob.glob(os.path.join(_AD, f"{arm}__rep*.json"))):
+        for _r in json.loads(pathlib.Path(_f).read_text(encoding="utf-8"))["rows"]:
+            if _r["tag"] == "long_explain":
+                _out.append(round(1000 * _r["timings"]["predicted_n"]
+                                  / _r["timings"]["predicted_ms"], 1))
+    return _out
+
+
+_A2_ROWS = {"translation fallback": "draft-max8-translate",
+            "matched vocabulary": "draft-max8-matched",
+            "baseline, measured beside them": "baseline"}
+chk("RETEST A2: the rows it names", sorted(_A2R), sorted(_A2_ROWS))
+for _label, _arm in sorted(_A2_ROWS.items()):
+    _want = _a2_rates(_arm)
+    if _arm != "baseline":
+        _want = _want + [97, 97]
+    _num_row_check(f"RETEST A2 {_label}", _A2R[_label], _want)
+chk("RETEST A2: both speculative arms drafted and accepted the same tokens",
+    sorted({(sum(_r["draft_n"] for _f in
+                 sorted(glob.glob(os.path.join(_AD, f"{_a}__rep*.json")))
+                 for _r in json.loads(pathlib.Path(_f).read_text(encoding="utf-8"))["rows"]),
+             sum(_r["draft_n_accepted"] for _f in
+                 sorted(glob.glob(os.path.join(_AD, f"{_a}__rep*.json")))
+                 for _r in json.loads(pathlib.Path(_f).read_text(encoding="utf-8"))["rows"]))
+            for _a in ("draft-max8-translate", "draft-max8-matched")}),
+    [(194, 194)])
+_a2_drafted = sum(_r["draft_n"] for _f in
+                  sorted(glob.glob(os.path.join(_AD,
+                                                "draft-max8-matched__rep*.json")))
+                  for _r in json.loads(pathlib.Path(_f)
+                                       .read_text(encoding="utf-8"))["rows"])
+chk("RETEST A2: which is what one repeat drafted, as the table prints it",
+    _a2_drafted // json.loads(pathlib.Path(_AD).joinpath("manifest.json")
+                              .read_text(encoding="utf-8"))["repeats"],
+    int(_A2R["matched vocabulary"][2]))
+
+
+print("\n=== the run registry: every number in it, against the manifests ===")
+# Two tables nothing read. The first was wrong in four places at once: run C
+# published as 3 repeats when its manifest says 5, run D as thirteen arms when
+# it has five, run A as 30 requests an arm when its speculative arms abort at
+# 12, and run E's sweep missing its lowest length. RETEST_TODO had said 5
+# repeats and 900 requests for the same run all along.
+_DATA = pathlib.Path(__file__).resolve().parents[1] / "v4_audit_2026_08_25" / "data"
+
+
+def _rg_mf(name):
+    return json.loads((_DATA / name / "manifest.json").read_text(encoding="utf-8"))
+
+
+def _rg_runs(name):
+    return sorted(glob.glob(str(_DATA / name / "*__rep*.json")))
+
+
+def _rg_arms(name):
+    return sorted({os.path.basename(f).split("__rep")[0]
+                   for f in _rg_runs(name)})
+
+
+def _rg_requests(name, arm=None):
+    _n = 0
+    for _f in _rg_runs(name):
+        if arm and os.path.basename(_f).split("__rep")[0] != arm:
+            continue
+        _n += len(json.loads(pathlib.Path(_f).read_text(encoding="utf-8"))["rows"])
+    return _n
+
+
+def _rg_prompts(name):
+    _f = _rg_runs(name)[0]
+    return len({_r["tag"] for _r
+                in json.loads(pathlib.Path(_f).read_text(encoding="utf-8"))["rows"]})
+
+
+def _rg_nmax(name, prefix):
+    """The draft lengths a run's arm names carry, in numeric order."""
+    return sorted(int(_a.rsplit("-n", 1)[1]) for _a in _rg_arms(name)
+                  if _a.startswith(prefix) and _a.rsplit("-n", 1)[1].isdigit())
+
+
+_A, _B = "A_bcb5eeb64_legacy", "B_master_3737e4137"
+_Cd, _Dd = "C_master_matrix_think_on", "D_master_matrix_think_off"
+_Ed, _Hd = "E_past_threshold", "H_pmin_sweep"
+_Kd = "matrix_K1_sweep_20260826_025615"
+_Od2, _Od3 = "matrix_O2_latin_20260826_153711", "matrix_O3_latin_20260826_203251"
+_Wd = sorted(str(_x.name) for _x in _DATA.glob("matrix_W_s*"))
+
+_REG_EXPECT = {
+    # A and B share a design; A's two speculative arms abort, so only its
+    # baseline reaches the full ten prompts a repeat.
+    "A / B": [len(_rg_arms(_A)), _rg_prompts(_A), _rg_mf(_A)["repeats"],
+              _rg_mf(_B)["repeats"], _rg_requests(_B, "baseline")],
+    "C / D": [len(_rg_arms(_Cd)), _rg_prompts(_Cd), _rg_mf(_Cd)["repeats"],
+              len(_rg_arms(_Dd)), _rg_mf(_Dd)["repeats"]],
+    # the 95 is E1's ceilinged coverage threshold, derived above
+    "E": [math.ceil(math.log(0.05) / math.log(1 - rho))]
+         + _rg_nmax(_Ed, "spec-draft") + [_rg_mf(_Ed)["repeats"]],
+    "H": [0, 0.50, 0.75, 0.90, 8, 32, 128, 0.75, _rg_mf(_Hd)["repeats"]],
+    "I": [1, 4, 8],
+    "J": [len(_rg_arms("matrix_J2_20260826_014750")),
+          _rg_mf("matrix_J2_20260826_014750")["repeats"]],
+    "K": _rg_nmax(_Kd, "spec-dflash") + [_rg_mf(_Kd)["repeats"], 4, 8],
+    "L": [len(_rg_arms("matrix_L_thinkon_20260826_032652")),
+          _rg_mf("matrix_L_thinkon_20260826_032652")["repeats"]],
+    "M": [len(_rg_arms("matrix_M1_20260826_075816")),
+          _rg_mf("matrix_M1_20260826_075816")["repeats"]],
+    "N": [len(_rg_arms("matrix_N_ngrammap_20260826_081806")),
+          _rg_mf("matrix_N_ngrammap_20260826_081806")["repeats"]],
+    "O": [len(_rg_arms("matrix_O_headtohead_20260826_081806")),
+          _rg_mf("matrix_O_headtohead_20260826_081806")["repeats"]],
+    "O2 / O3": [len(_rg_arms(_Od2)), _rg_mf(_Od2)["repeats"],
+                _rg_requests(_Od2), _rg_requests(_Od2)],
+    "P / R": [],
+    "Q": [len(_rg_arms("matrix_Q_q8_20260826_110747")),
+          _rg_mf("matrix_Q_q8_20260826_110747")["repeats"]],
+    "T / T3 / T4": [],
+    "U": [],
+    "V / V2 / V3": [],
+    "W": [len(_rg_arms(_Wd[0])), _rg_mf(_Wd[0])["repeats"],
+          sum(len(_rg_runs(_d)) for _d in _Wd)],
+}
+
+
+_REG = _num_rows(_RM_LINES, "| run | question | design |")
+chk("README run registry: one row per entry", sorted(_REG), sorted(_REG_EXPECT))
+for _run, _want in sorted(_REG_EXPECT.items()):
+    chk(f"README registry {_run}: every number in the row",
+        [float(_x) for _x in _REG[_run]], [float(_x) for _x in _want])
+chk("README registry: the rows with no number at all are the four prose ones",
+    sorted(_k for _k, _v in _REG_EXPECT.items() if not _v),
+    ["P / R", "T / T3 / T4", "U", "V / V2 / V3"])
+# and the run A abort the corrected row now states, which is why it is not 30
+chk("run A's speculative arms stop short of the baseline's request count",
+    sorted({_rg_requests(_A, _a) for _a in _rg_arms(_A)
+            if _a != "baseline"}), [12])
+chk("run A's baseline does not", _rg_requests(_A, "baseline"), 20)
+chk("and the short arms are the ones the manifest marks crashed",
+    sorted({os.path.basename(_f).split("__rep")[0] for _f in _rg_runs(_A)
+            if json.loads(pathlib.Path(_f).read_text(encoding="utf-8"))
+            .get("crashed")}),
+    ["draft-max8-matched", "draft-max8-translate"])
+chk("run D's five arms are five of run C's thirteen",
+    set(_rg_arms(_Dd)) <= set(_rg_arms(_Cd)), True)
+chk("and run D is the thinking-off one",
+    (_rg_mf(_Cd)["think"], _rg_mf(_Dd)["think"]), ("think_on", "off"))
+
+# --- and the tier table above it, whose numbers describe the archives -------
+# Its v4 row was orphaned from the header by a blank line, so GitHub rendered
+# the controlled tier as literal pipes and no reader here could see it either.
+_v1_labels = {_r["config"] for _r in _V1CSV}
+_v1_drafted = {_r["config"] for _r in _V1CSV if int(_r["draft_n"]) > 0}
+_V1RAW = json.loads((pathlib.Path(__file__).resolve().parents[1] / "results"
+                     / "baseline.json").read_text(encoding="utf-8"))
+_V2RAW = json.loads((pathlib.Path(__file__).resolve().parents[1]
+                     / "v2_3090_followup" / "results_v2.json")
+                    .read_text(encoding="utf-8"))
+_X2RAW = json.loads((pathlib.Path(__file__).resolve().parents[1]
+                     / "v2_3090_followup" / "n3_results_20260426.json")
+                    .read_text(encoding="utf-8"))
+_V3OUT = pathlib.Path(__file__).resolve().parents[1] / "v3_dflash_2026_05_07" \
+    / "data" / "out_20260507_183341"
+
+
+def _card_number(text):
+    """The 3090 in `NVIDIA GeForce RTX 3090`, from the archive that recorded it."""
+    return int(re.search(r"RTX (\d+)", text).group(1))
+
+
+_v2_flags = _V2RAW["common_flags"]
+_v3_dirs = sorted(_d.name for _d in _V3OUT.iterdir() if _d.is_dir())
+_v3_dflash = [_d for _d in _v3_dirs if "dflash" in _d]
+_v4_repeats = sorted({_rg_mf(os.path.basename(_d.rstrip("/")))["repeats"]
+                      for _d in _REG_ALL if _d not in _REG_SMOKE})
+_TIER_EXPECT = {
+    "v1 primary matrix": [
+        _card_number(_V1RAW["gpu_info"]),
+        len(_v1_labels), len(_v1_drafted), len(_v1_labels - _v1_drafted),
+        len({_r["prompt"] for _r in _V1CSV}),
+        int(float(re.search(r'"temperature": ([0-9.]+)', (
+            pathlib.Path(__file__).resolve().parents[1] / "bench_runner.py")
+            .read_text(encoding="utf-8")).group(1))),
+        Counter(int(_r["max_tokens"]) for _r in _V1CSV).most_common(1)[0][0]],
+    "v2 follow-up": [
+        _card_number(_V2RAW["hardware"]["gpu"]), len(_V2RAW["prompts"]),
+        float(_v2_flags[_v2_flags.index("--temp") + 1]),
+        int(_v2_flags[_v2_flags.index("-n") + 1])],
+    "Exp 2 code/JSON": [
+        2,
+        len(_X2RAW["configs"]["01_baseline"]["per_trial"][0]["results"]),
+        _X2RAW["n_trials"], len(_X2RAW["configs"])],
+    "v3 DFlash": [
+        len(list((_V3OUT / "01_baseline").glob("p*.log"))), 1, len(_v3_dflash)],
+    "v4 audit": [
+        _card_number(_V1RAW["gpu_info"]), _card_number(_V1RAW["gpu_info"]),
+        _REG_ARMRUNS, len(_REG_ALL) - len(_REG_SMOKE),
+        min(_v4_repeats), max(_v4_repeats)],
+}
+_TIER = _num_rows(_RM_LINES,
+                  "| ID | Date | Host / runner | Design | Evidence level |")
+chk("README tier table: one row per tier", sorted(_TIER), sorted(_TIER_EXPECT))
+for _tier, _want in sorted(_TIER_EXPECT.items()):
+    chk(f"README tier {_tier}: every number in the row",
+        [float(_x) for _x in _TIER[_tier]], [float(_x) for _x in _want])
+chk("the v1 host really had two of those cards",
+    _V1RAW["gpu_info"].strip().count("RTX 3090"), 2)
+chk("and the v1 commit the row names is the one the archive recorded",
+    f"commit `{_V1RAW['llama_cpp_commit']}`" in _ROOT_TEXT, True)
+chk("the v1 cap applies to all but the 1000-token label",
+    sorted({int(_r["max_tokens"]) for _r in _V1CSV}), [300, 1000])
+chk("Exp 2's own harness line says the same five prompts and cap",
+    _X2RAW["harness"], "5 prompts x max_tokens=200 x temperature=0.5 x seed=42")
+chk("every v3 draft-max directory is one of the three the row counts",
+    sorted(_v3_dflash),
+    ["05_dflash_max16", "06_dflash_max8", "07_dflash_max4"])
+
+
 print("\n=== how much of what is published is checked ===")
 # Six times a figure has been computed here, compared against a literal, and
 # printed into a table that nothing read; planting a wrong number in the table
@@ -5347,10 +8016,10 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import table_coverage as _tcov                                    # noqa: E402
 _cov = _tcov.census()
 chk("coverage: published tables", _cov["tables"], 136)
-chk("coverage: those carrying measurements", _cov["carrying_values"], 124)
+chk("coverage: those carrying measurements", _cov["carrying_values"], 125)
 chk("coverage: parsed cell by cell, and this may only rise",
-    _cov["parsed"] >= 44, True)
-chk("coverage: not parsed, and this may only fall", _cov["not_parsed"] <= 80, True)
+    _cov["parsed"] >= 119, True)
+chk("coverage: not parsed, and this may only fall", _cov["not_parsed"] <= 67, True)
 chk("coverage: every table is one of the three",
     _cov["parsed"] + _cov["not_parsed"] + _cov["no_values"], _cov["tables"])
 _repo = pathlib.Path(__file__).resolve().parents[1]
@@ -5367,7 +8036,7 @@ chk("coverage: every markdown file is either censused or excluded with a reason"
 chk("coverage: and no exclusion is left unexplained",
     [_k for _k, _v in _tcov.EXCLUDED.items() if not _v.strip()], [])
 chk("coverage: parsed cell by cell, restated after the exclusions",
-    _cov["parsed"] >= 44, True)
+    _cov["parsed"] >= 57, True)
 
 # A19 publishes the census, so the census has to be what A19 says. The probe
 # figures beside them - 67 unguarded of 80, 44 of 44 parsed caught, 40 of 40
@@ -5380,14 +8049,29 @@ _A19 = _ER_LINES_TEXT.split("### A19.")[1].split("\n### ")[0]
 # and a pattern that accepts spaces pairs them and captures the space instead
 # of the number - which is how the first version of this line crashed rather
 # than quietly matching nothing.
-_A19N = [int(_x.replace(" ", "")) for _x in
-         re.findall(r"\*\*([\d][\d ]*)\*\*", _A19) if _x.strip()]
+# the thousands separator here is a thin space, so a pattern that accepts only
+# an ASCII one silently matches nothing and the check passes on an empty list
+_A19N = [int(re.sub(r"[\s\u2009\u00a0]", "", _x)) for _x in
+         re.findall(r"\*\*([\d][\d\s\u2009\u00a0]*)\*\*", _A19) if _x.strip()]
+# the count of corrections is a number in a document too, so it is checked
+# against the list it introduces rather than kept in step by hand
+_A19_LIST = re.findall(r"^(\d+)\. ", _A19, re.M)
+_WORDS = {20: "Twenty", 21: "Twenty-one", 22: "Twenty-two",
+          23: "Twenty-three", 24: "Twenty-four", 25: "Twenty-five",
+          26: "Twenty-six", 27: "Twenty-seven", 28: "Twenty-eight",
+          29: "Twenty-nine", 30: "Thirty", 31: "Thirty-one"}
+chk("ERRATA A19: the corrections are numbered from one, without a gap",
+    [int(_x) for _x in _A19_LIST], list(range(1, len(_A19_LIST) + 1)))
+chk("ERRATA A19: and the count it states is the length of that list",
+    f"**{_WORDS[len(_A19_LIST)]} published statements were wrong" in _A19, True)
+
+
 chk("ERRATA A19: the census it publishes is the census",
     (_cov["tables"], _cov["no_values"], _cov["carrying_values"],
      _cov["parsed"], _cov["not_parsed"]),
-    (136, 12, 124, 44, 80))
-for _want, _what in ((136, "tables"), (124, "carrying measurements"),
-                     (44, "parsed"), (80, "not parsed"), (12, "no derivable number")):
+    (136, 11, 125, 119, 6))
+for _want, _what in ((136, "tables"), (125, "carrying measurements"),
+                     (119, "parsed"), (6, "not parsed"), (11, "no derivable number")):
     chk(f"ERRATA A19 prints the {_what} count", _want in _A19N, True)
 chk("ERRATA A19: it names the three commands that reproduce the probe figures",
     ("--probe`" in _A19 and "--probe --covered`" in _A19
@@ -5399,9 +8083,9 @@ chk("ERRATA A19: and says the probe is not run in CI",
 # same way; the sampled probe behind it is not, for the reason above.
 _pcov = _tcov.prose_census()
 chk("coverage: decimal numbers in prose, outside every table",
-    _pcov["prose_numbers"], 1155)
+    _pcov["prose_numbers"], 1209)
 chk("coverage: those that are not a literal in this file",
-    _pcov["not_a_literal"], 647)
+    _pcov["not_a_literal"], 660)
 # tested on a supplied source, not by searching this file for a phrase: the
 # first version of this check searched for a label's own words, and the search
 # string was itself a literal in the argument position, so it always found it.
@@ -5409,7 +8093,7 @@ _lbl_src = 'chk("A LABEL", "A VALUE", 1)'
 chk("coverage: a label is not counted as a literal and its arguments are",
     ("A LABEL" in _tcov._checker_literals(_lbl_src),
      "A VALUE" in _tcov._checker_literals(_lbl_src)), (False, True))
-for _want, _what in ((1155, "prose count"), (647, "count that are not literals"),
+for _want, _what in ((1209, "prose count"), (660, "count that are not literals"),
                      (40, "sample size")):
     chk(f"ERRATA A19 prints the {_what}", _want in _A19N, True)
 chk("ERRATA A19: the sample size it names is the one the tool draws",

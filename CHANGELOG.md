@@ -3,7 +3,7 @@
 All notable changes to this bench are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
-Versioning is not strictly semver — each numbered release is a public
+Versioning is not strictly semver; each numbered release is a public
 publication point with its own data set.
 
 ## [Unreleased] — the review pass, and an adversarial pass over it
@@ -12,15 +12,21 @@ publication point with its own data set.
 is now measured rather than assumed.** `analysis/table_coverage.py` counts the
 tables in the nine published documents; `--probe` writes a wrong number into
 one cell of each in turn and asks whether an assertion that was passing now
-fails. Of 136 tables, 124 carry measurements, 44 are parsed cell by cell, and
-of the 80 that are not, **67 accept a wrong number and nothing notices**.
-Perturbing the 44 that are parsed catches all 44 — which is the run worth
-doing, because "parsed" is a claim about a parser, and a parser can match a
-header, return rows and assert nothing about the column you changed. That is
-what the W three-design table did, in both documents that carry it: only the W
-column was read, so V2's `+12.03` and V3's `+12.17` — two thirds of a
-three-way comparison — could have been anything. Full accounting in
-[`ERRATA.md`](ERRATA.md) A19.
+fails. Of 136 tables, 125 carry measurements and 119 are parsed cell by cell.
+When 80 were still unparsed, perturbing one cell of each left **67 that accept
+a wrong number and nothing notices**; seventy-four of those 80 are parsed now.
+Full accounting in [`ERRATA.md`](ERRATA.md) A19.
+
+**One cell a table is too weak a test.** Perturbing every number of every
+parsed table instead found 80 more that nothing read, nearly all a second or
+third number inside a cell whose parser read the front and stopped: whole
+interval columns reached through `.split("[")[0]`, a configuration column
+nobody read, the `100 %` on a total row. Guarding those grew the parsed set and
+the probe over the grown set found 33 more; the run after that perturbs all
+2 252 numbers in the 119 parsed tables and none survives. That is what the W three-design table
+had done, in both documents that carry it: only the W column was read, so V2's
+`+12.03` and V3's `+12.17`, two thirds of a three-way comparison, could have
+been anything.
 
 The measurement was wrong twice before it measured anything, and both mistakes
 are recorded in the file. The first used the claim checker's exit status, and
@@ -29,9 +35,17 @@ the time and the checker exited non-zero whatever was done to the documents; a
 probe whose control and treatment agree measures nothing, so it compares
 failure *sets* now. The second matched a table header against the literals the
 checker parses without asking which document the reader reads, so a table
-duplicated into a second document counted as parsed there too — which is how
-the changelog's own copy of the re-derivation table passed as covered while
+duplicated into a second document counted as parsed there too, which is how the
+changelog's own copy of the re-derivation table passed as covered while
 accepting a wrong number.
+
+**And it had the defect it exists to find, twice more.** Its number extractor
+fell back to integers only when a cell held no decimal, so `p_min 0 / 0.50 /
+0.75 / 0.90 at n_max 8` was probed on its four decimals and never on the 8;
+and its not-a-value filter was applied to whole cells, so one commit hash hid
+every measurement beside it. The census and the probe now agree on what a
+value is, and the census resolves the generic readers through the variable
+that names their document.
 
 **Four published statements were wrong.** Run C's caption said every other arm
 sat between 0.03 and 0.48 tok/s of run-to-run SD once the cold start was
@@ -46,19 +60,63 @@ aggregate while winning on three prompts of ten, with acceptance separating the
 winners from the losers by 9.5 pp and no overlap; no sentence had drawn it out,
 and now one does.
 
-Twenty tables are parsed that were not — every cell of run C's thirteen arms,
-run O's head-to-head, the v1 representative table including both of its range
-rows, runs J, K, L and N, and the V2 and V3 columns of the W table — about nine
-hundred assertions, which is where most of this pass went. The census itself is
-now a gate: `verify_claims.py` pins the table count exactly and the parsed
-count as a floor, so a new table must be parsed or accounted for, and every
-markdown file must be either censused or excluded with a stated reason.
+**And thirteen more were, once the tables were parsed rather than read.** The
+run registry published run C as three repeats where its manifest says five, and
+run D as thirteen arms where it has five of run C's thirteen; it said "30
+requests each" for runs A and B, which is B, while run A's two speculative arms
+abort part way and reach twelve. Run E's row named three of the four draft
+lengths it swept and run K's named a range containing lengths it never ran. A
+blank line inside the tier registry orphaned its **v4 audit** row from the
+header, so GitHub rendered the controlled tier as literal pipes; a test now
+refuses any table row with no header above it. A14 called two runs' recorded
+argv byte-identical, and one of the thirty tokens differs: the listening port.
+A17's length-matched split table carried run V's largest **mode** contrast,
+11.90 pp, in a column asking for its largest length-matching shift, which is
+14.02 pp; the same entry said the external drafter appears three times across
+the thinking-off runs where it appears five; and the sentence under its
+per-repeat table quoted three coefficients for a four-row table, so a reader
+lining them up read `spec-dflash-n2`'s 1.84 % as `spec-mtp-n2`'s. A15's
+O2-against-T baseline row read +0.54 % where the pooled rates give +0.53 %.
+`BENCHMARK_ENV.md` put run N in the `-fit on` group when N ran pinned at
+`-ngl 999 -c 16384`, named no run W at all, and counted seventeen telemetry
+traces and twelve compact ones where the tree holds sixteen and eleven. The v4
+file map's lead-in said forty-one directories while the row beneath it said
+sixty-five, and the README's data map said 62 v2 logs where the three `v2_*`
+directories hold 61, one of them the verbose trace it counts separately.
+
+**And one check read a file no clone has.** The fitter placement ERRATA A14
+cites lives in `v4_audit_2026_08_25/data/matrix_M.log`, which `.gitignore`
+excluded along with every other `*.log`. It surfaced as a crash inside the
+coverage probe's worktree, a clean checkout of HEAD, where the checker died
+373 assertions early: the probe's own baseline was broken and it was measuring
+nothing. The eight v4 harness logs are committed now and a test refuses any
+path the checker opens that a fresh clone would not have.
+
+**Two figures in those tables cannot be re-derived here and say so.** A14's
+`n_batch 2048, n_ubatch 512` came from a `-v` server log this repository does
+not commit, and C4b's ~83 °C is the card's datasheet slowdown point rather
+than a reading. Both are marked; the alternative was to check a literal
+against itself and call it verified.
+
+Forty-three tables are parsed that were not, eight of them census corrections
+and thirty-five new readers: every cell of run C's thirteen arms, run O's
+head-to-head, the v1 representative table including both of its range rows,
+runs J, K, L and N, the V2 and V3 columns of the W table, both run registries,
+A4's log reconstruction, A14's M1-against-Q comparison, A16's six invocations,
+A17's per-repeat rates and its length-matched split, B4's family minima, the
+BOS-override table in the two documents that publish it, run I's acceptance
+under batching, the three batching tables, C4b's thermal table, v3's
+cross-method ranking, Exp 2's variance decomposition, the memory-policy table
+and both file maps. The census itself is now a gate: `verify_claims.py` pins
+the table count exactly and the parsed count as a floor, so a new table must be
+parsed or accounted for, and every markdown file must be either censused or
+excluded with a stated reason.
 
 **The larger half is prose, and it is not fixed.** Most decimal numbers in
 these documents are not in any table, and a seeded sample of them was perturbed
 the same way; the result is in ERRATA A19 with its interval. The probe is not
-run in CI — about twenty seconds a table is close to an hour, and it needs a
-git worktree.
+run in CI; about twenty seconds a table is close to an hour, and it needs a git
+worktree.
 
 **This repository's verification pipeline invalidated somebody else's
 measurement, so it can no longer start one.** On 2026-08-27 a benchmark harness
@@ -81,13 +139,13 @@ renices. CI is exempt, because there is no card there to contend for.
 the recording.** Two quantities were never in it, both named now, neither
 offered as the explanation. The GDDR6X memory-junction temperature is a
 separate sensor with its own throttle point that reduces **memory bandwidth**,
-and NVML does not expose it on Linux — every `temp_c` column here is the core
+and NVML does not expose it on Linux; every `temp_c` column here is the core
 die. Host CPU load was never sampled at all: `bench/gpu_telemetry.sh` queries
 `nvidia-smi` and nothing else in all three of its schemas. The second is now
-recordable — `bench/host_guard.py --sample` writes busy percent, load average
+recordable: `bench/host_guard.py --sample` writes busy percent, load average
 and the largest process that is not the benchmark's own descendant, attributed
-by descent rather than by name — and **no run in this repository has it**,
-V2, V3 and T4 included.
+by descent rather than by name, and **no run in this repository has it**, V2,
+V3 and T4 included.
 
 **CI got `shell: bash`.** A `run:` step with no shell gets `bash -e {0}`, which
 has `-e` and not `-o pipefail`, so `checker.py | tail -1` reports `tail`'s exit
@@ -121,10 +179,10 @@ one, that the estimand would not be switched afterwards, that no claim would be
 made about identifying A16, and that a null on the predecessor question would
 be reported with its interval rather than as absence.
 
-**The mode effect survives a carryover-balanced schedule.**
-`spec-dflash-n4`'s sign flip — the strongest result in A17 — now holds at
-+12.03, +12.17 and **+12.10** pp across three designs. `spec-mtp-n2` and
-`spec-draft-n8` agree with both earlier designs to a tenth of a point.
+**The mode effect survives a carryover-balanced schedule.** `spec-dflash-n4`'s
+sign flip, the strongest result in A17, now holds at +12.03, +12.17 and
+**+12.10** pp across three designs. `spec-mtp-n2` and `spec-draft-n8` agree
+with both earlier designs to a tenth of a point.
 
 **And the arm this repository has been wrong about twice resolves.**
 `spec-dflash-n2` reads **+8.29 pp [+7.97, +8.60]**, an interval that overlaps
@@ -133,12 +191,12 @@ within-invocation designs agree; the between-invocation one does not.
 
 **It is not first-order carryover, which is the point of the design.** With
 every arm preceded by every other exactly once, the contrast between running
-after a capped neighbour and after a free-running one is −1.20 %
-[−2.61, +0.22] for that arm — the largest of any by six times, pointing the way
-A17 guessed, negative in four sessions of five — and **no arm's interval
-excludes zero**. At five sessions that is a null at this power, reported with
-the interval; but an effect large enough to explain a 2.4 pp gap would sit far
-outside it. The one candidate this repository had been able to name is removed.
+after a capped neighbour and after a free-running one is −1.20 % [−2.61, +0.22]
+for that arm (the largest of any by six times, pointing the way A17 guessed,
+negative in four sessions of five) and **no arm's interval excludes zero**. At
+five sessions that is a null at this power, reported with the interval; but an
+effect large enough to explain a 2.4 pp gap would sit far outside it. The one
+candidate this repository had been able to name is removed.
 
 What is left is A16, and W reproduces it on the largest dataset yet: mean
 within-session CV of **1.69 %** for `spec-dflash-n2` against **0.31 %** for no
@@ -151,7 +209,7 @@ resolves to no commit: the runner was deployed from the working tree, the run
 started, and the file was edited twice more before being committed. The exact
 source is archived under `v4_audit_2026_08_25/harness/`, verified to hash to
 what all five manifests name, and the checker now requires every run's harness
-hash to resolve **either** in history or in that directory — so a run whose
+hash to resolve **either** in history or in that directory, so a run whose
 harness is neither cannot pass unnoticed. Archiving is not a substitute for
 committing first.
 
@@ -159,33 +217,33 @@ committing first.
 
 Nine and a half hours on the bench card, 618 arm-runs, none failed.
 
-**Run V2 — the crossover.** Eight sessions of two halves in `AB BA BA AB BA AB
+**Run V2; the crossover.** Eight sessions of two halves in `AB BA BA AB BA AB
 AB BA` order, so each mode ran first four times and second four times with the
 two orders balanced in mean time position. 400 of 400 arm-runs. The hard cap
-raises every arm and every interval excludes zero; `spec-dflash-n4` is
-**−1.66 %** free-running and **+10.37 %** capped, both clear of zero on opposite
-sides, so the published "`n_max 4` goes negative" with thinking off is a length
+raises every arm and every interval excludes zero; `spec-dflash-n4` is **−1.66
+%** free-running and **+10.37 %** capped, both clear of zero on opposite sides,
+so the published "`n_max 4` goes negative" with thinking off is a length
 artefact. Run V's own numbers land inside the eight-session intervals for three
-of four arms — and **outside** for `spec-dflash-n2`, whose +9.26 pp is above all
+of four arms, and **outside** for `spec-dflash-n2`, whose +9.26 pp is above all
 eight sessions. That arm's shift is +5.92 pp [+4.86, +6.99]. The review's
 objection was right and its size is **about 3.3 pp on one arm**.
 
-**Run V3 — both modes in one square.** `BENCH_HARDCAP_SUFFIX` puts `<arm>` and
+**Run V3; both modes in one square.** `BENCH_HARDCAP_SUFFIX` puts `<arm>` and
 `<arm>-cap` in the same balanced 10×10 rotation, so the contrast is
 within-invocation. 200 of 200 arm-runs, two sessions. Three arms agree with the
 crossover to a tenth of a point. `spec-dflash-n2` does not: **+8.65 pp** within
 against **+5.92 pp** between, with V3's own two sessions 0.06 pp apart. The
-absolute rates say why — four of five arms reproduce between the designs to
-0.01–0.3 tok/s and the baseline to a hundredth, while that one arm moves −0.95 %
-free-running and +1.4 % capped, in opposite directions. The repository reports
-the effect for that arm as **design-dependent, +5.9 to +8.7 pp**, rather than
-picking the design that flatters it.
+absolute rates say why; four of five arms reproduce between the designs to
+0.01–0.3 tok/s and the baseline to a hundredth, while that one arm moves −0.95
+% free-running and +1.4 % capped, in opposite directions. The repository
+reports the effect for that arm as **design-dependent, +5.9 to +8.7 pp**,
+rather than picking the design that flatters it.
 
-**Run T4 — the checkpoint boundary, split.** The third review's P0-2 was that
+**Run T4; the checkpoint boundary, split.** The third review's P0-2 was that
 A12's timers surround calls beginning with `ctx->synchronize()`, so 39.07 s
 might be an attribution to the API boundary rather than to the copying.
 `bench/apply_split_timers.py` drains explicitly and times the drain. The answer
-is **0.002 s of 39.09 s — 0.003 % of the excess**. The queue is already empty
+is **0.002 s of 39.09 s: 0.003 % of the excess**. The queue is already empty
 when the checkpoint is taken. Every component reproduces (17.336 / 16.346 /
 5.412 against 17.34 / 16.33 / 5.41), the counts reproduce (785 creates, 728
 restores, six times), the excess reproduces (71.49 s against 71.4), and the
@@ -194,12 +252,12 @@ measurement refutes it. The llama.cpp tree was restored to stock afterwards,
 verified by the library hash returning to `a0cbe4d0…`.
 
 **And T4 cornered A16.** Six repeats inside one invocation: `spec-dflash-n2`
-reads 139.36, 139.72, 139.93, then 145.04, 146.01, 144.43 — a **3.9 % step**
+reads 139.36, 139.72, 139.93, then 145.04, 146.01, 144.43, a **3.9 % step**
 partway through, on byte-identical output, while the two arms interleaved with
-it hold 0.12 % and 0.55 %. Three arms rotating means the predecessor varies, and
-it explains nothing: both predecessors produce both levels. 272 telemetry
-samples explain nothing either — across the step the card is *hotter*
-(63.4 → 64.9 °C), the SM clock is flat, the power is flat, and `sw_power_cap` is
+it hold 0.12 % and 0.55 %. Three arms rotating means the predecessor varies,
+and it explains nothing: both predecessors produce both levels. 272 telemetry
+samples explain nothing either; across the step the card is *hotter* (63.4 →
+64.9 °C), the SM clock is flat, the power is flat, and `sw_power_cap` is
 asserted in 17 samples while the arm is slow and 36 while it is fast. Every
 recorded physical quantity either does not move or moves the wrong way. A16's
 "invocation effect" is really an **arm-run-level** state that steps on a
@@ -214,68 +272,68 @@ experiment and it has not been run.
 release — `raw_logs_20260827.tar.zst`, 618 logs, 2.9 GB uncompressed, sha256
 `d56a7f88…` — kept separate so the first archive's digest keeps meaning what it
 meant. The manifest grows to 1320 logs and 21 traces, all 620 new entries
-verified against it before publishing, and the re-derivation still returns
-526 of 535, 12 of 12 and 12 of 12 identical with nothing differing.
+verified against it before publishing, and the re-derivation still returns 526
+of 535, 12 of 12 and 12 of 12 identical with nothing differing.
 
 **One perturbation survived the clean mirror**, and it was a real gap: the v4
 README's run-M table publishes six aggregates that the checker computed from
 the data and compared with literals, never with the document. Changing a
 published 127.3 to 130.3 passed everything. That table is parsed cell by cell
-now — which is the same defect as the four tables the second review's pass
+now, which is the same defect as the four tables the second review's pass
 found, in the one place a later edit put it back.
 
 **The pull request body is a published document, so it is in the tree now.**
 The third review's P0-4 was errors in it. Fixing them once fixes nothing: it is
 five numeric tables and four counts, and nothing was reading any of them.
 `PULL_REQUEST.md` holds the body, `analysis/verify_claims.py` parses all five
-tables cell by cell against the data, and the counts it quotes — assertions,
-regressions, perturbations, run directories — are derived from the files they
+tables cell by cell against the data, and the counts it quotes (assertions,
+regressions, perturbations, run directories) are derived from the files they
 describe rather than typed. `gh pr edit 2 --body-file PULL_REQUEST.md` is what
 publishes it.
 
 **That guard found one on its first run.** The checkpoint cost table appears in
-[`README.md`](README.md) and in the body as four merged rows, and both published
-the restore share as **30.5 %** — 22.9 + 7.6, the two component shares each
-rounded to one decimal and then added. The merged row is 21.74 s of 71.4 s,
-which is **30.4 %**, and with it the column adds to exactly 100.0 instead of
-100.1. A12's own four-row version has been parsed since 2026-08-26; the merged
-version was parsed nowhere. New **B9**.
+[`README.md`](README.md) and in the body as four merged rows, and both
+published the restore share as **30.5 %** — 22.9 + 7.6, the two component
+shares each rounded to one decimal and then added. The merged row is 21.74 s of
+71.4 s, which is **30.4 %**, and with it the column adds to exactly 100.0
+instead of 100.1. A12's own four-row version has been parsed since 2026-08-26;
+the merged version was parsed nowhere. New **B9**.
 
 **And the count the body publishes could not hold in both places it is
 checked.** Eight of the checker's assertions are git-provenance checks that do
-not run where there is no `.git`, and `tests/data_mutate.py` runs the checker in
-exactly such a mirror. The first version of the count check compared against
-whatever had run, so it was right in a checkout and wrong in the mirror — which
-the mirror reported, correctly, as "the checker fails on an unperturbed mirror".
-It compares against a full checkout's count now, and a test derives the eight by
-running the checker twice with `git` shadowed by a failing shim, rather than
-trusting the constant.
+not run where there is no `.git`, and `tests/data_mutate.py` runs the checker
+in exactly such a mirror. The first version of the count check compared against
+whatever had run, so it was right in a checkout and wrong in the mirror, which
+the mirror reported, correctly, as "the checker fails on an unperturbed
+mirror". It compares against a full checkout's count now, and a test derives
+the eight by running the checker twice with `git` shadowed by a failing shim,
+rather than trusting the constant.
 
 **A perturbation anchor could match twice.** `edit_doc` checked that its anchor
-was *present*, not that it was *unique*, so `| **39.09** | **54.7 %** |` — two
-identical rows of run T4's split table — perturbed whichever came first. It
+was *present*, not that it was *unique*, so `| **39.09** | **54.7 %** |`, two
+identical rows of run T4's split table, perturbed whichever came first. It
 still fired, which is exactly the problem: an anchor can go ambiguous, or stop
 meaning what its perturbation's name says, and the suite prints the same "all
 detected" either way. It refuses a non-unique anchor now, and a test resolves
 all 39 against their documents on every run.
 
 **And "comparable" was decided in two files.** A16's twelve comparable runs are
-selected by seven manifest fields in `analysis/verify_claims.py` and by the same
-seven in `analysis/plot_v4_runs.py`. The checker also filters on the run date,
-because A16 is *twelve times in one day*; the chart did not. Run T4 satisfies
-all seven and ran on 2026-08-27, so the moment it was committed the checker
-still said twelve and the two-level chart quietly became thirteen — the chart
-check caught it as "stale", which is the right alarm for the wrong reason.
-Neither file was wrong about its own arithmetic. The chart carries the date
-filter now, and a test asserts both files carry it *and* that some run actually
-distinguishes the two rules, so the test cannot pass by there being nothing to
-separate.
+selected by seven manifest fields in `analysis/verify_claims.py` and by the
+same seven in `analysis/plot_v4_runs.py`. The checker also filters on the run
+date, because A16 is *twelve times in one day*; the chart did not. Run T4
+satisfies all seven and ran on 2026-08-27, so the moment it was committed the
+checker still said twelve and the two-level chart quietly became thirteen; the
+chart check caught it as "stale", which is the right alarm for the wrong
+reason. Neither file was wrong about its own arithmetic. The chart carries the
+date filter now, and a test asserts both files carry it *and* that some run
+actually distinguishes the two rules, so the test cannot pass by there being
+nothing to separate.
 
 **And run T4's split is committed as data, not just as prose.** 39.09 s and
 0.002 s existed only in the document; `checkpoint_timers_20260827_split.json`
 holds all 18 arm-runs, `rederive_from_logs.py` regenerates it from the 18
-attested server logs — 18 of 18 identical — and the checker reads the dump
-rather than a literal.
+attested server logs, 18 of 18 identical, and the checker reads the dump rather
+than a literal.
 
 ### The third review
 
@@ -284,44 +342,44 @@ against the code and the data before anything moved, and every one that could be
 checked was right.
 
 **A17 does not identify what it claimed to.** Run V measured `ignore_eos` by
-running the whole freerun matrix first and the whole hard-cap matrix afterwards
-— `22:31:46` against `22:48:08`. Each half is position-balanced internally and
-the *mode* is not randomised at all, so it is confounded with sixteen minutes of
-elapsed time. That would be a footnote if A16 did not exist: A16 establishes an
-unexplained, DFlash-specific invocation effect spanning **9.4 pp** on the same
-drafter, and the shift A17 reports for `spec-dflash-n2` is **9.26 pp**. A17 is
-now a fixed-order sensitivity analysis, the two halves are named as two
-different estimands — natural-completion latency and an equal-token-count
-microbenchmark, neither one the corrected version of the other — and
-RETEST_TODO P1-3 is reopened for the crossover, and
+running the whole freerun matrix first and the whole hard-cap matrix
+afterwards: `22:31:46` against `22:48:08`. Each half is position-balanced
+internally and the *mode* is not randomised at all, so it is confounded with
+sixteen minutes of elapsed time. That would be a footnote if A16 did not exist:
+A16 establishes an unexplained, DFlash-specific invocation effect spanning
+**9.4 pp** on the same drafter, and the shift A17 reports for `spec-dflash-n2`
+is **9.26 pp**. A17 is now a fixed-order sensitivity analysis, the two halves
+are named as two different estimands (natural-completion latency and an
+equal-token-count microbenchmark, neither one the corrected version of the
+other) and RETEST_TODO P1-3 is reopened for the crossover, and
 `bench/run_v2_crossover.sh` is the design it needs: four sessions in
 AB/BA/BA/AB order, run V's configuration otherwise verbatim, with the session
 as the resampling unit. It has not been run.
 
 **A12 measures the API boundary, not state-copy time.** The timers surround
 `ckpt.update_tgt` / `load_tgt` / `load_dft`, which call
-`llama_state_seq_get_data_ext` and `set_data_ext` — and at `3737e4137` those
+`llama_state_seq_get_data_ext` and `set_data_ext`, and at `3737e4137` those
 begin with `ctx->synchronize()`, verified in the tested tree at
 `llama-context.cpp:4083`. So 39.07 s is elapsed *inside* the checkpoint calls,
-synchronisation included, and 54.7 % is an attribution to that boundary. Some of
-the wait would be paid elsewhere on a path with no checkpoints rather than
+synchronisation included, and 54.7 % is an attribution to that boundary. Some
+of the wait would be paid elsewhere on a path with no checkpoints rather than
 vanishing. Splitting it needs a second timer inside the call and a re-run.
 
 **Scope and arithmetic in the front matter.** The controlled tier is runs A–V,
-not A–T3. Its findings are for `3737e4137`, not "current llama.cpp" — upstream
+not A–T3. Its findings are for `3737e4137`, not "current llama.cpp"; upstream
 has open work on recurrent rollback, output row ordering and hybrid checkpoint
 invalidation that touches these paths. The head-to-head figure said "nine
-methods" for eight speculative configurations and a baseline. "The three methods
-v1 benchmarked are the bottom three rows" was wrong twice over: v1 tested three
-methods and they occupy **four** rows, because the external drafter appears
-twice. "Every thinking-off comparison is length-confounded" excluded run V's own
-hard-cap half.
+methods" for eight speculative configurations and a baseline. "The three
+methods v1 benchmarked are the bottom three rows" was wrong twice over: v1
+tested three methods and they occupy **four** rows, because the external
+drafter appears twice. "Every thinking-off comparison is length-confounded"
+excluded run V's own hard-cap half.
 
 **The headline interval is within-invocation and now says so.** The column read
 `95 % CI (t, over blocks)`; the blocks are nine sequential blocks of one
-invocation in one fixed rotation. The primary figure for `spec-dflash-n2` is the
-repeated-invocation range, **+17 % to +27 %**, with O2's point estimate and its
-own interval below it — and the twelve runs are not twelve independent
+invocation in one fixed rotation. The primary figure for `spec-dflash-n2` is
+the repeated-invocation range, **+17 % to +27 %**, with O2's point estimate and
+its own interval below it, and the twelve runs are not twelve independent
 measurements either, so that range is a bound on what was observed, not a
 confidence interval.
 
@@ -333,34 +391,34 @@ a decode graph, and "preserves raw logs" is preserving their hashes.
 
 - **Only `BENCH_THINK` parsed strictly.** `BENCH_IGNORE_EOS=oen` selected off,
   `BENCH_FIT=onn` selected off, an unknown `BENCH_FLAVOR` selected master, and
-  `BENCH_CONCURRENCY=0` was clamped to 1 — silent treatment drift, which is the
-  defect this audit was written about. Every treatment variable now goes through
-  one strict parser and a typo stops the run before any GPU work.
+  `BENCH_CONCURRENCY=0` was clamped to 1; silent treatment drift, which is the
+  defect this audit was written about. Every treatment variable now goes
+  through one strict parser and a typo stops the run before any GPU work.
 - **`BENCH_EXPECT_LIB_SHA256` accepted a prefix** and compared one library.
   `libllama.so`, `libggml-cuda.so` and `libggml-base.so` all decide what a
   decode does. The whole map is pinned to the run's first arm-run now, and the
   expected digest must be all 64 characters.
 - **The teardown guard allowed 2 GiB of residual VRAM** — most of the margin the
   fitter works in, next to a docstring saying a 120 MiB allocation killed the
-  next arm — and an unreadable `nvidia-smi` returned *settled*. It is 128 MiB
-  over the pre-run reading, held for three consecutive readings, and a card that
-  answered before the arm-run and not after is a failure. *Not* a host with no
-  reading at all: the first version of this fix missed that distinction and took
-  four end-to-end harness tests down in CI, which has no `nvidia-smi` — a guard
-  about memory coming back cannot apply where memory was never observable. Both
-  directions are tested, and the CI condition is pinned locally with a failing
-  shim on `PATH`.
+  next arm, and an unreadable `nvidia-smi` returned *settled*. It is 128 MiB
+  over the pre-run reading, held for three consecutive readings, and a card
+  that answered before the arm-run and not after is a failure. *Not* a host
+  with no reading at all: the first version of this fix missed that distinction
+  and took four end-to-end harness tests down in CI, which has no `nvidia-smi`,
+  a guard about memory coming back cannot apply where memory was never
+  observable. Both directions are tested, and the CI condition is pinned
+  locally with a failing shim on `PATH`.
 - **`paired_blocks.py` and the runner disagreed on "balanced"**: a two-arm,
   four-repeat schedule the runner accepts was reported unbalanced here, and the
   analysis wrote the same JSON either way. It shares the runner's definition,
   refuses to emit an interval unless `--allow-unbalanced` is given, and records
   the balance and the interval's scope in the JSON.
 - **The t table stopped at df=10 and fell back to 1.96**, the *normal* critical
-  value, so any run with twelve or more blocks silently got a narrower interval.
-  It is computed now, from the incomplete beta, matching published tables to
-  three decimals from df=1 to df=120. `--iters N` parses as well as `--iters=N`.
-  No published interval moved: the largest committed run has nine blocks, df=8,
-  inside the old table — which is asserted rather than assumed.
+  value, so any run with twelve or more blocks silently got a narrower
+  interval. It is computed now, from the incomplete beta, matching published
+  tables to three decimals from df=1 to df=120. `--iters N` parses as well as
+  `--iters=N`. No published interval moved: the largest committed run has nine
+  blocks, df=8, inside the old table, which is asserted rather than assumed.
 - Regenerating all seven `paired_blocks.json` under the new gate found that
   **two of them came from schedules that are not position-balanced** and said
   nothing about it: run T rotates three arms over four repeats, and the
@@ -373,12 +431,13 @@ a decode graph, and "preserves raw logs" is preserving their hashes.
   out of a file into ROOT without resolving it. The mirror made it unnecessary;
   it is gone.
 - **The model path was never read back.** `server_identity()` looked for
-  `llama_model_loader: loaded meta data from`, and llama.cpp prints `loaded meta
-  data with N key-value pairs and M tensors from PATH`. The pattern has never
-  matched, so `model_path` was absent from every arm-run identity ever recorded
-  and nothing noticed, because the field was only compared when present — which
-  it never was. It matches now, `/props` is read back as a second independent
-  source, and both are compared against the target the manifest names.
+  `llama_model_loader: loaded meta data from`, and llama.cpp prints `loaded
+  meta data with N key-value pairs and M tensors from PATH`. The pattern has
+  never matched, so `model_path` was absent from every arm-run identity ever
+  recorded and nothing noticed, because the field was only compared when
+  present, which it never was. It matches now, `/props` is read back as a
+  second independent source, and both are compared against the target the
+  manifest names.
 - **`stage_mtp_source.py` silently picked the first of several indexes** and
   reused the stage directory, so a stage could hold two checkpoint generations.
   It requires exactly one index, checks every shard the index names exists and
@@ -394,18 +453,18 @@ things, six of them defects introduced in this round:
 
 - **The library-map check cascaded off a crash.** `check_identity` seeded its
   baseline from the first arm-run it saw, and a crashed arm-run has hashed
-  nothing — so one crash made every later arm-run report that the libraries had
-  changed, burying the crash under a wrong finding. An empty map is skipped now;
-  the crash is its own finding.
+  nothing, so one crash made every later arm-run report that the libraries had
+  changed, burying the crash under a wrong finding. An empty map is skipped
+  now; the crash is its own finding.
 - **The strict parser refused a spelling this repository has used.**
   `matrix_L_thinkoff` records `think_env: "think_off"`, which the old parser
   accepted and the new one dropped. A parser that cannot reproduce a published
   run is a worse failure than the one it prevents. `think_off` and `think_on`
   are back, and a test pins them.
 - **`bench/run_v2_crossover.sh` called `~/bench/gpu_telemetry.sh`, which the
-  bench host does not have** — it lives only in this repository. Both the runner
-  and the telemetry script are resolved from three candidates now and the script
-  stops before any GPU time if either is missing.
+  bench host does not have**: it lives only in this repository. Both the runner
+  and the telemetry script are resolved from three candidates now and the
+  script stops before any GPU time if either is missing.
 - **The release notes' reproduction recipe was wrong**, in something already
   published: it omitted copying the committed arm-run JSON beside the logs and
   the four-run rename map, so anyone following it would have seen a hundred
@@ -423,10 +482,10 @@ Two more that the pass found in machinery this repository had already been
 relying on, and which matter more than any of the above:
 
 - **The perturbation suite was proving almost nothing.** `tests/data_mutate.py`
-  restores only what each perturbation *declares* it touched, and one of them —
-  "run T's telemetry runs 5 C warmer" — declared nothing. It sits at index 10 of
-  62, so the mirror kept a telemetry trace 5 °C warm for the rest of the run,
-  the checker was **already failing** for every later perturbation, and
+  restores only what each perturbation *declares* it touched, and one of them
+  ("run T's telemetry runs 5 C warmer") declared nothing. It sits at index 10
+  of 62, so the mirror kept a telemetry trace 5 °C warm for the rest of the
+  run, the checker was **already failing** for every later perturbation, and
   `returncode != 0` was recorded as "caught" without the guard that should have
   fired ever firing. **51 of 62 results were worthless.** Declaring the restore
   fixes it; the runner now refuses to start if any perturbation omits the
@@ -434,26 +493,25 @@ relying on, and which matter more than any of the above:
 - **Which uncovered a real hole.** With the mirror actually clean, one
   perturbation survived: a 5 % change to one request's decode time in run E.
   Every arm-run row carries `predicted_ms`, `predicted_n` and
-  `predicted_per_second` **twice** — at the top level and inside `timings` — and
+  `predicted_per_second` **twice**, at the top level and inside `timings`, and
   different analyses read different copies: `paired_blocks.py`,
   `matrix_report.py`, `plot.py` and `plot_v4_runs.py` take the top-level one,
   `past_threshold_fit.py` the nested one. Nothing compared them, so a change to
-  either was invisible to whatever read the other. All 13 344 rows of all 1305
+  either was invisible to whatever read the other. All 18 344 rows of all 1805
   arm-run files are checked for agreement now, and both copies are perturbed.
 
-- **And a third, from chasing the second.** `predicted_per_second` — llama.cpp's
-  own field, and the one every **request-mean** column in this repository is the
-  mean of — reports `1000 × (n − 1) / predicted_ms` in **13 300 of 13 344** rows.
-  It is a rate over `n − 1` tokens divided by the time for `n`. The 44
+- **And a third, from chasing the second.** `predicted_per_second`: llama.cpp's
+  own field, and the one every **request-mean** column in this repository is
+  the mean of: reports `1000 × (n − 1) / predicted_ms` in **18 300 of 18 344**
+  rows. It is a rate over `n − 1` tokens divided by the time for `n`. The 44
   exceptions are the legacy `bcb5eeb64` runs, so the definition also changed
   between the two tiers. Every headline figure and every delta is a pooled rate
   computed from the raw fields and is untouched, and on a fixed-300-token run
-  the bias is a uniform 0.33 % that cancels in every ratio — but where arms stop
+  the bias is a uniform 0.33 % that cancels in every ratio, but where arms stop
   at different lengths it does not, which is [A17](ERRATA.md#a17-the-thinking-off-comparisons-are-not-comparisons-of-the-same-amount-of-work)'s
-  mechanism riding on a different field. Written up as
-  [B8](ERRATA.md#b8-every-request-mean-here-counts-one-token-fewer-than-it-timed),
-  asserted so it cannot drift, and the recomputation left open rather than done:
-  it would move several dozen figures by 0.33 % and change no conclusion.
+  mechanism riding on a different field. Written up as [B8](ERRATA.md#b8-every-request-mean-here-counts-one-token-fewer-than-it-timed),
+  asserted so it cannot drift, and the recomputation left open rather than
+  done: it would move several dozen figures by 0.33 % and change no conclusion.
 
 And three where the pass improved an argument rather than fixing a bug:
 
@@ -463,8 +521,8 @@ And three where the pass improved an argument rather than fixing a bug:
   by 8.30 pp**. Tighter, and worse for run V.
 - **The Run V ordering was inferred, and is now established.** Two `created`
   stamps do not prove sequencing on their own. The runner stamps `created`
-  before the first server starts, and the freerun half's own measured work —
-  938 s — fits inside the 982 s gap, so the halves cannot have overlapped.
+  before the first server starts, and the freerun half's own measured work, 938
+  s, fits inside the 982 s gap, so the halves cannot have overlapped.
 - **The balance-agreement test checked six hand-written schedules.**
   `is_position_balanced` is duplicated because `paired_blocks.py` cannot import
   the runner, whose module body exits on a bad environment, so the copy is now
@@ -472,9 +530,9 @@ And three where the pass improved an argument rather than fixing a bug:
 
 ### The raw evidence is published
 
-`raw-evidence-2026-08-27` carries `raw_logs.tar.zst` — 702 llama-server logs,
+`raw-evidence-2026-08-27` carries `raw_logs.tar.zst`: 702 llama-server logs,
 4071 MB uncompressed, sha256 `29c2401f…`, the digest this repository has
-recorded since the manifest was written — and `telemetry.tar.zst` with the 19
+recorded since the manifest was written, and `telemetry.tar.zst` with the 19
 GPU traces. Until now the repository committed the hashes of files nobody else
 could see, which ties the derived JSON to something unavailable; the point of
 publishing is that the extraction can be re-run instead of trusted.
@@ -491,11 +549,11 @@ archive alone:
 
 **Zero records differ.** The nine that cannot be regenerated belong to
 `matrix_G_dflash_20260826_000124`, `matrix_I_conc1_20260826_012917` and
-`matrix_J_dflash_fit_20260826_014308` — three exploratory runs whose logs are in
-the archive and whose arm-run JSON is not committed, because they never finished
-their cell set and `check_data_integrity.py` refuses incomplete runs. The
-extractor needs both halves. They are nine of the 535 rows behind A13, and the
-claim there rests on the other 526. The re-derivation asserts that gap is
+`matrix_J_dflash_fit_20260826_014308`; three exploratory runs whose logs are in
+the archive and whose arm-run JSON is not committed, because they never
+finished their cell set and `check_data_integrity.py` refuses incomplete runs.
+The extractor needs both halves. They are nine of the 535 rows behind A13, and
+the claim there rests on the other 526. The re-derivation asserts that gap is
 exactly nine rather than tolerating any shortfall, and two mutations prove it
 fails on a changed record and on a vanished one.
 
@@ -520,7 +578,7 @@ and the second half of this entry is what that found.
   P1-3 and turns [A17](ERRATA.md#a17-the-thinking-off-comparisons-are-not-comparisons-of-the-same-amount-of-work)
   from a subset argument into a measurement.
 - Pooled over every comparable block, the headline arm spans **+17.0 % to
-  +27.8 %** with `draft_n` 2441 and acceptance 72.3 % in all 43 of them — the
+  +27.8 %** with `draft_n` 2441 and acceptance 72.3 % in all 43 of them: the
   speculative work identical to the token, only the time differing.
 
 ### What the adversarial pass found in this branch's own work
@@ -528,8 +586,8 @@ and the second half of this entry is what that found.
 - **`tests/mutate.py` edited the real source files** and restored them in a
   `finally` that a kill does not run. It committed one of its own mutations:
   `bench/retest_runner.py` was published with `body.pop("ignore_eos", None)`.
-  It runs in a mirror now, and `EveryPublishedFixIsStillHere` — added an hour
-  earlier for exactly this — is what caught it.
+  It runs in a mirror now, and `EveryPublishedFixIsStillHere`, added an hour
+  earlier for exactly this, is what caught it.
 - **A13 was built from `*__rep0.log`**: one arm-run per arm however many repeats
   it had, and it predated six runs. Over everything the base grows **73 → 517**
   and the claim survives with the margin narrowing **0.5 pp → 0.20 pp**.
@@ -553,22 +611,21 @@ and the second half of this entry is what that found.
   values are fingerprinted against master and unchanged.
 - **The pre-registration had no code.** Every other claim in this repository is
   produced by a script in `analysis/`; the one document written to be
-  falsifiable — `v4_audit_2026_08_25/PREREGISTERED_PREDICTION.md` — was
-  computed by hand. Recomputing it found that the *prediction*, written before
-  the data existed, reproduces to the last decimal: the coefficients, R²,
-  leave-one-out error, collinearity, the power-law extrapolation, all three
-  predicted rows. The *outcome section*, written after, had eight wrong
-  figures:
+  falsifiable, `v4_audit_2026_08_25/PREREGISTERED_PREDICTION.md`, was computed
+  by hand. Recomputing it found that the *prediction*, written before the data
+  existed, reproduces to the last decimal: the coefficients, R², leave-one-out
+  error, collinearity, the power-law extrapolation, all three predicted rows.
+  The *outcome section*, written after, had eight wrong figures:
   - the error column was computed from its own rounded display, which turned a
     **−0.6 %** miss at `n_max` 128 into a bolded **0.0 %**;
   - checkpoint traffic, 55.4 → 24.9 MiB per generated token, was computed at
-    **101.3 MiB per checkpoint — the size A12 withdrew**. It is 44.8 → 20.2.
-    The guard added earlier caught the retracted *number*; this was the
-    retracted number *derived*, and nothing was looking for that;
+    **101.3 MiB per checkpoint: the size A12 withdrew**. It is 44.8 → 20.2. The
+    guard added earlier caught the retracted *number*; this was the retracted
+    number *derived*, and nothing was looking for that;
   - 1639 checkpoints were attributed to **one 300-token request**. They are one
-    arm-run of **ten**, 163.9 per request — a 10× overstatement, cited in the
+    arm-run of **ten**, 163.9 per request: a 10× overstatement, cited in the
     README's row for upstream issue #24055;
-  - the no-speculation step was quoted as **7.87 ms** until this pass — a
+  - the no-speculation step was quoted as **7.87 ms** until this pass: a
     figure that is repeat 0 alone. Pooled over the five repeats the model is
     fitted on it is **8.11**, so the law's intercept is 3.3× it, not 3.4×;
   - nine **pooled decode rates** were published as "end-to-end throughput,
@@ -587,7 +644,7 @@ and the second half of this entry is what that found.
 
   Two figures that *looked* wrong were not. The residual step at the coverage
   threshold, **−0.39 pp**, and the **24–34 %** amortisation deviation both
-  reproduce exactly — the first in `(measured − predicted) / predicted`, the
+  reproduce exactly; the first in `(measured − predicted) / predicted`, the
   convention [A10](ERRATA.md#a10-the-single-regressor-law-is-falsified-out-of-sample-and-p_min-is-the-lever-that-matters)
   publishes and this document did not state, and the second by fitting the six
   points the model was fitted on rather than everything below the threshold.
@@ -614,7 +671,7 @@ and the second half of this entry is what that found.
   is that the 1.6 pp paired-block interval on the headline arm describes the
   run, not the configuration: five runs of it span +20.7 % to +26.7 %, and the
   README now says so beside the table.
-- `tests/fake_llama_server.py` — enough of the llama.cpp HTTP surface to drive
+- `tests/fake_llama_server.py`: enough of the llama.cpp HTTP surface to drive
   the runner end to end in a second without a GPU. The guards that fire after
   the arm loop had no test because reaching them needed a 20 GiB model, and a
   mutation that deleted the completeness check survived the whole suite.
@@ -624,8 +681,8 @@ and the second half of this entry is what that found.
 ### Fixed
 
 - `BENCH_ORDER=latin` generated a cyclic rotation for any (arms, repeats) pair
-  and labelled the result balanced. Three arms over four repeats rotates
-  0, 1, 2, 0 — which is what run T did, while its manifest recorded `latin`. The
+  and labelled the result balanced. Three arms over four repeats rotates 0, 1,
+  2, 0, which is what run T did, while its manifest recorded `latin`. The
   schedule is now built and validated before the first server starts, the
   unbalanced rotation is named `cyclic`, and the manifest carries the schedule
   and the verified balance. `analysis/paired_blocks.py` re-derives the schedule
@@ -676,11 +733,12 @@ The title loses the word "Historical": it was added by the v4.0 audit to stop
 readers taking v1 as current, and it stopped being true the moment this
 repository grew a controlled tier on post-merge master.
 
-v4.0 audited what this repository had published. v4.1 measures what it had never
-run. Nine of master's eleven `--spec-type` methods, on one card, against a
-matched no-speculation baseline inside every run — the two left out are
-`draft-eagle3`, which needs three extract layers this model does not expose, and
-`draft-dspark`, which the runtime accepts only for DeepseekV4. The headline reverses.
+v4.0 audited what this repository had published. v4.1 measures what it had
+never run. Nine of master's eleven `--spec-type` methods, on one card, against
+a matched no-speculation baseline inside every run; the two left out are
+`draft-eagle3`, which needs three extract layers this model does not expose,
+and `draft-dspark`, which the runtime accepts only for DeepseekV4. The headline
+reverses.
 
 ### Added
 
@@ -694,7 +752,7 @@ matched no-speculation baseline inside every run — the two left out are
   | J | DFlash off vs on, one binary — the A/B v3 never had | **+18.7 %**, and it reverses v3's sign |
   | K | where is the optimum, and does it survive batching? | a plateau at `n_max` 2–4, a cliff after; batching erases it |
   | L | does the win survive the workload changing? | it halves with thinking off, and `n_max 4` goes negative — **see [ERRATA A17](ERRATA.md#a17-the-thinking-off-comparisons-are-not-comparisons-of-the-same-amount-of-work): that comparison is confounded by output length and `n_max 4` is +14.1 % on the length-matched prompts** |
-  | M | `draft-mtp` — the method the vLLM sibling uses | **+17.5 to +21.8 %**; nothing was blocking it, it had never been run |
+  | M | `draft-mtp` — the method the vLLM sibling uses | **+18.6 %** on aggregate at `n_max` 2, its best MTP arm; nothing was blocking it, it had never been run |
   | N | `ngram-map-k` / `k4v`, never run here | they never engage: 0.0 % acceptance, three lookup hits in thirty requests |
   | O | every method, one baseline, one matrix, one policy | a factor of five, split by drafter architecture |
 
@@ -704,33 +762,33 @@ matched no-speculation baseline inside every run — the two left out are
   300-token cap, and the divergence rate tracks output length.
 - **ERRATA A12** — the mechanism, measured. An external drafter forces the
   hybrid target to checkpoint and restore 82.079 MiB of target state plus
-  19.266 MiB of draft state on every partially accepted round: 772 saves and 709
-  restores per arm-run, a nominal ≈118.7 GiB by event count × the size the server
-  reports. DFlash logs none at draft lengths 1–16 and MTP none at 1–8. **Both
-  figures were corrected after review**: the volume double-counted the draft
-  component that `size()` already includes, and a "≈19.5 % of the wall clock"
-  claim was withdrawn because the create and restore messages sit on opposite
-  sides of the work they name.
+  19.266 MiB of draft state on every partially accepted round: 772 saves and
+  709 restores per arm-run, a nominal ≈118.7 GiB by event count × the size the
+  server reports. DFlash logs none at draft lengths 1–16 and MTP none at 1–8.
+  **Both figures were corrected after review**: the volume double-counted the
+  draft component that `size()` already includes, and a "≈19.5 % of the wall
+  clock" claim was withdrawn because the create and restore messages sit on
+  opposite sides of the work they name.
 - **Runs P, Q and R**, 60 further arm-runs. P and R repeat the key arms on a
-  second set of **twenty** prompts sharing none with the v1 ten — long inputs,
+  second set of **twenty** prompts sharing none with the v1 ten: long inputs,
   structured output, four languages, arithmetic, and two genuinely multi-turn
   exchanges, gated on the model recalling four-turn-old context. The decode
   speed-up moves by at most 4.3 pp, so it is not a property of the original
   prompt mix. Q settles the one anomaly v4.1 could not explain.
 - **ERRATA A14** — within-run repeats are not an error bar. Ten (arm,
   configuration) pairs measured in two or three independent runs have a median
-  between-run spread of 0.56 pp, and one pair differs by 8.5 pp with the argv,
+  between-run spread of 0.56 pp, and one pair differs by 8.6 pp with the argv,
   the drafter hash, the fitter's choices, the per-prompt draft counts, the
-  acceptance, the temperature and the clocks all identical. A three-repeat delta
-  is accurate to about a point, not to its printed SD.
+  acceptance, the temperature and the clocks all identical. A three-repeat
+  delta is accurate to about a point, not to its printed SD.
 - **ERRATA A13** — llama.cpp keeps *two* acceptance counters and this repository
   had only ever quoted one. Across 517 single-request arm-runs they agree to
-  within 0.5 pp on every path that takes no speculative checkpoint (31 runs) and
-  disagree by at least 1.0 pp on every path that does (42 runs), with no overlap.
-  The worst case is 53.3 pp. This narrows A1's account of the upstream fix — the
-  denominator moved, the early return did not — and it discredits the drafter's
-  counter too: `spec-draft-n1` reports 1639 of 1639 accepted on an arm running at
-  a quarter of baseline.
+  within 0.5 pp on every path that takes no speculative checkpoint (31 runs)
+  and disagree by at least 1.0 pp on every path that does (42 runs), with no
+  overlap. The worst case is 53.3 pp. This narrows A1's account of the upstream
+  fix (the denominator moved, the early return did not) and it discredits the
+  drafter's counter too: `spec-draft-n1` reports 1639 of 1639 accepted on an
+  arm running at a quarter of baseline.
 - `analysis/plot_v4_runs.py`, `analysis/extract_spec_accounting.py`,
   `analysis/compare_acceptance_counters.py`, `bench/stage_mtp_source.py`, and
   four new charts.
@@ -747,7 +805,7 @@ matched no-speculation baseline inside every run — the two left out are
   this repository holds only 2026-04-21…05-07 data and "is not a benchmark of
   current llama.cpp master"; both were false once runs A–O existed.
 - `BENCHMARK_ENV.md` gains the v4 artefact hashes and, more usefully, the
-  memory-policy table — `-ngl`, `-c` and `--fit-target` are variables across
+  memory-policy table: `-ngl`, `-c` and `--fit-target` are variables across
   these runs, which is exactly why absolute rates do not transfer between them.
 - `bench/retest_runner.py`: `BENCH_CONCURRENCY` now actually dispatches
   concurrently and reads the achieved batch width back out of request
@@ -759,11 +817,11 @@ matched no-speculation baseline inside every run — the two left out are
 
 - **"A configuration is worth running when it clears ~48 % draft acceptance."**
   Published in this repository on 2026-08-26 and falsified the same day. It is
-  12/12 inside the DFlash family and fails on the external drafter exactly where
-  it should matter: `spec-draft-n1` reaches **68.7 % acceptance and is 74.8 %
-  slower**. Scored per family it is 21/23, and both failures are at the
+  12/12 inside the DFlash family and fails on the external drafter exactly
+  where it should matter: `spec-draft-n1` reaches **68.7 % acceptance and is
+  74.8 % slower**. Scored per family it is 21/23, and both failures are at the
   high-acceptance end. The threshold is a property of the drafter, not of
-  acceptance — see A12.
+  acceptance: see A12.
 - **"A Q4_K_M MTP head moves 6.8 pp against Q8_0 at unchanged acceptance."**
   Reported in this branch as measured-and-unexplained. Five repeats of each
   drafter dissolve it: the Q8_0 arm at `n_max 4` was one measurement that did
@@ -783,7 +841,7 @@ matched no-speculation baseline inside every run — the two left out are
 
 - The data map described `bench/retest_runner.py` as "never executed"; it
   produced every v4 measurement.
-- `RETEST_TODO.md`'s MTP entry was wrong twice — first "no head weights", then
+- `RETEST_TODO.md`'s MTP entry was wrong twice: first "no head weights", then
   "a converter gap". The weights are present, and the stock converter and stock
   runtime both support the architecture. A patch attempt refuted the second
   claim in one step with `TypeError: Cannot create a consistent MRO`.
@@ -822,7 +880,8 @@ statistics, and the causal claims. Full itemised list with evidence:
   classic-draft measurement ever published here.
 - **"The regression is structural / engine-independent / hardware-independent."**
 - **"Q4 collapses the technique"**, **"the mechanism generalises to DFlash"**,
-  **"co-trained heads are the only positive yield path"** — all removed from v3.
+  **"co-trained heads are the only positive yield path"** — all removed from
+  v3.
 - **"Exp 2 refutes the workload-shape hypothesis."** Downgraded to exploratory:
   `-no-cnv` was rejected, `/no_think` did not disable thinking, and per-request
   outputs were never committed, so the intended treatment is unverifiable.
@@ -884,17 +943,17 @@ statistics, and the causal claims. Full itemised list with evidence:
   partial-accept checkpoint restore. 3/3 on `code_small`, in both the
   translation and matched arms.
 - **The committed v2 script does not match the committed v2 data** — different
-  config directory names — and no v2/v3 log records its own argv.
+  config directory names, and no v2/v3 log records its own argv.
 - **`--spec-type` is server-only**, not "missing from master" as v3 claimed.
 
 ### Added
 
-- [`ERRATA.md`](ERRATA.md) — every corrected claim with its evidence.
-- [`RETEST_TODO.md`](RETEST_TODO.md) — the runnable work queue that closes the
+- [`ERRATA.md`](ERRATA.md): every corrected claim with its evidence.
+- [`RETEST_TODO.md`](RETEST_TODO.md): the runnable work queue that closes the
   open items, with the bench host's verified state.
-- [`analysis/verbose_accounting.py`](analysis/verbose_accounting.py) —
+- [`analysis/verbose_accounting.py`](analysis/verbose_accounting.py):
   reconstructs the acceptance-counter artefact from any `-v` log.
-- [`bench/retest_runner.py`](bench/retest_runner.py) — one pinned binary,
+- [`bench/retest_runner.py`](bench/retest_runner.py): one pinned binary,
   ABBA ordering, N repeats, hashed manifest, and per-request capture of text,
   reasoning channel, stop reason, timings, and token IDs via `logprobs` (near-complete: `probs_output` drops trailing stop-word tokens, `server-context.cpp:2036-2039`, so the list can run a few short of `predicted_n`, which stays the authority for token counts).
   Thinking suppression is verified per request, not assumed.
@@ -916,7 +975,7 @@ A natural follow-up to this repo's MTP findings was published in the sibling [`q
 
 Result: **MoE+MTP production stack wins decisively** — TTFT 178 ms vs Dense 771 ms (**4.34×**), tok/s 88 vs 16 (**5.42×**), e2e 274 ms vs 1684 ms (**6.13×**). The "Dense 27B fits TP=1, should be cheaper to serve" intuition is falsified on this hardware × workload, and the MTP k=3 production recommendation from this repo's v3.0 is corroborated by the absence of any cheaper Dense-no-spec alternative.
 
-Caveat: see the [vllm-2x3090 v5 README scope section](https://github.com/thc1006/qwen3.6-vllm-2x3090/blob/master/v5_2026_05_17/README.md#scope-and-known-caveats) — N=3, single hardware, plus several vLLM-config and prompt-specification confounds documented in the ERRATA. **Latency findings are compute-bound and robust; tool-accuracy findings need a prompt-matched retest.** This repo (`qwen3.6-speculative-decoding-rtx3090`) does not get a version bump or new release for this event — the work belongs in the sibling repo's lineage.
+Caveat: see the [vllm-2x3090 v5 README scope section](https://github.com/thc1006/qwen3.6-vllm-2x3090/blob/master/v5_2026_05_17/README.md#scope-and-known-caveats), N=3, single hardware, plus several vLLM-config and prompt-specification confounds documented in the ERRATA. **Latency findings are compute-bound and robust; tool-accuracy findings need a prompt-matched retest.** This repo (`qwen3.6-speculative-decoding-rtx3090`) does not get a version bump or new release for this event, the work belongs in the sibling repo's lineage.
 
 ## [v3.0] — 2026-05-07
 
@@ -950,46 +1009,44 @@ Caveat: see the [vllm-2x3090 v5 README scope section](https://github.com/thc1006
 
 ### Mechanism note
 
-Per llama.cpp PR #22105 author: *"for Qwen3.5/3.6 MoE, performance is
-currently not optimal due to MoE + hybrid structure not well supported."*
-The wider mechanism is **MoE expert-routing x consumer-Ampere bandwidth**:
-Qwen3.6-35B-A3B routes 8-of-256 experts per token, expert-saturation
-threshold ~94 tokens. At single-stream batch=1 with `--draft-max ≤ 32`,
-drafted tokens stay below saturation, so verification has to load the
-union of expert slices, exceeding savings even at 100 % acceptance. This
-is **not Q4-specific or consumer-GPU-specific in isolation** — it's the
-joint MoE-routing × bandwidth × Q4-coupling effect. Cross-reference: the
-[sister repo](https://github.com/thc1006/qwen3.6-vllm-2x3090) v3.0/v4.0
-shows vLLM MTP (co-trained head, no separate KV cache) is +27 % NET WIN
-on the same hardware.
+Per llama.cpp PR #22105 author: *"for Qwen3.5/3.6 MoE, performance is currently
+not optimal due to MoE + hybrid structure not well supported."* The wider
+mechanism is **MoE expert-routing x consumer-Ampere bandwidth**:
+Qwen3.6-35B-A3B routes 8-of-256 experts per token, expert-saturation threshold
+~94 tokens. At single-stream batch=1 with `--draft-max ≤ 32`, drafted tokens
+stay below saturation, so verification has to load the union of expert slices,
+exceeding savings even at 100 % acceptance. This is **not Q4-specific or
+consumer-GPU-specific in isolation** — it's the joint MoE-routing × bandwidth ×
+Q4-coupling effect. Cross-reference: the [sister
+repo](https://github.com/thc1006/qwen3.6-vllm-2x3090) v3.0/v4.0 shows vLLM MTP
+(co-trained head, no separate KV cache) is +27 % NET WIN on the same hardware.
 
 
 ## [v2.3] — 2026-04-26 (afternoon)
 
 ### Added
-- [`v2_3090_followup/exp2_codejson_n3/`](v2_3090_followup/exp2_codejson_n3/)
-  — workload-shape probe. 5 code/JSON prompts (Python class with RLock,
-  REST API spec JSON, Rust merge_sort, Nginx reverse proxy config,
-  PostgreSQL top-10 customers query) × 3 trials × 3 configs (baseline,
-  Oleg `--draft-min 2 --draft-max 32`, srogmann `--draft-min 48 --draft-max 64`)
-  on standalone single 3090. **Result confirms v2 negative direction**:
-  baseline 139.22 ± 0.46 tok/s, Oleg 66.57 ± 7.57 tok/s (−52 %), srogmann
-  83.84 ± 1.80 tok/s (−40 %). The "structured prompts win" hypothesis is
-  refuted on llama.cpp + Q4 + RTX 3090.
+- [`v2_3090_followup/exp2_codejson_n3/`](v2_3090_followup/exp2_codejson_n3/):
+  workload-shape probe. 5 code/JSON prompts (Python class with RLock, REST API
+  spec JSON, Rust merge_sort, Nginx reverse proxy config, PostgreSQL top-10
+  customers query) × 3 trials × 3 configs (baseline, Oleg `--draft-min 2
+  --draft-max 32`, srogmann `--draft-min 48 --draft-max 64`) on standalone
+  single 3090. **Result confirms v2 negative direction**: baseline 139.22 ±
+  0.46 tok/s, Oleg 66.57 ± 7.57 tok/s (−52 %), srogmann 83.84 ± 1.80 tok/s (−40
+  %). The "structured prompts win" hypothesis is refuted on llama.cpp + Q4 +
+  RTX 3090.
 - README banner at the top documenting Exp 2 + the cross-engine status
   correction.
 
 ### Changed
 - **MAJOR scope correction** — earlier wording (v2.2) claimed the spec-decode
   negative finding is "hardware-class-independent" across consumer Ampere +
-  datacenter Ampere NVLink + Hopper. A v3 clean A/B retest in the sibling
-  repo [`thc1006/qwen3.6-vllm-2x3090`](https://github.com/thc1006/qwen3.6-vllm-2x3090)
+  datacenter Ampere NVLink + Hopper. A v3 clean A/B retest in the sibling repo [`thc1006/qwen3.6-vllm-2x3090`](https://github.com/thc1006/qwen3.6-vllm-2x3090)
   (matched flags + `--no-enable-prefix-caching`) found vLLM MTP k=1 on the
-  **same 2× RTX 3090 PCIe hardware** is **+27.5 % faster decode rate**, not
-  −12 %. So the negative direction is **engine + spec-method specific**:
-  it holds for `llama.cpp` draft-then-verify (this repo's data) but does
-  not hold for `vLLM` MTP k=1 with prefix-cache disabled. README "Cross-engine
-  confirmation" paragraph and the "Why" paragraph have been corrected.
+  **same 2× RTX 3090 PCIe hardware** is **+27.5 % faster decode rate**, not −12
+  %. So the negative direction is **engine + spec-method specific**: it holds
+  for `llama.cpp` draft-then-verify (this repo's data) but does not hold for
+  `vLLM` MTP k=1 with prefix-cache disabled. README "Cross-engine confirmation"
+  paragraph and the "Why" paragraph have been corrected.
 - README banner updated; `v2_3090_followup` directory expanded.
 
 ## [v2.2] — 2026-04-26
@@ -1000,11 +1057,10 @@ on the same hardware.
   vs MTP run `0.80 / 2`); cite **2× A100-80GB SXM4 NVLink** Modal clean
   A/B as the canonical cross-hardware MTP datapoint (prompt-4
   decode-only delta **−11.4 %**, TTFT-robust).
-- README "Why" paragraph: remove "memory-bandwidth-bound" attribution.
-  The mechanism is **bandwidth-independent** — the same negative
-  direction is now observed on (a) consumer 3090 GDDR6X 936 GB/s,
-  (b) datacenter A100 SXM4 HBM2e 2 TB/s + NVLink, (c) Hopper H20-3e
-  per [vllm #38182](https://github.com/vllm-project/vllm/issues/38182).
+- README "Why" paragraph: remove "memory-bandwidth-bound" attribution. The
+  mechanism is **bandwidth-independent** — the same negative direction is now
+  observed on (a) consumer 3090 GDDR6X 936 GB/s, (b) datacenter A100 SXM4 HBM2e
+  2 TB/s + NVLink, (c) Hopper H20-3e per [vllm #38182](https://github.com/vllm-project/vllm/issues/38182).
 - Replace "engine-independent on Ampere" with "**hardware-class-
   independent at single-stream batch=1** across consumer Ampere +
   datacenter Ampere (and Hopper per #38182)".
@@ -1030,46 +1086,45 @@ on the same hardware.
   - [Alloc-MoE (arXiv 2604.08133)](https://arxiv.org/abs/2604.08133) and
     [XShare (arXiv 2602.07265)](https://arxiv.org/pdf/2602.07265) frame
     the same expert-saturation pressure.
-  - [vllm #35387](https://github.com/vllm-project/vllm/issues/35387) —
-    H100 + FP8 + Qwen3-Next-80B-A3B with `method=qwen3_next_mtp` reports
-    −76.5 % latency regression (different hardware/quant/arch from this
-    bench, suspected `mamba_postprocess` CPU sync; same direction).
-  - [vllm #38182](https://github.com/vllm-project/vllm/issues/38182) —
-    H20-3e + Qwen3.5-35B-A3B + MTP drops prefix-cache hit rate
-    ≈92 % → ≈71 %; @Angazenn pinpoints the cause to
-    `single_type_kv_cache_manager.py:L457`.
+  - [vllm #35387](https://github.com/vllm-project/vllm/issues/35387), H100 +
+    FP8 + Qwen3-Next-80B-A3B with `method=qwen3_next_mtp` reports −76.5 %
+    latency regression (different hardware/quant/arch from this bench,
+    suspected `mamba_postprocess` CPU sync; same direction).
+  - [vllm #38182](https://github.com/vllm-project/vllm/issues/38182), H20-3e +
+    Qwen3.5-35B-A3B + MTP drops prefix-cache hit rate ≈92 % → ≈71 %; @Angazenn
+    pinpoints the cause to `single_type_kv_cache_manager.py:L457`.
   - [vLLM Qwen3.5/3.6 official Recipes](https://docs.vllm.ai/projects/recipes/en/latest/Qwen/Qwen3.5.html)
     now state up-front that "MTP-1 reduces per-token latency but degrades
     text throughput under high concurrency".
 - README cross-engine confirmation note in TL;DR + Related reading pointer
   to sibling repo
   [`thc1006/qwen3.6-vllm-2x3090`](https://github.com/thc1006/qwen3.6-vllm-2x3090).
-- README applicability note (iv) — batched multi-user serving caveat —
-  and (v) — explicit scope: this bench tests `ngram-cache`, `ngram-mod`,
-  classic `--model-draft` in llama.cpp and `mtp k=1` in vLLM. **EAGLE-3**
-  with CUDA graphs (vLLM Model Runner V2) is not evaluated here.
+- README applicability note (iv): batched multi-user serving caveat, and (v):
+  explicit scope: this bench tests `ngram-cache`, `ngram-mod`, classic
+  `--model-draft` in llama.cpp and `mtp k=1` in vLLM. **EAGLE-3** with CUDA
+  graphs (vLLM Model Runner V2) is not evaluated here.
 - README counter-example block: corrected attribution for the +15–45 %
-  Qwen3.5-122B-A10B speedup on PR #20075 — that data is from the PR
-  author's M3 Max bench plus @0xSero's AMD Strix Halo follow-up, not
-  srogmann's bench. Strix Halo also reports up to **+119 %** with the
-  REAP-pruned variant on gfx1151.
+  Qwen3.5-122B-A10B speedup on PR #20075; that data is from the PR author's M3
+  Max bench plus @0xSero's AMD Strix Halo follow-up, not srogmann's bench.
+  Strix Halo also reports up to **+119 %** with the REAP-pruned variant on
+  gfx1151.
 
 ### Changed
-- README applicability note (ii) — `[PR #20075](https://github.com/ggml-org/llama.cpp/pull/20075)`
+- README applicability note (ii): `[PR #20075](https://github.com/ggml-org/llama.cpp/pull/20075)`
   was open at v1 publication; on 2026-04-25 a community comment suggested
   it can be closed because its functionality is superseded elsewhere. The
   note now reflects that the hybrid-SSM/MoE checkpoint situation is fluid.
 
 ### Older Unreleased entries (carried over from earlier in 2026-04-22 → 2026-04-25)
-- `v2_3090_followup/results_v2.json` — machine-readable summary of all
+- `v2_3090_followup/results_v2.json`: machine-readable summary of all
   v2 runs (per-prompt `llama-cli` stats + per-config mean / min / max /
   std), extracted from the `.log` artefacts.
-- `v2_3090_followup/extract_results.py` — the extraction script used to
+- `v2_3090_followup/extract_results.py`: the extraction script used to
   produce the above JSON.
-- `v2_3090_followup/plot_v2.py` + `plot_v2_configs.png` — horizontal
+- `v2_3090_followup/plot_v2.py` + `plot_v2_configs.png`: horizontal
   bar chart comparing all 9 original-commit configs against baseline,
   with master-commit cross-check annotation.
-- `CHANGELOG.md` — this file.
+- `CHANGELOG.md`: this file.
 
 ## [v2.0] — 2026-04-22
 
@@ -1077,7 +1132,7 @@ Follow-up bench addressing [Oleg-dM's comment](https://huggingface.co/unsloth/Qw
 on the HF-discussion thread for `unsloth/Qwen3.6-35B-A3B-GGUF`.
 
 ### Added
-- `v2_3090_followup/` — fresh single-3090 bench on a different
+- `v2_3090_followup/`: fresh single-3090 bench on a different
   physical 3090 covering:
   - baseline (no spec-decode)
   - `--draft-min 2 --draft-max 32` (Oleg's suggestion)
@@ -1086,8 +1141,8 @@ on the HF-discussion thread for `unsloth/Qwen3.6-35B-A3B-GGUF`.
   - srogmann-style `--draft-min 48 --draft-max 64`
   - `--verbose` per-token acceptance dump
 - **Cross-check on current master** `bcb5eeb64`
-  (post PR #22227 `speculative-simple: add checkpoint support`) — 3 key
-  configs re-run on master hardware to rule out stale-commit artefact.
+  (post PR #22227 `speculative-simple: add checkpoint support`), 3 key configs
+  re-run on master hardware to rule out stale-commit artefact.
 - 45 per-prompt `llama-cli` logs + `verbose.log`.
 - `v2_3090_followup/SUMMARY.md` with methodology + full result table.
 - `v2_3090_followup/bench_3090_oleg.sh` reproducible script.
@@ -1097,9 +1152,9 @@ on the HF-discussion thread for `unsloth/Qwen3.6-35B-A3B-GGUF`.
   evidence survives `git clean` and `git add -A` round-trips.
 
 ### Changed
-- `README.md` — UPDATE banner summarising v2 findings and linking to
+- `README.md`: UPDATE banner summarising v2 findings and linking to
   the follow-up artefacts.
-- `pr_comment.md` — UPDATE note so the historical llama.cpp PR-comment
+- `pr_comment.md`: UPDATE note so the historical llama.cpp PR-comment
   draft stays consistent with the repo state.
 
 ### Key findings
@@ -1107,9 +1162,9 @@ on the HF-discussion thread for `unsloth/Qwen3.6-35B-A3B-GGUF`.
   defaults by +18 % (65.0 vs 55.3 tok/s) but is still −54 % vs
   baseline 139.9 tok/s.
 - Aggressive `--draft-min 48 --draft-max 64` is the **least bad**
-  recipe at 85.6 tok/s (−39 %) — counter-intuitively, the "wasteful"
-  large-window config amortises verify + KV-management overhead
-  better than tight windows.
+  recipe at 85.6 tok/s (−39 %): counter-intuitively, the "wasteful"
+  large-window config amortises verify + KV-management overhead better than
+  tight windows.
 - 100 % draft acceptance is genuine: source read of
   `common/speculative.cpp` (`impl->n_acc_tokens += n_accepted;` in
   `common_speculative_accept()`) + `--verbose` run emitting
@@ -1118,10 +1173,10 @@ on the HF-discussion thread for `unsloth/Qwen3.6-35B-A3B-GGUF`.
   the regression is architectural rather than a stale-commit artefact.
 
 ### Conclusion of v1 stands
-On a consumer RTX 3090 with Qwen3.6-35B-A3B at Q4_K_M, **no
-speculative decoding configuration is a net win** — regardless of
-commit, regardless of draft-min / draft-max, regardless of which
-measurement regime. H100 / H200 or NVLinked pairs may flip the sign.
+On a consumer RTX 3090 with Qwen3.6-35B-A3B at Q4_K_M, **no speculative
+decoding configuration is a net win** — regardless of commit, regardless of
+draft-min / draft-max, regardless of which measurement regime. H100 / H200 or
+NVLinked pairs may flip the sign.
 
 ## [v1.0] — 2026-04-21
 

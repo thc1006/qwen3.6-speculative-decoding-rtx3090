@@ -87,11 +87,29 @@ READER_DOC = {"_md_table": "ERRATA.md",
               "_v4_table": "v4_audit_2026_08_25/README.md",
               "_pr_table": "PULL_REQUEST.md",
               "_root_table": "README.md",
-              "_ch_table": "CHANGELOG.md"}
+              "_ch_table": "CHANGELOG.md",
+              # found by the header-literal scan below, which is why that scan
+              # exists: a whole reader was missing from this map and both
+              # tables it reads were being counted as unparsed
+              "_pre_table":
+                  "v4_audit_2026_08_25/PREREGISTERED_PREDICTION.md"}
+# The generic readers take the document's LINES as their first argument and the
+# header as their second, so the document has to come from the variable name.
+# Adding one of these without adding it here counts its tables as unparsed,
+# which is the mistake `_pre_table` made above in the other direction.
+LINES_DOC = {"_ER_LINES": "ERRATA.md",
+             "_RM_LINES": "README.md",
+             "_ROOT_LINES": "README.md",
+             "_V4R_LINES": "v4_audit_2026_08_25/README.md",
+             "_PR_LINES": "PULL_REQUEST.md",
+             "_CH_LINES": "CHANGELOG.md",
+             "_BE_LINES": "BENCHMARK_ENV.md",
+             "_RT_LINES": "RETEST_TODO.md"}
+GENERIC_READERS = {"_num_rows", "_num_rows_seq"}
 DASH = {"−": "-", "–": "-", "—": "-"}
 # a cell that is a measurement rather than a path, hash, date, link or issue
 NOT_A_VALUE = re.compile(r"https?://|\.py|\.json|\.md|\.log|\.sh|\.cff"
-                         r"|`[0-9a-f]{8}|\d{4}-\d{2}-\d{2}|#\d")
+                         r"|`[0-9a-f]{7,}|\d{4}-\d{2}-\d{2}|#\d|[Ss][Hh][Aa]-?\d")
 NUMERIC = re.compile(r"\d+\.\d+|\d{2,}")
 
 
@@ -101,14 +119,40 @@ def norm(s: str) -> str:
     return s
 
 
-# Two tables are read by a bespoke loop in `verify_claims.py` rather than by one
-# of the readers above, so the AST scan cannot see them. Declared here, and the
-# declaration is a claim rather than a courtesy: `--probe --covered` perturbs
-# them like any other and both come back caught.
+# Read by a bespoke loop in `verify_claims.py` rather than by one of the readers
+# above, so the AST scan cannot see them. Declared here, and the declaration is
+# a claim rather than a courtesy: `--probe --covered` perturbs them like any
+# other and they come back caught. Four of these were being counted as unparsed
+# and were about to be parsed a second time.
 HAND_PARSED = {
     ("README.md", "| arm | pooled tok/s | change |"),
     ("README.md", "| arm | O2 | O3 | shift |"),
+    ("README.md", "| configuration | real acceptance | pooled tok/s | vs baseline |"),
+    ("README.md", "| | seconds | share |"),
+    ("ERRATA.md", "| arm | freerun, as the archive did it | hard cap | shift |"),
+    # one entry, two tables: runs A and B share a header and are located by
+    # index, so `_v4_table` cannot tell them apart and neither can the scan
+    ("v4_audit_2026_08_25/README.md", "| arm | request-mean | pooled | min |"),
+    # one table in three documents, read by index and required to agree
+    ("README.md", "| method | thinking on"),
+    ("ERRATA.md", "| method | thinking on"),
+    ("v4_audit_2026_08_25/README.md", "| method | thinking on"),
 }
+
+
+def header_literals() -> set[str]:
+    """Every string in the checker that looks like a table header.
+
+    A bespoke reader - `next(l for l in LINES if l.startswith("| arm | ..."))` -
+    is invisible to the scan above, and four tables were counted as unparsed
+    while being read that way. This finds the literal wherever it sits; the test
+    in `tests/` requires each one to be either a reader argument or an entry in
+    HAND_PARSED, so a new bespoke reader cannot go unrecorded.
+    """
+    src = (ROOT / "analysis" / "verify_claims.py").read_text(encoding="utf-8")
+    return {n.value for n in ast.walk(ast.parse(src))
+            if isinstance(n, ast.Constant) and isinstance(n.value, str)
+            and n.value.startswith("| ") and n.value.count("|") >= 2}
 
 
 def parsed_headers() -> set[tuple[str, str]]:
@@ -116,10 +160,24 @@ def parsed_headers() -> set[tuple[str, str]]:
     src = (ROOT / "analysis" / "verify_claims.py").read_text(encoding="utf-8")
     out = set()
     for n in ast.walk(ast.parse(src)):
-        if (isinstance(n, ast.Call) and getattr(n.func, "id", "") in READER_DOC
-                and n.args and isinstance(n.args[0], ast.Constant)):
-            out.add((READER_DOC[n.func.id], n.args[0].value))
+        if not isinstance(n, ast.Call):
+            continue
+        fn = getattr(n.func, "id", "")
+        if (fn in READER_DOC and n.args
+                and isinstance(n.args[0], ast.Constant)):
+            out.add((READER_DOC[fn], n.args[0].value))
+        elif (fn in GENERIC_READERS and len(n.args) >= 2
+                and isinstance(n.args[0], ast.Name)
+                and isinstance(n.args[1], ast.Constant)
+                and n.args[0].id in LINES_DOC):
+            out.add((LINES_DOC[n.args[0].id], n.args[1].value))
     return out | HAND_PARSED
+
+
+def _cells_with_numbers(row: str) -> list[str]:
+    """The cells of one row that hold at least one probeable number."""
+    return [row[a:b] for a, b in _pipe_spans(row)
+            if any(True for _ in _numbers_in(row, (a, b)))]
 
 
 def tables(rel: str) -> list[dict]:
@@ -138,8 +196,10 @@ def tables(rel: str) -> list[dict]:
             if not s.startswith("|"):
                 break
             body.append(s)
-        cells = [c.strip() for r in body for c in r.strip().strip("|").split("|")]
-        values = [c for c in cells if NUMERIC.search(c) and not NOT_A_VALUE.search(c)]
+        # a cell carries a value if the probe would perturb something in it,
+        # so the census and the probe cannot disagree about what a value is
+        values = [c for r in body
+                  for c in _cells_with_numbers(r)]
         out.append({"doc": rel, "line": i + 1, "header": head,
                     "rows": len(body), "value_cells": len(values)})
     return out
@@ -212,8 +272,9 @@ def prose_probe(absent: list[dict]) -> list[dict]:
     out = []
     with contextlib.ExitStack() as stack:
         wt = _worktree(stack)
-        base_fails, base_crash = _run(wt)
-        print(f"baseline: {len(base_fails)} failing assertion(s)", file=sys.stderr)
+        base_fails, base_n, base_rc = _run(wt)
+        print(f"baseline: {base_n} assertions, {len(base_fails)} failing, "
+              f"exit {base_rc}", file=sys.stderr)
         for n, item in enumerate(sorted(pick, key=lambda x: (x["doc"], x["line"])),
                                  start=1):
             p = wt / item["doc"]
@@ -229,10 +290,10 @@ def prose_probe(absent: list[dict]) -> list[dict]:
             lines[item["line"] - 1] = row.replace(was, now, 1)
             p.write_text("\n".join(lines) + "\n", encoding="utf-8")
             try:
-                fails, crashed = _run(wt)
+                fails, ran, rc = _run(wt)
             finally:
                 p.write_text(orig, encoding="utf-8")
-            caught = bool(fails - base_fails) or (crashed and not base_crash)
+            caught = (bool(fails - base_fails) or ran < base_n or rc != base_rc)
             out.append({**item, "probe": "caught" if caught else "SURVIVED",
                         "perturbation": f"{was} -> {now}"})
             print(f"  [{n}/{len(pick)}] {item['doc']}:{item['line']} {was} -> {now}  "
@@ -299,12 +360,149 @@ def _worktree(stack: contextlib.ExitStack) -> pathlib.Path:
 _FAILED = re.compile(r"^  FAIL  (.*?)\s+got=", re.M)
 
 
-def _run(wt: pathlib.Path) -> tuple[set[str], bool]:
-    """The checker's failure set, and whether it fell over instead of reporting."""
+_RAN = re.compile(r"^  (?:PASS|FAIL)  ", re.M)
+
+
+def _run(wt: pathlib.Path) -> tuple[set[str], int, int]:
+    """The checker's failure set, how many assertions it ran, and its status.
+
+    Three signals because two were not enough, twice. Reading only the FAIL
+    lines missed a perturbation that made the checker abort with
+    `SystemExit("unrecognised run C row label")`, which prints no traceback and
+    adds no failure. Adding the exit status missed the same thing whenever the
+    baseline was already exiting 1 for an unrelated reason: an abort also exits
+    1, so the comparison saw no change and called it unnoticed. The count of
+    assertions that ran is the signal that does not care - an abort always runs
+    fewer - and it is the one that would have caught both.
+    """
     r = subprocess.run([sys.executable, "analysis/verify_claims.py"],
                        cwd=wt, capture_output=True, text=True, timeout=1800)
-    crashed = "Traceback (most recent call last)" in r.stderr
-    return set(_FAILED.findall(r.stdout)), crashed
+    return (set(_FAILED.findall(r.stdout)), len(_RAN.findall(r.stdout)),
+            r.returncode)
+
+
+def _pipe_spans(raw: str) -> list[tuple[int, int]]:
+    """(start, end) of each cell's text in a raw markdown row, pipes excluded.
+
+    Offsets into the raw line, so a blockquote marker or any spacing survives
+    the edit. Splitting and rejoining would reformat the row, and a probe that
+    also reformats cannot say which change the checker noticed.
+    """
+    bars = [k for k, ch in enumerate(raw) if ch == "|"]
+    return [(bars[k] + 1, bars[k + 1]) for k in range(len(bars) - 1)]
+
+
+def _token_around(text: str, at: int) -> str:
+    """The whitespace-delimited token containing offset `at`.
+
+    `NOT_A_VALUE` used to be applied to the whole cell, so one commit hash in
+    a cell hid every real number beside it: the run registry's `3 arms x 10
+    prompts; A at \u0060bcb5eeb64\u0060, 2 repeats` offered nothing to probe at
+    all. Excluding the token instead keeps the hash, the date and the issue
+    number out while leaving the measurements in.
+    """
+    a = text.rfind(" ", 0, at) + 1
+    b = text.find(" ", at)
+    return text[a:] if b < 0 else text[a:b]
+
+
+def _numbers_in(raw: str, span: tuple[int, int]):
+    """Every number inside one cell, as (absolute_start, absolute_end, text).
+
+    Every number, not the first: an interval cell holds two, and perturbing
+    only the low bound leaves the high one untested. The W table passed a
+    one-number-per-table probe with two of its three columns unread; this is
+    the resolution that would have caught it.
+
+    Decimals and integers both, and this had the same bug it exists to find.
+    The first version fell back to integers only when the cell held no
+    decimal, so `p_min 0 / 0.50 / 0.75 / 0.90 at n_max 8` was probed on its
+    four decimals and never on the 8. Both lookarounds already exclude the
+    halves of a decimal, so there is nothing for the fallback to protect
+    against and it only hid numbers.
+    """
+    dec = re.compile(r"(?<![\w.])\d+\.\d+(?![\w.])")
+    integer = re.compile(r"(?<![\w.])\d+(?![\w.])")
+    text = raw[span[0]:span[1]]
+    seen = []
+    for pat in (dec, integer):
+        for m in pat.finditer(text):
+            if NOT_A_VALUE.search(_token_around(text, m.start())):
+                continue
+            seen.append((span[0] + m.start(), span[0] + m.end(), m.group(0)))
+    yield from sorted(seen)
+
+
+def _bump(was: str) -> str:
+    """Add seven to the integer part, keeping the shape of the number."""
+    head, dot, tail = was.partition(".")
+    return f"{int(head) + 7}.{tail}" if dot else str(int(head) + 7)
+
+
+def cell_probe(tables_: list[dict], shard: tuple[int, int] = (0, 1)) -> list[dict]:
+    """Perturb EVERY numeric cell of every table given, one at a time.
+
+    The one-cell-per-table probe is too weak to say a table is guarded: the W
+    three-design table passed it while two of its three columns were unread,
+    because the cell it happened to pick was in the third. This is the version
+    that would have caught that, and it is why it exists.
+
+    `shard` is (index, count); tables are dealt out round robin so several
+    processes can run at once, each in its own worktree.
+    """
+    out = []
+    picked = [t for k, t in enumerate(tables_) if k % shard[1] == shard[0]]
+    with contextlib.ExitStack() as stack:
+        wt = _worktree(stack)
+        base_fails, base_n, base_rc = _run(wt)
+        print(f"shard {shard[0]}/{shard[1]}: {len(picked)} tables, baseline "
+              f"{base_n} assertions, {len(base_fails)} failing, exit {base_rc}",
+              file=sys.stderr, flush=True)
+        for t in picked:
+            p = wt / t["doc"]
+            orig = p.read_text(encoding="utf-8")
+            lines = orig.splitlines()
+            body = []
+            for j in range(t["line"] + 1, len(lines)):
+                if not lines[j].strip().lstrip("> ").strip().startswith("|"):
+                    break
+                body.append(j)
+            for j in body:
+                raw = orig.splitlines()[j]
+                targets = [(col, a, b, txt)
+                           for col, span in enumerate(_pipe_spans(raw))
+                           for a, b, txt in _numbers_in(raw, span)]
+                for col, a, b, was in targets:
+                    now = _bump(was)
+                    lines[j] = raw[:a] + now + raw[b:]
+                    p.write_text("\n".join(lines) + "\n", encoding="utf-8")
+                    try:
+                        fails, ran, rc = _run(wt)
+                    finally:
+                        lines[j] = raw
+                        p.write_text("\n".join(lines) + "\n", encoding="utf-8")
+                    new_fails = sorted(fails - base_fails)
+                    # an abort is a detection, and it shows as a short run
+                    caught = bool(new_fails) or ran < base_n or rc != base_rc
+                    rec = {"doc": t["doc"], "table_line": t["line"],
+                           "row": j + 1, "col": col,
+                           "perturbation": f"{was} -> {now}",
+                           "probe": "caught" if caught else "SURVIVED",
+                           "noticed_by": new_fails[:1]
+                           or ([f"aborted after {ran} of {base_n}"]
+                               if ran < base_n else [f"exit {rc}"])}
+                    out.append(rec)
+                    if not caught:
+                        print(f"  SURVIVED {t['doc']}:{j + 1} col{col} "
+                              f"{was} -> {now}", file=sys.stderr, flush=True)
+            p.write_text(orig, encoding="utf-8")
+            _n = sum(1 for r in out if r["table_line"] == t["line"]
+                     and r["doc"] == t["doc"])
+            _s = sum(1 for r in out if r["table_line"] == t["line"]
+                     and r["doc"] == t["doc"] and r["probe"] == "SURVIVED")
+            print(f"  {t['doc']}:{t['line']}  {_n} cells, {_s} survived",
+                  file=sys.stderr, flush=True)
+    return out
 
 
 def probe(candidates: list[dict]) -> list[dict]:
@@ -332,9 +530,9 @@ def probe(candidates: list[dict]) -> list[dict]:
     out = []
     with contextlib.ExitStack() as stack:
         wt = _worktree(stack)
-        base_fails, base_crash = _run(wt)
-        print(f"baseline: {len(base_fails)} failing assertion(s)"
-              f"{', CRASHED' if base_crash else ''}", file=sys.stderr, flush=True)
+        base_fails, base_n, base_rc = _run(wt)
+        print(f"baseline: {base_n} assertions, {len(base_fails)} failing, "
+              f"exit {base_rc}", file=sys.stderr, flush=True)
         for name in sorted(base_fails):
             print(f"  standing failure (ignored): {name}", file=sys.stderr)
         for n, t in enumerate(candidates, start=1):
@@ -361,11 +559,11 @@ def probe(candidates: list[dict]) -> list[dict]:
             lines[row] = lines[row][:m.start()] + now + lines[row][m.end():]
             p.write_text("\n".join(lines) + "\n", encoding="utf-8")
             try:
-                fails, crashed = _run(wt)
+                fails, ran, rc = _run(wt)
             finally:
                 p.write_text(orig, encoding="utf-8")
             new_fails = sorted(fails - base_fails)
-            caught = bool(new_fails) or (crashed and not base_crash)
+            caught = bool(new_fails) or ran < base_n or rc != base_rc
             out.append({**t, "probe": "caught" if caught else "SURVIVED",
                         "perturbation": f"{was} -> {now}",
                         "noticed_by": new_fails[:2]})
@@ -376,16 +574,50 @@ def probe(candidates: list[dict]) -> list[dict]:
 
 
 def main() -> None:
-    unknown = [a for a in sys.argv[1:]
-               if a not in ("--json", "--probe", "--covered", "--prose")]
+    shard = (0, 1)
+    argv = []
+    for a in sys.argv[1:]:
+        if a.startswith("--shard="):
+            i, n = a.split("=", 1)[1].split("/")
+            shard = (int(i), int(n))
+        else:
+            argv.append(a)
+    unknown = [a for a in argv
+               if a not in ("--json", "--probe", "--covered", "--prose",
+                            "--every-cell", "--count")]
     if unknown:
         sys.exit(f"unrecognised option(s): {' '.join(unknown)}")
-    if "--prose" in sys.argv:
+    if "--every-cell" in argv:
+        c = census()
+        picked = c["covered" if "--covered" in argv else "uncovered"]
+        if "--count" in argv:
+            n = 0
+            for t in picked:
+                lines = (ROOT / t["doc"]).read_text(encoding="utf-8").splitlines()
+                for j in range(t["line"] + 1, len(lines)):
+                    if not lines[j].strip().lstrip("> ").strip().startswith("|"):
+                        break
+                    n += sum(1 for span in _pipe_spans(lines[j])
+                             for _ in _numbers_in(lines[j], span))
+            print(f"{len(picked)} tables, {n} numbers")
+            return
+        res = cell_probe(picked, shard)
+        surv = [r for r in res if r["probe"] == "SURVIVED"]
+        if "--json" in argv:
+            print(json.dumps({"shard": list(shard), "probed": len(res),
+                              "survived": surv}, indent=2))
+            return
+        print(f"shard {shard[0]}/{shard[1]}: {len(res)} numbers perturbed, "
+              f"{len(surv)} survived")
+        for r in surv:
+            print(f"  {r['doc']}:{r['row']} col{r['col']}  {r['perturbation']}")
+        return
+    if "--prose" in argv:
         pc = prose_census()
-        if "--probe" in sys.argv:
+        if "--probe" in argv:
             pc["sample"] = prose_probe(pc["absent"])
         pc.pop("absent")
-        if "--json" in sys.argv:
+        if "--json" in argv:
             print(json.dumps(pc, indent=2))
             return
         print(f"decimal numbers in prose:    {pc['prose_numbers']}")
@@ -401,10 +633,10 @@ def main() -> None:
     # honest: parsing a table is only coverage if perturbing a cell actually
     # fails the checker. A parser can match a header, return rows, and assert
     # nothing about the column you changed.
-    _key = "covered" if "--covered" in sys.argv else "uncovered"
-    if "--probe" in sys.argv:
+    _key = "covered" if "--covered" in argv else "uncovered"
+    if "--probe" in argv:
         c[_key] = probe(c[_key])
-    if "--json" in sys.argv:
+    if "--json" in argv:
         print(json.dumps(c, indent=2))
         return
     print(f"documents censused:          {c['documents']}"

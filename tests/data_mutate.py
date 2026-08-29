@@ -37,6 +37,10 @@ COPY = ("analysis", "bench", "tests", "v4_audit_2026_08_25", "results",
         # the CI-install guard reads both locks, so a mirror
         # without them turns that test into a FileNotFoundError
         "requirements-lint.lock", "requirements-plot.lock",
+        # the v1 archive's own request payload carries `temperature: 0.0`, which
+        # the tier registry's row is checked against, and `pr_comment.md` is the
+        # third document quoting the 0.6B drafter's vocabulary
+        "bench_runner.py", "pr_comment.md",
         "PULL_REQUEST.md",
         # the coverage census asserts that every markdown file in the tree is
         # either censused or excluded with a reason, so a mirror missing one

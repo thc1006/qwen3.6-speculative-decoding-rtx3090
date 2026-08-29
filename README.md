@@ -3,7 +3,7 @@
 [![DOI](https://zenodo.org/badge/1216484498.svg)](https://doi.org/10.5281/zenodo.19776558)
 
 > [!IMPORTANT]
-> **Audited 2026-08-25, extended 2026-08-26.** This repository now holds two
+> **Audited 2026-08-25, extended through 2026-08-28.** This repository now holds two
 > tiers, and they must not be read as one body of evidence.
 >
 > The **archival tier** is the published v1/v2/v3 runs, collected 2026-04-21 to
@@ -13,16 +13,18 @@
 > benchmark of all RTX 3090 systems, of all Qwen3.6 quantisations, of all
 > speculative-decoding methods, or of end-to-end voice-agent latency.
 >
-> The **controlled tier** is runs A–V3 and T4, collected 2026-08-25/27 on post-merge
-> master `3737e4137`: repeated arm-runs with a matched no-speculation baseline
+> The **controlled tier** is runs A to W, 1802 arm-runs in 62 directories,
+> collected 2026-08-25 to 2026-08-28. Run A is the legacy `bcb5eeb64` binary,
+> kept as the comparison; every other run is post-merge master `3737e4137`.
+> Each is repeated arm-runs with a matched no-speculation baseline
 > inside each run, thinking suppression verified per request rather than
 > assumed, concurrent client requests verified from request timestamps, full per-request text
 > and token ids, and continuous GPU telemetry. Its findings are the ones to
 > cite **for llama.cpp `3737e4137`**, under the model files, binary, hardware
-> and workload recorded below — not for current master, which has moved and
+> and workload recorded below, not for current master, which has moved and
 > which carries open work on recurrent rollback, output row ordering and
 > hybrid checkpoint invalidation that touches these paths directly
-> ([the upstream table](#upstream-status-at-the-2026-08-25-audit)). Two limits
+> ([the upstream table](#upstream-status-checked-2026-08-25-open-items-re-checked-2026-08-27)). Two limits
 > are stated up front rather than
 > buried: the same configuration measured **twelve times in one day spans
 > 9.4 pp**, clustered by run rather than scattered, on byte-identical output
@@ -31,16 +33,17 @@
 > that let the arms stop where they liked is confounded by output length**
 > ([A17](ERRATA.md#a17-the-thinking-off-comparisons-are-not-comparisons-of-the-same-amount-of-work)),
 > which is enough to change one published sign. Run V's hard-cap half is the
-> exception — it forces every request to the same token count — but its two
+> exception (it forces every request to the same token count), but its two
 > halves were not interleaved, so it measures a difference it cannot
 > attribute. The thinking-on results, which is everything in the
-> table below, are unaffected by the second: all 5904 thinking-on requests ran
-> to the cap.
+> table below, are unaffected by the second: 5770 requests recorded
+> `thinking_suppressed` false and every one of them ran to the 300-token cap, as
+> did the 134 in runs A and B, which predate the per-request field.
 >
 > The audit **retracted this repository's headline mechanism.** Earlier versions
 > reported "100 % draft acceptance yet slower, therefore MoE expert-loading
 > overhead". That 100 % is an artefact of how llama.cpp counts acceptance on
-> this model class, not a measurement — see
+> this model class, not a measurement; see
 > [The "100 % acceptance" retraction](#the-100--acceptance-retraction). Three
 > further defects turned up that no earlier version noticed: the draft model was
 > never actually vocabulary-compatible, three quarters of the v1 requests
@@ -52,10 +55,11 @@
 > **The negative observation survives for the methods v1 tested, and only for
 > those.** With an external draft model, speculation still loses badly here, and
 > batching widens the gap rather than closing it. With the target's *own* layers
-> as the drafter — DFlash, and the model's built-in multi-token-prediction head
-> — it wins, by a fifth to a quarter, at short draft windows and one request at
-> a time. The width of that band is not rounding. The same DFlash configuration
-> was measured **twelve times** on 2026-08-26 and spans **+17.3 % to +26.7 %**,
+> as the drafter, DFlash and the model's built-in multi-token-prediction head,
+> it wins at short draft windows and one request at a time. How much it wins by
+> depends on which invocation you measure, and the width of that band is not
+> rounding: the same DFlash configuration was measured **twelve times** on
+> 2026-08-26 and spans **+17.3 % to +26.7 %**,
 > on byte-identical output and identical draft counts, while the no-speculation
 > reference beside it holds to a CV of 0.42 %. The values cluster by run, and
 > only this one arm moves between the clusters
@@ -75,22 +79,26 @@ no-speculation reference.
 The direction holds *for the conditions v1 tested*. The *explanation* published
 alongside it does not. Re-run on a binary where llama.cpp counts acceptance
 correctly, real acceptance and decode rate correlate at **r = +0.998** across
-the ten prompts — the slowdown tracks low acceptance and draft-path cost, which
+the ten prompts: the slowdown tracks low acceptance and draft-path cost, which
 is ordinary speculative-decoding economics. The "100 % acceptance yet slower,
 therefore an MoE pathology" anomaly this repository was built around does not
 exist.
 
 **And the direction is not universal.** On 2026-08-26, eight speculative
 configurations and a no-speculation baseline were measured on this card in one
-matrix under one memory policy, as a **balanced Latin square**: nine blocks, each
-arm appearing exactly once per block and visiting every position exactly once —
-verified from the execution log, not from the design. Each change below is
+matrix under one memory policy, as a **Latin square balanced for position**:
+nine blocks, each arm appearing exactly once per block and visiting every
+position exactly once, verified from the execution log rather than from the
+design. It is not balanced for carryover, and `analysis/carryover.py` refuses to
+report a predecessor contrast for it. Run W is the design that balances both,
+and its analysis plan was pre-registered before its data existed
+(`v4_audit_2026_08_25/PREREGISTERED_W.md`). Each change below is
 paired against the baseline measured **inside the same block**, and the interval
 is over blocks, which is the unit of replication and of resampling.
 
 `analysis/paired_blocks.py` computes two of them: a percentile bootstrap that
 resamples whole blocks, and a Student-t interval on the log ratios. **The column
-below is the t interval**, which is the wider of the two on every row here — the
+below is the t interval**, which is the wider of the two on every row here. The
 bootstrap can only ever resample the nine values it has, so at this block count
 it under-covers, and quoting the narrower one would be the wrong direction to
 err in. Both are in each run's `paired_blocks.json`.
@@ -112,8 +120,8 @@ err in. Both are in each run's `paired_blocks.json`.
 > | run O2, t interval over its own nine blocks | [+25.5 %, +27.1 %] |
 >
 > The twelve runs are not twelve independent measurements of the configuration
-> either — they mix the stock and instrumented builds, two-, three- and
-> nine-arm matrices, and different neighbouring treatments — so the range is a
+> either (they mix the stock and instrumented builds, two-, three- and
+> nine-arm matrices, and different neighbouring treatments), so the range is a
 > bound on what was observed, not a confidence interval. Pooling their 43
 > blocks would not fix that: the blocks are nested inside invocations, and the
 > invocation is the level the variation lives at. A design that identifies it
@@ -139,15 +147,16 @@ acceptance column readable, and it is why `ngram-map-k4v-m8` is not the
 half-accepted success its 50.0 % suggests: it drafted **216 tokens across 27 000
 generated**, one per 125, so its acceptance rate is 108 of 216 and it neither
 helps nor hurts because it almost never fires. `ngram-mod-n24` and `ngram-cache`
-are the opposite — they draft on a fifth of tokens and have almost all of it
-rejected, which is what a 10–19 % loss is made of.
+are the opposite: they draft on a sixth to a fifth of tokens, 0.17 and 0.19 per
+token generated, and have almost all of it rejected, which is what a 10–19 %
+loss is made of.
 
 ![Eight speculative configurations, one baseline, one matrix](analysis/plot_head_to_head.png)
 
 **It was run twice.** Run O3 is the same nine arms, nine balanced blocks, same
 stock binary and same models, five hours later, with the harness asserting the
 library hash on **every arm-run** rather than once. All **810 request-pairs are
-byte-identical** to O2 — same token ids, same text — and acceptance matches to a
+byte-identical** to O2 (same token ids, same text), and acceptance matches to a
 tenth of a point on every arm. What moves is the time:
 
 | arm | O2 | O3 | shift |
@@ -163,7 +172,7 @@ tenth of a point on every arm. What moves is the time:
 | *no speculation, absolute* | *115.7* | *116.5* | *+0.7 %* |
 
 Eight arms move by 0.2 to 1.0 pp. **`spec-dflash-n2` moves by 2.9**, and it did
-the same thing between runs T and T3 — 5.2 pp, also on byte-identical output.
+the same thing between runs T and T3, by 5.2 pp, also on byte-identical output.
 Whatever this is, it is specific to that arm and it is reproducible, and nothing
 recorded distinguishes the runs:
 [ERRATA A16](ERRATA.md#a16-two-runs-identical-in-every-recorded-respect-and-byte-identical-in-output-differ-by-34--on-one-arm).
@@ -184,7 +193,7 @@ one request at a time:
 | U1 **+22.3 %** 22:12 | U2 **+24.2 %** 22:15 | U3 **+17.3 %** 22:18 | U4 **+19.9 %** 22:21 | U5 **+25.6 %** 22:24 | U6 **+24.3 %** 22:27 |
 
 **Range 9.4 pp, SD 2.9.** The no-speculation baseline over the same twelve runs
-holds 115.72–117.25 tok/s, a CV of **0.42 %** — the reference is steady and the
+holds 115.72–117.25 tok/s, a CV of **0.42 %**: the reference is steady and the
 arm under test is not. Every one of the twelve produced byte-identical output,
 and `draft_n` is 2441 with acceptance 72.3 % in all 43 of their blocks: the
 speculative work is the same to the token and only the time differs.
@@ -192,7 +201,7 @@ speculative work is the same to the token and only the time differs.
 Pooling those 43 blocks gives **+17.0 % to +27.8 %**, and the values cluster by
 run rather than scattering inside one: split at +23 % and **eleven of the twelve
 runs fall wholly on one side**, averaging +25.7 % above and +20.3 % below. Run
-O3 is the one that crosses, at block 4 — and **in those blocks only this arm
+O3 is the one that crosses, at block 4, and **in those blocks only this arm
 moves**, including `spec-dflash-n4`, the same drafter at twice the draft length,
 which never leaves ±1.01 % of its own first block. Whatever it is survives the
 server restart between arm-runs, so a single measurement lands wherever it
@@ -204,17 +213,17 @@ interval as within-invocation precision only:
 [ERRATA A16](ERRATA.md#a16-two-runs-identical-in-every-recorded-respect-and-byte-identical-in-output-differ-by-34--on-one-arm).
 
 O2 is quoted because the documents are built on it and because run O3 replicates
-it arm for arm; it is not the lowest — run U3 is, at +17.3 %. Runs K1 and L read about +21 % for the same arm and are
+it arm for arm; it is not the lowest. Run U3 is, at +17.3 %. Runs K1 and L read about +21 % for the same arm and are
 excluded from the comparison above: they ran at `--fit-target 2048`, a different
 memory policy, which [`BENCHMARK_ENV.md`](BENCHMARK_ENV.md) records as a variable
 across runs. Until 2026-08-26 this footnote quoted run O's +24.6 % as though it
-were this table's own figure — it was written when run O *was* the headline table
+were this table's own figure. It was written when run O *was* the headline table
 and was not updated when O2 replaced it. What a three-repeat delta is actually
 worth is measured in
 [ERRATA A14](ERRATA.md#a14-within-run-repeats-are-not-an-error-bar).
 
 † Server-side acceptance counter. It agrees with llama.cpp's other counter to
-0.5 pp on the self-speculative rows and under-reports on the rest — the divergence
+0.5 pp on the self-speculative rows and under-reports on the rest; the divergence
 tracks the speculative-checkpoint path exactly
 ([ERRATA A13](ERRATA.md#a13-there-are-two-acceptance-counters-they-disagree-and-the-disagreement-is-exactly-the-checkpoint-path)).
 No throughput figure depends on either counter.
@@ -227,21 +236,22 @@ quantisation, parameters activated per proposed token, reuse of the target's
 hidden states, rollback behaviour, full-checkpoint policy and acceptance
 profile, and nothing here varies them one at a time.
 
-All three are separately loaded draft models — the harness passes `-md <GGUF>`
+All three are separately loaded draft models: the harness passes `-md <GGUF>`
 for every one of them, and upstream describes MTP as a distinct model with its
 own context and KV cache even when it comes from the same file. An earlier
 version of this section said the divide was "whether the drafter is a second
-model"; that is simply false of these arms. `spec-draft-n1` accepts 69.7 % of its drafts —
-more than every winning arm but one — and is 75 % slower, because a separate
+model"; that is simply false of these arms. `spec-draft-n1` accepts 69.7 % of
+its drafts, third-highest in the table, above one of the three winning arms and
+below the other two, and is 75 % slower, because a separate
 draft context makes this hybrid target save and restore a full checkpoint on
-every partially accepted round — the server reports 82.079 MiB per checkpoint,
-772 creates and 709 restores in one arm-run — which DFlash logs zero times at
+every partially accepted round. The server reports 82.079 MiB per checkpoint,
+772 creates and 709 restores in one arm-run, which DFlash logs zero times at
 draft lengths 1 to 16 and MTP zero times at 1 to 8
 ([ERRATA A12](ERRATA.md#a12-what-the-checkpoint-path-costs-measured-with-timers-in-the-source)).
 
 **Every arm here that represents a method v1 benchmarked is below baseline.**
 That is four rows, not three: v1 tested an external draft model, `ngram-cache`
-and `ngram-mod`, and the external drafter appears twice — `spec-draft-n8` and
+and `ngram-mod`, and the external drafter appears twice: `spec-draft-n8` and
 `spec-draft-n1` are two configurations of one method, with `ngram-cache` and
 `ngram-mod-n24` above them. The original negative finding was right about what
 it measured. What it did not measure is DFlash and MTP, which is where the wins
@@ -249,23 +259,25 @@ are.
 
 **And it is not a property of those ten prompts.** Every number above and every
 number this repository has ever published rests on the same ten. Repeated on a
-second set of twenty sharing none of them — long inputs, JSON and SQL, four
-languages, arithmetic, two genuinely multi-turn exchanges — the decode speed-up
-moves by at most 4.3 pp, and one arm moves *upward*
+second set of twenty sharing none of them (long inputs, JSON and SQL, four
+languages, arithmetic, two genuinely multi-turn exchanges), the decode speed-up
+moves by at most 4.3 pp, and for `spec-dflash-n4` it moves *upward*
+(two of the four shifts are positive; the other is `spec-draft-n8` becoming
+slightly less bad)
 ([runs P and R](v4_audit_2026_08_25/README.md#runs-p-and-r--is-the-win-a-property-of-those-ten-prompts)).
 That comparison has to be made on pooled decode rate: the longer prompts put
 12.7 % of wall-clock into prompt processing against 6.7 % for the v1 ten, and
 aggregate throughput divides by wall-clock, so reading it there would have shown
 a collapse that is an artefact of prompt length and not of the method. v1 never tested that method, and the archived v3 attempt at it compared
-two different binaries. The sign flips with the draft window — +18.7 % at 4,
-−14.8 % at 8, −47.4 % at 16 — so "speculative decoding loses here" was a
+two different binaries. The sign flips with the draft window: +18.7 % at 4,
+−14.8 % at 8, −47.4 % at 16, so "speculative decoding loses here" was a
 statement about draft-window regimes that this repository had not yet separated.
 
 One qualification travels with that number, and with every speculative
 measurement here: **speculation is not output-preserving on this build.** The
-engine is deterministic — every arm reproduces itself byte-for-byte across
-repeats, and the no-speculation baseline reproduces across separate runs — and
-against that control, turning speculation on changes the generated text in 27 to
+engine is deterministic. Every arm reproduces itself byte-for-byte across
+repeats, and the no-speculation baseline reproduces across separate runs.
+Against that control, turning speculation on changes the generated text in 27 to
 30 of 30 request-pairs. All arms still emit exactly 300 tokens and the baseline's
 decode rate varies only 0.8 % across ten very different prompts, so the
 throughput comparison stands; but this is a faster computation landing on
@@ -273,13 +285,13 @@ slightly different text, not a lossless speedup of the same one
 ([ERRATA A11](ERRATA.md#a11-speculative-decoding-is-not-output-preserving-on-this-build-and-the-engine-is-deterministic-enough-to-prove-it)).
 See [`v4_audit_2026_08_25/README.md`](v4_audit_2026_08_25/README.md#run-j--the-first-configuration-that-is-actually-faster).
 
-The one lever upstream names as the fix — batching — was also tested, and does
+The one lever upstream names as the fix, batching, was also tested, and does
 not help: no speculation gains +64 % at concurrency 8 while the matched-vocabulary
 drafter moves −8 %, so the gap widens rather than closing
 ([run I](v4_audit_2026_08_25/README.md#run-i--batching-the-lever-upstream-names)).
 It does not rescue the winner either. A sweep down to `n_max 1` puts DFlash on a
-plateau — +17.1 %, +17.6 %, +17.3 % at 2, 3 and 4, separated by less than the
-baseline's own run-to-run SD — and a cliff between 4 and 6; batching then erases
+plateau (+17.1 %, +17.6 %, +17.3 % at 2, 3 and 4, separated by less than the
+baseline's own run-to-run SD) and a cliff between 4 and 6; batching then erases
 the plateau at four concurrent requests (+0.4 %) and collapses it at eight
 (−74.1 %), with draft volume and acceptance barely moving, so it is the draft
 *cost* that fails to amortise
@@ -290,8 +302,9 @@ And the win belongs to the workload rather than to the method. Repeated with
 thinking verifiably off on all 250 requests, `n_max 2` falls from +21.1 % to
 +7.6 % and `n_max 4` goes **negative** at −2.7 %, tracking draft acceptance down
 with it (72.8 % → 58.5 %, 55.6 % → 40.3 %). Per prompt, step-by-step arithmetic
-and Python keep their full gain — their output is constrained and stays ~85–90 %
-accepted — while Traditional Chinese free prose goes from +15 % to −25 % as
+and Python keep their full gain, their output being constrained and their
+acceptance staying between 82 % and 92 %, while Traditional Chinese free prose
+goes from +15 % to −25 % as
 acceptance falls from 66 % to 29 %. Reasoning text is enumerated, repetitive
 planning prose, which is exactly what a drafter predicts well
 ([run L](v4_audit_2026_08_25/README.md#run-l--the-win-is-a-property-of-the-workload-not-of-the-method)).
@@ -305,15 +318,15 @@ length-matched prompts and **45.4 %** on the thinking-on half alone, while the
 slope moves nearly three times as far in relative terms. The threshold is the
 stable quantity and the slope is not, which is the same thing A10 found out of
 sample. Read it as **45–48 %**, not as 48. Scored across every (run, arm) with a matched baseline and enough drafts to
-define a rate — 86 of 90, the four excluded having drafted at most 45 tokens in
-total against at least 132 for the rest — it calls the sign **57 / 59 inside the
+define a rate (86 of 90, the four excluded having drafted at most 45 tokens in
+total against at least 132 for the rest), it calls the sign **57 / 59 inside the
 self-speculative families**, **13 / 16 on the external drafter** and **8 / 11 on
 the drafter-free n-gram arms**: **78 / 86 overall**, or 79 / 86 read through
 llama.cpp's other acceptance counter.
 
 The eight it misses are the informative part, and they are two kinds. Three are
 `spec-draft-n1`, which reaches **69.7 % acceptance** (100.0 % by the drafter's
-own counter) and is **75 % slower** — the same arm in runs O, O2 and O3, and the
+own counter) and is **75 % slower**: the same arm in runs O, O2 and O3, and the
 structural failure this section is about. The other five sit **within 2 pp of
 the boundary**: `ngram-map-k4v-m8` at 50.0 % three times while moving −0.3 to
 −0.8 %, `spec-mtp-n4` at 49.5 % and −8.2 %, and run V's `spec-dflash-n4` at
@@ -328,22 +341,24 @@ is what those five say.
 So the threshold is not a law about acceptance; it tracks the drafter. What is
 measured is that a separate draft context makes this hybrid target log **772
 full-checkpoint creates and 709 restores in one ten-prompt arm-run**, at a
-reported 82.079 MiB each — a nominal **118.7 GiB** by event count × logged size,
+reported 82.079 MiB each, a nominal **118.7 GiB** by event count × logged size,
 which is an estimate and not measured memory traffic. DFlash logs none of these
 events at draft lengths 1 to 16 and MTP none at 1 to 8. What that costs in wall
 clock **is** measured, by rebuilding llama.cpp with timers around the four
 calls: **39.07 s of a 71.4 s excess, 54.7 %**, replicated to 54.6 % in a second
 balanced run. That is elapsed time *inside the checkpoint API calls*, which at
 this commit begin with `ctx->synchronize()`, so it includes waiting for queued
-backend work as well as the copying — an attribution to the API boundary rather
-than an isolated measurement of checkpoint memory traffic
+backend work as well as the copying, which makes it an attribution to the API
+boundary rather than an isolated measurement of checkpoint memory traffic
 ([A12](ERRATA.md#a12-what-the-checkpoint-path-costs-measured-with-timers-in-the-source)).
 This sentence said "not established here" until 2026-08-26, which was true when
 it was written and stopped being true when run T was measured. And the
 external drafter is 0.8 B *dense* against a target that activates only ~3 B
 parameters per token, so drafting costs a quarter of a target step before any
-state management: 17.24 s in `generate()` against 1.89–3.43 s for a head that
-reuses the target's own layers
+state management: 17.24 s in `generate()` in run J2 against 1.89 s for MTP at
+`n_max` 1 and 3.43 s for DFlash at 2, the two winning configurations. Across
+every self-speculative arm measured the span is 1.89 s to 6.27 s, still a
+fraction of the dense drafter's
 ([ERRATA A12](ERRATA.md#a12-what-the-checkpoint-path-costs-measured-with-timers-in-the-source)).
 
 ![v1 300-token matrix: request-mean vs pooled throughput](analysis/plot_mean_by_config.png)
@@ -361,21 +376,32 @@ are not a cumulative body of evidence for one hypothesis and must not be pooled.
 | **v2 follow-up** | 2026-04-22 | different single-3090 host; `llama-cli`; commits `9789512` and `bcb5eeb64` | 5 prompts; `temperature=0.5`; 200-token cap; different runner and host | Directional check, not a controlled replication of v1 absolute rates. Thinking control did not work ([D1/D2](ERRATA.md#d1--d2--no-cnv-was-rejected-and-no_think-did-not-disable-thinking)). |
 | **Exp 2 code/JSON** | 2026-04-25/26 | v2 host; `llama-cli` at `bcb5eeb64` | 5 prompts × 3 trials × 3 configs | Exploratory only. Intended workload unverified and per-request outputs not committed ([D3](ERRATA.md#d3-exp-2-cannot-be-audited-so-it-cannot-refute-anything)). |
 | **v3 DFlash** | 2026-05-07 | v2 host; `llama-cli` | 5 prompts × 1 run × 3 draft-max settings | Exploratory only. Baseline and treatment used **different binaries** ([D4](ERRATA.md#d4-v3-dflash-compares-two-different-binaries)). |
-
-| **v4 audit** | 2026-08-25/26 | one RTX 3090 (`3090` host); `llama-server` at `bcb5eeb64` and `3737e4137` | runs A–L; ABBA arm order, 3–5 repeats per arm, per-request JSON with full text and token ids, continuous GPU telemetry, pre-registered predictions | The controlled tier. Each run carries its own matched no-speculation baseline. |
+| **v4 audit** | 2026-08-25 to 2026-08-28 | one RTX 3090 (`3090` host); `llama-server` at `bcb5eeb64` and `3737e4137` | runs A to W, 1802 arm-runs in 62 committed directories, beside three one-request start-up checks; 2 to 10 repeats per arm; arm order ABBA, then a Latin square from run O2, then a Williams square in run W; per-request JSON with full text and token ids, continuous GPU telemetry, pre-registered predictions | The controlled tier. Each run carries its own matched no-speculation baseline. |
 
 The v4 runs, and what each one is for:
 
 | run | question | design |
 |---|---|---|
-| A / B | does the archive reproduce, and does the abort persist? | `bcb5eeb64` vs post-merge `3737e4137`, 30 requests each |
-| C / D | thirteen arms, thinking on and verifiably off | 13 arms × 10 prompts × 3 repeats, twice |
-| E | is there anything past MoESD's 95-token coverage threshold? | `n_max` 64 / 96 / 128 |
-| H | is `p_min` the lever, not draft length? | `p_min` 0 / 0.50 / 0.75 / 0.90 sweep |
+| A / B | does the archive reproduce, and does the abort persist? | 3 arms × 10 prompts; A at `bcb5eeb64`, 2 repeats, where both speculative arms abort part way; B at post-merge `3737e4137`, 3 repeats, 30 requests an arm |
+| C / D | thirteen arms, thinking on and verifiably off | C: 13 arms × 10 prompts × 5 repeats; D: 5 of those arms again with thinking off, 5 repeats |
+| E | is there anything past MoESD's 95-token coverage threshold? | `n_max` 32 / 64 / 96 / 128, spanning the threshold, 3 repeats |
+| H | is `p_min` the lever, not draft length? | `p_min` 0 / 0.50 / 0.75 / 0.90 at `n_max` 8, plus `n_max` 32 and 128 at 0.75, 3 repeats |
 | I | does concurrency rescue speculation, as upstream says it should? | 1 / 4 / 8 concurrent client requests, verified from timestamps; server-side batch width not instrumented |
 | J | DFlash off vs on, one binary — the A/B v3 never had | 5 arms × 3 repeats, `-fit on` on every arm |
-| K | where is the draft-length optimum, and does it survive batching? | `n_max` 1–8 sweep, then the winner at concurrency 4 / 8 |
+| K | where is the draft-length optimum, and does it survive batching? | `n_max` 1, 2, 3, 4, 6, 8 at 3 repeats, then the winner at concurrency 4 / 8 |
 | L | does the win survive the workload changing? | same 5 arms twice, thinking on and off, 5 repeats |
+| M | the MTP head the vLLM sibling uses, measured here | 7 arms at 3 repeats, then batching, thinking off, and a Q4_K_M head |
+| N | do the two ngram-map methods nobody had run do anything? | 7 arms × 3 repeats |
+| O | every method against one baseline under one policy | 9 arms × 3 repeats, ABBA order |
+| O2 / O3 | the same nine arms as a Latin square, and again five hours later | 9 arms × 9 blocks, twice; 810 of 810 request-pairs byte-identical |
+| P / R | is the win a property of those ten prompts? | a second set of twenty sharing none of them, thinking on and off |
+| Q | does run M1's outlier reproduce at five repeats? | 3 arms × 5 repeats, two drafter quantisations |
+| T / T3 / T4 | where does the extra time actually go? | llama.cpp rebuilt with timers around the four checkpoint calls; T4 splits the wait from the state work |
+| U | how far does one configuration move between invocations? | the same two arms, six invocations back to back |
+| V / V2 / V3 | what does forcing every request to the same length change? | free-running against a hard cap; V2 is eight sessions, V3 two within-invocation squares |
+| W | is the mode contrast an artefact of what ran before it? | five sessions of a 10 × 10 Williams square, 500 arm-runs, balanced for position **and** for first-order carryover |
+
+The `smoke` directories are start-up checks and carry one arm-run each.
 
 The v2 / Exp 2 / v3 files remain valuable archival evidence. Their absolute
 rates and their causal interpretations must be read inside those limits.
@@ -384,16 +410,16 @@ rates and their causal interpretations must be read inside those limits.
 
 ## v1 hardware, software, and artefacts
 
-- **GPU used by the benchmark process** — RTX 3090 24 GiB, `CUDA_VISIBLE_DEVICES=1`, SM 8.6.
-- **Physical host** — two RTX 3090s, Intel Core i7-11700, 62 GiB RAM, Ubuntu 24.04.4, kernel 6.17. GPU 0 was deliberately left to an Ollama instance; the benchmark process had one card to itself, the host did not, and no continuous utilisation trace was captured ([C4](ERRATA.md#c4-gpu-0-was-running-another-workload)).
-- **Driver** — NVIDIA 580.126.09. `nvidia-smi` reports driver support for CUDA 13.0; llama.cpp was built with the **CUDA 12.6** toolkit. These are different things.
-- **llama.cpp** — `97895129e5f2bde94d13dc01ca41ee79e9b629f2` (short `9789512`), authored 2026-04-20, post PR #19493.
-- **Target** — `Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf` (~21 GiB), from [`unsloth/Qwen3.6-35B-A3B-GGUF`](https://huggingface.co/unsloth/Qwen3.6-35B-A3B-GGUF).
-- **Classic draft model** — `Qwen3.5-0.8B-Q4_K_M.gguf` (~508 MiB), from [`unsloth/Qwen3.5-0.8B-GGUF`](https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF).
-- **Fixed server flags** — `-ngl 999 -c 16384 --jinja -fa on -ctk q8_0 -ctv q8_0 --no-webui`.
-- **Sampling** — greedy, `temperature=0`.
-- **Warm-up** — one 8-token completion before each config's prompt sequence. This is not a full-shape warm-up.
-- **Config execution** — server restarted between configs, so KV and prompt-cache state does not bleed across configs.
+- **GPU used by the benchmark process**: RTX 3090 24 GiB, `CUDA_VISIBLE_DEVICES=1`, SM 8.6.
+- **Physical host**: two RTX 3090s, Intel Core i7-11700, 62 GiB RAM, Ubuntu 24.04.4, kernel 6.17. GPU 0 was deliberately left to an Ollama instance; the benchmark process had one card to itself, the host did not, and no continuous utilisation trace was captured ([C4](ERRATA.md#c4-gpu-0-was-running-another-workload)).
+- **Driver**: NVIDIA 580.126.09. `nvidia-smi` reports driver support for CUDA 13.0; llama.cpp was built with the **CUDA 12.6** toolkit. These are different things.
+- **llama.cpp**: `97895129e5f2bde94d13dc01ca41ee79e9b629f2` (short `9789512`), authored 2026-04-20, post PR #19493.
+- **Target**: `Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf` (~21 GiB), from [`unsloth/Qwen3.6-35B-A3B-GGUF`](https://huggingface.co/unsloth/Qwen3.6-35B-A3B-GGUF).
+- **Classic draft model**: `Qwen3.5-0.8B-Q4_K_M.gguf` (~508 MiB), from [`unsloth/Qwen3.5-0.8B-GGUF`](https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF).
+- **Fixed server flags**: `-ngl 999 -c 16384 --jinja -fa on -ctk q8_0 -ctv q8_0 --no-webui`.
+- **Sampling**: greedy, `temperature=0`.
+- **Warm-up**: one 8-token completion before each config's prompt sequence. This is not a full-shape warm-up.
+- **Config execution**: server restarted between configs, so KV and prompt-cache state does not bleed across configs.
 - Full snapshot: [`BENCHMARK_ENV.md`](BENCHMARK_ENV.md).
 
 Expected SHA-256 of the v1 model files:
@@ -437,17 +463,17 @@ I/O, and application latency.
 
 Three summaries are reported for every config:
 
-- **Request-mean decode rate** — arithmetic mean of each request's
+- **Request-mean decode rate**: arithmetic mean of each request's
   `predicted_per_second`. Every prompt weighs the same.
-- **Pooled decode throughput** — `1000 × Σ predicted_n / Σ predicted_ms`. Every
+- **Pooled decode throughput**: `1000 × Σ predicted_n / Σ predicted_ms`. Every
   generated token weighs the same. For equal-length outputs this is the
   harmonic mean of the per-request rates.
-- **Min–max across prompts** — workload heterogeneity. One measurement per
+- **Min–max across prompts**: workload heterogeneity. One measurement per
   prompt/config, so it is **not** repeated-run uncertainty, a standard error,
   or a confidence interval.
 
 `draft_n` and `draft_n_accepted` need their own definition, because they do not
-mean what their names suggest — see the next section.
+mean what their names suggest; see the next section.
 
 ---
 
@@ -463,7 +489,7 @@ token."
 ![What the 100 % acceptance number actually counts](analysis/plot_acceptance_accounting.png)
 
 Qwen3.6-35B-A3B is a hybrid Gated-DeltaNet / MoE model, so
-`common_context_can_seq_rm()` returns `COMMON_CONTEXT_SEQ_RM_TYPE_FULL` — the
+`common_context_can_seq_rm()` returns `COMMON_CONTEXT_SEQ_RM_TYPE_FULL`: the
 context cannot roll back part of a sequence. In `server-context.cpp` at the
 tested commit, a partially accepted draft therefore takes an early `continue`
 that restores a state checkpoint and skips **both** acceptance counters, then
@@ -488,8 +514,8 @@ accepted and thrown away**. Rebuild the table yourself with
 verification rounds that were accepted in full", a quantity guaranteed to equal
 `draft_n_accepted`. `draft_n = 0` means "no fully accepted round was recorded",
 **not** "speculation did not run". The retracted
-`analysis/plot_accept_vs_speed.png` — every one of whose 140 points sat at
-exactly 100 % — has been deleted.
+`analysis/plot_accept_vs_speed.png`, every one of whose 140 points sat at
+exactly 100 %, has been deleted.
 
 **And the original intuition survives, on honest evidence at last.** The
 published claim was "100 % acceptance yet slower". That 100 % was the artefact
@@ -507,8 +533,8 @@ drafter's confidence drops, produces genuine high-acceptance configurations:
 times slower than not speculating.** The intuition was right; the evidence for
 it was not, and the MoE conclusion drawn from it was an overreach. `p_min` also
 turns out to be the knob that matters rather than `n_max`: at `p_min` 0.75,
-`n_max` 32 and `n_max` 128 are byte-identical — 6159 drafted tokens, 70.9 %
-acceptance, 42.0 tok/s each. See
+`n_max` 32 and `n_max` 128 are byte-identical, at 6159 drafted tokens, 70.9 %
+acceptance and 42.0 tok/s each. See
 [A10](ERRATA.md#a10-the-single-regressor-law-is-falsified-out-of-sample-and-p_min-is-the-lever-that-matters).
 
 **What the same log does support.** It contains a direct cost decomposition
@@ -533,7 +559,7 @@ size without any appeal to expert-union loading.
 Ten 300-token requests per config, one measurement each. Deltas are against the
 matched no-speculation reference. Descriptive only.
 
-> **`request-mean` is llama.cpp's own `predicted_per_second`, averaged.** That field divides `n − 1` generated tokens by the time for `n`, in 13 300 of 13 344 committed request rows, so every request-mean here is low by `(n − 1) / n` — 0.33 % at 300 tokens and more at shorter lengths. It is uniform across arms on a run where every request hits the same cap, and it is NOT uniform where the arms stop at different lengths, so it must not carry a cross-arm comparison in the thinking-off runs. Every headline figure and every published delta is a **pooled** rate computed from `predicted_n` and `predicted_ms` directly and contains none of this. See [B8](ERRATA.md#b8-every-request-mean-here-counts-one-token-fewer-than-it-timed).
+> **`request-mean` is llama.cpp's own `predicted_per_second`, averaged.** That field divides `n − 1` generated tokens by the time for `n`, in 18 300 of 18 344 committed request rows, so every request-mean here is low by `(n − 1) / n` — 0.33 % at 300 tokens and more at shorter lengths. It is uniform across arms on a run where every request hits the same cap, and it is NOT uniform where the arms stop at different lengths, so it must not carry a cross-arm comparison in the thinking-off runs. Every headline figure and every published delta is a **pooled** rate computed from `predicted_n` and `predicted_ms` directly and contains none of this. See [B8](ERRATA.md#b8-every-request-mean-here-counts-one-token-fewer-than-it-timed).
 
 | condition | request-mean | pooled | median | min | requests with a counted draft round |
 |---|---:|---:|---:|---:|---:|
@@ -586,20 +612,22 @@ The heatmap also exposes why `ngcache-kv-fp16` is a **one-sided control**: on
 the seven prompts with no draft round it runs at 101–102 % of the q8_0
 baseline, because fp16 KV is simply faster when speculation is idle. There is
 no no-speculation fp16-KV row in the matrix, so that condition cannot separate
-a speculation effect from a KV-precision effect, and the old reading — "fp16 KV
-does not rescue, so KV quant is not the cause" — does not follow.
+a speculation effect from a KV-precision effect, and the old reading, "fp16 KV
+does not rescue, so KV quant is not the cause", does not follow.
 
 ---
 
-## What the audit measured on 2026-08-25
+## What the audit measured on 2026-08-25 and 2026-08-26
 
-Three new measurements were taken on the original v2/v3 bench host. They are
-recorded here because two of them bear directly on how the archived data should
-be read.
+Four things were measured on the original v2/v3 bench host and are recorded
+here: what acceptance does once it is counted correctly, whether the vocabulary
+defect explains the slowdown, whether `llama-server` survives a draft model on
+the archived binary, and what the workload shape was doing. The middle two bear
+directly on how the archived data should be read.
 
 Full data and method: [`v4_audit_2026_08_25/`](v4_audit_2026_08_25/).
 
-**With acceptance measured properly, the anomaly disappears — and the contrast
+**With acceptance measured properly, the anomaly disappears, and the contrast
 has to be named.** Upstream has since made the partial-accept path reachable,
 so the counter reports real ratios. Two comparisons are available and they
 point opposite ways; reporting either without saying which would repeat exactly
@@ -627,9 +655,9 @@ drafting method is a third, independent term.
 
 **The slowdown is the per-round cost of drafting, times how much is drafted,
 divided by how much is accepted.** That is ordinary speculative-decoding
-economics. There is no anomaly left, and **no MoE-specific pathology is needed**
-— this repository never had evidence for one, and the sweep was extended past
-the threshold to check rather than assert. Across `n_max` 1 → 128, spanning
+economics. There is no anomaly left, and **no MoE-specific pathology is
+needed**. This repository never had evidence for one, and the sweep was extended
+past the threshold to check rather than assert. Across `n_max` 1 → 128, spanning
 **3.1 % to 98.3 % expected routed-expert coverage**, a single regressor accounts
 for the cost:
 
@@ -671,13 +699,13 @@ CUDA error: an unsupported value or parameter was passed to the function
 
 The no-speculation arm completes all ten prompts every time. This means v2's
 "cross-checked on master `bcb5eeb64`, identical results" is a `llama-cli`
-cross-check only — the `llama-server` path that produced every v1 number does
+cross-check only: the `llama-server` path that produced every v1 number does
 not survive on that commit with a draft attached. It is **fixed on post-merge
 master**: all thirty requests complete on `3737e4137`. See
 [A6](ERRATA.md#a6-llama-server-plus-a-draft-model-aborts-on-this-model-at-bcb5eeb64).
 
 **Workload shape matters, and it was never controlled.** The audit ran the
-comparison Exp 2 was trying to run — the same arms with thinking verifiably on
+comparison Exp 2 was trying to run, the same arms with thinking verifiably on
 and verifiably off, 5 repeats each, `thinking_suppressed` recorded per request:
 
 | method | thinking on | thinking off | draft tokens per generated token |
@@ -688,8 +716,8 @@ and verifiably off, 5 repeats each, `thinking_suppressed` recorded per request:
 
 With thinking off `ngram-mod` stops drafting entirely and its cost nearly
 vanishes; a chain-of-thought trace is the repetitive text an n-gram lookup
-feeds on, a direct answer is not. That one is length-independent — zero draft
-tokens is zero however long the output — and it stands.
+feeds on, a direct answer is not. That one is length-independent (zero draft
+tokens is zero however long the output) and it stands.
 
 > [!WARNING]
 > **The rest of this table is confounded by output length, and one reading of
@@ -706,23 +734,24 @@ tokens is zero however long the output — and it stands.
 > | its acceptance | 1.8 % | 1.4 % | **1.8 %** |
 >
 > This paragraph used to read "for the draft model the effect reverses —
-> acceptance falls from 29.7 % to 23.0 %, so reasoning traces are *easier* for a
+> acceptance falls from 29.7 % to 23.1 %, so reasoning traces are *easier* for a
 > 0.8 B drafter than real answers". On the length-matched half, acceptance is
 > **30.3 %** against 29.7 % with thinking on, and the throughput cost is
 > *smaller* with thinking off, not larger. The fall was the short outputs, not
 > the workload: acceptance varies along the sequence and a short generation is
 > all early tokens.
 >
-> The matched half is five prompts of ten and not a random five — they are the
-> ones long enough that every arm hit the cap — so this is not a corrected value
+> The matched half is five prompts of ten and not a random five: they are the
+> ones long enough that every arm hit the cap, so this is not a corrected value
 > either. What it establishes is that the original reading was not supported.
 > [ERRATA A17](ERRATA.md#a17-the-thinking-off-comparisons-are-not-comparisons-of-the-same-amount-of-work),
 > `analysis/length_matching.py`, and `BENCH_IGNORE_EOS` in the harness for
 > measuring it properly next time.
 
 What that implies splits by family, so it cannot be said in one sentence.
-Draft-model speculation was measured on its *favourable* workload — thinking
-traces are easier to predict and give a better net result — and still lost, so
+Draft-model speculation was measured on its *favourable* workload, since
+thinking traces are easier to predict and give a better net result, and still
+lost, so
 that finding is more robust than when it was published. ngram methods were
 measured on their *unfavourable* one: thinking gives an n-gram lookup much more
 to fire on, and firing costs more than it returns, so the historical ngram
@@ -732,7 +761,7 @@ becomes a net win. See
 
 **Three quarters of v1's requests returned no answer.** `message.content` is
 empty for 144 of 190 v1 requests, and 19/19 for both `reasoning` and
-`code_small` — the 300-token cap was reached inside the thinking block, and
+`code_small`: the 300-token cap was reached inside the thinking block, and
 `reasoning_content` was never captured. v1 measured decode throughput on
 truncated chain-of-thought, not on answers. See
 [A5](ERRATA.md#a5-three-quarters-of-v1s-requests-returned-no-answer-at-all--only-truncated-thinking).
@@ -771,8 +800,8 @@ truncated chain-of-thought, not on answers. See
   verified what was being generated
   ([A5](ERRATA.md#a5-three-quarters-of-v1s-requests-returned-no-answer-at-all--only-truncated-thinking)).
 - A statement about a *working* speculative path for this model class, because
-  the fix for the hybrid-SSM partial-acceptance failure the runs actually hit —
-  llama.cpp PR #20075 — was closed without merge
+  the fix for the hybrid-SSM partial-acceptance failure the runs actually hit,
+  llama.cpp PR #20075, was closed without merge
   ([A3](ERRATA.md#a3-the-tested-build-had-a-known-broken-speculative-path-for-this-model-class-and-the-fix-was-never-merged)).
 - A production voice-agent recommendation. This measures decode
   microperformance, not streaming TTFT, audio latency, multi-turn cache reuse,
@@ -801,8 +830,8 @@ That line appears in 61 of 62 v2 logs and 30 of 33 v3 logs, and those same logs
 then contain `[Start thinking]` and a full reasoning trace. The measured
 workload is long chain-of-thought output, not the intended direct answer.
 
-Exp 2 committed only timing summaries — the per-request generated text, token
-IDs, and stop reasons were never saved — so its intended "structured,
+Exp 2 committed only timing summaries. The per-request generated text, token
+IDs, and stop reasons were never saved, so its intended "structured,
 low-entropy, thinking-off code/JSON" distribution cannot be checked. **Exp 2
 therefore does not refute the workload-shape hypothesis.** It shows that the
 configurations, as actually executed, were slower for whatever the command
@@ -811,7 +840,7 @@ chat-template thinking toggle, plus committed outputs.
 
 One thing Exp 2 does establish cleanly: the command is highly repeatable. The
 three trial means for the Oleg config are 66.54 / 66.54 / 66.64 tok/s,
-SD 0.06 — the published `± 7.57` is spread *between prompts*, not run-to-run
+SD 0.06; the published `± 7.57` is spread *between prompts*, not run-to-run
 noise.
 
 ### v3 DFlash
@@ -840,22 +869,22 @@ Details and controls in
 
 [`thc1006/qwen3.6-vllm-2x3090`](https://github.com/thc1006/qwen3.6-vllm-2x3090)
 reports a positive vLLM **MTP** result on the same physical hardware. It is
-still **not** a matched cross-engine control — two GPUs, tensor parallelism, a
+still **not** a matched cross-engine control: two GPUs, tensor parallelism, a
 different engine, a different quantisation stack, different flags, a different
-protocol — so do not use it to decompose the cause of the llama.cpp result.
+protocol, so do not use it to decompose the cause of the llama.cpp result.
 
 But one thing it used to confound is now separated. "llama.cpp loses where vLLM
 wins" could have been about the engine or about the method, because the method
 vLLM used had never been run under llama.cpp here. It has been now: the same
 target's own MTP head, exported with the stock converter, is **+17.5 %** against
 a matched baseline in run O and **+18.6 %** in run M. MTP is not what llama.cpp
-was failing at — this repository had simply never pointed llama.cpp at it. What
+was failing at: this repository had simply never pointed llama.cpp at it. What
 remains between the two results is the engine, the parallelism and the
 quantisation stack, and none of those is measured here.
 
 ---
 
-## Where the time goes — measured, and not MoE-specific
+## Where the time goes, measured, and not MoE-specific
 
 The audit's re-measurement ([A7](ERRATA.md#a7-with-acceptance-measured-properly-there-is-no-anomaly-left-to-explain))
 removed the mystery: decode rate tracks acceptance at r = +0.998 across the
@@ -905,7 +934,7 @@ artefacts rather than a one-command reproducer: the v1 warm-up is short, there
 is one run per cell, and [D5](ERRATA.md#d5-the-committed-v2-script-does-not-produce-the-committed-v2-directories)
 records a provenance gap in v2.
 
-Build the **exact** v1 revision — not current master:
+Build the **exact** v1 revision, not current master:
 
 ```bash
 git clone https://github.com/ggml-org/llama.cpp.git
@@ -946,7 +975,7 @@ python analysis/plot.py
 python analysis/verbose_accounting.py
 ```
 
-A corrected harness for *new*, controlled runs — one pinned binary for every
+A corrected harness for *new*, controlled runs, with one pinned binary for every
 arm, ABBA ordering, N repeats, a manifest that hashes the binary and both
 models, and per-request capture of the generated text, the reasoning channel,
 the stop reason, the full `timings` block, and token IDs via `logprobs` — is
@@ -1029,7 +1058,7 @@ python analysis/plot_v4_runs.py
 | [`analysis/plot.py`](analysis/plot.py) | aggregation and charts |
 | [`analysis/verbose_accounting.py`](analysis/verbose_accounting.py) | reconstructs the acceptance-counter artefact from a `-v` log |
 | [`v2_3090_followup/SUMMARY.md`](v2_3090_followup/SUMMARY.md) | v2 methodology and tables |
-| [`v2_3090_followup/v2_*/`](v2_3090_followup/) | 62 v2 raw `llama-cli` logs + one `--verbose` trace |
+| [`v2_3090_followup/v2_*/`](v2_3090_followup/) | 60 v2 raw `llama-cli` logs + one `--verbose` trace |
 | [`v2_3090_followup/exp2_codejson_n3/`](v2_3090_followup/exp2_codejson_n3/) | Exp 2 aggregates and script |
 | [`v3_dflash_2026_05_07/`](v3_dflash_2026_05_07/) | DFlash logs, tables, script |
 | [`BENCHMARK_ENV.md`](BENCHMARK_ENV.md) | hardware, software, commits, hashes for v1/v2/v3, and the v4 memory-policy table |
@@ -1040,7 +1069,7 @@ python analysis/plot_v4_runs.py
 |---|---|
 | [`v4_audit_2026_08_25/README.md`](v4_audit_2026_08_25/README.md) | what each run asked, what it measured, and every control |
 | [`v4_audit_2026_08_25/PREREGISTERED_PREDICTION.md`](v4_audit_2026_08_25/PREREGISTERED_PREDICTION.md) | predictions committed to git before the data existed |
-| `v4_audit_2026_08_25/data/A_*`, `B_*` | `bcb5eeb64` against post-merge master, 30 requests each |
+| `v4_audit_2026_08_25/data/A_*`, `B_*` | `bcb5eeb64` against post-merge master; 30 requests an arm on B, and 12 on A's two speculative arms, which abort |
 | `v4_audit_2026_08_25/data/C_*`, `D_*` | the thirteen-arm matrix, thinking on and verifiably off |
 | `v4_audit_2026_08_25/data/E_*`, `H_*` | past the MoESD coverage threshold; the `p_min` sweep |
 | `v4_audit_2026_08_25/data/matrix_I2_conc{1,4,8}_*` | concurrency, with the client requests in flight recorded |
@@ -1070,7 +1099,7 @@ model, and recording the full `BENCH_*` configuration), one
 
 ---
 
-## Upstream status at the 2026-08-25 audit
+## Upstream status: checked 2026-08-25, open items re-checked 2026-08-27
 
 Checked against the GitHub API on 2026-08-25.
 
@@ -1134,14 +1163,14 @@ concern this exact model family.
 
 ## Licence
 
-- **Code and documentation** — MIT, see [`LICENSE`](LICENSE).
-- **Benchmark data** — CC0-1.0, scoped by [`DATA_LICENSE`](DATA_LICENSE), full
+- **Code and documentation**: MIT, see [`LICENSE`](LICENSE).
+- **Benchmark data**: CC0-1.0, scoped by [`DATA_LICENSE`](DATA_LICENSE), full
   text in [`LICENSES/CC0-1.0.txt`](LICENSES/CC0-1.0.txt).
 
 ## Citation
 
 Machine-readable metadata is in [`CITATION.cff`](CITATION.cff). Cite the DOI
-above for the archived release, and state which version you are citing —
+above for the archived release, and state which version you are citing:
 pre-audit releases (v1.0 – v3.0) contain the claims retracted in
 [`ERRATA.md`](ERRATA.md).
 
