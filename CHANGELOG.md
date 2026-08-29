@@ -24,10 +24,10 @@ interval columns reached through `.split("[")[0]`, a configuration column
 nobody read, the `100 %` on a total row. Guarding those grew the parsed set and
 the probe over the grown set found 33 more; the run after that perturbed all
 2 252 numbers in the 119 tables parsed at the time and none survived, and
-parsing the last six grew the population again, to 2 373 across 125. That is what the W three-design table
-had done, in both documents that carry it: only the W column was read, so V2's
-`+12.03` and V3's `+12.17`, two thirds of a three-way comparison, could have
-been anything.
+parsing the last six grew the population again, to 2 373 across 125. That is
+what the W three-design table had done, in both documents that carry it: only
+the W column was read, so V2's `+12.03` and V3's `+12.17`, two thirds of a
+three-way comparison, could have been anything.
 
 The measurement was wrong four times before it measured anything, and all
 four are recorded in the file. The first used the claim checker's exit status, and

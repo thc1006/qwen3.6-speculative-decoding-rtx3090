@@ -1911,10 +1911,10 @@ accounted for.
 
 Perturbing the 80 that were unparsed then: two have no cell that can be
 perturbed, **11** are caught by some other check, and **67 accepted a wrong
-number and nothing noticed**. All 80 of those are parsed now. Eleven
-being caught without being parsed is the general net doing its job (the rule
-that every quoted throughput must equal one derivable for that arm) and it
-catches a typo, not a figure attributed to the wrong run.
+number and nothing noticed**. All 80 of those are parsed now. Eleven being
+caught without being parsed is the general net doing its job (the rule that
+every quoted throughput must equal one derivable for that arm) and it catches
+a typo, not a figure attributed to the wrong run.
 
 **One cell a table does not say a table is guarded.** Perturbing every number
 of every parsed table, rather than one cell of each, found **80** numbers in
@@ -2035,10 +2035,10 @@ number and this file exists because of unchecked numbers.
     out of A2's own table, on the master binary alone; unrounded that pair
     gives +0.19 %, and a request-mean is the metric
     [B8](#b8-every-request-mean-here-counts-one-token-fewer-than-it-timed)
-    says may not carry a published delta. The span is the master binary's six v1-tagged prompts,
-    which drops `zh_hant` at −2.2 %. Pooled over both binaries the
-    difference is +0.2 %, and across the sixteen (binary, prompt) cells the
-    span is −2.2 % to +3.7 %.
+    says may not carry a published delta. The span is the master binary's six
+    v1-tagged prompts, which drops `zh_hant` at −2.2 %. Pooled over both
+    binaries the difference is +0.2 %, and across the sixteen (binary, prompt)
+    cells the span is −2.2 % to +3.7 %.
 28. The pull-request body said the uncommitted server logs are 7 GB; the
     script that archives them says ~3 GB in three places.
 29. A17's per-repeat CV table mixed two definitions inside one table, in an
