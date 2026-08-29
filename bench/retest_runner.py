@@ -959,7 +959,7 @@ def stop_server(proc: subprocess.Popen, baseline_mib: int | None = None,
             "wait_s": round(time.perf_counter() - t0, 2), "readable": True}
 
 
-def chat(system: str, user, hardcap: bool = False) -> dict:
+def chat(system: str, user, *, hardcap: bool) -> dict:
     """`user` is a string for a single turn, or a list of message dicts for a
     real multi-turn exchange. The v1 set only ever used the first form, which is
     why its `multi_turn_1` / `multi_turn_2` tags are two independent single-turn
@@ -1067,7 +1067,7 @@ def run_prompt_set(arm: str, rep: int,
     if CONCURRENCY == 1:
         for tag, sysmsg, usermsg in PROMPTS:
             try:
-                r = chat(sysmsg, usermsg, hardcap)
+                r = chat(sysmsg, usermsg, hardcap=hardcap)
             except Exception as e:  # noqa: BLE001
                 # A server death is a finding, not a harness failure: record
                 # where it happened and move on to the next arm.
@@ -1086,7 +1086,14 @@ def run_prompt_set(arm: str, rep: int,
     # matches the sequential path and repeats stay comparable.
     got: dict[str, dict] = {}
     with cf.ThreadPoolExecutor(max_workers=CONCURRENCY) as pool:
-        fut = {pool.submit(chat, sysmsg, usermsg): tag
+        # `hardcap` HAS to be passed here. It was not, and `chat()` defaulted it
+        # to False, so at CONCURRENCY > 1 every `*-cap` arm sent no
+        # `ignore_eos` and ran freerun while the manifest recorded it as a
+        # hard-cap arm - silent treatment corruption, not a metadata slip. The
+        # parallel warm-up below passed it correctly, so warm-up and
+        # measurement were not even the same treatment. `chat()` now takes it
+        # keyword-only with no default, so the next omission is a TypeError.
+        fut = {pool.submit(chat, sysmsg, usermsg, hardcap=hardcap): tag
                for tag, sysmsg, usermsg in PROMPTS}
         for f in cf.as_completed(fut):
             tag = fut[f]
@@ -1308,10 +1315,10 @@ def run_arm(arm: str, rep: int) -> dict:
             # inside the measured window.
             _wu = ("You are concise.", "Warm up with a few sentences about the weather.")
             if CONCURRENCY == 1:
-                chat(*_wu, arm_is_hardcap(arm))
+                chat(*_wu, hardcap=arm_is_hardcap(arm))
             else:
                 with cf.ThreadPoolExecutor(max_workers=CONCURRENCY) as pool:
-                    for f in [pool.submit(chat, *_wu, arm_is_hardcap(arm))
+                    for f in [pool.submit(chat, *_wu, hardcap=arm_is_hardcap(arm))
                               for _ in range(CONCURRENCY)]:
                         f.result()
         except Exception as e:  # noqa: BLE001

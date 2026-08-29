@@ -22,6 +22,9 @@ Environment knobs, used by the tests to drive failure paths:
   FAKE_BUILD=<n> FAKE_COMMIT=<sha>
   FAKE_READY_FILE=<path>     write the parent pid there once the orphan
                              watchdog is armed, and only then
+  FAKE_RECORD_REQUESTS=<path>
+                             append every request body to this file as JSONL,
+                             so a test can assert what treatment was sent
 """
 from __future__ import annotations
 
@@ -71,6 +74,14 @@ class H(BaseHTTPRequestHandler):
         except Exception:  # noqa: BLE001
             req = {}
         _seen["n"] += 1
+        # Record the body so a test can assert on the TREATMENT the runner sent,
+        # not merely on what came back. `hardcap` was dropped on the concurrent
+        # submission path and every guard downstream still passed, because a
+        # freerun request that reaches the cap looks exactly like a capped one.
+        rec = os.environ.get("FAKE_RECORD_REQUESTS")
+        if rec:
+            with open(rec, "a", encoding="utf-8") as fh:
+                fh.write(json.dumps({"path": self.path, "body": req}) + "\n")
         if FAIL_ON and _seen["n"] == FAIL_ON:
             self._send(500, {"error": "fake failure"})
             return

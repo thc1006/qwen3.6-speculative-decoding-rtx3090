@@ -3961,5 +3961,93 @@ def _load_runner():
     return mod
 
 
+class TheConcurrentPathMustSendTheSameTreatmentAsTheSequentialOne(unittest.TestCase):
+    """At CONCURRENCY > 1 a `*-cap` arm was silently running freerun.
+
+    `chat()` took `hardcap` with a default of False. The sequential path passed
+    it and the parallel WARM-UP passed it, but the parallel MEASUREMENT
+    submission did not -- `pool.submit(chat, sysmsg, usermsg)` -- so every
+    measured request in a capped arm went out without `ignore_eos` while the
+    manifest recorded the arm as hard-capped. Nothing downstream could see it:
+    a freerun request that happens to reach the cap is indistinguishable from a
+    capped one in the response. Warm-up and measurement were not even the same
+    treatment as each other.
+
+    These assert on the REQUEST BODIES the runner sent, which is the only place
+    the defect is visible, and they separate warm-up from measurement by the
+    warm-up's fixed prompt.
+    """
+
+    FAKE = ROOT / "tests" / "fake_llama_server.py"
+    WARMUP = "Warm up with a few sentences about the weather."
+
+    def _run(self, out: Path, arms: str, extra: dict):
+        rec = out.parent / f"{out.name}.requests.jsonl"
+        env = dict(os.environ)
+        env.update({
+            "LLAMA_SERVER_BIN": str(self.FAKE), "MODEL_TARGET": "/dev/null",
+            "BENCH_ARMS": arms, "BENCH_REPEATS": "1",
+            "BENCH_ORDER": "cyclic", "BENCH_OUT": str(out),
+            "BENCH_PORT": free_port(), "BENCH_MAX_TOKENS": "300",
+            "BENCH_FIT": "off", "FAKE_RECORD_REQUESTS": str(rec),
+        })
+        env.update(extra)
+        r = subprocess.run([sys.executable, str(RUNNER)], env=env,
+                           capture_output=True, text=True, timeout=600)
+        sent = [json.loads(x) for x in rec.read_text().splitlines()] if rec.exists() else []
+        warm = [x["body"] for x in sent if self.WARMUP in json.dumps(x["body"])]
+        meas = [x["body"] for x in sent if self.WARMUP not in json.dumps(x["body"])]
+        return r, warm, meas
+
+    def test_a_capped_arm_sends_ignore_eos_on_every_concurrent_request(self):
+        with tempfile.TemporaryDirectory() as t:
+            out = Path(t) / "cap2"
+            r, warm, meas = self._run(out, "baseline-cap", {
+                "BENCH_CONCURRENCY": "2", "BENCH_HARDCAP_SUFFIX": "-cap"})
+            self.assertEqual(r.returncode, 0, r.stdout[-1500:] + r.stderr[-1500:])
+            self.assertTrue(meas, "no measurement requests were recorded")
+            missing = [i for i, b in enumerate(meas) if not b.get("ignore_eos")]
+            self.assertEqual(
+                missing, [],
+                f"{len(missing)} of {len(meas)} measured requests in a hard-cap arm "
+                f"carried no ignore_eos at CONCURRENCY=2. The arm ran freerun while "
+                f"the manifest recorded it as capped.")
+
+    def test_a_free_arm_sends_no_ignore_eos_at_concurrency_two(self):
+        """The other direction, so the test cannot pass by always asserting true."""
+        with tempfile.TemporaryDirectory() as t:
+            out = Path(t) / "free2"
+            r, warm, meas = self._run(out, "baseline", {"BENCH_CONCURRENCY": "2"})
+            self.assertEqual(r.returncode, 0, r.stdout[-1500:] + r.stderr[-1500:])
+            self.assertTrue(meas)
+            self.assertEqual([i for i, b in enumerate(meas) if b.get("ignore_eos")], [],
+                             "a freerun arm sent ignore_eos")
+
+    def test_warm_up_and_measurement_agree_at_concurrency_two(self):
+        with tempfile.TemporaryDirectory() as t:
+            out = Path(t) / "agree"
+            r, warm, meas = self._run(out, "baseline-cap", {
+                "BENCH_CONCURRENCY": "2", "BENCH_HARDCAP_SUFFIX": "-cap"})
+            self.assertEqual(r.returncode, 0, r.stdout[-1500:] + r.stderr[-1500:])
+            self.assertTrue(warm and meas, "expected both warm-up and measured requests")
+            self.assertEqual(
+                {bool(b.get("ignore_eos")) for b in warm},
+                {bool(b.get("ignore_eos")) for b in meas},
+                "warm-up and measurement used different treatments; the warm-up passed "
+                "the flag and the measurement did not, which is how this survived")
+
+    def test_chat_refuses_to_default_the_treatment(self):
+        """The signature is the guard. A missed argument must be a TypeError,
+        not a silent choice of freerun."""
+        import inspect
+        src = (ROOT / "bench" / "retest_runner.py").read_text()
+        sig = [ln for ln in src.splitlines() if ln.startswith("def chat(")]
+        self.assertEqual(len(sig), 1, sig)
+        self.assertIn("*, hardcap: bool", sig[0],
+                      f"chat() must take hardcap keyword-only with no default; got {sig[0]!r}")
+        self.assertNotIn("hardcap: bool = ", sig[0],
+                         "a default on hardcap is what let the concurrent path omit it")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

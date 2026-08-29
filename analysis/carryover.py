@@ -163,6 +163,58 @@ def capped_contrast(runs: list[dict], suffix: str) -> dict:
     return out
 
 
+def capped_contrast_matched(runs: list[dict], suffix: str) -> dict:
+    """The same question, with predecessor IDENTITY held fixed.
+
+    `capped_contrast` above pools every capped predecessor against every free
+    one, and those two groups are not matched. For an uncapped current arm `X`
+    the capped group contains `X-cap` -- its own twin -- while the free group
+    cannot contain `X`, because nothing precedes itself; for `X-cap` it is the
+    other way round. So the grouped contrast carries three things at once: the
+    predecessor's cap mode, one unmatched predecessor configuration, and a k
+    against k-1 weighting. It is not a predecessor-mode effect on its own.
+
+    This pairs within base configuration. For every OTHER base `Y`, the rate
+    after `Y-cap` is compared with the rate after `Y`, and the arm's own twin is
+    dropped from both sides. Each pair differs in cap mode and in nothing else,
+    so their mean is a mode contrast. Sessions stay the resampling unit, as
+    they are for the grouped version.
+    """
+    def base(a: str) -> str:
+        return a[:-len(suffix)] if suffix and a.endswith(suffix) else a
+
+    per: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
+    for d in runs:
+        if d["same_repeat"] and d["usable"]:
+            per[d["arm"]][d["predecessor"]].append(d["tok_s"])
+
+    out = {}
+    for a, preds in per.items():
+        own = base(a)
+        pairs, dropped = [], []
+        for p_arm in sorted({base(x) for x in preds}):
+            if p_arm == own:
+                dropped.append(p_arm)          # the unmatched twin, excluded
+                continue
+            cap = preds.get(p_arm + suffix) or []
+            free = preds.get(p_arm) or []
+            if not cap or not free:
+                continue
+            mc, mf = st.mean(cap), st.mean(free)
+            pairs.append({"predecessor_base": p_arm,
+                          "after_cap": mc, "after_free": mf,
+                          "delta_pct": 100.0 * (mc / mf - 1.0)})
+        if not pairs:
+            continue
+        deltas = [x["delta_pct"] for x in pairs]
+        out[a] = {"delta_pct": st.mean(deltas),
+                  "n_pairs": len(pairs),
+                  "own_twin_dropped": dropped,
+                  "pairs": pairs,
+                  "sd_pct": st.stdev(deltas) if len(deltas) > 1 else 0.0}
+    return out
+
+
 def spread_by_predecessor(runs: list[dict]) -> dict:
     """How much an arm's rate moves across its nine predecessors."""
     per: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
@@ -187,6 +239,7 @@ def spread_by_predecessor(runs: list[dict]) -> dict:
 def report(dirs: list[str], as_json: bool) -> dict:
     out: dict = {"runs": [], "refused": []}
     per_arm_delta: dict[str, list[float]] = defaultdict(list)
+    per_arm_delta_matched: dict[str, list[float]] = defaultdict(list)
     for d in sorted(dirs):
         runs = arm_runs(d)
         name = os.path.basename(d.rstrip("/"))
@@ -219,6 +272,7 @@ def report(dirs: list[str], as_json: bool) -> dict:
             continue
         rec["hardcap_suffix"] = suffix
         rec["capped_predecessor"] = capped_contrast(runs, suffix)
+        rec["capped_predecessor_matched"] = capped_contrast_matched(runs, suffix)
         rec["spread"] = spread_by_predecessor(runs)
         unbalanced = sorted(a for a, v in rec["capped_predecessor"].items()
                             if not v["split_is_balanced"])
@@ -233,6 +287,8 @@ def report(dirs: list[str], as_json: bool) -> dict:
             continue
         for a, v in rec["capped_predecessor"].items():
             per_arm_delta[a].append(v["delta_pct"])
+        for a, v in rec["capped_predecessor_matched"].items():
+            per_arm_delta_matched[a].append(v["delta_pct"])
         if not as_json:
             print(f"  {'arm':<24} {'after -cap':>11} {'after free':>11} "
                   f"{'delta':>8}   {'spread over 9 predecessors':>26}")
@@ -256,6 +312,24 @@ def report(dirs: list[str], as_json: bool) -> dict:
             m, lo, hi, n = interval(vs)
             out["across_sessions"][a] = {"mean_delta_pct": m, "lo": lo, "hi": hi,
                                          "sessions": n, "per_session": vs}
+            if not as_json:
+                rng = "" if lo is None else f"[{lo:+.2f} %, {hi:+.2f} %]"
+                print(f"  {a:<24} {m:>+8.2f} % {rng:>22} {n:>9}")
+
+    if per_arm_delta_matched and max(len(v) for v in per_arm_delta_matched.values()) > 1:
+        out["across_sessions_matched"] = {}
+        if not as_json:
+            print("\n  MATCHED on predecessor configuration: the same contrast with "
+                  "the arm's own\n  twin dropped and each capped predecessor paired "
+                  "against its free counterpart.\n  This is the one that is a mode "
+                  "contrast; the grouped figures above are not.")
+            print(f"  {'arm':<24} {'mean':>9} {'95 % t':>22} {'sessions':>9}")
+        for a, vs in sorted(per_arm_delta_matched.items(),
+                            key=lambda kv: -abs(st.mean(kv[1]))):
+            m, lo, hi, n = interval(vs)
+            out["across_sessions_matched"][a] = {"mean_delta_pct": m, "lo": lo,
+                                                 "hi": hi, "sessions": n,
+                                                 "per_session": vs}
             if not as_json:
                 rng = "" if lo is None else f"[{lo:+.2f} %, {hi:+.2f} %]"
                 print(f"  {a:<24} {m:>+8.2f} % {rng:>22} {n:>9}")

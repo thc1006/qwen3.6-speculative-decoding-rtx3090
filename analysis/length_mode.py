@@ -65,11 +65,55 @@ from paired_blocks import t_critical_975  # noqa: E402  - same directory
 CAP = "-cap"
 
 
-def pooled(run_dir, arm):
-    """Pooled decode rate over every repeat: 1000 * sum(n) / sum(ms)."""
+def row_first(run_dir):
+    """{(arm, repeat)} for the arm-run that OPENED each row of the square.
+
+    A Williams square balances first-order carryover among the adjacencies
+    INSIDE a row. Running its ten rows back to back adds nine more transitions,
+    from the last treatment of one row to the first of the next, and no n x n
+    square balances those. `carryover.py` already excludes them from the
+    predecessor contrast; this makes the same set available to the mode
+    estimator, which pooled every arm-run including these.
+
+    Derived from the data's own timestamps, not from the schedule: the first
+    arm-run of each repeat is the one whose predecessor sits in another repeat.
+    """
+    import carryover as _co
+    try:
+        runs = _co.arm_runs(run_dir)
+    except SystemExit:
+        # `arm_runs` refuses a directory whose arm-runs carry no `t_start`,
+        # because the order they ran in is then not in the data and it will not
+        # fall back to the manifest's PLANNED schedule. That refusal is right,
+        # and it must not take the whole analysis with it: the boundary
+        # exclusion is a sensitivity pass, so a run that cannot support it is
+        # reported as such and the all-data estimate still stands.
+        return None
+    return {(d["arm"], d["repeat"]) for d in runs if not d["same_repeat"]}
+
+
+def pooled(run_dir, arm, drop_row_first=False):
+    """Pooled decode rate over every repeat: 1000 * sum(n) / sum(ms).
+
+    `drop_row_first` removes the arm-runs that opened a row, whose predecessor
+    the design does not balance. Position balance puts every treatment in the
+    first slot exactly once per session, so this drops one arm-run per arm per
+    session -- symmetric across arms, and the observations it drops are the ones
+    the carryover guarantee never covered.
+    """
     ms = n = 0
     gen = []
+    if drop_row_first:
+        skip = row_first(run_dir)
+        if skip is None:
+            return None
+    else:
+        skip = set()
     for f in sorted(glob.glob(os.path.join(run_dir, f"{arm}__rep*.json"))):
+        if skip:
+            _rep = int(os.path.basename(f).split("__rep")[1].split(".")[0])
+            if (arm, _rep) in skip:
+                continue
         with open(f, encoding="utf-8") as fh:
             body = json.load(fh)
         # a crashed arm-run can still carry the requests it got through before
@@ -188,12 +232,38 @@ def report_within(dirs, out):
     print("=== both modes inside one invocation ===")
     per_arm = defaultdict(list)
     per_arm_log = defaultdict(list)
+    per_arm_nb = defaultdict(list)      # the same contrast, row openers dropped
     for d in sorted(dirs):
         arms = arms_of(d)
         free = {a: pooled(d, a)["tok_s"] for a in arms
                 if not a.endswith(CAP) and pooled(d, a)}
         cap = {a[:-len(CAP)]: pooled(d, a)["tok_s"] for a in arms
                if a.endswith(CAP) and pooled(d, a)}
+        # The same two dictionaries with the row-opening arm-runs removed. Those
+        # observations have a predecessor from the previous row, which no n x n
+        # Williams square balances, and pooling them made the mode estimator
+        # rest on adjacencies the design does not cover. Position balance means
+        # exactly one per arm per session is dropped, so the exclusion is
+        # symmetric.
+        _orderable = row_first(d) is not None
+        if _orderable:
+            free_nb = {a: pooled(d, a, True)["tok_s"] for a in arms
+                       if not a.endswith(CAP) and pooled(d, a, True)}
+            cap_nb = {a[:-len(CAP)]: pooled(d, a, True)["tok_s"] for a in arms
+                      if a.endswith(CAP) and pooled(d, a, True)}
+        else:
+            free_nb = cap_nb = {}
+            if manifest(d).get("order_mode") == "williams":
+                # A Williams run is the one design whose primary estimate is
+                # supposed to exclude the row openers. If its order cannot be
+                # recovered, that estimate does not exist and the run must not
+                # be reported as though it did.
+                sys.exit(f"{os.path.basename(d.rstrip('/'))} is a williams run "
+                         f"whose arm-run order cannot be recovered from the "
+                         f"data, so the row-boundary exclusion its design needs "
+                         f"cannot be computed.")
+            print("    (row-boundary exclusion unavailable: no recoverable "
+                  "arm-run order in this directory)")
         man = manifest(d)
         print(f"\n  {os.path.basename(d.rstrip('/'))}  "
               f"complete={complete(d)}  order={man.get('order_mode')}  "
@@ -224,6 +294,9 @@ def report_within(dirs, out):
                   f"{v['shift_pp']:+8.2f} pp")
             per_arm[a].append(v["shift_pp"])
             per_arm_log[a].append(v["log_delta"])
+        c_nb = contrast(free_nb, cap_nb) if free_nb and cap_nb else None
+        for a, v in (c_nb or {}).items():
+            per_arm_nb[a].append(v["shift_pp"])
         out.setdefault("within", []).append(
             {"dir": os.path.basename(d.rstrip("/")), "complete": complete(d),
              "freerun_tok_s": free, "hardcap_tok_s": cap,
@@ -244,6 +317,19 @@ def report_within(dirs, out):
                 "estimand": "absolute change in percentage points of the "
                             "arm-vs-baseline figure",
                 "log_contrast_pct": pct}
+    if per_arm_nb:
+        print(f"\n  row-boundary EXCLUDED -- the arm-run that opened each row is "
+              f"dropped,\n  because its predecessor is in the previous row and the "
+              f"square does not\n  balance that adjacency. One per arm per session.")
+        out["within_summary_no_boundary"] = {}
+        for a, vs in sorted(per_arm_nb.items(), key=lambda kv: -st.mean(kv[1])):
+            m, lo, hi, n = interval(vs)
+            rng = "" if lo is None else f"  [{lo:+.2f}, {hi:+.2f}]"
+            print(f"    {a:<22} {m:+8.2f} pp{rng}   n={n}")
+            out["within_summary_no_boundary"][a] = {
+                "mean_pp": m, "lo": lo, "hi": hi, "n": n,
+                "estimand": "absolute change in percentage points of the "
+                            "arm-vs-baseline figure, row openers excluded"}
 
 
 def report_crossover(halves, out):

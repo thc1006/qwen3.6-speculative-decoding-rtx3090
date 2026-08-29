@@ -318,25 +318,63 @@ def prose_probe(absent: list[dict]) -> list[dict]:
     return out
 
 
+# Tables that carry digits but no measurement, each named and reasoned rather
+# than caught by a threshold. The census used to file anything with fewer than
+# three numeric cells as "paths, links or prose", which is a different claim
+# from "no derivable numbers" and let a one- or two-value RESULT table leave the
+# coverage population without anyone deciding that it should. Zero is the
+# threshold now, and these five are listed because a reviewer looked at each.
+#
+# Keyed on (document, first line of the header row) so it survives the table
+# moving within its file. A stale entry -- one that matches no table -- fails.
+EXCLUDED_TABLES = {
+    ("README.md", "| Open upstream | Status | What it would change here |"):
+        "upstream tracker; the digits are PR and issue numbers and dates",
+    ("ERRATA.md", "| | `97895129e` (v1) | `3737e4137` (audit) |"):
+        "commit hashes and source line numbers, not measurements",
+    ("RETEST_TODO.md", "| type | why it cannot run here |"):
+        "drafter types and the loader errors that reject them; the digit is a source line",
+    ("RETEST_TODO.md", "| Item | Status |"):
+        "a written/not-written checklist; no quantity in it",
+    ("v4_audit_2026_08_25/README.md", "| arm | what it is |"):
+        "arm definitions; the digit is a tokenizer id passed with --override-kv",
+}
+
 def census() -> dict:
     known = parsed_headers()
-    covered, uncovered, no_values = [], [], []
+    covered, uncovered, no_values, excluded, seen_ex = [], [], [], [], set()
     for rel in DOCS:
         for t in tables(rel):
             hn = norm(t["header"])
             if any(rel == doc and hn.startswith(norm(p)) for doc, p in known):
                 covered.append(t)
-            elif t["value_cells"] < 3:
+            elif (rel, t["header"]) in EXCLUDED_TABLES:
+                seen_ex.add((rel, t["header"]))
+                excluded.append(dict(t, reason=EXCLUDED_TABLES[(rel, t["header"])]))
+            elif t["value_cells"] == 0:
+                # ZERO, not "fewer than three". The threshold used to be < 3, so a
+                # table carrying one or two measurements was filed as "paths, links
+                # or prose" and left the coverage population entirely -- and a
+                # two-cell before/after table can be the most important result in a
+                # document. "Few numbers" and "no derivable numbers" are different
+                # claims, and only the second one licenses skipping the table.
                 no_values.append(t)
             else:
                 uncovered.append(t)
     numeric = len(covered) + len(uncovered)
+    # A registry entry that matches nothing is a claim about a table that is no
+    # longer there, and it would silently shrink the population it was written
+    # to keep honest.
+    stale = sorted(k for k in EXCLUDED_TABLES if k not in seen_ex)
     return {"documents": len(DOCS), "documents_excluded": len(EXCLUDED),
-            "tables": numeric + len(no_values),
+            "tables": numeric + len(no_values) + len(excluded),
             "carrying_values": numeric,
             "parsed": len(covered),
             "not_parsed": len(uncovered),
             "no_values": len(no_values),
+            "excluded_tables": len(excluded),
+            "excluded_stale": stale,
+            "excluded_detail": excluded,
             "coverage_pct": round(100.0 * len(covered) / numeric, 1) if numeric else 0.0,
             "uncovered": sorted(uncovered, key=lambda t: -t["value_cells"]),
             "covered": sorted(covered, key=lambda t: -t["value_cells"])}
@@ -670,8 +708,22 @@ def main() -> None:
     argv = []
     for a in sys.argv[1:]:
         if a.startswith("--shard="):
-            i, n = a.split("=", 1)[1].split("/")
-            shard = (int(i), int(n))
+            spec = a.split("=", 1)[1]
+            try:
+                i_s, n_s = spec.split("/")
+                i, n = int(i_s), int(n_s)
+            except ValueError:
+                sys.exit(f"--shard wants INDEX/COUNT, both integers; got {spec!r}")
+            # Range-checked. Without this `--shard=8/8` selects nothing, because
+            # `k % 8 == 8` is never true, and exits 0 reporting "0 numbers
+            # perturbed, 0 survived" -- a shard that did no work and said it
+            # succeeded. `--shard=-1/8` is the same, and `--shard=0/0` divides by
+            # zero halfway through instead of at the boundary.
+            if n < 1:
+                sys.exit(f"--shard count must be at least 1; got {n}")
+            if not 0 <= i < n:
+                sys.exit(f"--shard index must be in [0, {n}); got {i}")
+            shard = (i, n)
         else:
             argv.append(a)
     unknown = [a for a in argv

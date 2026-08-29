@@ -248,14 +248,31 @@ schedules. For `spec-dflash-n2`, W's interval **overlaps V3's and does not
 overlap V2's at all**: the two within-invocation designs agree and the
 between-invocation crossover does not.
 
-**It is not the predecessor.** With every arm preceded by every other exactly
-once, the contrast between running after a capped neighbour and after a
-free-running one is **−1.20 %** [−2.61, +0.22] for `spec-dflash-n2`. That is
-the largest of any arm by six times, it points the way A17 guessed, and it is
-negative in four sessions of five, but **no arm's interval excludes zero**.
-Reported as no detectable effect at this power, with the interval, not as
-absence. An effect
-big enough to explain a 2.4 pp gap would be far outside it.
+**No capped-predecessor association was detected, at this power.** With every
+arm preceded by every other exactly once within a row, the contrast between
+running after a capped neighbour and after a free-running one is **−1.05 %**
+[−2.97, +0.86] for `spec-dflash-n2` — the largest of any arm, pointing the way
+A17 guessed, negative in four sessions of five, and **no arm's interval excludes
+zero**. Reported as no detectable effect at this power, with the interval, not
+as absence.
+
+That figure is the **identity-matched** estimator. The grouped one this
+paragraph used to quote, −1.20 % [−2.61, +0.22], is not a mode contrast: for an
+uncapped arm `X` the capped group contains `X-cap`, its own twin, while the free
+group cannot contain `X`, because nothing precedes itself — so it carries the
+predecessor's mode, one unmatched predecessor identity, and a five-against-four
+weighting together. Pairing each capped predecessor with its own free
+counterpart and dropping the twin moves the estimate to −1.05 % and **widens**
+the interval, which is where the removed precision was coming from.
+
+This does not rule the predecessor out, and an earlier version of this paragraph
+said it did — under the heading "It is not the predecessor", and with the claim
+that an effect big enough to explain a 2.4 pp gap "would be far outside" the
+interval. **−2.4 is inside [−2.61, +0.22]**, and inside the wider matched
+interval as well. The two numbers are also different estimands: −1.05 % is a
+relative difference in one arm's raw decode rate by predecessor mode, while
+2.4 pp is a difference between arm-and-baseline mode effects. Neither bounds the
+other.
 
 **What is left is A16.** The difference is between measuring the two modes
 inside one invocation and across two. W reproduces the instability that section
@@ -469,9 +486,9 @@ W added 500 more the next day. What keeps this a draft is below, under
 
 ```
 python analysis/rederive_from_logs.py bench   # raw logs -> the committed JSON
-python analysis/verify_claims.py          # 3660 assertions, re-derived
+python analysis/verify_claims.py          # 3669 assertions, re-derived
 python analysis/check_data_integrity.py   # structure of all 65 run directories
-python -m unittest discover tests         # 228 regressions for defects shipped here
+python -m unittest discover tests         # 232 regressions for defects shipped here
 python tests/mutate.py                    # break each fix, require its test to fail
 python tests/data_mutate.py               # perturb a measurement or a published
                                           #   figure, require the checker to fail

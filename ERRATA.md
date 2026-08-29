@@ -1897,9 +1897,17 @@ the nine published documents, and `--probe` writes a wrong number into one cell
 of each in turn, runs the claim checker, and asks whether an assertion that was
 passing now fails. Measured on the tree this entry is committed in:
 
-Of **136** tables, **11** carry no derivable number (paths, hashes, build
-identifiers) and **125** carry measurements. All **125** of those are parsed
-cell by cell by `analysis/verify_claims.py`; **0** are not.
+Of **136** tables, **6** carry no number at all (paths, links, prose), **5** are
+excluded by name and reason in `EXCLUDED_TABLES` -- an upstream PR tracker, a
+commit-hash comparison, two checklists and a table of arm definitions whose only
+digit is a tokenizer id -- and **125** carry measurements. All **125** of those
+are parsed cell by cell by `analysis/verify_claims.py`; **0** are not.
+
+The split used to be three ways, with anything under three numeric cells filed
+as prose. That is a different claim from "no derivable number", and it let a
+one- or two-value result table leave the population without anyone deciding it
+should: five did. The threshold is zero now, and a table that carries digits but
+no measurement has to be named.
 
 That count was 44 and 80 when this entry was first written. Eight of the
 difference is a correction to the census rather than work: a table read by a

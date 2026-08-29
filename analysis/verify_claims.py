@@ -5964,12 +5964,19 @@ chk("W's spec-dflash-n4 keeps the sign flip",
 
 # Q2, the predecessor contrast the design exists for
 _wcarry = defaultdict(list)
+_wcarry_m = defaultdict(list)
 for _d in _W:
     _runs = _co.arm_runs(str(_d))
     for _a, _v in _co.capped_contrast(_runs, "-cap").items():
         chk(f"W {_d.name[8:11]} {_a} predecessor split is the balanced one",
             _v["split_is_balanced"], True)
         _wcarry[_a].append(_v["delta_pct"])
+    # The identity-matched version, which is the one that is a mode contrast.
+    # The grouped estimator above puts an uncapped arm's own capped twin in the
+    # capped group while the free group cannot contain the arm itself, so it
+    # carries predecessor identity as well as predecessor mode.
+    for _a, _v in _co.capped_contrast_matched(_runs, "-cap").items():
+        _wcarry_m[_a].append(_v["delta_pct"])
 _excl = sorted(a for a, v in _wcarry.items()
                if (lambda i: i[1] is not None and (i[1] > 0 or i[2] < 0))(_lm.interval(v)))
 chk("no arm's predecessor interval excludes zero", _excl, [])
@@ -6095,10 +6102,32 @@ for _a, _row in sorted(_PRV3.items()):
     chk(f"PR body V3 {_a}: and its interval",
         (round(_v2i[1], 2), round(_v2i[2], 2)), (_lo, _hi))
 
-chk("PR body: the predecessor result is the one computed",
+chk("PR body: the grouped predecessor result is the one computed",
     round(_lm.interval(_wcarry["spec-dflash-n2"])[0], 2), -1.20, 0.005)
-chk("PR body quotes it",
-    "**-1.20 %**" in _norm(_PR) and "[-2.61, +0.22]" in _norm(_PR), True)
+_wm2 = _lm.interval(_wcarry_m["spec-dflash-n2"])
+chk("PR body: the MATCHED predecessor result is the one computed",
+    round(_wm2[0], 2), -1.05, 0.005)
+chk("PR body: and its matched interval",
+    (round(_wm2[1], 2), round(_wm2[2], 2)), (-2.97, 0.86))
+chk("PR body quotes the matched figure and the grouped one it replaces",
+    ("**-1.05 %**" in _norm(_PR) and "[-2.97, +0.86]" in _norm(_PR)
+     and "-1.20 % [-2.61, +0.22]" in _norm(_PR)), True)
+# The sentence that was wrong. -2.4 has to be inside the interval the document
+# said it was far outside, or the correction in that paragraph is itself untrue.
+_wg2 = _lm.interval(_wcarry["spec-dflash-n2"])
+chk("PR body: -2.4 really is inside the grouped interval it was said to be outside",
+    (_wg2[1] <= -2.4 <= _wg2[2]), True)
+chk("PR body: and inside the matched one", (_wm2[1] <= -2.4 <= _wm2[2]), True)
+chk("PR body: no matched interval excludes zero",
+    [a for a, v in _wcarry_m.items()
+     if not (_lm.interval(v)[1] <= 0 <= _lm.interval(v)[2])], [])
+# The heading, not the phrase: the paragraph that replaces it quotes the old
+# heading in order to withdraw it, and a bare substring test cannot tell the use
+# from the mention.
+chk("PR body: the withdrawn heading is gone",
+    "**It is not the predecessor.**" in _PR, False)
+chk("PR body: and the withdrawal names it",
+    'heading "It is not the predecessor"' in _PR, True)
 chk("PR body quotes the per-repeat CV pair",
     "**1.69 %**" in _PR and "**0.31 %**" in _PR, True)
 
@@ -8730,11 +8759,21 @@ import table_coverage as _tcov                                    # noqa: E402
 _cov = _tcov.census()
 chk("coverage: published tables", _cov["tables"], 136)
 chk("coverage: those carrying measurements", _cov["carrying_values"], 125)
-chk("coverage: parsed cell by cell, and this may only rise",
-    _cov["parsed"] >= 119, True)
-chk("coverage: not parsed, and this may only fall", _cov["not_parsed"] <= 67, True)
-chk("coverage: every table is one of the three",
-    _cov["parsed"] + _cov["not_parsed"] + _cov["no_values"], _cov["tables"])
+# EXACT, not "may only rise". `parsed >= 119` and `not_parsed <= 67` were a
+# ratchet that permitted six unparsed measurement tables to stand indefinitely,
+# and the census that fed them filed any table with fewer than three numeric
+# cells as prose -- so a two-value result table could sit outside the population
+# and outside the ratchet at the same time. Every table carrying a measurement
+# is parsed now, and the gate says so rather than bounding it.
+chk("coverage: every measurement table is parsed", _cov["parsed"], _cov["carrying_values"])
+chk("coverage: none left unparsed", _cov["not_parsed"], 0)
+chk("coverage: every table is one of the four",
+    _cov["parsed"] + _cov["not_parsed"] + _cov["no_values"] + _cov["excluded_tables"],
+    _cov["tables"])
+# An exclusion is a claim about a table that exists. One that matches nothing is
+# a claim about a table that does not, and it would quietly shrink the
+# population it was written to keep honest.
+chk("coverage: no stale table exclusion", _cov["excluded_stale"], [])
 _repo = pathlib.Path(__file__).resolve().parents[1]
 chk("coverage: no document is listed twice",
     sorted(_tcov.DOCS), sorted(set(_tcov.DOCS)))
@@ -8798,11 +8837,12 @@ chk("CHANGELOG: and that is the split it publishes",
     "Eighty-one tables are parsed that were not, eight of them census "
     "corrections and seventy-three new readers" in _CL_FLAT, True)
 chk("ERRATA A19: the census it publishes is the census",
-    (_cov["tables"], _cov["no_values"], _cov["carrying_values"],
-     _cov["parsed"], _cov["not_parsed"]),
-    (136, 11, 125, 125, 0))
+    (_cov["tables"], _cov["no_values"], _cov["excluded_tables"],
+     _cov["carrying_values"], _cov["parsed"], _cov["not_parsed"]),
+    (136, 6, 5, 125, 125, 0))
 for _want, _what in ((136, "tables"), (125, "carrying measurements"),
-                     (125, "parsed"), (0, "not parsed"), (11, "no derivable number")):
+                     (125, "parsed"), (0, "not parsed"), (6, "no number at all"),
+                     (5, "named exclusions")):
     chk(f"ERRATA A19 prints the {_what} count", _want in _A19N, True)
 chk("ERRATA A19: it names the three commands that reproduce the probe figures",
     ("--probe`" in _A19 and "--probe --covered`" in _A19
@@ -8814,9 +8854,9 @@ chk("ERRATA A19: and says the probe is not run in CI",
 # same way; the sampled probe behind it is not, for the reason above.
 _pcov = _tcov.prose_census()
 chk("coverage: decimal numbers in prose, outside every table",
-    _pcov["prose_numbers"], 1226)
+    _pcov["prose_numbers"], 1235)
 chk("coverage: those that are not a literal in this file",
-    _pcov["not_a_literal"], 647)
+    _pcov["not_a_literal"], 625)
 # tested on a supplied source, not by searching this file for a phrase: the
 # first version of this check searched for a label's own words, and the search
 # string was itself a literal in the argument position, so it always found it.
