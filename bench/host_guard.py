@@ -44,6 +44,7 @@ from __future__ import annotations
 
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 # Set in every child too, so a subprocess that imports numpy does not undo this.
@@ -146,9 +147,28 @@ def _benchmark_name(argv: list[str]) -> str | None:
         # `python3 -u harness/bench.py ...` - the script is an argument near the
         # front, compared whole, not searched for inside a longer string
         for a in argv[1:4]:
-            if os.path.basename(a) in _BENCH_SCRIPTS:
+            if os.path.basename(a) in _BENCH_SCRIPTS and not _in_scratch(a):
                 return os.path.basename(a)
     return None
+
+
+def _in_scratch(path: str) -> bool:
+    """A harness copy under a throwaway mirror is a test, not a measurement.
+
+    `tests/mutate.py` and `tests/data_mutate.py` each copy `bench/` into a
+    temporary directory and run the harness there, to check that a broken one
+    is caught. Started side by side on 2026-08-29 each saw the other's copy,
+    `python3 /tmp/tmp*/work/bench/retest_runner.py`, and refused to run. The
+    match was right about the name and right about the position and still
+    wrong about what the process was: a measurement does not live under the
+    temporary directory, and a copy of the harness running there is the suite
+    that tests it.
+    """
+    try:
+        real = os.path.realpath(path)
+    except OSError:
+        return False
+    return real.startswith(os.path.realpath(tempfile.gettempdir()) + os.sep)
 
 
 def measuring_processes() -> list[str]:

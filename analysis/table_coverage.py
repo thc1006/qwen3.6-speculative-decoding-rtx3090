@@ -275,6 +275,14 @@ def prose_probe(absent: list[dict]) -> list[dict]:
         base_fails, base_n, base_rc = _run(wt)
         print(f"baseline: {base_n} assertions, {len(base_fails)} failing, "
               f"exit {base_rc}", file=sys.stderr)
+        # same rule as `cell_probe`: a control that does not pass makes every
+        # "caught" reading suspect, and suspect in the reassuring direction
+        if base_fails or base_rc != 0:
+            raise SystemExit(
+                f"the checker does not pass on an unperturbed worktree "
+                f"({len(base_fails)} failing, exit {base_rc}), so nothing this "
+                f"probe reports would mean anything.\n  "
+                + "\n  ".join(sorted(base_fails)[:5]))
         for n, item in enumerate(sorted(pick, key=lambda x: (x["doc"], x["line"])),
                                  start=1):
             p = wt / item["doc"]
@@ -458,6 +466,22 @@ def cell_probe(tables_: list[dict], shard: tuple[int, int] = (0, 1)) -> list[dic
         print(f"shard {shard[0]}/{shard[1]}: {len(picked)} tables, baseline "
               f"{base_n} assertions, {len(base_fails)} failing, exit {base_rc}",
               file=sys.stderr, flush=True)
+        # A failing control biases the result in the reassuring direction: a
+        # perturbation is "caught" when the failure set grows, so any failure
+        # the baseline did not have counts, including one that has nothing to
+        # do with the number that was changed. Sixteen shards sharing one
+        # `.git` produced three such failures on 2026-08-29 and one shard alone
+        # produced none, so the reading was contention and the result would
+        # have been a clean run that measured nothing. This file has now had to
+        # record a broken control three times; it refuses instead.
+        if base_fails or base_rc != 0:
+            raise SystemExit(
+                f"shard {shard[0]}/{shard[1]}: the checker does not pass on an "
+                f"unperturbed worktree ({len(base_fails)} failing, exit "
+                f"{base_rc}), so nothing this shard reports would mean "
+                f"anything. Fix the tree, or run fewer shards at once: several "
+                f"checkers against one `.git` make the git-gated assertions "
+                f"flake.\n  " + "\n  ".join(sorted(base_fails)[:5]))
         for t in picked:
             p = wt / t["doc"]
             orig = p.read_text(encoding="utf-8")

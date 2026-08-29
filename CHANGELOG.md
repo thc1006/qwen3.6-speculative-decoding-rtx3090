@@ -121,6 +121,24 @@ the table count exactly and the parsed count as a floor, so a new table must be
 parsed or accounted for, and every markdown file must be either censused or
 excluded with a stated reason.
 
+**And the probe's control was wrong a third time, in the direction that
+reassures.** Run as sixteen shards against one `.git`, each shard's baseline
+came back with three failing assertions that a single shard alone does not
+have: several claim checkers calling `git` at once make the git-gated
+assertions flake. A perturbation counts as caught when the failure set grows,
+so a flaky baseline turns unread numbers into caught ones and the run reports
+a clean tree it never measured. Both probes now refuse to report at all unless
+the unperturbed worktree passes, which is the rule `tests/data_mutate.py` has
+always had for its mirror.
+
+**The host guard refused the suites it protects.** Started side by side,
+`tests/mutate.py` and `tests/data_mutate.py` each copy `bench/` into a
+temporary directory and run the harness there, and each read the other's
+`python3 /tmp/tmp*/work/bench/retest_runner.py` as a live measurement. The
+match was right about the name and right about the position and still wrong
+about what the process was: a measurement does not live under the temporary
+directory. A test now pins both directions.
+
 **The larger half is prose, and it is not fixed.** Most decimal numbers in
 these documents are not in any table, and a seeded sample of them was perturbed
 the same way; the result is in ERRATA A19 with its interval. The probe is not

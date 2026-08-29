@@ -8773,6 +8773,15 @@ chk("CHANGELOG: the census it publishes is the census",
      f"and all {_cov['parsed']} are parsed cell by cell." in _CL_FLAT,
      f"all {80 - _cov['not_parsed']} of those are parsed now" in _CL_FLAT),
     (True, True))
+# and the arithmetic beside it: 44 tables were parsed when the entry was first
+# written, eight more turned out to have been parsed all along, and the rest
+# are readers written since. The 119 in this paragraph went stale unnoticed
+# because nothing subtracted anything.
+chk("CHANGELOG: eighty-one more are parsed, eight of them census corrections",
+    (_cov["parsed"] - 44, _cov["parsed"] - 44 - 8), (81, 73))
+chk("CHANGELOG: and that is the split it publishes",
+    "Eighty-one tables are parsed that were not, eight of them census "
+    "corrections and seventy-three new readers" in _CL_FLAT, True)
 chk("ERRATA A19: the census it publishes is the census",
     (_cov["tables"], _cov["no_values"], _cov["carrying_values"],
      _cov["parsed"], _cov["not_parsed"]),

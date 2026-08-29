@@ -2256,6 +2256,24 @@ class TheVerificationSuitesMustRefuseAMeasuringHost(unittest.TestCase):
                 ([], None)):
             self.assertEqual(m(argv), want, f"argv={argv}")
 
+    def test_a_harness_copy_under_a_mirror_is_not_a_measurement(self):
+        """The two suites each copy `bench/` into a temporary directory and run
+        the harness there. Started side by side they saw each other's copy and
+        both refused: right about the name, right about the position, wrong
+        about what the process was."""
+        m = self._hg()._benchmark_name
+        tmp = tempfile.gettempdir()
+        self.assertIsNone(
+            m(["/usr/bin/python3", f"{tmp}/tmpeuz/work/bench/retest_runner.py"]),
+            "a harness copy inside a test mirror still reads as a measurement")
+        self.assertIsNone(
+            m(["python3", f"{tmp}/tmpX/work/harness/bench.py", "--matrix"]),
+            "the same for the other harness name")
+        # and the direction that must not be lost: a real one still counts
+        self.assertEqual(
+            m(["/usr/bin/python3", "/home/x/bench/retest_runner.py", "--arm"]),
+            "retest_runner.py")
+
     def test_every_thread_variable_is_pinned(self):
         """OpenBLAS spawning one thread per core is half of what caused the
         contention; setdefault must cover all five names."""
