@@ -306,6 +306,14 @@ def prose_probe(absent: list[dict]) -> list[dict]:
                         "perturbation": f"{was} -> {now}"})
             print(f"  [{n}/{len(pick)}] {item['doc']}:{item['line']} {was} -> {now}  "
                   f"{'caught' if caught else 'SURVIVED'}", file=sys.stderr, flush=True)
+        # the control again, for the reason `cell_probe` gives at the same spot
+        end_fails, end_n, end_rc = _run(wt)
+        if end_fails or end_rc != 0 or end_n != base_n:
+            raise SystemExit(
+                f"the control no longer passes after the run "
+                f"({len(end_fails)} failing, exit {end_rc}, {end_n} of "
+                f"{base_n} assertions), so this sample means nothing.\n  "
+                + "\n  ".join(sorted(end_fails)[:5]))
     return out
 
 
@@ -526,6 +534,20 @@ def cell_probe(tables_: list[dict], shard: tuple[int, int] = (0, 1)) -> list[dic
                      and r["doc"] == t["doc"] and r["probe"] == "SURVIVED")
             print(f"  {t['doc']}:{t['line']}  {_n} cells, {_s} survived",
                   file=sys.stderr, flush=True)
+        # The control again, after the work. Passing once at the start does
+        # not bound half an hour of running beside seven other shards, and a
+        # "caught" reading is only as good as the control at the moment it was
+        # taken. It also catches the other way a long run goes wrong: a
+        # perturbation that was written and not restored leaves the worktree
+        # dirty, and every reading after it was against a different document.
+        end_fails, end_n, end_rc = _run(wt)
+        if end_fails or end_rc != 0 or end_n != base_n:
+            raise SystemExit(
+                f"shard {shard[0]}/{shard[1]}: the control no longer passes "
+                f"after the run ({len(end_fails)} failing, exit {end_rc}, "
+                f"{end_n} of {base_n} assertions), so the catches it reported "
+                f"cannot be trusted and neither can the survivors.\n  "
+                + "\n  ".join(sorted(end_fails)[:5]))
     return out
 
 

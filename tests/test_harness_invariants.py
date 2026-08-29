@@ -2216,6 +2216,40 @@ class TheGitlessAssertionGapMustBeTheDeclaredOne(unittest.TestCase):
                          f"analysis/verify_claims.py.")
 
 
+class AProbeMustCheckItsControlAtBothEnds(unittest.TestCase):
+    """A probe reports "caught" when the checker fails more than it did.
+
+    So the control decides every reading, and a control that stops passing
+    part way turns unread numbers into caught ones: the failure is silent and
+    it is reassuring. On 2026-08-29 sixteen shards against one `.git` made the
+    git-gated assertions flake and every baseline came back with three
+    failures a single shard does not have. Both probes now refuse before and
+    after, and the second check also catches a perturbation that was written
+    and never restored.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    def _body(self, name):
+        src = (self.ROOT / "analysis" / "table_coverage.py").read_text(
+            encoding="utf-8")
+        tree = ast.parse(src)
+        fn = next(n for n in ast.walk(tree)
+                  if isinstance(n, ast.FunctionDef) and n.name == name)
+        return ast.get_source_segment(src, fn) or ""
+
+    def test_each_probe_refuses_before_and_after(self):
+        for name in ("cell_probe", "prose_probe"):
+            body = self._body(name)
+            self.assertEqual(
+                body.count("raise SystemExit"), 2,
+                f"{name} must refuse a failing control at both ends")
+            self.assertIn("base_fails or base_rc != 0", body,
+                          f"{name} does not check the control before the work")
+            self.assertIn("end_fails or end_rc != 0 or end_n != base_n", body,
+                          f"{name} does not check the control after the work")
+
+
 class TheVerificationSuitesMustRefuseAMeasuringHost(unittest.TestCase):
     """The guard added on 2026-08-27 was itself unguarded.
 

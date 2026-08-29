@@ -129,7 +129,10 @@ assertions flake. A perturbation counts as caught when the failure set grows,
 so a flaky baseline turns unread numbers into caught ones and the run reports
 a clean tree it never measured. Both probes now refuse to report at all unless
 the unperturbed worktree passes, which is the rule `tests/data_mutate.py` has
-always had for its mirror.
+always had for its mirror, and they check it again after the work: passing
+once does not bound half an hour of running beside seven other shards, and
+the second check also catches a perturbation that was written and never
+restored.
 
 **The host guard refused the suites it protects.** Started side by side,
 `tests/mutate.py` and `tests/data_mutate.py` each copy `bench/` into a
