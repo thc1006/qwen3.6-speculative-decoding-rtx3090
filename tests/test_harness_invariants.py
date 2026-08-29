@@ -21,6 +21,7 @@ import signal
 import socket
 import shutil
 import subprocess
+import contextlib
 import sys
 import tempfile
 import time
@@ -2214,6 +2215,55 @@ class TheGitlessAssertionGapMustBeTheDeclaredOne(unittest.TestCase):
                          f"removing a git-gated assertion changes this: set "
                          f"_GITLESS_SKIPPED = {n_with - n_without} in "
                          f"analysis/verify_claims.py.")
+
+
+class AKilledProbeMustNotLeaveItsWorktree(unittest.TestCase):
+    """`pkill` sends SIGTERM, and Python's default handling for it skips
+    `finally`, `atexit` and every ExitStack callback. The probe's worktree is
+    removed by such a callback, so each probe stopped that way left a 163 MB
+    checkout in `/tmp` and an entry in the repository's worktree registry.
+    Seven of them, from runs stopped on 2026-08-29 and 2026-08-30, had a 16 GB
+    tmpfs down to 176 MB free.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    def _tc(self):
+        sys.path.insert(0, str(self.ROOT / "analysis"))
+        import table_coverage
+        return table_coverage
+
+    def test_the_handler_raises_so_the_stack_unwinds(self):
+        tc = self._tc()
+        before = {s: signal.getsignal(s)
+                  for s in (signal.SIGTERM, signal.SIGINT)}
+        try:
+            with contextlib.ExitStack() as stack:
+                tc._unwind_on_signal(stack)
+                handler = signal.getsignal(signal.SIGTERM)
+                self.assertNotIn(handler, (signal.SIG_DFL, signal.SIG_IGN),
+                                 "SIGTERM still ends the process without cleanup")
+                self.assertIs(signal.getsignal(signal.SIGINT), handler)
+                with self.assertRaises(SystemExit):
+                    handler(signal.SIGTERM, None)
+        finally:
+            for s, h in before.items():
+                signal.signal(s, h)
+
+    def test_the_worktree_helper_installs_it_and_prunes_first(self):
+        src = (self.ROOT / "analysis" / "table_coverage.py").read_text(
+            encoding="utf-8")
+        body = ast.get_source_segment(src, next(
+            n for n in ast.walk(ast.parse(src))
+            if isinstance(n, ast.FunctionDef) and n.name == "_worktree")) or ""
+        self.assertIn("_unwind_on_signal(stack)", body,
+                      "a probe stopped with SIGTERM leaks its worktree")
+        # SIGKILL cannot be caught, so the registry is cleared on the way in
+        self.assertIn('"worktree", "prune"', body,
+                      "a worktree left by a SIGKILLed run stays registered")
+        self.assertLess(body.index("_unwind_on_signal(stack)"),
+                        body.index('"worktree", "add"'),
+                        "the handler must be installed before the worktree exists")
 
 
 class AProbeMustCheckItsControlAtBothEnds(unittest.TestCase):

@@ -1923,10 +1923,12 @@ number inside a cell a parser read the front of, such as the four arms by three
 columns by two interval bounds of A17's crossover table. Guarding those grew
 the parsed set, and the probe over the grown set found more: on 2026-08-29 it
 perturbed **2 252** numbers across the **119** tables parsed at the time and
-**33** of them changed nothing. Every one of those is read now. The runs it
-took are the point: the population grows as the coverage does, so a clean run
-is only clean for the tree it ran on, and parsing the last six tables grew it
-again, to **2 373** numbers across **125**.
+**33** of them changed nothing. The runs it took are the point: the population
+grows as the coverage does, so a clean run is only clean for the tree it ran
+on, and parsing the last six tables grew it again. On 2026-08-30, on the tree
+this entry is committed in, all **2 373** numbers across all **125** tables
+were perturbed one at a time and **every one was caught**, in eight shards
+whose control passed before the work and again after it.
 
 The measurement was wrong four times before it measured anything, and all
 four are recorded in the file. The first used the claim checker's exit status,

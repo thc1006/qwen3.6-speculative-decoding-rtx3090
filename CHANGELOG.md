@@ -24,7 +24,9 @@ interval columns reached through `.split("[")[0]`, a configuration column
 nobody read, the `100 %` on a total row. Guarding those grew the parsed set and
 the probe over the grown set found 33 more; the run after that perturbed all
 2 252 numbers in the 119 tables parsed at the time and none survived, and
-parsing the last six grew the population again, to 2 373 across 125. That is
+parsing the last six grew the population again. The run on 2026-08-30 perturbs
+all 2 373 numbers across all 125 tables and catches every one, in eight shards
+whose control passed before the work and again after it. That is
 what the W three-design table had done, in both documents that carry it: only
 the W column was read, so V2's `+12.03` and V3's `+12.17`, two thirds of a
 three-way comparison, could have been anything.
@@ -136,6 +138,16 @@ always had for its mirror, and they check it again after the work: passing
 once does not bound half an hour of running beside seven other shards, and
 the second check also catches a perturbation that was written and never
 restored.
+
+**And a probe stopped with `pkill` left its worktree behind.** The throwaway
+checkout is removed by an ExitStack callback, and Python's default SIGTERM
+handling ends the process without running `finally`, `atexit` or any such
+callback, so every probe stopped that way leaked 163 MB and an entry in the
+repository's worktree registry. Seven of them had a 16 GB tmpfs down to 176 MB
+free, which is the kind of thing that breaks the next run rather than the one
+that caused it. The probes now install a handler that raises `SystemExit`, so
+the stack unwinds, and prune the registry on the way in for the case that
+cannot be caught at all.
 
 **The host guard refused the suites it protects.** Started side by side,
 `tests/mutate.py` and `tests/data_mutate.py` each copy `bench/` into a

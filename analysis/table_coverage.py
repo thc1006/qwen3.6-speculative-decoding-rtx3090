@@ -55,6 +55,7 @@ import pathlib
 import random
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -341,6 +342,28 @@ def census() -> dict:
             "covered": sorted(covered, key=lambda t: -t["value_cells"])}
 
 
+def _unwind_on_signal(stack: contextlib.ExitStack) -> None:
+    """Make SIGTERM and SIGINT unwind the ExitStack instead of skipping it.
+
+    Python's default SIGTERM handling ends the process without running
+    `finally` blocks, `atexit` or an ExitStack's callbacks, so a probe stopped
+    with `pkill` leaves its worktree behind: 163 MB of checkout, plus an entry
+    in the repository's worktree registry. Seven of them, from runs stopped on
+    2026-08-29 and 2026-08-30, had `/tmp` at 176 MB free on a 16 GB tmpfs.
+
+    Raising SystemExit from the handler is what unwinds the stack. SIGKILL
+    cannot be caught, and `git worktree prune` above is the answer to that.
+    """
+    def _bail(signum, _frame):
+        raise SystemExit(f"stopped by signal {signum}")
+
+    for _sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            signal.signal(_sig, _bail)
+        except ValueError:
+            pass            # not the main thread; the ExitStack still runs
+
+
 def _worktree(stack: contextlib.ExitStack) -> pathlib.Path:
     """A throwaway copy of the working tree, so probing never dirties the real one.
 
@@ -351,6 +374,10 @@ def _worktree(stack: contextlib.ExitStack) -> pathlib.Path:
     for the provenance assertions, and uncommitted edits are copied across so
     the probe measures what is on disk rather than what is committed.
     """
+    _unwind_on_signal(stack)
+    # a registry entry whose directory is already gone, from a run that was
+    # killed before this handler existed
+    subprocess.run(["git", "worktree", "prune"], cwd=ROOT, capture_output=True)
     dest = pathlib.Path(tempfile.mkdtemp(prefix="table-probe-"))/ "wt"
     stack.callback(shutil.rmtree, dest.parent, ignore_errors=True)
     subprocess.run(["git", "worktree", "add", "--detach", "-q", str(dest), "HEAD"],
@@ -453,6 +480,25 @@ def _bump(was: str) -> str:
     """Add seven to the integer part, keeping the shape of the number."""
     head, dot, tail = was.partition(".")
     return f"{int(head) + 7}.{tail}" if dot else str(int(head) + 7)
+
+
+def cell_population(tables_: list[dict]) -> int:
+    """How many numbers `cell_probe` would perturb over these tables.
+
+    A function rather than a loop inside `--count`, because the published
+    figure for it is a number in a document like any other and the claim
+    checker has to be able to derive it. Two copies of one derivation is the
+    defect A12 was written about: the second copy is the one nobody reads.
+    """
+    n = 0
+    for t in tables_:
+        lines = (ROOT / t["doc"]).read_text(encoding="utf-8").splitlines()
+        for j in range(t["line"] + 1, len(lines)):
+            if not lines[j].strip().lstrip("> ").strip().startswith("|"):
+                break
+            n += sum(1 for span in _pipe_spans(lines[j])
+                     for _ in _numbers_in(lines[j], span))
+    return n
 
 
 def cell_probe(tables_: list[dict], shard: tuple[int, int] = (0, 1)) -> list[dict]:
@@ -637,15 +683,7 @@ def main() -> None:
         c = census()
         picked = c["covered" if "--covered" in argv else "uncovered"]
         if "--count" in argv:
-            n = 0
-            for t in picked:
-                lines = (ROOT / t["doc"]).read_text(encoding="utf-8").splitlines()
-                for j in range(t["line"] + 1, len(lines)):
-                    if not lines[j].strip().lstrip("> ").strip().startswith("|"):
-                        break
-                    n += sum(1 for span in _pipe_spans(lines[j])
-                             for _ in _numbers_in(lines[j], span))
-            print(f"{len(picked)} tables, {n} numbers")
+            print(f"{len(picked)} tables, {cell_population(picked)} numbers")
             return
         res = cell_probe(picked, shard)
         surv = [r for r in res if r["probe"] == "SURVIVED"]

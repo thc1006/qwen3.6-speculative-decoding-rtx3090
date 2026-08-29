@@ -8840,6 +8840,29 @@ def _wilson_low(_k, _n, _z=1.959964):
     return _c - _h
 
 
+# The size of the probe's population is a published number too, and nothing
+# read it: A19, the changelog and the pull-request body all print 2 373 and
+# 125, and until now each was a literal typed in by hand after reading the
+# tool's output. `cell_population` is what the probe itself would perturb.
+_A19_POP = _tcov.cell_population(_cov["covered"])
+chk("A19: the probe population it publishes is the one the tool would perturb",
+    (_A19_POP, len(_cov["covered"])), (2373, 125))
+# not `_grouped`, which returns the digit groups a table cell splits into:
+# this is prose, and the question is whether the sentence contains the number.
+# `str.split()` treats the thin space as whitespace, so normalising both sides
+# makes the needle match whichever separator the document used.
+_A19_PRINTED = (f"{_A19_POP // 1000} {_A19_POP % 1000:03d}"
+                if _A19_POP >= 1000 else str(_A19_POP))
+for _a19doc, _a19txt in (("ERRATA A19", _A19),
+                         ("CHANGELOG", _CL_FLAT),
+                         ("PR body", _PR)):
+    # bold markers removed and the whole padded, so the count is matched as a
+    # token: `**125**` is the same figure as `125`, and a bare `in` test on
+    # "125" would also be satisfied by the 125 inside some other number
+    _a19flat = " " + " ".join(_a19txt.replace("*", " ").split()) + " "
+    chk(f"{_a19doc}: prints that population and the table count with it",
+        (f" {_A19_PRINTED} " in _a19flat
+         and f" {len(_cov['covered'])} " in _a19flat), True)
 chk("ERRATA A19: the interval it publishes is Wilson's, at the count measured",
     math.floor(100 * _wilson_low(36, _tcov.PROSE_SAMPLE)), 76)
 chk("ERRATA A19: and the entry states that pair",
