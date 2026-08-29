@@ -319,9 +319,10 @@ adversarial pass over this branch's own commits found:
   stopped, a configuration column nobody read, the `100 %` on a total row. Each
   is compared against a value derived from the data, and the measurement says
   so: on 2026-08-29 the probe perturbed all 2 252 numbers across the 119
-  parsed tables and none of them changed nothing. It took three runs, because
+  parsed tables and every one of them was caught. It took three runs, because
   the population grows as the coverage does and a clean run is only clean for
-  the tree it ran on.
+  the tree it ran on, and parsing the last six tables grew it again, to
+  2 373 numbers across 125.
   `analysis/table_coverage.py --probe --covered --every-cell` is the
   measurement and **A19** the accounting; 84 data and document perturbations
   remain permanent tests.
@@ -354,6 +355,19 @@ adversarial pass over this branch's own commits found:
   under 0.15 % where the largest moves 0.18 %; and the changelog credited run M
   with a range that is run O's two metrics for the same arm.
 
+  Four more came out of the two tables nothing had ever read at all. The
+  status board still credited the BOS defect with +0.3 %, which is A2's
+  superseded figure, and A2's own entry still carried it too: the +0.3 % is
+  `33.7 / 33.6`, the ratio of two rounded request-means from A2's own table
+  on the master binary alone, and the `-1.2 % to +3.7 %` beside it is that
+  binary's six v1-tagged prompts, which drops `zh_hant` at -2.2 %. Pooled
+  over both binaries the difference is +0.2 %, and across the sixteen
+  (binary, prompt) cells the span is -2.2 % to +3.7 %. Four places reported
+  the thinking control as "50/50 in D, 0/50 in C" with nothing to say the 50
+  was per arm; over the whole run it is 250 of 250 against 0 of 650. And the
+  host table called the target model 22 GiB, in a cell arguing 29 GiB of free
+  disk was too little for it, where this repository's own listing gives 21G.
+
   One of the new checks read a file no clone has. The fitter placement A14
   cites lives in `v4_audit_2026_08_25/data/matrix_M.log`, and `.gitignore`
   line 4 is `*.log`, so the eight v4 harness logs were on the bench host and in
@@ -361,13 +375,16 @@ adversarial pass over this branch's own commits found:
   the checker inside a clean checkout of HEAD, and there it died 373 assertions
   early, so the probe's own baseline was broken and it was measuring nothing.
   The logs are committed now and a test refuses any path the checker opens that
-  a fresh clone would not have. A clean checkout runs all 3643 assertions and
+  a fresh clone would not have. A clean checkout runs all 3648 assertions and
   exits 0, which it did not before.
 
-  Two figures in those tables are not re-derivable here and say so rather than
+  Figures in those tables that are not re-derivable here say so rather than
   being checked against themselves: A14's two batch sizes, read from a server
-  log this repository does not commit, and C4b's ~83 °C, which is the card's
-  datasheet.
+  log this repository does not commit; C4b's ~83 °C, which is the card's
+  datasheet; and the host table, which is a read-only probe of two machines
+  on one day. Four of its figures turn out to be in the archive after all,
+  because every run manifest carries the same `82 MiB, 0 %` from its own
+  `nvidia-smi`, and three more are the model sizes `BENCHMARK_ENV.md` lists.
 
 ## What the third review found
 
@@ -450,7 +467,7 @@ W added 500 more the next day. What keeps this a draft is below, under
 
 ```
 python analysis/rederive_from_logs.py bench   # raw logs -> the committed JSON
-python analysis/verify_claims.py          # 3643 assertions, re-derived
+python analysis/verify_claims.py          # 3648 assertions, re-derived
 python analysis/check_data_integrity.py   # structure of all 65 run directories
 python -m unittest discover tests         # 223 regressions for defects shipped here
 python tests/mutate.py                    # break each fix, require its test to fail

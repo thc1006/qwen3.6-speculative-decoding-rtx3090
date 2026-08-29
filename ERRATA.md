@@ -1945,12 +1945,12 @@ the baseline every shard compared against was a broken run.
 return rows, and assert nothing about the column you changed, which is exactly
 what the W three-design table did, in two documents, until this pass.
 
-**The larger half is not tables.** **1 215** decimal numbers sit in prose,
-outside every table; **645** of them do not appear as a string literal anywhere
+**The larger half is not tables.** **1 226** decimal numbers sit in prose,
+outside every table; **647** of them do not appear as a string literal anywhere
 in the checker, counting only literals that are not assertion labels; a label
 is prose about a check and not a check, and leaving them in made the count move
 whenever an assertion was reworded. That criterion is an upper bound on the gap
-rather than the gap, so a fixed sample of **40** of the 645 was perturbed the
+rather than the gap, so a fixed sample of **40** of the 647 was perturbed the
 same way, seed `20260828`: **40 of 40 accepted a wrong number**. The 95 %
 Wilson interval puts the unguarded fraction of that population at **91 % or
 above**. The prose half of this repository is, to a first approximation,
@@ -2031,9 +2031,15 @@ number and this file exists because of unchecked numbers.
 26. `RETEST_TODO`'s A2 table gave the baseline as `~125-129 tok/s (quiet
     host)`; run A's control on that prompt reads 123.3 and 126.0.
 27. A2 reported the vocabulary difference as +0.3 % overall and −1.2 % to
-    +3.7 % per prompt; pooled over both binaries it is +0.2 %, and the span
-    across the sixteen (binary, prompt) cells is −2.2 % to +3.7 %. The status
-    board in [`RETEST_TODO.md`](RETEST_TODO.md) repeated the +0.3 %.
+    +3.7 % per prompt, in three places. Neither figure was what it said.
+    The +0.3 % is `33.7 / 33.6`, the ratio of two **rounded** request-means
+    out of A2's own table, on the master binary alone; unrounded that pair
+    gives +0.19 %, and a request-mean is the metric
+    [B8](#b8-every-request-mean-here-counts-one-token-fewer-than-it-timed)
+    says may not carry a published delta. The span is the master binary's six v1-tagged prompts,
+    which drops `zh_hant` at −2.2 %. Pooled over both binaries the
+    difference is +0.2 %, and across the sixteen (binary, prompt) cells the
+    span is −2.2 % to +3.7 %.
 28. The pull-request body said the uncommitted server logs are 7 GB; the
     script that archives them says ~3 GB in three places.
 29. A17's per-repeat CV table mixed two definitions inside one table, in an
@@ -2063,18 +2069,26 @@ file has had to record that. The eight v4 harness logs are committed now, 452
 kB of them, and a test refuses any path the checker opens that a fresh clone
 would not have.
 
-**What it did not change.** Six tables and most of the prose are still
-unguarded. The six are named rather than counted, because each is unread for
-its own reason: `RETEST_TODO`'s status board and its host probe, the first
-because every figure in it is a cross-reference and the second because nothing
-here can re-derive a host's free disk on 2026-08-25; the v4 README's open-gaps
-table and the README's upstream-issue table, both cross-references; A8's
-`p_min` defaults, which are a property of three llama.cpp builds rather than of
-any measurement here; and A14's between-run histogram, whose ten pairs this
-file already says are not enumerated anywhere. The probe is not run in CI: at about twenty seconds a table it is
-close to an hour, and it needs a git worktree. What CI does hold is the census:
-`verify_claims.py` pins the table count exactly and the parsed count as a
-floor, so a new table has to be parsed or accounted for, and a parser that is
+**The six that had held out are read now**, each by the route its own content
+allows, and naming them is the point: a table of pure cross-reference is not
+exempt from being checked, it just has to be checked against what it refers to.
+`RETEST_TODO`'s status board is fifty-eight figures that are all results
+derived elsewhere, and each is now compared against that result rather than
+against itself; that is how P0-1 was caught still crediting the BOS defect with
+a superseded +0.3 %. Its host probe is a reading of two machines on one day:
+four of its figures turn out to be in the archive after all, because every run
+manifest carries the same `82 MiB, 0 %` from its own `nvidia-smi`, three more
+are the model sizes `BENCHMARK_ENV.md` lists, and the rest carry a dagger. The
+v4 README's open gaps and the README's upstream-issue table are
+cross-references in the same sense. A8's `p_min` defaults are a property of
+three llama.cpp builds rather than of any measurement here, and say so. A14's
+between-run histogram was replaced by the twelve groups it summarised.
+
+**What it did not change.** Most of the prose is still unguarded, and that is
+the larger half. The probe is not run in CI: at about twenty seconds a table it
+is close to an hour, and it needs a git worktree. What CI does hold is the
+census: `verify_claims.py` pins the table count exactly and the parsed count as
+a floor, so a new table has to be parsed or accounted for, and a parser that is
 deleted fails. The numbers above are reproduced by `python
 analysis/table_coverage.py --probe`, `--probe --covered` and `--prose --probe`.
 

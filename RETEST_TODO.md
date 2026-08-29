@@ -8,17 +8,18 @@ bench host.
 
 Probed read-only over Tailscale, then used for the runs recorded below.
 † marks a figure that was read off a host on that date and is not
-reproducible from anything in this archive: free disk, driver versions,
-and this box's GPU occupancy and CUDA version. The `3090` column's GPU
-reading is not one of them: every run manifest in
+reproducible from anything in this archive. Every figure in the
+`thc1006-debian13` column is one, because nothing here was measured on
+that machine, and so are the bench host's free disk and driver. The
+`3090` column's GPU reading is not: every run manifest in
 [`v4_audit_2026_08_25/data/`](v4_audit_2026_08_25/data/) records the same
 `82 MiB, 0 %` from its own `nvidia-smi`.
 
 | | `3090` (100.112.135.98) — the v2/v3 bench host | `thc1006-debian13` (this box) |
 |---|---|---|
-| GPU | 1 × RTX 3090, **82 MiB used, 0 % util — idle** | 1 × RTX 3090, **20.2 GiB used** † by a qwen3.8 `llama-server` |
+| GPU | 1 × RTX 3090, **82 MiB used, 0 % util — idle** | 1 × RTX 3090 †, **20.2 GiB used** † by a qwen3.8 `llama-server` |
 | driver | 580.173.02 † (was 580.126.09 at bench time) | 610.43.02 † |
-| disk free | **262 GiB** † | 29 GiB † — the three models are 21 GiB, 508 MiB and 905 MiB, and a CUDA build tree beside them does not fit |
+| disk free | **262 GiB** † | 29 GiB †, against 21 GiB for the target and 508 MiB and 905 MiB for the two drafters |
 | target model | `~/models/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf` ✅ | absent |
 | draft model | `~/models/Qwen3.5-0.8B-Q4_K_M.gguf` ✅ | absent |
 | DFlash drafter | `~/models/qwen36-dflash.gguf` ✅ | absent |

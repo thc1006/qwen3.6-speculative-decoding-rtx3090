@@ -8384,11 +8384,47 @@ chk("A2: the vocabulary difference pooled over both binaries",
     round(_A2_POOLED, 1), 0.2, 0.005)
 chk("A2: and the span across those cells",
     (round(_A2_SPAN[0], 1), round(_A2_SPAN[-1], 1)), (-2.2, 3.7))
+# and the diagnosis of where the superseded pair came from, which is a claim
+# about arithmetic and so is checked like any other. `predicted_per_second` is
+# the field B8 is about; the published +0.3 % is the ratio of two rounded
+# copies of it, and the published span is the master binary's six v1 prompts.
+_A2_RM = {}
+for _sba in ("draft-max8-translate", "draft-max8-matched"):
+    _A2_RM[_sba] = st.mean(
+        [_r["timings"]["predicted_per_second"]
+         for _f in _rg_runs(_B)
+         if os.path.basename(_f).split("__rep")[0] == _sba
+         for _r in json.loads(pathlib.Path(_f)
+                              .read_text(encoding="utf-8"))["rows"]])
+chk("A2: the superseded +0.3 % is the ratio of the table's two rounded means",
+    (round(100 * (round(_A2_RM["draft-max8-matched"], 1)
+                  / round(_A2_RM["draft-max8-translate"], 1) - 1), 1),
+     round(100 * (_A2_RM["draft-max8-matched"]
+                  / _A2_RM["draft-max8-translate"] - 1), 2)),
+    (0.3, 0.19))
+_A2_V1 = ["long_explain", "medium_chat", "medium_rec", "reasoning",
+          "short_greet", "short_q"]
+_A2_SIX = sorted(100 * (_sb_rate((_B, "draft-max8-matched", _t))
+                        / _sb_rate((_B, "draft-max8-translate", _t)) - 1)
+                 for _t in _A2_V1)
+chk("A2: and the superseded span is that binary's six v1-tagged prompts",
+    (len(_A2_SIX), round(_A2_SIX[0], 1), round(_A2_SIX[-1], 1)), (6, -1.2, 3.7))
+chk("A2: the cell it drops is zh_hant, which is the widest of the sixteen",
+    round(100 * (_sb_rate((_B, "draft-max8-matched", "zh_hant"))
+                 / _sb_rate((_B, "draft-max8-translate", "zh_hant")) - 1), 1),
+    round(_A2_SPAN[0], 1), 0.005)
 _A2_SEC = _ER_LINES_TEXT.split("### A2.")[1].split("\n### ")[0]
+# all three documents that carried the superseded pair, checked together: the
+# entry, the audit README's answer 1, and the status board row
+_A2_SAYS = " ".join(_norm("+0.2 % pooled over both binaries, and from −2.2 % "
+                          "to +3.7 % across the sixteen (binary, prompt) "
+                          "cells").split())
 chk("ERRATA A2 states both, and no longer the pair they superseded",
-    (" ".join(_norm("+0.2 % pooled over both binaries, and from −2.2 % to "
-                    "+3.7 % across the sixteen (binary, prompt) cells").split())
-     in " ".join(_norm(_A2_SEC).split()), "+0.3 %" in _A2_SEC), (True, False))
+    (_A2_SAYS in " ".join(_norm(_A2_SEC).split()), "+0.3 %" in _A2_SEC),
+    (True, False))
+chk("the audit README's answer 1 states the same pair, and not the old one",
+    (_A2_SAYS in " ".join(_norm(_V4R_TEXT).split()),
+     "+0.3 % overall" in _V4R_TEXT), (True, False))
 
 # P0-2. What the thinking control's "50" counts. Four places printed 50/50
 # against 0/50 with nothing to say the 50 was per arm; over the whole run it is
@@ -8611,6 +8647,7 @@ chk("and ERRATA names it as the build the v2 controls ran on",
 # GPU occupancy, or a CUDA version. The assertion is that the document has not
 # lost them, which is what the dagger beside each one says.
 _HP_READ = {"bench host free GiB": 262, "this box free GiB": 29,
+            "this box cards": 1, "this box card": 3090,
             "this box GPU GiB in use": 20.2, "this box CUDA": 13.3}
 _HP = _num_rows(_RT_LINES, "| | `3090` (100.112.135.98)")
 chk("host probe: the rows it has",
@@ -8628,6 +8665,7 @@ chk("host probe: the text found is the row that was parsed",
 # beside them. Each is pinned to the checker rather than derived, which is
 # what the dagger says; the assertion is that the document has not lost it.
 for _hprow, _hpfig, _hpname in (
+        ("GPU", "1 × RTX 3090 †", "this box's card"),
         ("GPU", "**20.2 GiB used** †", "this box's GPU in use"),
         ("driver", "580.173.02 †", "the bench host's driver"),
         ("driver", "610.43.02 †", "this box's driver"),
@@ -8637,14 +8675,17 @@ for _hprow, _hpfig, _hpname in (
     chk(f"host probe: {_hpname} is marked as read off the host",
         _hpfig in _HP_ROW[_hprow], True)
 chk("host probe: and the note says what the dagger means",
-    ("† marks a figure that was read off a host on that date and is not "
-     "reproducible from anything in this archive"
+    ("Every figure in the `thc1006-debian13` column is one, because nothing "
+     "here was measured on that machine"
      in " ".join("\n".join(_RT_LINES).split())), True)
 chk("host probe: the superseded target size is gone",
     "too small for the 22 GiB target" in "\n".join(_RT_LINES), False)
 
 _HP_WANT = {
-    "GPU": [_HP_CARDS[0], _HP_CARD, _HP_MIB, _HP_UTIL, _HP_CARDS[0], _HP_CARD,
+    # the second column's card is pinned, not derived: the bench host's
+    # manifests say nothing about the machine this box is
+    "GPU": [_HP_CARDS[0], _HP_CARD, _HP_MIB, _HP_UTIL,
+            _HP_READ["this box cards"], _HP_READ["this box card"],
             _HP_READ["this box GPU GiB in use"]],
     "driver": [],
     "disk free": [_HP_READ["bench host free GiB"],
@@ -8749,9 +8790,9 @@ chk("ERRATA A19: and says the probe is not run in CI",
 # same way; the sampled probe behind it is not, for the reason above.
 _pcov = _tcov.prose_census()
 chk("coverage: decimal numbers in prose, outside every table",
-    _pcov["prose_numbers"], 1215)
+    _pcov["prose_numbers"], 1226)
 chk("coverage: those that are not a literal in this file",
-    _pcov["not_a_literal"], 645)
+    _pcov["not_a_literal"], 647)
 # tested on a supplied source, not by searching this file for a phrase: the
 # first version of this check searched for a label's own words, and the search
 # string was itself a literal in the argument position, so it always found it.
@@ -8759,7 +8800,7 @@ _lbl_src = 'chk("A LABEL", "A VALUE", 1)'
 chk("coverage: a label is not counted as a literal and its arguments are",
     ("A LABEL" in _tcov._checker_literals(_lbl_src),
      "A VALUE" in _tcov._checker_literals(_lbl_src)), (False, True))
-for _want, _what in ((1215, "prose count"), (645, "count that are not literals"),
+for _want, _what in ((1226, "prose count"), (647, "count that are not literals"),
                      (40, "sample size")):
     chk(f"ERRATA A19 prints the {_what}", _want in _A19N, True)
 chk("ERRATA A19: the sample size it names is the one the tool draws",

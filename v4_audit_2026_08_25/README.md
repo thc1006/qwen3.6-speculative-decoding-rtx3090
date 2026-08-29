@@ -119,8 +119,8 @@ a draft round; here all 10 do.
 
 The two arms are byte-identical in what they draft: `16590` drafted and `4926`
 accepted, in **both**, and the same per-prompt pairs (`154/576`, `140/647`,
-`211/404`, …). The throughput difference is +0.3 % overall, and per prompt it
-ranges from −1.2 % to +3.7 %: noise.
+`211/404`, …). Throughput differs by +0.2 % pooled over both binaries, and
+from −2.2 % to +3.7 % across the sixteen (binary, prompt) cells: noise.
 
 So: llama.cpp genuinely was running the token-translation fallback, this
 repository's "vocab-matched" claim was genuinely false, and fixing it changes
