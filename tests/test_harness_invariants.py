@@ -2849,6 +2849,21 @@ class ThePublishToolMustParseAndVerify(unittest.TestCase):
         self.assertIn('_api("GET")', src, "it never re-reads what it published")
         self.assertIn("differs from", src, "no byte comparison after publishing")
 
+    def test_it_does_not_call_a_character_count_bytes(self):
+        """It reported "31015 bytes" for a body GitHub's API returns as 31083,
+        because the body carries 36 non-ASCII characters and `len` on a `str`
+        counts characters. The comparison was right; the number beside it
+        invited a mismatch that was not there, in the one tool whose whole
+        purpose is to prove the body landed unchanged."""
+        src = (self.ROOT / "tools" / "publish_pr_body.py").read_text(encoding="utf-8")
+        ok = next((ln for ln in src.splitlines() if "matches {SOURCE.name}" in ln), "")
+        self.assertTrue(ok, "the success message moved")
+        tail = src[src.index(ok):src.index(ok) + 300]
+        self.assertIn("encode('utf-8')", tail,
+                      "the byte count is not measured in bytes")
+        self.assertIn("characters", tail,
+                      "the character count is not labelled as characters")
+
 
 class TheRerunScriptsMustBehaveWithAFakeRunner(unittest.TestCase):
     """Source-level assertions pass on a script that does not work.

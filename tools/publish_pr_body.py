@@ -87,18 +87,26 @@ def main() -> None:
 
     got = (_api("GET").get("body") or "").replace("\r\n", "\n").strip()
     if got == want:
-        print(f"live body matches {SOURCE.name}: {len(want)} bytes")
+        # characters and bytes, both: the body carries 36 non-ASCII characters
+        # (28 of them U+2212) and GitHub's API reports its length in bytes, so
+        # printing one count labelled as the other invites exactly the
+        # comparison that fails for no reason. Comparing the strings IS a
+        # byte-for-byte comparison, because UTF-8 encodes them one way only.
+        print(f"live body matches {SOURCE.name}: {len(want)} characters, "
+              f"{len(want.encode('utf-8'))} bytes")
         return
 
-    # say where, not just that
+    # say where, not just that. The index is into characters, which is what
+    # the slices below are, so it is not called a byte offset.
     for i, (a, b) in enumerate(zip(want, got)):
         if a != b:
             raise SystemExit(
-                f"live body differs from {SOURCE.name} at byte {i}\n"
+                f"live body differs from {SOURCE.name} at character {i}\n"
                 f"  want: {want[max(0, i - 40):i + 40]!r}\n"
                 f"  got:  {got[max(0, i - 40):i + 40]!r}")
     raise SystemExit(
-        f"live body differs in length: file {len(want)}, live {len(got)}\n"
+        f"live body differs in length: file {len(want)} characters, "
+        f"live {len(got)}\n"
         f"  tail of the shorter: {(want if len(want) < len(got) else got)[-120:]!r}")
 
 

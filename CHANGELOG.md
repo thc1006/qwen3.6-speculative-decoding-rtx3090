@@ -139,6 +139,15 @@ once does not bound half an hour of running beside seven other shards, and
 the second check also catches a perturbation that was written and never
 restored.
 
+**The publisher called a character count a byte count.** It reported "31015
+bytes" for a body GitHub's API returns as 31083, because the pull-request body
+carries 36 non-ASCII characters, 28 of them U+2212, and `len` on a Python `str`
+counts characters. The comparison behind it was right, and comparing the two
+strings is a byte-for-byte comparison because UTF-8 encodes a string one way
+only; the number printed beside it was the one that invited a mismatch that was
+not there, in the one tool whose whole purpose is to prove the body landed
+unchanged. It prints both counts now.
+
 **And a probe stopped with `pkill` left its worktree behind.** The throwaway
 checkout is removed by an ExitStack callback, and Python's default SIGTERM
 handling ends the process without running `finally`, `atexit` or any such
