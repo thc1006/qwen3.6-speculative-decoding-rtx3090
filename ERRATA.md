@@ -1928,8 +1928,8 @@ took are the point: the population grows as the coverage does, so a clean run
 is only clean for the tree it ran on, and parsing the last six tables grew it
 again, to **2 373** numbers across **125**.
 
-The measurement was wrong three times before it measured anything, and all
-three are recorded in the file. The first used the claim checker's exit status,
+The measurement was wrong four times before it measured anything, and all
+four are recorded in the file. The first used the claim checker's exit status,
 and every table came back caught, because one unrelated assertion was failing
 at the time and the checker exited non-zero whatever was done to the documents;
 a probe whose control and treatment agree measures nothing, so it compares
@@ -1939,7 +1939,15 @@ duplicated into a second document counted as parsed there too; that is how the
 changelog's copy of the re-derivation table passed as covered while accepting a
 wrong number. The third is above: the checker read a file `.gitignore`
 excluded, so inside the probe's clean checkout it died 373 assertions early and
-the baseline every shard compared against was a broken run.
+the baseline every shard compared against was a broken run. The fourth is the
+same defect from the other side. Run as sixteen shards against one `.git`,
+every shard's baseline came back with three failing assertions that one shard
+alone does not have, because several claim checkers calling `git` at once make
+the git-gated assertions flake; a perturbation counts as caught when the
+failure set grows, so a flaky control turns an unread number into a read one
+and the run reports a clean tree it never measured. Both probes now refuse
+unless the unperturbed worktree passes, and they check it again after the work,
+because passing once does not bound half an hour of running.
 
 "Parsed" is a claim about what a parser does, and a parser can match a header,
 return rows, and assert nothing about the column you changed, which is exactly
@@ -1951,34 +1959,25 @@ in the checker, counting only literals that are not assertion labels; a label
 is prose about a check and not a check, and leaving them in made the count move
 whenever an assertion was reworded. That criterion is an upper bound on the gap
 rather than the gap, so a fixed sample of **40** of the 647 was perturbed the
-same way, seed `20260828`: **40 of 40 accepted a wrong number**. The 95 %
-Wilson interval puts the unguarded fraction of that population at **91 % or
-above**. The prose half of this repository is, to a first approximation,
-unchecked.
+same way, seed `20260828`: **36 of 40 accepted a wrong number**, and the 95 %
+Wilson interval puts the unguarded fraction of that population at **76 % or
+above**. The run before this one caught none of its forty; the four it catches
+now are numbers the readers written for the tables happen to reach, which is
+the only reason the figure moved. The prose half of this repository is, to a
+first approximation, unchecked.
 
-**The measurement was wrong twice before it measured anything.** The first
-version used the claim checker's exit status, and every table came back caught,
-because one unrelated assertion was failing at the time and the checker exited
-non-zero whatever was done to the documents: a probe whose control and
-treatment agree measures nothing. It compares failure *sets* now. The second
-matched a table header against the literals the checker parses without asking
-which document the reader reads, so a table duplicated into a second document
-counted as parsed there too; that is how the changelog's copy of the
-re-derivation table passed as covered while accepting a wrong number. Each
-reader is bound to its document now. Both mistakes are recorded in the file,
-because the shape of a wrong measurement outlives the number it produced.
-
-**What this pass changed.** Seventy-five tables count as parsed that did not:
-eight are the census correction above and sixty-seven are new readers. They
+**What this pass changed.** Eighty-one tables count as parsed that did not:
+eight are the census correction above and seventy-three are new readers. They
 include every cell of the thirteen-arm run C table, run O's head-to-head, the
 v1 representative table with both of its range rows, run J and run K, run L's
 two halves, the V2 and V3 columns of the W table in both documents that carry
 it, both run registries, A4's log reconstruction, A14's M1-against-Q
 comparison, A16's six invocations, A17's per-repeat rates, B4's family minima,
 the BOS-override table in the two documents that publish it, run I's
-acceptance under batching, and the README's length-matched comparison.
+acceptance under batching, the README's length-matched comparison, and last
+the six named above.
 
-**Thirty-one published statements were wrong and are corrected.** They are
+**Thirty-three published statements were wrong and are corrected.** They are
 listed rather than summarised, because a count of corrections is itself a
 number and this file exists because of unchecked numbers.
 
@@ -2055,6 +2054,14 @@ number and this file exists because of unchecked numbers.
     repository's own directory listing gives 21G, twice, and the three
     models together are 21 GiB, 508 MiB and 905 MiB; the cell now says
     that instead.
+32. This entry carried the paragraph about how many times the coverage
+    measurement was wrong twice over, once saying three times and once saying
+    twice, and the second copy was the older text. There is one paragraph now
+    and it says four.
+33. The same entry said seventy-five tables count as parsed that did not,
+    split into eight census corrections and sixty-seven new readers, while
+    the changelog said eighty-one and seventy-three for the same pass. The
+    census gives eighty-one, and a check now derives the split from it.
 
 A test now refuses any table row with no header above it, and another refuses
 any path the checker opens that a fresh clone would not have.
@@ -2076,9 +2083,11 @@ exempt from being checked, it just has to be checked against what it refers to.
 derived elsewhere, and each is now compared against that result rather than
 against itself; that is how P0-1 was caught still crediting the BOS defect with
 a superseded +0.3 %. Its host probe is a reading of two machines on one day:
-four of its figures turn out to be in the archive after all, because every run
-manifest carries the same `82 MiB, 0 %` from its own `nvidia-smi`, three more
-are the model sizes `BENCHMARK_ENV.md` lists, and the rest carry a dagger. The
+of its seventeen figures, four turn out to be in the archive after all,
+because every run manifest carries the same `82 MiB, 0 %` from its own
+`nvidia-smi`; three more are the model sizes `BENCHMARK_ENV.md` lists; four
+are upstream identifiers it also records, one of them v2's own build; and the
+six that are left carry a dagger. The
 v4 README's open gaps and the README's upstream-issue table are
 cross-references in the same sense. A8's `p_min` defaults are a property of
 three llama.cpp builds rather than of any measurement here, and say so. A14's

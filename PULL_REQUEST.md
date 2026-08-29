@@ -375,16 +375,18 @@ adversarial pass over this branch's own commits found:
   the checker inside a clean checkout of HEAD, and there it died 373 assertions
   early, so the probe's own baseline was broken and it was measuring nothing.
   The logs are committed now and a test refuses any path the checker opens that
-  a fresh clone would not have. A clean checkout runs all 3650 assertions and
+  a fresh clone would not have. A clean checkout runs all 3656 assertions and
   exits 0, which it did not before.
 
   Figures in those tables that are not re-derivable here say so rather than
   being checked against themselves: A14's two batch sizes, read from a server
   log this repository does not commit; C4b's ~83 °C, which is the card's
   datasheet; and the host table, which is a read-only probe of two machines
-  on one day. Four of its figures turn out to be in the archive after all,
-  because every run manifest carries the same `82 MiB, 0 %` from its own
-  `nvidia-smi`, and three more are the model sizes `BENCHMARK_ENV.md` lists.
+  on one day. Of its seventeen figures, four turn out to be in the archive
+  after all, because every run manifest carries the same `82 MiB, 0 %` from
+  its own `nvidia-smi`; three more are the model sizes `BENCHMARK_ENV.md`
+  lists; four are upstream identifiers it also records; and the six that are
+  left carry a dagger.
 
 ## What the third review found
 
@@ -467,7 +469,7 @@ W added 500 more the next day. What keeps this a draft is below, under
 
 ```
 python analysis/rederive_from_logs.py bench   # raw logs -> the committed JSON
-python analysis/verify_claims.py          # 3650 assertions, re-derived
+python analysis/verify_claims.py          # 3656 assertions, re-derived
 python analysis/check_data_integrity.py   # structure of all 65 run directories
 python -m unittest discover tests         # 225 regressions for defects shipped here
 python tests/mutate.py                    # break each fix, require its test to fail

@@ -8646,6 +8646,7 @@ chk("and ERRATA names it as the build the v2 controls ran on",
 # nothing in this archive can reproduce a free-disk figure, another machine's
 # GPU occupancy, or a CUDA version. The assertion is that the document has not
 # lost them, which is what the dagger beside each one says.
+_HP_IDS = (22105, 8863, 8889, 8942)     # a PR and three library builds
 _HP_READ = {"bench host free GiB": 262, "this box free GiB": 29,
             "this box cards": 1, "this box card": 3090,
             "this box GPU GiB in use": 20.2, "this box CUDA": 13.3}
@@ -8694,12 +8695,25 @@ _HP_WANT = {
     "target model": [],
     "draft model": [],
     "DFlash drafter": [],
-    "llama.cpp": [22105, 8863, 8889, 8942],
+    "llama.cpp": list(_HP_IDS),
     "toolchain": [_HP_READ["this box CUDA"]],
     "llama-completion": [],
     "gguf tooling": [],
 }
 chk("host probe: every row is accounted for", sorted(_HP), sorted(_HP_WANT))
+# and the accounting the entry publishes for them, which is the whole claim
+# that a table of host readings can be checked at all
+_HP_N = sum(len(_v) for _v in _HP_WANT.values())
+_HP_SIZES = _HP_TARGET + _HP_DRAFT + _HP_DFLASH
+chk("host probe: seventeen figures, and what each of them rests on",
+    (_HP_N, len(_HP_READ), len(_HP_SIZES), len(_HP_IDS),
+     _HP_N - len(_HP_READ) - len(_HP_SIZES) - len(_HP_IDS)),
+    (17, 6, 3, 4, 4))
+chk("host probe: and both documents account for them the same way",
+    (("of its seventeen figures, four turn out to be in the archive"
+      in " ".join(_ER_LINES_TEXT.split())),
+     ("Of its seventeen figures, four turn out to be in the archive"
+      in " ".join(_PR.split()))), (True, True))
 for _hpid in sorted(_HP_WANT):
     _num_row_check(f"host probe {_hpid}", _HP[_hpid], _HP_WANT[_hpid])
 
@@ -8758,7 +8772,8 @@ _A19_LIST = re.findall(r"^(\d+)\. ", _A19, re.M)
 _WORDS = {20: "Twenty", 21: "Twenty-one", 22: "Twenty-two",
           23: "Twenty-three", 24: "Twenty-four", 25: "Twenty-five",
           26: "Twenty-six", 27: "Twenty-seven", 28: "Twenty-eight",
-          29: "Twenty-nine", 30: "Thirty", 31: "Thirty-one"}
+          29: "Twenty-nine", 30: "Thirty", 31: "Thirty-one",
+          32: "Thirty-two", 33: "Thirty-three", 34: "Thirty-four"}
 chk("ERRATA A19: the corrections are numbered from one, without a gap",
     [int(_x) for _x in _A19_LIST], list(range(1, len(_A19_LIST) + 1)))
 chk("ERRATA A19: and the count it states is the length of that list",
@@ -8812,6 +8827,33 @@ chk("coverage: a label is not counted as a literal and its arguments are",
 for _want, _what in ((1226, "prose count"), (647, "count that are not literals"),
                      (40, "sample size")):
     chk(f"ERRATA A19 prints the {_what}", _want in _A19N, True)
+# The interval beside that sample was stated and never derived. Wilson, not
+# the normal approximation: at 40 of 40 the normal one has zero width and says
+# the population is 100 % unguarded, which is why the entry uses this one.
+
+
+def _wilson_low(_k, _n, _z=1.959964):
+    _ph = _k / _n
+    _c = (_ph + _z * _z / (2 * _n)) / (1 + _z * _z / _n)
+    _h = ((_z / (1 + _z * _z / _n))
+          * math.sqrt(_ph * (1 - _ph) / _n + _z * _z / (4 * _n * _n)))
+    return _c - _h
+
+
+chk("ERRATA A19: the interval it publishes is Wilson's, at the count measured",
+    math.floor(100 * _wilson_low(36, _tcov.PROSE_SAMPLE)), 76)
+chk("ERRATA A19: and the entry states that pair",
+    ("**36 of 40 accepted a wrong number**" in _A19
+     and "**76 % or\nabove**" in _A19), True)
+# the split of what this pass parsed, which the entry and the changelog give
+# separately and which went stale in the entry at seventy-five
+chk("ERRATA A19: the newly parsed count is the census's difference too",
+    ("**What this pass changed.** Eighty-one tables count as parsed that did "
+     "not: eight are the census correction above and seventy-three are new "
+     "readers." in " ".join(_A19.split())), True)
+chk("ERRATA A19: and it says the measurement was wrong four times, once",
+    (_A19.count("The measurement was wrong"),
+     "wrong four times before it measured anything" in _A19), (1, True))
 chk("ERRATA A19: the sample size it names is the one the tool draws",
     _tcov.PROSE_SAMPLE, 40)
 chk("ERRATA A19: and the seed it names is the one the tool uses",

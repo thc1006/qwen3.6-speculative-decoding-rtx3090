@@ -29,8 +29,8 @@ had done, in both documents that carry it: only the W column was read, so V2's
 `+12.03` and V3's `+12.17`, two thirds of a three-way comparison, could have
 been anything.
 
-The measurement was wrong three times before it measured anything, and all
-three are recorded in the file. The first used the claim checker's exit status, and
+The measurement was wrong four times before it measured anything, and all
+four are recorded in the file. The first used the claim checker's exit status, and
 every table came back caught, because one unrelated assertion was failing at
 the time and the checker exited non-zero whatever was done to the documents; a
 probe whose control and treatment agree measures nothing, so it compares
@@ -40,7 +40,10 @@ duplicated into a second document counted as parsed there too, which is how the
 changelog's own copy of the re-derivation table passed as covered while
 accepting a wrong number. The third is below: the checker read a file
 `.gitignore` excluded, so inside the probe's clean checkout it died 373
-assertions early and every shard compared against a broken baseline.
+assertions early and every shard compared against a broken baseline. The
+fourth is the same defect from the other side, and it is below: sixteen shards
+against one `.git` made the git-gated assertions flake, so every baseline came
+back with three failures a single shard does not have.
 
 **And it had the defect it exists to find, twice more.** Its number extractor
 fell back to integers only when a cell held no decimal, so `p_min 0 / 0.50 /
@@ -144,7 +147,9 @@ directory. A test now pins both directions.
 
 **The larger half is prose, and it is not fixed.** Most decimal numbers in
 these documents are not in any table, and a seeded sample of them was perturbed
-the same way; the result is in ERRATA A19 with its interval. The probe is not
+the same way: 36 of 40 accepted a wrong number, against 40 of 40 on the run
+before, and the 95 % Wilson interval puts the unguarded fraction at 76 % or
+above. The result is in ERRATA A19. The probe is not
 run in CI; about twenty seconds a table is close to an hour, and it needs a git
 worktree.
 
