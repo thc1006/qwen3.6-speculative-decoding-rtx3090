@@ -11,9 +11,21 @@
 # `length_mode.py` should not have called V3 "the design that identifies the
 # effect", and this is the design that does.
 #
-# W is V3 with ONE difference: `BENCH_ORDER=williams` instead of `latin`. Same
-# ten arms, same models, same fit target, same prompts, same everything. If W
-# and V3 disagree, the schedule is the only thing that can explain it.
+# W uses V3's treatment definitions, prompts, models, fit target and server
+# build, with `BENCH_ORDER=williams` instead of `latin` and a LATER HARNESS
+# REVISION. It is not V3 verbatim, and this comment used to say it was: the two
+# manifests record different runner hashes, and the diff between exactly those
+# two blobs is archived at `v4_audit_2026_08_25/harness/V3_to_W_runner.diff`
+# with a hunk-by-hunk classification beside it. 189 lines, all of it the
+# Williams schedule builder, provenance assertions and provenance records; none
+# of it reaches the request body, the server argv, timing collection, teardown
+# or aggregation. One hunk adds a failure mode V3 did not have -- an arm-run
+# with rows but no observed target identity is refused -- which can reject more
+# and cannot move a number.
+#
+# So a difference between W and V3 is not attributable to the schedule alone
+# without reading that diff. It is a small second difference, it is enumerated,
+# and it is not zero.
 #
 # What the square gives
 # ---------------------
@@ -56,7 +68,8 @@ export LLAMA_SERVER_BIN="${LLAMA_SERVER_BIN:-$BENCH/llama-retest/build/bin/llama
 [ -x "$LLAMA_SERVER_BIN" ] || { echo "not executable: $LLAMA_SERVER_BIN" >&2; exit 1; }
 export BENCH_EXPECT_COMMIT="${BENCH_EXPECT_COMMIT:-3737e41370da1830a44c663f9929a0f27591ffa6}"
 
-# run V3 verbatim, except the schedule
+# V3's treatment definitions and environment; see the diff note above for the
+# harness revision that is the other difference
 export BENCH_HARDCAP_SUFFIX="-cap"
 # the twins are listed, not inferred - exactly as run V3 listed them
 export BENCH_ARMS="baseline,baseline-cap,spec-dflash-n2,spec-dflash-n2-cap,spec-dflash-n4,spec-dflash-n4-cap,spec-mtp-n2,spec-mtp-n2-cap,spec-draft-n8,spec-draft-n8-cap"

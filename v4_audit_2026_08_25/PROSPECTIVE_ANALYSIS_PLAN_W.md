@@ -1,8 +1,19 @@
-# Pre-registered analysis plan for run W
+# Prospective analysis plan for run W
 
-Committed **before** run W's data existed. `git log` on this file is the
-timestamp; W's arm-runs land in a later commit, and
-`analysis/verify_claims.py` asserts that ordering.
+**Finalized after 360 of run W's 500 arm-runs had completed, and before the
+completed dataset was committed.** It is not a preregistration and this file
+used to call itself one: it said "committed before run W's data existed", which
+`git log` cannot show. Commit ancestry proves the plan commit precedes the
+commit that added the data — nothing more. It cannot show that 360 finished
+arm-runs did not exist on disk at the time, that no intermediate output was
+read, or that the estimators and thresholds below were not shaped by partial
+results.
+
+The author states that no outcome summaries were inspected before the plan was
+finalized. That is a statement, not evidence, and it is recorded as one.
+
+`analysis/verify_claims.py` still asserts the commit ordering, which is the part
+that can be checked.
 
 ## Why this file exists at all
 
@@ -66,9 +77,11 @@ and O2 today for exactly that reason.
   other arms would make first-order carryover a live explanation for the
   V2/V3 disagreement, and A16's next experiment would be about state that
   survives a server restart.
-- Intervals containing zero for every arm would eliminate the predecessor as
-  the explanation, which is a real result: it is the one candidate this
-  repository has been able to name and could never test.
+- Intervals containing zero for every arm would mean no predecessor-mode
+  association was detected at this power. That is a real result — it is the one
+  candidate this repository has been able to name and could never test — but it
+  is not elimination, and this line used to say "eliminate". A non-detection
+  bounds the effect by the interval it reports and does nothing else.
 
 **Q3. Does the within-invocation instability A16 reports appear again?**
 

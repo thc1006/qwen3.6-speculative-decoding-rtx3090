@@ -228,8 +228,15 @@ not, and both schedules are cyclic rotations that balance treatment position
 and leave the predecessor fixed, so neither could say why.
 
 **Run W is the design that can.** Five sessions of a 10 x 10 Williams square,
-row order shuffled from a per-session seed, 500 of 500 arm-runs. Run V3
-verbatim except for `BENCH_ORDER`. Every arm visits every position exactly once
+row order shuffled from a per-session seed, 500 of 500 arm-runs. It uses V3's
+treatment definitions, prompts, models and server build, with a Williams
+schedule and a later harness revision — **not V3 verbatim**, which this section
+used to claim. The two manifests record different runner hashes, and the diff
+between exactly those blobs is archived at
+[`v4_audit_2026_08_25/harness/V3_to_W_runner.diff`](v4_audit_2026_08_25/harness/V3_to_W_runner.diff)
+with every hunk classified: 189 lines, all of it the schedule builder,
+provenance assertions and provenance records, none of it reaching the request
+body, server argv, timing collection, teardown or aggregation. Every arm visits every position exactly once
 **and** is preceded by every other arm exactly once within a repeat, verified
 from the arm-runs' own `t_start` order rather than from the manifest, in all
 five sessions. The analysis plan was committed while the run was at 360 of 500
@@ -486,7 +493,7 @@ W added 500 more the next day. What keeps this a draft is below, under
 
 ```
 python analysis/rederive_from_logs.py bench   # raw logs -> the committed JSON
-python analysis/verify_claims.py          # 3669 assertions, re-derived
+python analysis/verify_claims.py          # 3678 assertions, re-derived
 python analysis/check_data_integrity.py   # structure of all 65 run directories
 python -m unittest discover tests         # 232 regressions for defects shipped here
 python tests/mutate.py                    # break each fix, require its test to fail

@@ -65,7 +65,7 @@ DOCS = ["README.md", "ERRATA.md", "CHANGELOG.md", "RETEST_TODO.md",
         "BENCHMARK_ENV.md", "PULL_REQUEST.md",
         "v4_audit_2026_08_25/README.md",
         "v4_audit_2026_08_25/PREREGISTERED_PREDICTION.md",
-        "v4_audit_2026_08_25/PREREGISTERED_W.md"]
+        "v4_audit_2026_08_25/PROSPECTIVE_ANALYSIS_PLAN_W.md"]
 # Not censused, and why. Nothing may be missing from DOCS + EXCLUDED: a new
 # document that is in neither would escape the count silently, which is the
 # failure this whole file exists to stop.
@@ -74,6 +74,12 @@ EXCLUDED = {
     "v2_3090_followup/SUMMARY.md": "archived artefact; ERRATA quotes it, it is not re-derived",
     "v3_dflash_2026_05_07/README.md": "archived artefact; ERRATA quotes it, it is not re-derived",
     "v4_audit_2026_08_25/harness/README.md": "provenance note; hashes, not measurements",
+    # Its tables are two runner hashes and a hunk-by-hunk classification of a
+    # diff. Not measurements -- but the diff's own line counts ARE checkable, so
+    # verify_claims asserts them against the archived file rather than leaving
+    # them to a table parser that would have nothing else to read.
+    "v4_audit_2026_08_25/harness/V3_TO_W_DIFF.md":
+        "provenance note; runner hashes and a diff classification, and its counts are checked directly",
     "v4_audit_2026_08_25/patches/README.md": "provenance note; hashes, not measurements",
     # marked DO NOT POST at the top and never sent: it is a record of claims
     # this repository retracted, and every number in it is quoted from ERRATA

@@ -5997,7 +5997,7 @@ for _d in _W:
               / sum(x["predicted_ms"] for x in json.load(open(f))["rows"])
               for f in sorted(_d.glob(f"{_a}__rep*.json"))]
         _wcv[_a].append(100 * st.stdev(_r) / st.mean(_r))
-# per-repeat CV over the ten arm-runs, which is what PREREGISTERED_W.md asked
+# per-repeat CV over the ten arm-runs, which is what PROSPECTIVE_ANALYSIS_PLAN_W.md asked
 # for and what V3's published 1.82 % is. `carryover.py`'s `spread` averages
 # over predecessors first and reads 1.65 for the same arm; two definitions of
 # the same word, and the table now says which one it publishes.
@@ -6101,6 +6101,38 @@ for _a, _row in sorted(_PRV3.items()):
     chk(f"PR body V3 {_a}: the V2 column", round(_v2i[0], 2), _pt, 0.005)
     chk(f"PR body V3 {_a}: and its interval",
         (round(_v2i[1], 2), round(_v2i[2], 2)), (_lo, _hi))
+
+# The V3-to-W runner diff, checked against the archived blobs rather than
+# described. "V3 verbatim except BENCH_ORDER" was the claim; the manifests
+# record different runner hashes, so the diff is archived and every number the
+# note quotes about it is asserted here.
+_HDIR = _pl0.Path(__file__).resolve().parents[1] / "v4_audit_2026_08_25" / "harness"
+_WRUN = _HDIR / "retest_runner_W_20260828_104222.py"
+_DIFF = _HDIR / "V3_to_W_runner.diff"
+_DNOTE = (_HDIR / "V3_TO_W_DIFF.md").read_text(encoding="utf-8")
+import hashlib as _hl0                                              # noqa: E402
+chk("W runner: the archived blob is the hash its manifests record",
+    _hl0.sha256(_WRUN.read_bytes()).hexdigest(),
+    "341a4a649c9215feb596561fd14c466274bc202c915455ab8d6a34fddd862f0b")
+_dl = _DIFF.read_text(encoding="utf-8").splitlines()
+_dadd = sum(1 for x in _dl if x.startswith("+") and not x.startswith("+++"))
+_ddel = sum(1 for x in _dl if x.startswith("-") and not x.startswith("---"))
+_dhunk = sum(1 for x in _dl if x.startswith("@@"))
+chk("V3-to-W diff: the note's line counts are the diff's",
+    (len(_dl), _dadd, _ddel, _dhunk), (189, 111, 3, 9))
+for _n in ("189 lines", "111 added", "3 removed", "nine hunks"):
+    chk(f"V3-to-W note quotes {_n!r}", _n in _DNOTE, True)
+# The measurement path is what the note says is untouched, so that is asserted
+# rather than asserted about: no hunk may mention these.
+chk("V3-to-W diff: no hunk touches the request body or the timing extraction",
+    [x for x in _dl if x.startswith(("+", "-")) and not x.startswith(("+++", "---"))
+     and any(k in x for k in ("def chat(", "predicted_ms", "predicted_n",
+                              "ignore_eos", "max_tokens\"", "subprocess.Popen"))],
+    [])
+chk("PR body: it no longer says W is V3 verbatim",
+    "verbatim except for `BENCH_ORDER`" in _PR, False)
+chk("PR body: and it points at the archived diff",
+    "V3_to_W_runner.diff" in _PR, True)
 
 chk("PR body: the grouped predecessor result is the one computed",
     round(_lm.interval(_wcarry["spec-dflash-n2"])[0], 2), -1.20, 0.005)
@@ -6206,7 +6238,7 @@ print("\n=== run W's analysis plan was registered before its data ===")
 # W exists to settle a disagreement this repository has been wrong about twice,
 # so the estimators and the thresholds are committed first and the ordering is
 # asserted, not asked for on trust.
-_PW = pathlib.Path(__file__).resolve().parents[1] / "v4_audit_2026_08_25" / "PREREGISTERED_W.md"
+_PW = pathlib.Path(__file__).resolve().parents[1] / "v4_audit_2026_08_25" / "PROSPECTIVE_ANALYSIS_PLAN_W.md"
 chk("run W's plan is committed", _PW.is_file(), True)
 _PWT = _norm(_PW.read_text(encoding="utf-8"))
 chk("it names the disagreement it is there to settle",
@@ -6225,9 +6257,16 @@ chk("it refuses in advance to pick a favourite among three readings",
 chk("it does not claim W will identify A16",
     "No claim will be made that W identifies" in " ".join(_PWT.split()), True)
 if _HAS_GIT:
-    _pw_commit = _sp2.run(["git", "-C", str(_repo), "log", "--format=%H", "-1", "--",
-                           "v4_audit_2026_08_25/PREREGISTERED_W.md"],
-                          capture_output=True, text=True).stdout.strip()
+    # `--follow`, because the file was renamed. It was called PREREGISTERED_W.md
+    # and said it had been committed before W's data existed, which git ancestry
+    # cannot show and which the live PR body contradicts: the plan was finalized
+    # at 360 of 500 arm-runs. Renaming it to a prospective plan must not lose
+    # the ordering evidence, which is the part that IS checkable -- and a plain
+    # `git log -- <new path>` returns the rename commit, not the original one.
+    _pw_commit = _sp2.run(["git", "-C", str(_repo), "log", "--follow", "--format=%H",
+                           "--", "v4_audit_2026_08_25/PROSPECTIVE_ANALYSIS_PLAN_W.md"],
+                          capture_output=True, text=True).stdout.strip().splitlines()
+    _pw_commit = _pw_commit[-1] if _pw_commit else ""
     chk("the plan has a commit of its own", bool(_pw_commit), True)
     _wdirs = sorted((pathlib.Path(__file__).resolve().parents[1]
                      / "v4_audit_2026_08_25" / "data").glob("matrix_W_*"))

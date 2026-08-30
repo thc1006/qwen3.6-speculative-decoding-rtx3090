@@ -230,7 +230,7 @@ Every arm visits every position exactly once **and** is preceded by every other
 arm exactly once within a repeat, verified from the arm-runs' own `t_start`
 order in all five sessions rather than from the manifest.
 
-The analysis plan was committed in `PREREGISTERED_W.md` while the run was at
+The analysis plan was committed in `PROSPECTIVE_ANALYSIS_PLAN_W.md` while the run was at
 360 of 500, and the checker asserts that commit is an ancestor of the one
 carrying the data. It fixed the estimators, the thresholds, and four things
 that would cost something: that a three-way disagreement would be published as

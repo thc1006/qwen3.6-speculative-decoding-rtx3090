@@ -1762,7 +1762,7 @@ three are the schedule. Every arm visits every position exactly once **and** is
 preceded by every other arm exactly once within a repeat; verified from the
 arm-runs' own `t_start` order, not from the manifest, in all five sessions. The
 analysis plan was committed in
-[`PREREGISTERED_W.md`](v4_audit_2026_08_25/PREREGISTERED_W.md) while the run
+[`PROSPECTIVE_ANALYSIS_PLAN_W.md`](v4_audit_2026_08_25/PROSPECTIVE_ANALYSIS_PLAN_W.md) while the run
 was at 360 of 500, and `analysis/verify_claims.py` asserts that commit is an
 ancestor of this one.
 

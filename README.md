@@ -92,7 +92,7 @@ position exactly once, verified from the execution log rather than from the
 design. It is not balanced for carryover, and `analysis/carryover.py` refuses to
 report a predecessor contrast for it. Run W is the design that balances both,
 and its analysis plan was pre-registered before its data existed
-(`v4_audit_2026_08_25/PREREGISTERED_W.md`). Each change below is
+(`v4_audit_2026_08_25/PROSPECTIVE_ANALYSIS_PLAN_W.md`). Each change below is
 paired against the baseline measured **inside the same block**, and the interval
 is over blocks, which is the unit of replication and of resampling.
 
