@@ -462,6 +462,19 @@ changed. Nothing in it was rejected.
   checkpoint generations at once. Thirteen new mutations and eleven new tests.
 
 - **The raw evidence is published**, so the extraction can be re-run instead of
+  **The published tag does not publish this tree.** `raw-evidence-2026-08-27`
+  points at `de6f33bf`, this branch's base: the whole `v4_audit_2026_08_25`
+  directory, the verifier and run W's data all postdate it, while its assets do
+  not — a third tranche was added to a mutable release whose source revision
+  stayed behind. The tag is deliberately not retargeted, because silently moving
+  a published tag destroys the one property a tag has; its notes now say where
+  it points and why. A final versioned release is cut at the exact
+  dataset-and-verifier commit instead, by
+  [`v4_audit_2026_08_25/RELEASE_PROCEDURE.md`](v4_audit_2026_08_25/RELEASE_PROCEDURE.md),
+  and `bench/check_release_binding.py` fails any `raw-evidence-*` tag whose
+  commit does not carry the manifest, both registries and the three verifier
+  scripts that `HEAD` does.
+
   trusted. `raw-evidence-2026-08-27` carries `raw_logs.tar.zst` (702 logs,
   4071 MB uncompressed) and `telemetry.tar.zst` (19 traces), plus a second
   tranche `raw_logs_20260827.tar.zst` (618 logs, 2.9 GB, sha256 `d56a7f88…`)

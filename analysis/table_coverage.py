@@ -79,6 +79,11 @@ EXCLUDED = {
     # diff. Not measurements -- but the diff's own line counts ARE checkable, so
     # verify_claims asserts them against the archived file rather than leaving
     # them to a table parser that would have nothing else to read.
+    # A procedure, not a result: its only numbers are a commit hash and shell
+    # in a fenced block, and the counts it tells the operator to publish are
+    # asserted where they are computed rather than quoted here.
+    "v4_audit_2026_08_25/RELEASE_PROCEDURE.md":
+        "the release procedure; a commit hash and commands, no measurement",
     "v4_audit_2026_08_25/harness/V3_TO_W_DIFF.md":
         "provenance note; runner hashes and a diff classification, and its counts are checked directly",
     "v4_audit_2026_08_25/patches/README.md": "provenance note; hashes, not measurements",

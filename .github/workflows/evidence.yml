@@ -36,6 +36,7 @@ on:
       # the member preflight the unpack step runs before extracting, and
       # the registry that says what the re-derivation is supposed to cover
       - bench/preflight_tar.py
+      - bench/check_release_binding.py
       - v4_audit_2026_08_25/EVIDENCE_REGISTRY.json
       # the last step of this job runs the claim checker, so a change to it can
       # break this workflow without touching an extractor - which is how the
@@ -253,6 +254,14 @@ jobs:
           # files; a missing run T4 must fail it, not be reported
           REDERIVE_REQUIRE_T4: "1"
         run: python analysis/rederive_from_logs.py bench
+
+      - name: a release tag must publish the tree it names
+        if: startsWith(github.ref, 'refs/tags/raw-evidence-')
+        # `raw-evidence-2026-08-27` points at this branch's base and its assets
+        # kept being added to, so its source revision holds neither the current
+        # verifier nor the current manifest. A tag that does not publish the
+        # tree it names breaks source <-> verifier <-> manifest <-> assets.
+        run: python3 bench/check_release_binding.py "${GITHUB_REF_NAME}"
 
       - name: every quoted figure still matches the re-derived data
         run: python analysis/verify_claims.py
