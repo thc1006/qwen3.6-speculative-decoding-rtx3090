@@ -19,6 +19,7 @@ number this repository publishes for them, so "fewer records" fails too.
 import json
 import os
 import subprocess
+import time
 import sys
 from collections import defaultdict
 
@@ -36,11 +37,29 @@ NOT_REPRODUCIBLE = {"matrix_G_dflash_20260826_000124",
 FAIL = []
 
 
+EXTRACTOR_TIMEOUT_S = int(os.environ.get("REDERIVE_TIMEOUT_S", "600"))
+
+
 def run(script, *args):
-    r = subprocess.run([sys.executable, os.path.join(ROOT, "analysis", script), *args],
-                       capture_output=True, text=True, cwd=ROOT)
+    """Run one extractor. Bounded, because a malformed log used to hang it.
+
+    Without a timeout the only limit was the 45-minute Actions budget for the
+    whole job, so one bad input took the entire evidence workflow with it and
+    the log said nothing about which extractor or which file.
+    """
+    t0 = time.monotonic()
+    try:
+        r = subprocess.run([sys.executable, os.path.join(ROOT, "analysis", script), *args],
+                           capture_output=True, text=True, cwd=ROOT,
+                           timeout=EXTRACTOR_TIMEOUT_S)
+    except subprocess.TimeoutExpired:
+        sys.exit(f"{script} did not finish within {EXTRACTOR_TIMEOUT_S}s: "
+                 f"{len(args)} input(s), last {args[-1] if args else '(none)'}, "
+                 f"elapsed {time.monotonic() - t0:.1f}s")
     if r.returncode:
-        sys.exit(f"{script} failed:\n{r.stderr[-2000:]}")
+        sys.exit(f"{script} failed after {time.monotonic() - t0:.1f}s "
+                 f"({len(args)} inputs, last {args[-1] if args else '(none)'}):\n"
+                 f"{r.stderr[-2000:]}")
     return json.loads(r.stdout)
 
 

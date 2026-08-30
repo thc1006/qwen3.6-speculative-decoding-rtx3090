@@ -8964,6 +8964,21 @@ chk("ERRATA A19: and says the probe is not run in CI",
 
 # the prose half, which is the larger one. Cheap to census, so it is pinned the
 # same way; the sampled probe behind it is not, for the reason above.
+# Prose census locations must be unique. They were {doc, line, value}, and
+# `prose_probe` rewrote the first occurrence of `value` on that line -- so two
+# identical decimals on one line gave two records that both perturbed the first,
+# and the second number was counted as probed and never touched. 28 records are
+# in that shape.
+_PN = _tcov.prose_numbers()
+chk("prose probe: every census record has an exact span",
+    [n for n in _PN if n.get("start") is None or n.get("end") is None], [])
+chk("prose probe: and the spans are unique",
+    len({(n["doc"], n["line"], n["start"], n["end"]) for n in _PN}), len(_PN))
+chk("prose probe: records whose value repeats on its own line",
+    sum(1 for n in _PN
+        if sum(1 for m in _PN if m["doc"] == n["doc"] and m["line"] == n["line"]
+               and m["value"] == n["value"]) > 1), 28)
+
 _pcov = _tcov.prose_census()
 chk("coverage: decimal numbers in prose, outside every table",
     _pcov["prose_numbers"], 1235)

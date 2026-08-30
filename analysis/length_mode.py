@@ -357,9 +357,23 @@ def report_crossover(halves, out):
     print(f"  sessions with both halves complete: {len(usable)} of {len(by_session)}")
     for s, present, ok in dropped:
         print(f"    dropped {s}: halves {present}, complete {ok}")
+    # FAIL CLOSED, as the within-invocation path already does. This printed the
+    # dropped sessions and carried on, so an eight-session crossover could
+    # become a seven- or six-session one and still be published -- silently
+    # turning a design into a subset of itself. The existing data is complete,
+    # so nothing here changes; what changes is what happens the next time it is
+    # not.
+    if dropped and not ALLOW_INCOMPLETE:
+        sys.exit(f"{len(dropped)} of {len(by_session)} crossover session(s) do "
+                 f"not have both halves complete: "
+                 f"{[s for s, _, _ in dropped]}. Pass --allow-incomplete to "
+                 f"analyse the rest anyway, and do not publish the result.")
     if not usable:
         return
 
+    if dropped:
+        out["crossover_publishable"] = False
+        out["crossover_dropped_sessions"] = [s for s, _, _ in dropped]
     deltas = defaultdict(dict)
     first_mode = {}
     for s in usable:

@@ -4,7 +4,7 @@
   the seven tables below cell by cell and `tests/data_mutate.py` perturbs them;
   a figure that drifts out of agreement with the data fails CI.
 
-  Publish with `python tools/publish_pr_body.py`, which strips this comment
+  Publish with `python tools/publish_pr_body.py --write`, which strips this comment
   line by line and then reads the body back from GitHub to prove it landed.
   Do not strip it with a regex: the previous one-liner matched a literal
   closing marker inside its own pattern and published half of itself.
@@ -349,7 +349,12 @@ adversarial pass over this branch's own commits found:
   is compared against a value derived from the data, and the measurement says
   so: on 2026-08-30 the probe perturbed all 2 373 numbers across all 125
   parsed tables and caught every one, in eight shards whose control passed
-  before the work and again after it. It took four runs, because the population
+  before the work and again after it — and, since 2026-08-30, whose union is
+  checked to be the population exactly once by
+  `analysis/table_coverage.py --aggregate`, over attestations carrying the head,
+  the checker hash, the population digest, both controls and every location as a
+  character span. Before that nothing showed the eight had all run, or were
+  disjoint, or were the same tree. It took four runs, because the population
   grows as the coverage does and a clean run is only clean for the tree it ran
   on: the run before this one covered 2 252 numbers across 119 tables.
   `analysis/table_coverage.py --probe --covered --every-cell` is the
@@ -508,9 +513,9 @@ W added 500 more the next day. What keeps this a draft is below, under
 
 ```
 python analysis/rederive_from_logs.py bench   # raw logs -> four audit files
-python analysis/verify_claims.py          # 3702 assertions, re-derived
+python analysis/verify_claims.py          # 3705 assertions, re-derived
 python analysis/check_data_integrity.py   # structure of all 65 run directories
-python -m unittest discover tests         # 232 regressions for defects shipped here
+python -m unittest discover tests         # 245 regressions for defects shipped here
 python tests/mutate.py                    # break each fix, require its test to fail
 python tests/data_mutate.py               # perturb a measurement or a published
                                           #   figure, require the checker to fail

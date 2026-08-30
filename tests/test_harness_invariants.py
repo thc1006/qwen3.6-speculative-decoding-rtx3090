@@ -1369,13 +1369,30 @@ class TheLengthModeAnalysisMustReadBothDesigns(unittest.TestCase):
                         encoding="utf-8")
                     (d / "RUN_COMPLETE.json").write_text("{}", encoding="utf-8")
                     halves.append(str(d))
+            # FAIL CLOSED by default. This used to print the dropped session
+            # and carry on, so an eight-session crossover could silently become
+            # a seven- or six-session one and still be published. The within-
+            # invocation path had refused all along; this one did not.
             out = {}
             with contextlib.redirect_stdout(io.StringIO()) as buf:
-                m.report_crossover(m.classify(halves)[1], out)
+                with self.assertRaises(SystemExit) as ctx:
+                    m.report_crossover(m.classify(halves)[1], out)
             text = buf.getvalue()
-        self.assertIn("1 of 2", text)
-        self.assertIn("dropped s2", text)
+            self.assertIn("1 of 2", text)
+            self.assertIn("dropped s2", text)
+            self.assertIn("--allow-incomplete", str(ctx.exception))
+
+            # And with the flag it analyses the rest, marked not publishable.
+            m.ALLOW_INCOMPLETE = True
+            try:
+                out = {}
+                with contextlib.redirect_stdout(io.StringIO()):
+                    m.report_crossover(m.classify(halves)[1], out)
+            finally:
+                m.ALLOW_INCOMPLETE = False
         self.assertEqual(out["crossover"]["a"]["sessions"], 1)
+        self.assertIs(out["crossover_publishable"], False)
+        self.assertEqual(out["crossover_dropped_sessions"], ["s2"])
 
     def test_several_invocations_get_an_interval(self):
         import io, contextlib
@@ -2844,6 +2861,41 @@ class ThePublishToolMustParseAndVerify(unittest.TestCase):
                          "the publishing command is being published again")
         self.assertTrue(body.startswith("This branch audits"), body[:80])
 
+    def test_writing_is_opt_in_and_a_typo_is_refused(self):
+        """`check_only = "--check" in sys.argv` made WRITE the default.
+
+        Any typo -- `--chek` -- fell through to the PATCH path, in a tool whose
+        target is a public pull request body. argparse refuses an unknown
+        option, `--check` is the default, and `--write` has to be asked for.
+        """
+        tool = self.ROOT / "tools" / "publish_pr_body.py"
+        src = tool.read_text(encoding="utf-8")
+        self.assertIn("argparse", src, "the CLI is still hand-parsed")
+        # EXECUTABLE code only, via the AST. Both the module docstring and a
+        # comment quote the old expression in order to explain why it went, and
+        # a substring test over the file cannot tell the fix from its own
+        # rationale -- which is the same use-versus-mention trap the prose
+        # guards in this suite already had to be taught.
+        import ast as _a
+        tree = _a.parse(src)
+        argv_reads = [n for n in _a.walk(tree)
+                      if isinstance(n, _a.Attribute) and n.attr == "argv"]
+        self.assertEqual(
+            argv_reads, [],
+            "sys.argv is read directly again; the CLI is supposed to be argparse, "
+            "which refuses an unknown option instead of ignoring it")
+        r = subprocess.run([sys.executable, str(tool), "--chek"],
+                           capture_output=True, text=True, timeout=60)
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertIn("unrecognized arguments", r.stderr)
+
+    def test_the_token_is_bound_to_github_com(self):
+        """It took the FIRST oauth_token in hosts.yml. An Enterprise entry above
+        github.com would have sent that host's credential to api.github.com."""
+        src = (self.ROOT / "tools" / "publish_pr_body.py").read_text(encoding="utf-8")
+        self.assertIn('tokens["github.com"]', src,
+                      "the token is not selected by host")
+
     def test_it_reads_the_body_back_before_claiming_success(self):
         src = (self.ROOT / "tools" / "publish_pr_body.py").read_text(encoding="utf-8")
         self.assertIn('_api("GET")', src, "it never re-reads what it published")
@@ -4047,6 +4099,180 @@ class TheConcurrentPathMustSendTheSameTreatmentAsTheSequentialOne(unittest.TestC
                       f"chat() must take hardcap keyword-only with no default; got {sig[0]!r}")
         self.assertNotIn("hardcap: bool = ", sig[0],
                          "a default on hardcap is what let the concurrent path omit it")
+
+
+class ShardAttestationsMustCoverThePopulationExactlyOnce(unittest.TestCase):
+    """Eight shards were reported as covering 2373 numbers and nothing checked it.
+
+    Not that all eight ran -- `--shard=8/8` selected no tables, reported
+    "0 numbers perturbed, 0 survived" and exited 0. Not that their locations
+    were disjoint, not that the union was the whole population, not that they
+    shared a head and a checker, not that each control passed at both ends.
+    Every one of those is a way the sentence could be false with every
+    individual shard output looking correct, so `--aggregate` checks each one
+    and this asserts that it does.
+    """
+
+    TC = ROOT / "analysis" / "table_coverage.py"
+
+    def _shard(self, i, n=4, locs=None, **over):
+        d = {"head_sha": "h" * 40, "checker_sha256": "c" * 64,
+             "population_sha256": "p" * 64, "population_size": 4,
+             "shard": [i, n], "control_before": "pass", "control_after": "pass",
+             "probed": 1, "locations": locs if locs is not None else [["d.md", 1, 2, 3, i, i + 1]],
+             "survived": []}
+        d.update(over)
+        return d
+
+    def _run(self, shards):
+        with tempfile.TemporaryDirectory() as t:
+            paths = []
+            for k, d in enumerate(shards):
+                f = Path(t) / f"s{k}.json"
+                f.write_text(json.dumps(d))
+                paths.append(str(f))
+            return subprocess.run([sys.executable, str(self.TC), "--aggregate", *paths],
+                                  capture_output=True, text=True, timeout=120)
+
+    def test_a_complete_disjoint_set_passes(self):
+        r = self._run([self._shard(i) for i in range(4)])
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("covered exactly once", r.stdout)
+
+    def test_a_missing_shard_fails(self):
+        r = self._run([self._shard(i) for i in (0, 1, 3)])
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("have no attestation", r.stderr)
+
+    def test_a_duplicated_location_fails(self):
+        sh = [self._shard(i) for i in range(4)]
+        sh[1]["locations"] = sh[0]["locations"]
+        r = self._run(sh)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("not a partition", r.stderr)
+
+    def test_a_different_head_fails(self):
+        sh = [self._shard(i) for i in range(4)]
+        sh[2]["head_sha"] = "x" * 40
+        r = self._run(sh)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("head_sha", r.stderr)
+
+    def test_a_different_checker_fails(self):
+        sh = [self._shard(i) for i in range(4)]
+        sh[2]["checker_sha256"] = "x" * 64
+        r = self._run(sh)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("checker_sha256", r.stderr)
+
+    def test_a_failed_control_fails(self):
+        sh = [self._shard(i) for i in range(4)]
+        sh[3]["control_after"] = "FAIL"
+        r = self._run(sh)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("control_after", r.stderr)
+
+    def test_a_union_short_of_the_population_fails(self):
+        sh = [self._shard(i, population_size=9) for i in range(4)]
+        r = self._run(sh)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("never probed", r.stderr)
+
+    def test_a_survivor_fails(self):
+        sh = [self._shard(i) for i in range(4)]
+        sh[0]["survived"] = [{"doc": "d.md"}]
+        r = self._run(sh)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("survived", r.stderr)
+
+    def test_the_shard_index_is_range_checked(self):
+        """`--shard=8/8` used to select nothing and exit 0."""
+        for spec, want in (("8/8", "index must be in"), ("-1/8", "index must be in"),
+                           ("0/0", "count must be at least"), ("x/8", "wants INDEX/COUNT")):
+            r = subprocess.run([sys.executable, str(self.TC), "--every-cell",
+                                "--count", f"--shard={spec}"],
+                               capture_output=True, text=True, timeout=120)
+            self.assertEqual(r.returncode, 1, f"--shard={spec} was accepted")
+            self.assertIn(want, r.stdout + r.stderr, f"--shard={spec}")
+
+
+class AStrangersBenchmarkIsInterferenceNotOurs(unittest.TestCase):
+    """Attribution is by descent. A review said it was by name; it is not.
+
+    The claim was that `host_guard` treats any process whose command line
+    mentions `llama-server`, `llama-bench` or `retest_runner.py` as one of its
+    own roots, so an unrelated llama-server on the same machine would be
+    absorbed instead of reported. The code does the opposite: `_own_pids()`
+    walks descendants of `os.getpid()` and never looks at a name, and the name
+    matching is applied only to processes that are NOT descendants, to find
+    interference. This pins that, because a guard whose direction is only
+    asserted in a docstring is a guard whose direction can flip unnoticed.
+
+    Run with a real executable renamed, not a shell script: a `#!/bin/sh` shim
+    has `sh` as argv[0] and would be missed for a reason that has nothing to do
+    with what is being tested. That mistake was made once while writing this.
+    """
+
+    def _fake_server(self, tmp):
+        import shutil
+        exe = Path(tmp) / "llama-server"
+        shutil.copy("/bin/sleep", exe)
+        return exe
+
+    def test_a_process_that_is_not_a_descendant_is_reported(self):
+        sys.path.insert(0, str(ROOT / "bench"))
+        import host_guard as hg
+        with tempfile.TemporaryDirectory() as t:
+            exe = self._fake_server(t)
+            # `setsid` so the process is REPARENTED away from this one. A plain
+            # Popen child is a descendant, which `_own_pids()` is right to treat
+            # as ours -- and a first version of this test used one and read the
+            # correct answer as a failure. `setsid` forks when it is already a
+            # group leader, so the sleep ends up under init and is a stranger.
+            # `--fork`, so the setsid process itself exits at once and the
+            # stand-in is reparented. Without it setsid execs into the stand-in
+            # when it is not already a group leader, stays a child of this test,
+            # and the wait below blocks for the stand-in's whole lifetime.
+            # Five seconds, not twenty. A reparented stand-in that outlives its
+            # test is a `llama-server` on the host, and the host guard in the
+            # other end-to-end tests is right to refuse to measure beside one --
+            # which is how this test made two unrelated ones fail once.
+            subprocess.run(["setsid", "--fork", str(exe), "5"],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                           timeout=10, check=False)
+            time.sleep(0.6)
+            pid = None
+            for d in Path("/proc").iterdir():
+                if not d.name.isdigit():
+                    continue
+                try:
+                    raw = (d / "cmdline").read_bytes().decode("utf-8", "replace")
+                except OSError:
+                    continue
+                if str(exe) in raw:
+                    pid = int(d.name)
+                    break
+            self.assertIsNotNone(pid, "the stand-in process did not start")
+            try:
+                found = hg.measuring_processes()
+                self.assertIn(str(pid), " ".join(found),
+                              f"a stranger's llama-server was not reported: {found}")
+                self.assertNotIn(pid, hg._own_pids(),
+                                 "a stranger's llama-server was counted as ours")
+            finally:
+                os.kill(pid, 9)
+
+    def test_own_pids_is_descent_only(self):
+        """It must not consult a command line at all."""
+        import ast as _a
+        src = (ROOT / "bench" / "host_guard.py").read_text(encoding="utf-8")
+        fn = next(n for n in _a.walk(_a.parse(src))
+                  if isinstance(n, _a.FunctionDef) and n.name == "_own_pids")
+        body = _a.dump(fn)
+        for name in ("cmdline", "_BENCH_EXE", "_BENCH_SCRIPTS", "_benchmark_name"):
+            self.assertNotIn(name, body,
+                             f"_own_pids consults {name}; ownership would then be "
+                             f"by name, and a stranger's server would be absorbed")
 
 
 if __name__ == "__main__":

@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """Publish `PULL_REQUEST.md` as pull request #2's body, and prove it landed.
 
-    python tools/publish_pr_body.py [--check]
+    python tools/publish_pr_body.py            # check only, the default
+    python tools/publish_pr_body.py --write    # publish, then read back
 
-`--check` compares the live body against the file and exits non-zero if they
-differ, without writing anything.
+READ-ONLY unless `--write` is given. It used to be the other way round --
+`check_only = "--check" in sys.argv` -- so any typo selected the PATCH path in
+a tool whose target is a public pull request body. Unknown options are refused
+rather than ignored.
 
 Why this is a script and not a one-liner
 ----------------------------------------
@@ -29,6 +32,7 @@ compared byte for byte.
 """
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 import urllib.request
@@ -57,11 +61,23 @@ def strip_header(text: str) -> str:
 
 
 def _token() -> str:
+    """The token for github.com, not whichever host is listed first.
+
+    This returned the first `oauth_token` in the file. `hosts.yml` can hold
+    several hosts -- a GitHub Enterprise entry above github.com is the ordinary
+    case -- and this would then send that host's credential to api.github.com.
+    """
     hosts = Path.home() / ".config" / "gh" / "hosts.yml"
+    host, tokens = None, {}
     for line in hosts.read_text(encoding="utf-8").splitlines():
-        if "oauth_token" in line:
-            return line.split()[-1].strip()
-    raise SystemExit("no oauth_token in ~/.config/gh/hosts.yml")
+        if line[:1] not in (" ", "\t", "#", "") and line.rstrip().endswith(":"):
+            host = line.strip().rstrip(":")
+        elif "oauth_token" in line and host:
+            tokens[host] = line.split()[-1].strip()
+    if "github.com" not in tokens:
+        raise SystemExit(f"no github.com oauth_token in {hosts}; hosts found: "
+                         f"{sorted(tokens) or '(none)'}")
+    return tokens["github.com"]
 
 
 def _api(method: str, payload: dict | None = None) -> dict:
@@ -77,12 +93,22 @@ def _api(method: str, payload: dict | None = None) -> dict:
 
 
 def main() -> None:
+    # argparse, and READ-ONLY by default. `check_only = "--check" in sys.argv`
+    # meant a typo -- `--chek` -- silently selected the PATCH path: the default
+    # for a tool that writes to a public pull request was to write.
+    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0] if __doc__ else None)
+    g = ap.add_mutually_exclusive_group()
+    g.add_argument("--check", action="store_true",
+                   help="compare the published body with the source (default)")
+    g.add_argument("--write", action="store_true",
+                   help="PATCH the pull request body, then read it back and compare")
+    args = ap.parse_args()
+
     want = strip_header(SOURCE.read_text(encoding="utf-8"))
     if not want:
         raise SystemExit(f"{SOURCE.name}: nothing to publish after the header")
-    check_only = "--check" in sys.argv
 
-    if not check_only:
+    if args.write:
         _api("PATCH", {"body": want})
 
     got = (_api("GET").get("body") or "").replace("\r\n", "\n").strip()

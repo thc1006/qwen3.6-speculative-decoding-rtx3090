@@ -1936,7 +1936,14 @@ grows as the coverage does, so a clean run is only clean for the tree it ran
 on, and parsing the last six tables grew it again. On 2026-08-30, on the tree
 this entry is committed in, all **2 373** numbers across all **125** tables
 were perturbed one at a time and **every one was caught**, in eight shards
-whose control passed before the work and again after it.
+whose control passed before the work and again after it. The eight shard outputs were not
+attested as a set until 2026-08-30: nothing showed that all eight ran, that
+their locations were disjoint, that the union was the whole population, or that
+they shared a head and a checker -- and `--shard=8/8` selected no tables,
+reported "0 numbers perturbed, 0 survived" and exited 0.
+`table_coverage.py --aggregate` checks exactly that now, over
+attestations that each carry the head, the checker hash, the population digest,
+both control readings and every location as a character span.
 
 The measurement was wrong four times before it measured anything, and all
 four are recorded in the file. The first used the claim checker's exit status,

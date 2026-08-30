@@ -49,6 +49,7 @@ documents. A probe whose control and treatment agree measures nothing.
 from __future__ import annotations
 
 import ast
+import hashlib
 import contextlib
 import json
 import pathlib
@@ -254,8 +255,15 @@ def prose_numbers() -> list[dict]:
                 continue
             if fenced or line.startswith("|") or raw.startswith(("    ", "\t")):
                 continue
-            for v in dec.findall(line):
-                out.append({"doc": rel, "line": i + 1, "value": v})
+            # The SPAN, not just the value. Two identical decimals on one line
+            # produced two census records, and `prose_probe` perturbed the first
+            # occurrence for both -- so "40 numbers probed" could be fewer than
+            # 40 distinct locations, and one of them was never touched. The
+            # offsets are into `raw`, which is what the probe rewrites.
+            off = raw.index(line) if line and line in raw else 0
+            for m in dec.finditer(line):
+                out.append({"doc": rel, "line": i + 1, "value": m.group(0),
+                            "start": off + m.start(), "end": off + m.end()})
     return out
 
 
@@ -280,6 +288,7 @@ def prose_probe(absent: list[dict]) -> list[dict]:
     with contextlib.ExitStack() as stack:
         wt = _worktree(stack)
         base_fails, base_n, base_rc = _run(wt)
+        _CTRL["before"] = bool(base_fails) or base_rc != 0
         print(f"baseline: {base_n} assertions, {len(base_fails)} failing, "
               f"exit {base_rc}", file=sys.stderr)
         # same rule as `cell_probe`: a control that does not pass makes every
@@ -299,10 +308,15 @@ def prose_probe(absent: list[dict]) -> list[dict]:
             was = item["value"]
             head, dot, tail = was.partition(".")
             now = f"{int(head) + 7}.{tail}"
-            if was not in row:
+            a, b = item.get("start"), item.get("end")
+            # Perturb THAT occurrence, by offset. `row.replace(was, now, 1)`
+            # always hit the first one, so a line carrying the same decimal
+            # twice had one of its two census records probing the other's
+            # position and the second number was never perturbed at all.
+            if a is None or b is None or row[a:b] != was:
                 out.append({**item, "probe": "moved"})
                 continue
-            lines[item["line"] - 1] = row.replace(was, now, 1)
+            lines[item["line"] - 1] = row[:a] + now + row[b:]
             p.write_text("\n".join(lines) + "\n", encoding="utf-8")
             try:
                 fails, ran, rc = _run(wt)
@@ -315,6 +329,7 @@ def prose_probe(absent: list[dict]) -> list[dict]:
                   f"{'caught' if caught else 'SURVIVED'}", file=sys.stderr, flush=True)
         # the control again, for the reason `cell_probe` gives at the same spot
         end_fails, end_n, end_rc = _run(wt)
+        _CTRL["after"] = bool(end_fails) or end_rc != 0 or end_n != base_n
         if end_fails or end_rc != 0 or end_n != base_n:
             raise SystemExit(
                 f"the control no longer passes after the run "
@@ -545,6 +560,41 @@ def cell_population(tables_: list[dict]) -> int:
     return n
 
 
+_CTRL = {"before": None, "after": None}
+
+
+def _head_sha() -> str:
+    """The commit these shards were taken on. Eight attestations from different
+    heads are eight measurements of different documents."""
+    try:
+        return subprocess.run(["git", "-C", str(ROOT), "rev-parse", "HEAD"],
+                              capture_output=True, text=True,
+                              check=True).stdout.strip()
+    except Exception:                                              # noqa: BLE001
+        return ""
+
+
+def _checker_sha() -> str:
+    """The checker the shard ran. A perturbation is caught BY something, and if
+    two shards ran different checkers their results are not one population."""
+    f = ROOT / "analysis" / "verify_claims.py"
+    return hashlib.sha256(f.read_bytes()).hexdigest() if f.exists() else ""
+
+
+def _population_sha(tables_: list[dict]) -> str:
+    """A digest of the whole census population, not of this shard's slice.
+
+    Every shard computes it over the same input, so a mismatch says the
+    documents moved under one of them.
+    """
+    c = census()
+    key = json.dumps([[t["doc"], t["line"], t["header"], t["value_cells"]]
+                      for t in sorted(c["covered"] + c["uncovered"],
+                                      key=lambda t: (t["doc"], t["line"]))],
+                     sort_keys=True)
+    return hashlib.sha256(key.encode()).hexdigest()
+
+
 def cell_probe(tables_: list[dict], shard: tuple[int, int] = (0, 1)) -> list[dict]:
     """Perturb EVERY numeric cell of every table given, one at a time.
 
@@ -608,6 +658,12 @@ def cell_probe(tables_: list[dict], shard: tuple[int, int] = (0, 1)) -> list[dic
                     caught = bool(new_fails) or ran < base_n or rc != base_rc
                     rec = {"doc": t["doc"], "table_line": t["line"],
                            "row": j + 1, "col": col,
+                           # the exact character span, so a cell holding two
+                           # numbers yields two DIFFERENT location keys. Without
+                           # it the shard attestations below could not tell one
+                           # perturbation from the other and a union check would
+                           # silently accept a missing one.
+                           "start": a, "end": b,
                            "perturbation": f"{was} -> {now}",
                            "probe": "caught" if caught else "SURVIVED",
                            "noticed_by": new_fails[:1]
@@ -709,6 +765,85 @@ def probe(candidates: list[dict]) -> list[dict]:
     return out
 
 
+def aggregate(paths: list[str]) -> int:
+    """Do these shard attestations cover the population exactly once each?
+
+    The claim was "2373 numbers across 125 tables, all caught in eight shards".
+    Nothing could check it. Not that all eight ran -- `--shard=8/8` selected no
+    tables and exited 0. Not that their locations were disjoint. Not that their
+    union was the whole population. Not that they were taken on one head with
+    one checker. Not that each one's control passed at both ends.
+
+    Every one of those is a way the sentence could be false while every
+    individual shard output looked fine, so every one of them is checked here.
+    """
+    shards = []
+    for f in paths:
+        with open(f, encoding="utf-8") as fh:
+            shards.append((f, json.load(fh)))
+    bad = []
+    if not shards:
+        return _fail(["no shard attestations given"])
+
+    counts = {tuple(d["shard"])[1] for _, d in shards}
+    if len(counts) != 1:
+        bad.append(f"the shards disagree on how many there are: {sorted(counts)}")
+    n = sorted(counts)[0]
+    seen = {}
+    for f, d in shards:
+        i, c = d["shard"]
+        if i in seen:
+            bad.append(f"shard {i}/{c} appears twice: {seen[i]} and {f}")
+        seen[i] = f
+        for k in ("control_before", "control_after"):
+            if d.get(k) != "pass":
+                bad.append(f"{f}: {k} is {d.get(k)!r}, so nothing it reports means anything")
+    missing = sorted(set(range(n)) - set(seen))
+    if missing:
+        bad.append(f"shard(s) {missing} of {n} have no attestation")
+
+    for field in ("head_sha", "checker_sha256", "population_sha256"):
+        vals = {d.get(field) for _, d in shards}
+        if len(vals) != 1:
+            bad.append(f"the shards do not share one {field}: {sorted(vals)}")
+        elif not sorted(vals)[0]:
+            bad.append(f"{field} is empty in every shard, so nothing pins them together")
+
+    union, dupes = set(), []
+    for f, d in shards:
+        for loc in d.get("locations", []):
+            k = tuple(loc)
+            if k in union:
+                dupes.append((f, loc))
+            union.add(k)
+    if dupes:
+        bad.append(f"{len(dupes)} location(s) are perturbed by more than one "
+                   f"shard, so the shards are not a partition: {dupes[:3]}")
+
+    want = {d.get("population_size") for _, d in shards}
+    if len(want) == 1 and sorted(want)[0] is not None:
+        w = sorted(want)[0]
+        if len(union) != w:
+            bad.append(f"the union covers {len(union)} locations and the "
+                       f"population is {w}: {w - len(union)} never probed")
+    surv = [r for _, d in shards for r in d.get("survived", [])]
+    if surv:
+        bad.append(f"{len(surv)} perturbation(s) survived")
+    if bad:
+        return _fail(bad)
+    print(f"{len(shards)} shards, one head {shards[0][1]['head_sha'][:12]}, "
+          f"one checker {shards[0][1]['checker_sha256'][:12]}, "
+          f"{len(union)} locations covered exactly once, 0 survived")
+    return 0
+
+
+def _fail(msgs: list[str]) -> int:
+    print("shard aggregation FAILED:", file=sys.stderr)
+    for m in msgs:
+        print(f"  {m}", file=sys.stderr)
+    return 1
+
+
 def main() -> None:
     shard = (0, 1)
     argv = []
@@ -732,9 +867,11 @@ def main() -> None:
             shard = (i, n)
         else:
             argv.append(a)
+    if argv and argv[0] == "--aggregate":
+        sys.exit(aggregate(argv[1:]))
     unknown = [a for a in argv
                if a not in ("--json", "--probe", "--covered", "--prose",
-                            "--every-cell", "--count")]
+                            "--every-cell", "--count", "--aggregate")]
     if unknown:
         sys.exit(f"unrecognised option(s): {' '.join(unknown)}")
     if "--every-cell" in argv:
@@ -746,8 +883,25 @@ def main() -> None:
         res = cell_probe(picked, shard)
         surv = [r for r in res if r["probe"] == "SURVIVED"]
         if "--json" in argv:
-            print(json.dumps({"shard": list(shard), "probed": len(res),
-                              "survived": surv}, indent=2))
+            # An ATTESTATION, not a summary. Eight shards were reported as
+            # covering 2373 numbers across 125 tables and nothing in the
+            # repository could show that: not that all eight ran, not that their
+            # locations were disjoint, not that their union was the whole
+            # population, not that they were the same head and the same checker.
+            # `--aggregate` below verifies exactly that against these files.
+            print(json.dumps({
+                "head_sha": _head_sha(),
+                "checker_sha256": _checker_sha(),
+                "population_sha256": _population_sha(picked),
+                "population_size": cell_population(picked),
+                "shard": list(shard),
+                "control_before": "pass" if not _CTRL["before"] else "FAIL",
+                "control_after": "pass" if not _CTRL["after"] else "FAIL",
+                "probed": len(res),
+                "locations": sorted([r["doc"], r["table_line"], r["row"],
+                                     r["col"], r["start"], r["end"]]
+                                    for r in res),
+                "survived": surv}, indent=2))
             return
         print(f"shard {shard[0]}/{shard[1]}: {len(res)} numbers perturbed, "
               f"{len(surv)} survived")
