@@ -1977,12 +1977,12 @@ because passing once does not bound half an hour of running.
 return rows, and assert nothing about the column you changed, which is exactly
 what the W three-design table did, in two documents, until this pass.
 
-**The larger half is not tables.** **1 226** decimal numbers sit in prose,
-outside every table; **647** of them do not appear as a string literal anywhere
+**The larger half is not tables.** **1 254** decimal numbers sit in prose,
+outside every table; **640** of them do not appear as a string literal anywhere
 in the checker, counting only literals that are not assertion labels; a label
 is prose about a check and not a check, and leaving them in made the count move
 whenever an assertion was reworded. That criterion is an upper bound on the gap
-rather than the gap, so a fixed sample of **40** of the 647 was perturbed the
+rather than the gap, so a fixed sample of **40** of the 640 was perturbed the
 same way, seed `20260828`: **36 of 40 accepted a wrong number**, and the 95 %
 Wilson interval puts the unguarded fraction of that population at **76 % or
 above**. The run before this one caught none of its forty; the four it catches
@@ -2001,7 +2001,7 @@ the BOS-override table in the two documents that publish it, run I's
 acceptance under batching, the README's length-matched comparison, and last
 the six named above.
 
-**Thirty-nine published statements were wrong and are corrected.** They are
+**Forty-five published statements were wrong and are corrected.** They are
 listed rather than summarised, because a count of corrections is itself a
 number and this file exists because of unchecked numbers.
 
@@ -2128,6 +2128,49 @@ number and this file exists because of unchecked numbers.
     measured nothing for that whole stretch. A test now requires every path
     literal the checker opens to be reachable in the mirror, `.git` excepted
     because the mirror is the gitless environment on purpose.
+40. This entry published **1 226** prose numbers and **647** of them not
+    literals while the census said **1 239** and **627**, and nothing failed.
+    The check asked whether the number 1226 appears in the entry, not whether
+    the entry prints the census's own value, so updating the pin beside the
+    census without updating the entry was invisible. Both loops derive from
+    the census now: the entry is compared with `_pcov` and `_cov`, not with a
+    literal typed beside them. The corrected counts are **1 252** and **638**,
+    which include the thirteen numbers this branch's own analysis plan for run
+    W2 added to the prose, none of them guarded.
+41. B8's numerator bias was published as **0.90 % to 1.57 %** "on the
+    thinking-off freerun arms", and was measured on three runs of twenty. The
+    population was selected by `glob("*thinkoff*")`, which is a filename and
+    not a property: it missed `D_master_matrix_think_off` for its underscore,
+    every `matrix_V2_s*_freerun` half, `matrix_V_freerun`, and the freerun arms
+    inside V3 and W. Over all twenty runs, ninety-eight arm figures, the range
+    is **0.90 % to 1.75 %**, and the highest is in the run the underscore
+    dropped. Selected by manifest now: thinking off, not a hard-capped half,
+    and the arm not a `-cap` one.
+42. The assertion naming that population was `chk(..., sorted(_B8),
+    sorted(_B8))`, which is true for any `_B8` including an empty one. The
+    checker's self-audit refused two literals and had nothing to say about one
+    expression twice, so it read as a pass and certified nothing. It refuses
+    both now, and the assertion states the population's size.
+43. The same exclusion made the sentence beside it wrong too. The widest
+    within-run spread across arms was published as **0.11 pp** and is
+    **0.26 pp**, again in `D_master_matrix_think_off`, and the assertion
+    guarding it was a bound of `<= 0.12` rather than the value, so it would
+    have accepted anything under the number it was written from. It names the
+    run now, not a ceiling.
+44. "The tier description gives the full date span" searched the whole README
+    for `2026-08-25 to 2026-08-28`, and the span is also in the blockquote near
+    the top. Deleting it from the registry row the check is named for left the
+    check green; scoping it to that row makes the same deletion fail. Twenty-six
+    document assertions were examined for this shape and it is the one where
+    the location was part of the claim.
+45. An assertion labelled "300 is the cap every v4 request runs to" checked
+    one file of one thinking-on run, where it holds. Across the committed
+    corpus it does not: **13 393 of 18 344** rows reach the cap and **4 951**
+    stop short, every one of them thinking-off. No document made the
+    unconditional claim -- all four attach the condition "on a run where every
+    request hits the same cap" -- so this corrects an assertion rather than a
+    published figure, and the assertion now measures the split over every
+    committed row, which is what supports the condition the documents attach.
 
 A test now refuses any table row with no header above it, and another refuses
 any path the checker opens that a fresh clone would not have.

@@ -41,6 +41,17 @@ ROOT = Path(__file__).resolve().parents[1]
 
 # (description, file, correct fragment, defect to restore, test that must fail)
 MUTATIONS = [
+    # --- run W2's preparation -----------------------------------------------
+    ("the W driver hardcodes its run label again, so a second invocation pools",
+     "bench/run_w_williams.sh",
+     '    out="$BENCH/matrix_${LABEL}_s${session}_$STAMP"',
+     '    out="$BENCH/matrix_W_s${session}_$STAMP"',
+     "tests.test_harness_invariants.ASecondInvocationMustNotPoolWithTheFirst"),
+    ("the run label stops being validated, so a glob character reaches find",
+     "bench/run_w_williams.sh",
+     '    *[!A-Za-z0-9]*|"") echo "BENCH_RUN_LABEL must be alphanumeric" >&2; exit 1;;',
+     "    zzzz_never_matches) : ;;",
+     "tests.test_harness_invariants.ASecondInvocationMustNotPoolWithTheFirst"),
     # --- the fifth review's findings ----------------------------------------
     # Each fix below shipped with a test and none of them shipped with a
     # mutation, so nothing had shown the tests were not decorative. That is the

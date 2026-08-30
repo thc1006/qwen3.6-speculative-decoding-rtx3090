@@ -211,7 +211,16 @@ def capped_contrast_matched(runs: list[dict], suffix: str) -> dict:
                   "n_pairs": len(pairs),
                   "own_twin_dropped": dropped,
                   "pairs": pairs,
-                  "sd_pct": st.stdev(deltas) if len(deltas) > 1 else 0.0}
+                  # NOT the session SD. These four deltas are one session's
+                  # four matched predecessor pairs, so this is spread WITHIN a
+                  # session; the published interval is over sessions and is
+                  # built by the caller from `delta_pct`. Named for what it is
+                  # because a field called `sd_pct` sitting under a docstring
+                  # that says "sessions stay the resampling unit" is an
+                  # invitation to quote it as the session SD, and nothing reads
+                  # it today to notice.
+                  "sd_over_pairs_within_session_pct":
+                      st.stdev(deltas) if len(deltas) > 1 else 0.0}
     return out
 
 

@@ -3801,18 +3801,31 @@ for _f in _armruns:
 # What that numerator is WORTH, measured rather than described. The bias is
 # 0.33 % at a fixed 300-token cap, which is why the pooled headline is
 # unaffected; on the thinking-off freerun arms the lengths vary and it is 0.90
-# to 1.57 %. Within a run it is nearly the same for every arm, so the ratios the
+# to 1.75 %. Within a run it is nearly the same for every arm, so the ratios the
 # study reports move far less than the absolute rates do -- and that is a
 # measurement here, not an assumption.
+# Selected by what the manifest says, not by what the directory is called.
+# `glob("*thinkoff*")` matched three runs of twenty: it missed
+# `D_master_matrix_think_off` for its underscore, every `matrix_V2_s*_freerun`
+# half, `matrix_V_freerun`, and the freerun arms inside V3 and W. The published
+# upper bound came from those three and was 1.57 %; the highest of the twenty
+# is 1.75 %, in the run the underscore excluded.
 _B8 = {}
 for _d in sorted((pathlib.Path(__file__).resolve().parents[1] / "v4_audit_2026_08_25"
-                  / "data").glob("*thinkoff*")):
-    if not _d.is_dir():
+                  / "data").glob("*")):
+    if not _d.is_dir() or not (_d / "manifest.json").exists():
+        continue
+    _b8m = json.loads((_d / "manifest.json").read_text(encoding="utf-8"))
+    # thinking off, and not a wholly hard-capped half: the cap fixes every
+    # length, which is the 0.33 % case this figure is contrasted against
+    if str(_b8m.get("think")) != "off" or _b8m.get("ignore_eos"):
         continue
     _per = defaultdict(lambda: {"u": [], "c": []})
     for _f in _d.glob("*__rep*.json"):
         _b = json.loads(_f.read_text(encoding="utf-8"))
         _arm = _b.get("arm") or _f.name.split("__rep")[0]
+        if _arm.endswith("-cap"):        # a capped arm inside a mixed run
+            continue
         for _r in _b.get("rows") or []:
             _t = _r.get("timings") or {}
             if not _t.get("predicted_ms") or _t.get("predicted_n", 0) < 2:
@@ -3823,11 +3836,23 @@ for _d in sorted((pathlib.Path(__file__).resolve().parents[1] / "v4_audit_2026_0
         _B8[_d.name] = {_a: 100.0 * (st.mean(_v["c"]) / st.mean(_v["u"]) - 1.0)
                         for _a, _v in _per.items()}
 _b8all = [x for v in _B8.values() for x in v.values()]
-chk("B8: the thinking-off runs measured", sorted(_B8), sorted(_B8))
+# Was `chk(..., sorted(_B8), sorted(_B8))`, which is true for any `_B8`
+# including an empty one: it named a population and asserted nothing about it,
+# and the self-audit below only refused two LITERALS, not one expression twice.
+chk("B8: every thinking-off run with a freerun arm is in the population",
+    (len(_B8), sum(len(_v) for _v in _B8.values())), (20, 98))
+chk("B8: and the run the old filename glob dropped is one of them",
+    "D_master_matrix_think_off" in _B8, True)
 chk("B8: the numerator bias on thinking-off freerun arms",
-    (round(min(_b8all), 2), round(max(_b8all), 2)), (0.90, 1.57))
-chk("B8: and within a run it is nearly the same for every arm, so ratios barely move",
-    max(round(max(v.values()) - min(v.values()), 2) for v in _B8.values()) <= 0.12, True)
+    (round(min(_b8all), 2), round(max(_b8all), 2)), (0.90, 1.75))
+# 0.26, not 0.12: the widest is `D_master_matrix_think_off`, the run the
+# filename glob dropped, and it is nearly three times the widest of the three
+# runs the figure used to be measured on.
+_b8spread = {_k: round(max(_v.values()) - min(_v.values()), 2)
+             for _k, _v in _B8.items() if len(_v) > 1}
+chk("B8: within a run it is nearly the same for every arm, so ratios barely move",
+    (max(_b8spread.values()), max(_b8spread, key=_b8spread.get)),
+    (0.26, "D_master_matrix_think_off"))
 
 chk("B8 rows where the server reports 1000*(n-1)/ms", _nm1, 18300)
 chk("B8 rows where it reports 1000*n/ms", _nn, 44)
@@ -4469,9 +4494,22 @@ _reg_missing = sorted(_f for _f in _REG_FAMILY
 chk("registry: every run family the data holds is named in the table",
     _reg_missing, [])
 chk("registry: and run W is one of them", "W" in _reg_named, True)
-chk("registry: the tier description gives the full date span",
-    ("2026-08-25 to\n> 2026-08-28" in _ROOT_TEXT
-     or "2026-08-25 to 2026-08-28" in " ".join(_ROOT_TEXT.split())), True)
+# The ROW, not the document. The span also appears in the blockquote near the
+# top, so searching the whole README satisfied a check named for the registry
+# even if the registry row had lost it: two occurrences, one assertion, and the
+# one it was written for was not the one that could keep it green.
+# Matched on the first CELL, not on a pipe-delimited literal: the census
+# treats any `| ... |` string in this file as a table header that must resolve
+# to a registered reader, and `"| **v4 audit** |"` is a row, so it tripped that
+# invariant. The invariant is right to be strict; the literal was the wrong
+# shape for what it names.
+_reg_v4row = [_l for _l in _ROOT_TEXT.splitlines()
+              if _l.startswith("|") and _l.count("|") > 2
+              and "**v4 audit**" in _l.split("|")[1]]
+chk("registry: there is exactly one v4 audit row to check",
+    len(_reg_v4row), 1)
+chk("registry: the tier description gives the full date span, in that row",
+    "2026-08-25 to 2026-08-28" in " ".join(_reg_v4row[0].split()), True)
 chk("registry: it no longer says runs A to L",
     ("runs A–L" in _ROOT_TEXT or "runs A-L" in _ROOT_TEXT), False)
 
@@ -6417,6 +6455,21 @@ for _n in _ast.walk(_tree):
         _label = _n.args[0]
         _literal_only.append(getattr(_label, "value", None)
                              or _ast.unparse(_label)[:60])
+
+# The same rule one level up. `chk(name, X, X)` cannot fail either, and this
+# audit did not refuse it because neither side is a literal: `sorted(_B8)`
+# against `sorted(_B8)` sat in B8 naming a population and asserting nothing
+# about it, true for any `_B8` including an empty one. A name on both sides is
+# not evidence that anything was compared.
+_self_compare = []
+for _n in _ast.walk(_tree):
+    if not (isinstance(_n, _ast.Call) and isinstance(_n.func, _ast.Name)
+            and _n.func.id == "chk" and len(_n.args) >= 3):
+        continue
+    if _ast.dump(_n.args[1]) == _ast.dump(_n.args[2]):
+        _label = _n.args[0]
+        _self_compare.append(getattr(_label, "value", None)
+                             or _ast.unparse(_label)[:60])
 print("\n=== A17's length-matched split table, and the cell that held the "
       "wrong quantity ===")
 # Its `matrix_V_freerun` row published 11.90 pp in a column asking for the
@@ -7243,7 +7296,36 @@ chk("B8 table: four lengths", len(_B8T), 4)
 _B8_LENGTHS = [20, 187, 300, 1000]
 chk("B8 table: the lengths it tabulates",
     sorted(int(_k) for _k in _B8T), _B8_LENGTHS)
-chk("B8: 300 is the cap every v4 request runs to",
+# Was "300 is the cap every v4 request runs to", checked over ONE file of one
+# thinking-on run, where it is true. Across the corpus it is not: 4951 of
+# 18344 rows stop short, every one of them thinking-off, which is exactly the
+# condition the documents attach to this figure ("on a run where every request
+# hits the same cap"). Measured over every committed row, so the condition is
+# supported rather than assumed.
+_b8cap_at = _b8cap_short = 0
+_b8cap_think = set()
+for _d in sorted((pathlib.Path(__file__).resolve().parents[1] / "v4_audit_2026_08_25"
+                  / "data").glob("*")):
+    if not _d.is_dir() or not (_d / "manifest.json").exists():
+        continue
+    _mth = str(json.loads((_d / "manifest.json").read_text(encoding="utf-8"))
+               .get("think"))
+    for _f in _d.glob("*__rep*.json"):
+        for _r in json.loads(_f.read_text(encoding="utf-8")).get("rows") or []:
+            _n300 = (_r.get("timings") or {}).get("predicted_n")
+            if _n300 is None:
+                continue
+            if _n300 == 300:
+                _b8cap_at += 1
+            else:
+                _b8cap_short += 1
+                _b8cap_think.add(_mth)
+chk("B8: committed rows that reach the 300-token cap, and those that stop short",
+    (_b8cap_at, _b8cap_short, _b8cap_at + _b8cap_short), (13393, 4951, 18344))
+chk("B8: and every row that stops short is a thinking-off one, which is the "
+    "condition the documents attach",
+    sorted(_b8cap_think), ["off"])
+chk("B8: the run the old one-file check looked at does run every request to it",
     sorted({_r["timings"]["predicted_n"] for _f in
             sorted(glob.glob("v4_audit_2026_08_25/data/matrix_O2_latin_*/"
                              "baseline__rep0.json"))
@@ -8957,7 +9039,9 @@ _WORDS = {20: "Twenty", 21: "Twenty-one", 22: "Twenty-two",
           29: "Twenty-nine", 30: "Thirty", 31: "Thirty-one",
           32: "Thirty-two", 33: "Thirty-three", 34: "Thirty-four",
           35: "Thirty-five", 36: "Thirty-six", 37: "Thirty-seven",
-          38: "Thirty-eight", 39: "Thirty-nine", 40: "Forty"}
+          38: "Thirty-eight", 39: "Thirty-nine", 40: "Forty",
+          41: "Forty-one", 42: "Forty-two", 43: "Forty-three",
+          44: "Forty-four", 45: "Forty-five"}
 chk("ERRATA A19: the corrections are numbered from one, without a gap",
     [int(_x) for _x in _A19_LIST], list(range(1, len(_A19_LIST) + 1)))
 chk("ERRATA A19: and the count it states is the length of that list",
@@ -8985,9 +9069,12 @@ chk("ERRATA A19: the census it publishes is the census",
     (_cov["tables"], _cov["no_values"], _cov["excluded_tables"],
      _cov["carrying_values"], _cov["parsed"], _cov["not_parsed"]),
     (136, 7, 5, 124, 124, 0))
-for _want, _what in ((136, "tables"), (124, "carrying measurements"),
-                     (124, "parsed"), (0, "not parsed"), (7, "no number at all"),
-                     (5, "named exclusions")):
+for _want, _what in ((_cov["tables"], "tables"),
+                     (_cov["carrying_values"], "carrying measurements"),
+                     (_cov["parsed"], "parsed"),
+                     (_cov["not_parsed"], "not parsed"),
+                     (_cov["no_values"], "no number at all"),
+                     (_cov["excluded_tables"], "named exclusions")):
     chk(f"ERRATA A19 prints the {_what} count", _want in _A19N, True)
 chk("ERRATA A19: it names the three commands that reproduce the probe figures",
     ("--probe`" in _A19 and "--probe --covered`" in _A19
@@ -9014,9 +9101,9 @@ chk("prose probe: records whose value repeats on its own line",
 
 _pcov = _tcov.prose_census()
 chk("coverage: decimal numbers in prose, outside every table",
-    _pcov["prose_numbers"], 1239)
+    _pcov["prose_numbers"], 1254)
 chk("coverage: those that are not a literal in this file",
-    _pcov["not_a_literal"], 627)
+    _pcov["not_a_literal"], 640)
 # tested on a supplied source, not by searching this file for a phrase: the
 # first version of this check searched for a label's own words, and the search
 # string was itself a literal in the argument position, so it always found it.
@@ -9024,8 +9111,14 @@ _lbl_src = 'chk("A LABEL", "A VALUE", 1)'
 chk("coverage: a label is not counted as a literal and its arguments are",
     ("A LABEL" in _tcov._checker_literals(_lbl_src),
      "A VALUE" in _tcov._checker_literals(_lbl_src)), (False, True))
-for _want, _what in ((1226, "prose count"), (647, "count that are not literals"),
-                     (40, "sample size")):
+# DERIVED, not literals. These were `(1226, ...), (647, ...)` typed in by
+# hand, and the check asked only whether that number appears in the entry --
+# so when the census moved to 1239 and the `_pcov` pin above was updated
+# without the document, A19 kept publishing 1226 and nothing failed. The two
+# copies of one number have to be the same copy.
+for _want, _what in ((_pcov["prose_numbers"], "prose count"),
+                     (_pcov["not_a_literal"], "count that are not literals"),
+                     (_tcov.PROSE_SAMPLE, "sample size")):
     chk(f"ERRATA A19 prints the {_what}", _want in _A19N, True)
 # The interval beside that sample was stated and never derived. Wilson, not
 # the normal approximation: at 40 of 40 the normal one has zero width and says
@@ -9122,6 +9215,8 @@ chk("checker: and the audit is not vacuous - names at risk are found",
 
 chk("checker: no chk() compares literals with literals",
     (len(_literal_only), _literal_only[:3]), (0, []))
+chk("checker: and none compares an expression with itself",
+    (len(_self_compare), _self_compare[:3]), (0, []))
 chk("checker: number of assertions", len([1 for _n in _ast.walk(_tree)
      if isinstance(_n, _ast.Call) and isinstance(_n.func, _ast.Name) and _n.func.id == "chk"]) > 150, True)
 

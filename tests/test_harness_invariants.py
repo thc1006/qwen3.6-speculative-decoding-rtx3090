@@ -4319,6 +4319,63 @@ class ThePullRequestBodyMustKeepTheStyleItDeclares(unittest.TestCase):
             "a table in the body is not parsed cell by cell")
 
 
+class ASecondInvocationMustNotPoolWithTheFirst(unittest.TestCase):
+    """`run_w_williams.sh` wrote `matrix_W_s<n>_<stamp>` with `W` hardcoded, and
+    every analyser globs `matrix_W_*` with no invocation qualifier. A second
+    invocation would therefore have been pooled with the first by whichever
+    analyser ran next, and the difference between invocations is exactly what
+    A16 is about and what nothing here explains. The label is a knob now, so a
+    new invocation is a new run rather than more of an old one.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    def test_the_driver_takes_a_label_and_defaults_to_W(self):
+        src = (self.ROOT / "bench" / "run_w_williams.sh").read_text(
+            encoding="utf-8")
+        self.assertIn('LABEL="${BENCH_RUN_LABEL:-W}"', src,
+                      "the run label is not a knob, or its default moved")
+        self.assertNotIn("matrix_W_s${session}", src,
+                         "the output path still hardcodes the label")
+        self.assertNotIn('"$TELE_INTERVAL" "W"', src,
+                         "the telemetry trace still hardcodes the label")
+
+    def test_a_label_that_could_break_a_glob_is_refused(self):
+        """It becomes a directory name and a `find -name` pattern, so a space
+        or a star in it would match directories the run did not write."""
+        sh = str(self.ROOT / "bench" / "run_w_williams.sh")
+        # not the empty string: `${BENCH_RUN_LABEL:-W}` treats unset and empty
+        # alike, as every other knob in this driver does, so an empty value is
+        # the default and not a mistake. The next test pins that.
+        for bad in ("W 2", "W*", "../W", "W/2"):
+            r = subprocess.run(["bash", sh, "1"],
+                               env={**os.environ, "BENCH_RUN_LABEL": bad,
+                                    "BENCH_ROOT": "/nonexistent"},
+                               capture_output=True, text=True, timeout=60)
+            self.assertNotEqual(r.returncode, 0, f"label {bad!r} was accepted")
+            self.assertIn("alphanumeric", r.stdout + r.stderr,
+                          f"label {bad!r} failed for the wrong reason")
+
+    def test_an_empty_label_is_the_default_not_an_error(self):
+        src = (self.ROOT / "bench" / "run_w_williams.sh").read_text(
+            encoding="utf-8")
+        self.assertIn('${BENCH_RUN_LABEL:-W}', src,
+                      "an empty label no longer falls back to the default, "
+                      "which is what every other knob in this driver does")
+
+    def test_every_analyser_that_globs_W_is_named_here(self):
+        """If a new analyser globs `matrix_W_*`, it inherits the pooling
+        problem, and this is the list that says which ones were checked."""
+        import re
+        hits = set()
+        for f in sorted((self.ROOT / "analysis").glob("*.py")):
+            if re.search(r"matrix_W[_*]", f.read_text(encoding="utf-8")):
+                hits.add(f.name)
+        self.assertEqual(hits, {"verify_claims.py"},
+                         "an analyser globs matrix_W and is not accounted for; "
+                         "check it cannot pool two invocations")
+
+
 class TheDataMirrorMustHoldEveryPathTheCheckerOpens(unittest.TestCase):
     """`tests/data_mutate.py` copies a list of paths and runs the checker in
     the copy. When the checker grew an assertion that reads

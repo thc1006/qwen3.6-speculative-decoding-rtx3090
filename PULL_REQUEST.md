@@ -361,7 +361,7 @@ adversarial pass over this branch's own commits found:
   grows as the coverage does and a clean run is only clean for the tree it ran
   on: the run before this one covered 2 252 numbers across 119 tables.
   `analysis/table_coverage.py --probe --covered --every-cell` is the
-  measurement and **A19** the accounting; 69 code and 84 data and document perturbations
+  measurement and **A19** the accounting; 71 code and 84 data and document perturbations
   remain permanent tests.
 
   Parsing the rest of them, rather than reading them, found seventeen more
@@ -412,7 +412,7 @@ adversarial pass over this branch's own commits found:
   the checker inside a clean checkout of HEAD, and there it died 373 assertions
   early, so the probe's own baseline was broken and it was measuring nothing.
   The logs are committed now and a test refuses any path the checker opens that
-  a fresh clone would not have. A clean checkout runs all 3708 assertions and
+  a fresh clone would not have. A clean checkout runs all 3713 assertions and
   exits 0, which it did not before.
 
   Figures in those tables that are not re-derivable here say so rather than
@@ -564,13 +564,13 @@ review:
 
 ```
 python analysis/rederive_from_logs.py bench   # raw logs -> four audit files
-python analysis/verify_claims.py          # 3708 assertions, re-derived
+python analysis/verify_claims.py          # 3713 assertions, re-derived
 python analysis/check_data_integrity.py   # structure of all 65 run directories
-python -m unittest discover tests         # 267 regressions for defects shipped here
+python -m unittest discover tests         # 271 regressions for defects shipped here
 python tests/mutate.py                    # break each fix, require its test to fail
 python tests/data_mutate.py               # perturb a measurement or a published
                                           #   figure, require the checker to fail
-                                          #   69 code and 84 data perturbations,
+                                          #   71 code and 84 data perturbations,
                                           #   with a clean-mirror re-check after
                                           #   the last restore
 python analysis/plot_v4_runs.py --check   # charts still match the data
@@ -613,9 +613,10 @@ literals. Six of them did, and were rewritten.
 
   Measured rather than left as a caveat: the gap is 0.33 % at a fixed
   300-token cap, which is why the pooled headline does not move, and
-  **0.90 % to 1.57 %** on the thinking-off freerun arms where the lengths
+  **0.90 % to 1.75 %** over all twenty thinking-off runs with a freerun arm,
+  ninety-eight arm figures, where the lengths
   vary. Within one run it is nearly the same for every arm, and the widest
-  spread across arms in a run is **0.11 pp**, so arm-vs-baseline ratios
+  spread across arms in a run is **0.26 pp**, so arm-vs-baseline ratios
   move far less than the absolute rates do. The runner records
   `request_tok_s` = `1000 × predicted_n / predicted_ms` beside the
   upstream field from now on, so a future analysis does not have to

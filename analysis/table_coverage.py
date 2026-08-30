@@ -66,7 +66,8 @@ DOCS = ["README.md", "ERRATA.md", "CHANGELOG.md", "RETEST_TODO.md",
         "BENCHMARK_ENV.md", "PULL_REQUEST.md",
         "v4_audit_2026_08_25/README.md",
         "v4_audit_2026_08_25/PREREGISTERED_PREDICTION.md",
-        "v4_audit_2026_08_25/PROSPECTIVE_ANALYSIS_PLAN_W.md"]
+        "v4_audit_2026_08_25/PROSPECTIVE_ANALYSIS_PLAN_W.md",
+        "v4_audit_2026_08_25/PROSPECTIVE_ANALYSIS_PLAN_W2.md"]
 # Not censused, and why. Nothing may be missing from DOCS + EXCLUDED: a new
 # document that is in neither would escape the count silently, which is the
 # failure this whole file exists to stop.

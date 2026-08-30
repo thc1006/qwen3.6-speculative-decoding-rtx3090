@@ -48,6 +48,15 @@
 set -euo pipefail
 
 SESSIONS="${1:-5}"
+# The run label. Hardcoded "W" until 2026-08-30, and every analyser globs
+# `matrix_W_*` with no invocation qualifier, so a second invocation would
+# have been pooled with the first without anyone choosing that -- and the
+# thing A16 is about is exactly the difference between invocations. A new
+# invocation gets its own label so nothing pools it by accident.
+LABEL="${BENCH_RUN_LABEL:-W}"
+case "$LABEL" in
+    *[!A-Za-z0-9]*|"") echo "BENCH_RUN_LABEL must be alphanumeric" >&2; exit 1;;
+esac
 BENCH="${BENCH_ROOT:-$HOME/bench}"
 RUNNER="${BENCH_RUNNER:-$BENCH/retest_runner.py}"
 TELE_SH="${BENCH_TELEMETRY:-$BENCH/gpu_telemetry.sh}"
@@ -85,8 +94,8 @@ export BENCH_FLAVOR=master
 # the run-level flag would cap the free half too and measure nothing
 unset BENCH_IGNORE_EOS || true
 
-echo "telemetry $TELE_SH $TELE_SCHEMA $TELE_INTERVAL W"
-bash "$TELE_SH" "$TELE_SCHEMA" "$TELE_INTERVAL" "W" &
+echo "telemetry $TELE_SH $TELE_SCHEMA $TELE_INTERVAL $LABEL"
+bash "$TELE_SH" "$TELE_SCHEMA" "$TELE_INTERVAL" "$LABEL" &
 TELE_PID=$!
 trap 'kill "$TELE_PID" 2>/dev/null || true' EXIT
 # It was started and never looked at again. A sampler that dies in the first
@@ -100,7 +109,7 @@ BENCH_ROOT_TELECHECK="$(dirname "$0")/check_telemetry_cover.py"
 DONE=""
 FAILED=""
 for session in $(seq 1 "$SESSIONS"); do
-    out="$BENCH/matrix_W_s${session}_$STAMP"
+    out="$BENCH/matrix_${LABEL}_s${session}_$STAMP"
     # a seed per session, deterministic from the stamp so the schedule can be
     # rebuilt from the manifest without keeping anything else
     export BENCH_SCHEDULE_SEED=$(( (10#${STAMP//_/} % 100000) + session ))
@@ -130,8 +139,8 @@ echo "failed:${FAILED:- none}"
 # Fail closed: every session, every arm-run, and the balance the run is named
 # for. A driver that reports success on partial data is worse than one that
 # crashes, because the operator sees directories and believes the matrix ran.
-sessions=$(find "$BENCH" -maxdepth 1 -type d -name "matrix_W_s*_$STAMP" -printf . | wc -c)
-complete=$(find "$BENCH" -maxdepth 1 -type d -name "matrix_W_s*_$STAMP" \
+sessions=$(find "$BENCH" -maxdepth 1 -type d -name "matrix_${LABEL}_s*_$STAMP" -printf . | wc -c)
+complete=$(find "$BENCH" -maxdepth 1 -type d -name "matrix_${LABEL}_s*_$STAMP" \
              -exec test -f '{}/RUN_COMPLETE.json' ';' -printf . | wc -c)
 echo "sessions:$sessions  validated:$complete  expected:$SESSIONS"
 rc=0
@@ -154,7 +163,7 @@ fi
 [ -z "$FAILED" ] || { echo "FAIL: sessions failed:$FAILED" >&2; rc=1; }
 [ "$sessions" -eq "$SESSIONS" ] || { echo "FAIL: $sessions sessions" >&2; rc=1; }
 [ "$complete" -eq "$SESSIONS" ] || { echo "FAIL: $complete validated" >&2; rc=1; }
-for d in "$BENCH"/matrix_W_s*_"$STAMP"; do
+for d in "$BENCH"/matrix_"$LABEL"_s*_"$STAMP"; do
     n=$(find "$d" -maxdepth 1 -name '*__rep*.json' -printf . | wc -c)
     [ "$n" -eq 100 ] || { echo "FAIL: $d has $n arm-runs, expected 100" >&2; rc=1; }
     python3 - "$d" <<'PY' || rc=1
