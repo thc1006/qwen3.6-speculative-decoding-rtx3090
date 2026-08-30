@@ -318,9 +318,9 @@ def report_within(dirs, out):
                             "arm-vs-baseline figure",
                 "log_contrast_pct": pct}
     if per_arm_nb:
-        print(f"\n  row-boundary EXCLUDED -- the arm-run that opened each row is "
-              f"dropped,\n  because its predecessor is in the previous row and the "
-              f"square does not\n  balance that adjacency. One per arm per session.")
+        print("\n  row-boundary EXCLUDED -- the arm-run that opened each row is "
+              "dropped,\n  because its predecessor is in the previous row and the "
+              "square does not\n  balance that adjacency. One per arm per session.")
         out["within_summary_no_boundary"] = {}
         for a, vs in sorted(per_arm_nb.items(), key=lambda kv: -st.mean(kv[1])):
             m, lo, hi, n = interval(vs)

@@ -4092,7 +4092,6 @@ class TheConcurrentPathMustSendTheSameTreatmentAsTheSequentialOne(unittest.TestC
     def test_chat_refuses_to_default_the_treatment(self):
         """The signature is the guard. A missed argument must be a TypeError,
         not a silent choice of freerun."""
-        import inspect
         src = (ROOT / "bench" / "retest_runner.py").read_text()
         sig = [ln for ln in src.splitlines() if ln.startswith("def chat(")]
         self.assertEqual(len(sig), 1, sig)
