@@ -528,7 +528,7 @@ W added 500 more the next day. What keeps this a draft is below, under
 python analysis/rederive_from_logs.py bench   # raw logs -> four audit files
 python analysis/verify_claims.py          # 3708 assertions, re-derived
 python analysis/check_data_integrity.py   # structure of all 65 run directories
-python -m unittest discover tests         # 245 regressions for defects shipped here
+python -m unittest discover tests         # 248 regressions for defects shipped here
 python tests/mutate.py                    # break each fix, require its test to fail
 python tests/data_mutate.py               # perturb a measurement or a published
                                           #   figure, require the checker to fail

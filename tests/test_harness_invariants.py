@@ -23,6 +23,7 @@ import shutil
 import subprocess
 import contextlib
 import sys
+import tarfile
 import tempfile
 import time
 import unittest
@@ -4273,6 +4274,69 @@ class AStrangersBenchmarkIsInterferenceNotOurs(unittest.TestCase):
             self.assertNotIn(name, body,
                              f"_own_pids consults {name}; ownership would then be "
                              f"by name, and a stranger's server would be absorbed")
+
+
+class TheTarPreflightMustWorkOnThePipeCiActuallyGivesIt(unittest.TestCase):
+    """The workflow hands it `<(unzstd -c ...)`, which is a FIFO.
+
+    `tarfile.open(path)` defaults to a seeking mode and a FIFO cannot seek, so
+    the first run this code ever had died with `Illegal seek` -- while the local
+    tests, which used real files, all passed. That is the same shape as every
+    other defect this repository has found: a path that had never been executed.
+    These drive the preflight through an actual pipe, both ways.
+    """
+
+    TOOL = ROOT / "bench" / "preflight_tar.py"
+
+    def _fixture(self, tmp, hostile=False):
+        import io
+        man = Path(tmp) / "m.sha256"
+        man.write_text("0" * 64 + "  a/ok.log\n")
+        tar = Path(tmp) / "x.tar"
+
+        def add(tf, name, **kw):
+            ti = tarfile.TarInfo(name)
+            ti.size = 0
+            for k, v in kw.items():
+                setattr(ti, k, v)
+            tf.addfile(ti, io.BytesIO(b""))
+
+        with tarfile.open(tar, "w") as tf:
+            add(tf, "a/ok.log")
+            if hostile:
+                add(tf, "/etc/passwd")
+                ti = tarfile.TarInfo("a/link")
+                ti.type = tarfile.SYMTYPE
+                ti.linkname = "/etc/passwd"
+                tf.addfile(ti)
+        return man, tar
+
+    def _through_pipe(self, man, tar):
+        return subprocess.run(
+            ["bash", "-c",
+             f"python3 {self.TOOL} {man} <(cat {tar})"],
+            capture_output=True, text=True, timeout=120)
+
+    def test_a_clean_archive_passes_through_a_pipe(self):
+        with tempfile.TemporaryDirectory() as t:
+            man, tar = self._fixture(t)
+            r = self._through_pipe(man, tar)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertNotIn("Illegal seek", r.stderr)
+
+    def test_a_hostile_archive_is_refused_through_a_pipe(self):
+        with tempfile.TemporaryDirectory() as t:
+            man, tar = self._fixture(t, hostile=True)
+            r = self._through_pipe(man, tar)
+            self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+            self.assertIn("absolute path", r.stderr)
+            self.assertIn("symlink", r.stderr)
+
+    def test_it_does_not_open_in_a_seeking_mode(self):
+        src = self.TOOL.read_text(encoding="utf-8")
+        self.assertIn('mode="r|', src,
+                      "tarfile is opened in a seeking mode; a FIFO cannot seek "
+                      "and the workflow gives it one")
 
 
 if __name__ == "__main__":

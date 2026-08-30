@@ -41,8 +41,15 @@ def manifest_paths(path: str) -> set[str]:
 
 def check(archive: str, named: set[str]) -> list[str]:
     bad, seen = [], set()
-    with tarfile.open(archive) as tf:
-        for m in tf.getmembers():
+    # STREAM mode. The default seeks, and the workflow hands this a process
+    # substitution -- `<(unzstd -c ...)` -- which is a FIFO: `Illegal seek`,
+    # on the first run this code ever had. Local tests used real files and
+    # never touched the path CI uses. `r|*` reads sequentially and detects
+    # compression, so it works for both.
+    with tarfile.open(archive, mode="r|*") as tf:
+        # Iterate, not getmembers(): a stream cannot be rewound to build the
+        # full list first, and iterating is what a sequential reader supports.
+        for m in tf:
             n = m.name
             if not m.isfile():
                 kind = ("symlink" if m.issym() else "hardlink" if m.islnk()
