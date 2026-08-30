@@ -115,6 +115,37 @@ def compare(label, regenerated, published, key, expected_gap=0, scope=None,
         FAIL.append(f"{label}: {len(extra)} record(s) the dump does not contain")
 
 
+REGISTRY = None
+
+
+def registry():
+    """The expected coverage, held apart from the outputs being checked.
+
+    Every scope in this file used to be read off the published artifact: the
+    acceptance run set from the published dump, the checkpoint run set from the
+    published rows, the spec-accounting log names from the published JSON. A run
+    dropped from an output therefore left the comparison instead of failing it,
+    which is precisely the omission the re-derivation exists to catch.
+    """
+    global REGISTRY
+    if REGISTRY is None:
+        here = os.path.dirname(os.path.abspath(__file__))
+        with open(os.path.join(here, "..", "v4_audit_2026_08_25",
+                               "EVIDENCE_REGISTRY.json"), encoding="utf-8") as fh:
+            REGISTRY = json.load(fh)
+    return REGISTRY
+
+
+def expected_runs(artifact):
+    a = registry()["artifacts"].get(artifact)
+    if not a:
+        FAIL.append(f"{artifact}: no entry in EVIDENCE_REGISTRY.json, so what it "
+                    f"is supposed to cover is not recorded anywhere independent "
+                    f"of the file being checked")
+        return None
+    return set(a["expected_runs"])
+
+
 def main():
     if len(sys.argv) < 2:
         sys.exit(__doc__)
@@ -123,7 +154,20 @@ def main():
 
     # --- the acceptance counters behind A13 --------------------------------
     published = committed("acceptance_counter_comparison.json")
+    _want_runs = expected_runs("acceptance_counter_comparison.json")
     _runs_in_dump = {r["run"] for r in published}
+    if _want_runs is not None:
+        _absent = sorted(_want_runs - _runs_in_dump)
+        _extra = sorted(_runs_in_dump - _want_runs)
+        if _absent:
+            FAIL.append(f"acceptance_counter_comparison.json: "
+                        f"{len(_absent)} run(s) the registry expects are not in "
+                        f"the published dump at all: {_absent[:4]}")
+        if _extra:
+            FAIL.append(f"acceptance_counter_comparison.json: "
+                        f"{len(_extra)} run(s) are published that the registry "
+                        f"does not list: {_extra[:4]}")
+        _runs_in_dump = _want_runs
     # exactly which rows may be absent, not how many
     _expected_missing = [(r["run"], r["arm"], r.get("repeat"))
                          for r in published if r["run"] in NOT_REPRODUCIBLE]
@@ -136,8 +180,10 @@ def main():
     # --- the source timers behind A12 --------------------------------------
     pub = committed("checkpoint_timers_20260826.json")
     pub_rows = pub if isinstance(pub, list) else pub["rows"]
-    runs = {r.get("run") for r in pub_rows if r.get("run")} or \
-        {"matrix_T_timers_20260826_182639"}
+    runs = expected_runs("checkpoint_timers_20260826.json")
+    if runs is None:
+        runs = {r.get("run") for r in pub_rows if r.get("run")} or \
+            {"matrix_T_timers_20260826_182639"}
     logs = []
     for r in sorted(runs):
         d = os.path.join(bench, r, "server_logs")

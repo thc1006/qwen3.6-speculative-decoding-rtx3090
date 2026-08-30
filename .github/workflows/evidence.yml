@@ -75,7 +75,15 @@ defaults:
 
 jobs:
   rederive:
-    name: raw logs to committed JSON
+    # NOT "raw logs to committed JSON", which is what this said and is more than
+    # it does. Four server-log-derived audit files are independently regenerated
+    # and compared: the acceptance counters, two sets of checkpoint timers and
+    # the speculative accounting. The primary per-request benchmark JSON is NOT
+    # regenerated -- the logs carry no per-request timing rows -- and is only
+    # integrity-checked against EVIDENCE_MANIFEST.sha256.
+    # v4_audit_2026_08_25/EVIDENCE_REGISTRY.json says which is which, and holds
+    # the expected run set independently of the outputs being checked.
+    name: four log-derived audit files, re-derived and compared
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -224,8 +232,8 @@ jobs:
 
       - name: re-derive, and require the result to be what is committed
         env:
-          # the whole point of this job is that the archive regenerates the
-          # committed JSON; a missing run T4 must fail it, not be reported
+          # the point of this job is that the archive regenerates those four
+          # files; a missing run T4 must fail it, not be reported
           REDERIVE_REQUIRE_T4: "1"
         run: python analysis/rederive_from_logs.py bench
 

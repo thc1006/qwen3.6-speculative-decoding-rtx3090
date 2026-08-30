@@ -5766,8 +5766,17 @@ chk("PR body says W's interval overlaps V3 and not V2",
 chk("PR body reports the predecessor null as a null at this power",
     "no\ndetectable effect at this power" in _PR
     or "no detectable effect at this power" in _PR, True)
-chk("PR body: it still says the randomised-order run has not been run",
-    _PR.count("it has not been run"), 2)
+# This used to assert that the body said the randomised-order run had NOT been
+# run -- twice. Run W is that experiment and it is complete, so the same two
+# sentences became the body's own contradiction of its opening section, and a
+# check that pinned them kept them there. The assertion is now the other way
+# round: a completed run may not be described as pending. The one surviving
+# occurrence is inside a block quote of the earlier review, marked as such and
+# answered underneath, which is a quotation rather than a claim.
+chk("PR body: it does not describe the completed randomised-order run as pending",
+    _PR.count("it has not been run"), 0)
+chk("PR body: and it says W is that experiment",
+    "W is that experiment" in _PR, True)
 chk("PR body: it does not claim the mode order was the cause",
     "Order was not the cause" in _PR, True)
 # Every test*.py, and only methods on a TestCase subclass, because that is what
@@ -6101,6 +6110,70 @@ for _a, _row in sorted(_PRV3.items()):
     chk(f"PR body V3 {_a}: the V2 column", round(_v2i[0], 2), _pt, 0.005)
     chk(f"PR body V3 {_a}: and its interval",
         (round(_v2i[1], 2), round(_v2i[2], 2)), (_lo, _hi))
+
+# The evidence registry, which holds the re-derivation's expected coverage apart
+# from the outputs it checks. Every scope in rederive_from_logs.py used to be
+# read off the published artifact, so a run dropped from an output left the
+# comparison rather than failing it.
+_EREG = json.loads((_pl0.Path(__file__).resolve().parents[1] / "v4_audit_2026_08_25"
+                    / "EVIDENCE_REGISTRY.json").read_text(encoding="utf-8"))
+for _an, _av in _EREG["artifacts"].items():
+    _ap = (_pl0.Path(__file__).resolve().parents[1] / "v4_audit_2026_08_25"
+           / "data" / _an)
+    chk(f"evidence registry: {_an} exists", _ap.exists(), True)
+    if not _ap.exists():
+        continue
+    _ad = json.loads(_ap.read_text(encoding="utf-8"))
+    _ar = _ad if isinstance(_ad, list) else _ad.get("rows", [])
+    _have = {r.get("run") for r in _ar if r.get("run")}
+    if _have:                       # some artifacts carry no run column
+        chk(f"evidence registry: {_an} covers exactly the runs it lists",
+            sorted(_have), sorted(_av["expected_runs"]))
+chk("evidence registry: it records what is NOT re-derived",
+    "primary_benchmark_json" in _EREG["not_rederived"], True)
+_EWF = (_pl0.Path(__file__).resolve().parents[1] / ".github" / "workflows"
+        / "evidence.yml").read_text(encoding="utf-8")
+chk("evidence workflow: its job name no longer claims the benchmark JSON",
+    "name: raw logs to committed JSON" in _EWF, False)
+chk("evidence workflow: and says what it does re-derive",
+    "four log-derived audit files" in _EWF, True)
+
+# The run registry. The PR body carried two contradictory narratives at once --
+# W complete and W not run, the evidence workflow green and not green, two
+# tranches and three -- because each fact lived in prose in more than one place.
+# These are computed from the data and the manifest, and the documents are then
+# checked against them rather than against each other.
+_REG = json.loads((_pl0.Path(__file__).resolve().parents[1] / "v4_audit_2026_08_25"
+                   / "RUN_REGISTRY.json").read_text(encoding="utf-8"))
+_DATA = _pl0.Path(__file__).resolve().parents[1] / "v4_audit_2026_08_25" / "data"
+for _rk, _pat in (("V2", "matrix_V2_*"), ("V3", "matrix_V3_*"), ("W", "matrix_W_*")):
+    _ds = sorted(d for d in _DATA.glob(_pat) if d.is_dir())
+    _ar = sum(len(list(d.glob("*__rep*.json"))) for d in _ds)
+    chk(f"registry: {_rk} session count is the directories'",
+        len(_ds), _REG["runs"][_rk]["sessions"])
+    chk(f"registry: {_rk} arm-run count is the files'",
+        _ar, _REG["runs"][_rk]["arm_runs"])
+    chk(f"registry: {_rk} is attested by the driver in every session",
+        [d.name for d in _ds if not (d / "RUN_COMPLETE.json").exists()], [])
+_MANL = (_pl0.Path(__file__).resolve().parents[1] / "v4_audit_2026_08_25"
+         / "EVIDENCE_MANIFEST.sha256").read_text(encoding="utf-8").splitlines()
+chk("registry: the server-log count is the manifest's",
+    sum(1 for x in _MANL if x.rstrip().endswith(".log")),
+    _REG["raw_evidence"]["server_logs"])
+chk("registry: the telemetry-trace count is the manifest's",
+    sum(1 for x in _MANL if "telemetry" in x and x.rstrip().endswith(".csv")),
+    _REG["raw_evidence"]["telemetry_traces"])
+# A completed run may not be described as pending anywhere.
+for _rk, _rv in _REG["runs"].items():
+    if _rv["status"] == "complete" and _rk == "W":
+        chk("registry: no document says the randomised-order run has not happened",
+            [_d for _d, _t in (("PULL_REQUEST.md", _PR),)
+             if "it has not been run" in _t], [])
+chk("PR body: the evidence inventory is the registry's",
+    (f"{_REG['raw_evidence']['server_logs']} " in _PR
+     and f"{_REG['raw_evidence']['telemetry_traces']} telemetry traces" in _PR), True)
+chk("PR body: it does not still say two tranches",
+    "two tranches" in _PR.lower(), False)
 
 # The V3-to-W runner diff, checked against the archived blobs rather than
 # described. "V3 verbatim except BENCH_ORDER" was the claim; the manifests

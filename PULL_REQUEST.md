@@ -298,7 +298,12 @@ requests ran to the cap.
 > points the same way each time, that arm being slower after a capped neighbour,
 > but a fixed rotation cannot separate it, and this repository has said the
 > wrong thing about `spec-dflash-n2` twice already. Randomising the order is the
-> next experiment and **it has not been run**.
+> next experiment.
+>
+> *(That was written before run W. W is that experiment: five sessions of a
+> 10 x 10 Williams square, 500 of 500 arm-runs, complete. The quoted block is
+> left as it was written; what it asked for exists, and the section above
+> reports it.)*
 
 ## What the audit got wrong about itself
 
@@ -456,10 +461,20 @@ changed. Nothing in it was rejected.
   4071 MB uncompressed) and `telemetry.tar.zst` (19 traces), plus a second
   tranche `raw_logs_20260827.tar.zst` (618 logs, 2.9 GB, sha256 `d56a7f88…`)
   for V2, V3 and T4, kept separate so the first archive's digest keeps meaning
-  what it meant. The manifest is 1320 logs and 21 traces; all 620 new entries
-  were verified against it before publishing.
+  what it meant, and a third, `raw_logs_20260828.tar.zst`, for run W. The
+  manifest is **1820 server logs and 22 telemetry traces** across **three
+  tranches**, published as six release assets; every new entry was verified
+  against it before publishing. These counts come from
+  `v4_audit_2026_08_25/RUN_REGISTRY.json`, which the checker compares against
+  the data directories and the manifest.
   `python analysis/rederive_from_logs.py <bench-root>` checks every file
-  against `EVIDENCE_MANIFEST.sha256` and re-runs the extractors:
+  against `EVIDENCE_MANIFEST.sha256` and re-runs the extractors. **It
+  regenerates four log-derived audit files, not the primary per-request
+  benchmark JSON** — the server logs carry no per-request timing rows, so those
+  files are integrity-checked against the manifest and nothing more.
+  `v4_audit_2026_08_25/EVIDENCE_REGISTRY.json` says which is which, and holds
+  each artifact's expected run set independently of the artifact, so a run
+  omitted from an output fails the comparison instead of falling outside it:
 
   | derived file | records | identical | not regenerated |
   |---|---:|---:|---:|
@@ -492,8 +507,8 @@ W added 500 more the next day. What keeps this a draft is below, under
 ## Checking it
 
 ```
-python analysis/rederive_from_logs.py bench   # raw logs -> the committed JSON
-python analysis/verify_claims.py          # 3678 assertions, re-derived
+python analysis/rederive_from_logs.py bench   # raw logs -> four audit files
+python analysis/verify_claims.py          # 3702 assertions, re-derived
 python analysis/check_data_integrity.py   # structure of all 65 run directories
 python -m unittest discover tests         # 232 regressions for defects shipped here
 python tests/mutate.py                    # break each fix, require its test to fail
@@ -508,7 +523,8 @@ python analysis/plot_v4_runs.py --check   # charts still match the data
 CI runs all of it on every push, with actions pinned to commit SHAs, chart
 dependencies hash-pinned, shellcheck at `--severity=style` and pyflakes. That
 is `.github/workflows/audit.yml`, which is registered and green on this head.
-The evidence workflow beside it is not: see above.
+`.github/workflows/evidence.yml` beside it has also run and passed on this head;
+what it does and does not prove is described where it is introduced.
 
 `verify_claims.py` parses its own AST and fails if any assertion compares two
 literals. Six of them did, and were rewritten.
@@ -520,10 +536,14 @@ literals. Six of them did, and were rewritten.
   work done, which is byte-identical. Run T4 narrows it from an invocation
   effect to an arm-run-level state that steps within one invocation; it does not
   explain it.
-- **The randomised-order run.** V2 and V3 balance position and fix the
-  predecessor, so neither can test whether `spec-dflash-n2` is sensitive to what
-  ran before it. That is the experiment that would settle its +5.9-vs-+8.7 pp
-  disagreement, and it has not been run.
+- **A randomised-order run at a power that could resolve the predecessor.**
+  V2 and V3 balance position and fix the predecessor, so neither can test
+  whether `spec-dflash-n2` is sensitive to what ran before it. Run W is that
+  experiment and it is complete — 500 of 500 arm-runs — and it returns no
+  detectable predecessor-mode association, with the widest matched interval
+  spanning [−2.97, +0.86] %. That is a bound, not an answer: an effect of the
+  size that would matter sits inside it. What is still missing is the power to
+  exclude one, which is more sessions rather than a different design.
 - **The request-mean columns.** `predicted_per_second` is llama.cpp's own field
   and it divides `n − 1` tokens by the time for `n`, in 18 300 of 18 344
   committed request rows, exactly. Every **request-mean** column in this
@@ -535,8 +555,8 @@ literals. Six of them did, and were rewritten.
   than done (**B8**), and the relationship is asserted so it cannot change
   silently.
 - The ~3 GB of llama-server logs are not committed. That is the size `bench/collect_evidence.sh` states in three places and the audit README beside it; this line said 7 GB.
-  `v4_audit_2026_08_25/EVIDENCE_MANIFEST.sha256` holds the SHA-256 of all 1320
-  of them and of the 21 telemetry traces; both compressed tranches are published
+  `v4_audit_2026_08_25/EVIDENCE_MANIFEST.sha256` holds the SHA-256 of all 1820
+  of them and of the 22 telemetry traces; all three compressed tranches are published
   as release assets, and `analysis/rederive_from_logs.py` re-runs the
   extractors against them.
 - `draft-eagle3` needs three extract layers this model does not expose;

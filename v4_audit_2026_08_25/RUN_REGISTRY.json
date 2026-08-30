@@ -1,0 +1,31 @@
+{
+  "_comment": [
+    "One place that says what has been run and what evidence exists, because the",
+    "PR body said both. It presented run W as complete at 500 of 500 and, four",
+    "screens down, said the randomised-order experiment had not been run; it said",
+    "the evidence workflow had passed and, later, that it was not green; and its",
+    "evidence section described two tranches, 1320 logs and 21 traces while the",
+    "manifest held 1820 and 22 and the release carried six assets.",
+    "",
+    "Prose in several documents cannot be kept in step by hand. These numbers are",
+    "checked against the data directories and EVIDENCE_MANIFEST.sha256 by",
+    "analysis/verify_claims.py, and the documents are checked against them."
+  ],
+  "dataset_version": "v4.2",
+  "runs": {
+    "V2": {"status": "complete", "sessions": 16, "arm_runs": 400,
+           "design": "between-invocation crossover"},
+    "V3": {"status": "complete", "sessions": 2, "arm_runs": 200,
+           "design": "within-invocation latin square, position-balanced only"},
+    "T4": {"status": "complete", "sessions": 1, "arm_runs": 18,
+           "design": "checkpoint split-timer probe"},
+    "W":  {"status": "complete", "sessions": 5, "arm_runs": 500,
+           "design": "within-invocation 10x10 Williams square, randomised row order"}
+  },
+  "raw_evidence": {
+    "tranches": 3,
+    "server_logs": 1820,
+    "telemetry_traces": 22,
+    "release_assets": 6
+  }
+}
