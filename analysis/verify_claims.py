@@ -3798,6 +3798,37 @@ for _f in _armruns:
             _nn += 1
         else:
             _neither += 1
+# What that numerator is WORTH, measured rather than described. The bias is
+# 0.33 % at a fixed 300-token cap, which is why the pooled headline is
+# unaffected; on the thinking-off freerun arms the lengths vary and it is 0.90
+# to 1.57 %. Within a run it is nearly the same for every arm, so the ratios the
+# study reports move far less than the absolute rates do -- and that is a
+# measurement here, not an assumption.
+_B8 = {}
+for _d in sorted((pathlib.Path(__file__).resolve().parents[1] / "v4_audit_2026_08_25"
+                  / "data").glob("*thinkoff*")):
+    if not _d.is_dir():
+        continue
+    _per = defaultdict(lambda: {"u": [], "c": []})
+    for _f in _d.glob("*__rep*.json"):
+        _b = json.loads(_f.read_text(encoding="utf-8"))
+        _arm = _b.get("arm") or _f.name.split("__rep")[0]
+        for _r in _b.get("rows") or []:
+            _t = _r.get("timings") or {}
+            if not _t.get("predicted_ms") or _t.get("predicted_n", 0) < 2:
+                continue
+            _per[_arm]["u"].append(_t["predicted_per_second"])
+            _per[_arm]["c"].append(1000.0 * _t["predicted_n"] / _t["predicted_ms"])
+    if _per:
+        _B8[_d.name] = {_a: 100.0 * (st.mean(_v["c"]) / st.mean(_v["u"]) - 1.0)
+                        for _a, _v in _per.items()}
+_b8all = [x for v in _B8.values() for x in v.values()]
+chk("B8: the thinking-off runs measured", sorted(_B8), sorted(_B8))
+chk("B8: the numerator bias on thinking-off freerun arms",
+    (round(min(_b8all), 2), round(max(_b8all), 2)), (0.90, 1.57))
+chk("B8: and within a run it is nearly the same for every arm, so ratios barely move",
+    max(round(max(v.values()) - min(v.values()), 2) for v in _B8.values()) <= 0.12, True)
+
 chk("B8 rows where the server reports 1000*(n-1)/ms", _nm1, 18300)
 chk("B8 rows where it reports 1000*n/ms", _nn, 44)
 chk("B8 rows matching neither", _neither, 0)
@@ -8981,9 +9012,9 @@ chk("prose probe: records whose value repeats on its own line",
 
 _pcov = _tcov.prose_census()
 chk("coverage: decimal numbers in prose, outside every table",
-    _pcov["prose_numbers"], 1235)
+    _pcov["prose_numbers"], 1239)
 chk("coverage: those that are not a literal in this file",
-    _pcov["not_a_literal"], 625)
+    _pcov["not_a_literal"], 627)
 # tested on a supplied source, not by searching this file for a phrase: the
 # first version of this check searched for a label's own words, and the search
 # string was itself a literal in the argument position, so it always found it.

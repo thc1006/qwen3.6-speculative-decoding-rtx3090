@@ -33,6 +33,10 @@ on:
       - analysis/extract_checkpoint_timers.py
       - analysis/extract_spec_accounting.py
       - analysis/compare_acceptance_counters.py
+      # the member preflight the unpack step runs before extracting, and
+      # the registry that says what the re-derivation is supposed to cover
+      - bench/preflight_tar.py
+      - v4_audit_2026_08_25/EVIDENCE_REGISTRY.json
       # the last step of this job runs the claim checker, so a change to it can
       # break this workflow without touching an extractor - which is how the
       # shallow-clone failure reached a green audit and a red evidence run
@@ -161,6 +165,20 @@ jobs:
           set -euo pipefail
           sudo apt-get -qq update && sudo apt-get -qq install -y zstd
           mkdir -p bench
+          # PREFLIGHT, before a byte is written. `sha256sum -c` afterwards proves
+          # every file the manifest NAMES is intact and says nothing about what
+          # the archive carries and the manifest does not: an absolute path, a
+          # `..`, a symlink out of the tree, a duplicated member that overwrites
+          # its first copy, or simply an extra file. The pinned digests make that
+          # unlikely for these archives; the verifier was still not closed-world.
+          grep -v '^#' v4_audit_2026_08_25/EVIDENCE_MANIFEST.sha256 | grep -v '^$' > /tmp/manifest
+          python3 bench/preflight_tar.py /tmp/manifest \
+              <(unzstd -c evidence/raw_logs.tar.zst) \
+              <(unzstd -c evidence/raw_logs_20260827.tar.zst) \
+              <(unzstd -c evidence/raw_logs_20260828.tar.zst) \
+              <(unzstd -c evidence/telemetry.tar.zst) \
+              <(unzstd -c evidence/telemetry_20260827.tar.zst) \
+              <(unzstd -c evidence/telemetry_20260828.tar.zst)
           # Three tranches, and no `if [ -f ]` around any of them: the step
           # above fails when one of the six archives is absent, so the guards
           # that used to be here could never be false, and they read as though
@@ -174,7 +192,6 @@ jobs:
           # third tranche: run W's 500 logs and its telemetry trace
           tar --use-compress-program=unzstd -xf evidence/raw_logs_20260828.tar.zst -C bench
           tar --use-compress-program=unzstd -xf evidence/telemetry_20260828.tar.zst -C bench
-          grep -v '^#' v4_audit_2026_08_25/EVIDENCE_MANIFEST.sha256 | grep -v '^$' > /tmp/manifest
           cd bench && sha256sum -c /tmp/manifest
           # `sha256sum -c` proves every file the manifest names is intact. It
           # says nothing about a file the archive carries and the manifest does

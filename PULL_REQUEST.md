@@ -513,7 +513,7 @@ W added 500 more the next day. What keeps this a draft is below, under
 
 ```
 python analysis/rederive_from_logs.py bench   # raw logs -> four audit files
-python analysis/verify_claims.py          # 3705 assertions, re-derived
+python analysis/verify_claims.py          # 3708 assertions, re-derived
 python analysis/check_data_integrity.py   # structure of all 65 run directories
 python -m unittest discover tests         # 245 regressions for defects shipped here
 python tests/mutate.py                    # break each fix, require its test to fail
@@ -559,6 +559,17 @@ literals. Six of them did, and were rewritten.
   published request-means to move them by a third of a percent is listed rather
   than done (**B8**), and the relationship is asserted so it cannot change
   silently.
+
+  Measured rather than left as a caveat: the gap is 0.33 % at a fixed
+  300-token cap, which is why the pooled headline does not move, and
+  **0.90 % to 1.57 %** on the thinking-off freerun arms where the lengths
+  vary. Within one run it is nearly the same for every arm — the widest
+  spread across arms in a run is **0.11 pp** — so arm-vs-baseline ratios
+  move far less than the absolute rates do. The runner records
+  `request_tok_s` = `1000 × predicted_n / predicted_ms` beside the
+  upstream field from now on, so a future analysis does not have to
+  choose between an upstream quirk and a silent re-baselining, and the
+  three bounds above are assertions rather than prose.
 - The ~3 GB of llama-server logs are not committed. That is the size `bench/collect_evidence.sh` states in three places and the audit README beside it; this line said 7 GB.
   `v4_audit_2026_08_25/EVIDENCE_MANIFEST.sha256` holds the SHA-256 of all 1820
   of them and of the 22 telemetry traces; all three compressed tranches are published

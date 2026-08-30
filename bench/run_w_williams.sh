@@ -89,6 +89,13 @@ echo "telemetry $TELE_SH $TELE_SCHEMA $TELE_INTERVAL W"
 bash "$TELE_SH" "$TELE_SCHEMA" "$TELE_INTERVAL" "W" &
 TELE_PID=$!
 trap 'kill "$TELE_PID" 2>/dev/null || true' EXIT
+# It was started and never looked at again. A sampler that dies in the first
+# second leaves a two-line trace and the run still reports success, so the one
+# record of what the card was doing is missing exactly when it is wanted.
+sleep 2
+kill -0 "$TELE_PID" 2>/dev/null || { echo "FAIL: telemetry died at startup" >&2; exit 1; }
+RUN_T0=$(date +%s)
+BENCH_ROOT_TELECHECK="$(dirname "$0")/check_telemetry_cover.py"
 
 DONE=""
 FAILED=""
@@ -99,13 +106,19 @@ for session in $(seq 1 "$SESSIONS"); do
     export BENCH_SCHEDULE_SEED=$(( (10#${STAMP//_/} % 100000) + session ))
     export BENCH_OUT="$out"
     echo "=== session $session/$SESSIONS  seed $BENCH_SCHEDULE_SEED  $(date -Is) ==="
-    if ! python3 "$RUNNER"; then
-        echo "!!! session $session exited non-zero" >&2
-    fi
-    if [ -f "$out/RUN_COMPLETE.json" ]; then
+    # The runner's exit status IS a verdict, not a warning. This printed one and
+    # then decided purely on whether RUN_COMPLETE.json existed -- so a leftover
+    # attestation from an earlier run, or a runner that failed after writing it,
+    # counted as a completed session.
+    runner_rc=0
+    python3 "$RUNNER" || runner_rc=$?
+    if [ "$runner_rc" -ne 0 ]; then
+        echo "!!! session $session exited $runner_rc" >&2
+        FAILED="$FAILED s$session(rc=$runner_rc)"
+    elif [ -f "$out/RUN_COMPLETE.json" ]; then
         DONE="$DONE s$session"
     else
-        FAILED="$FAILED s$session"
+        FAILED="$FAILED s$session(no RUN_COMPLETE)"
         echo "!!! session $session did not complete" >&2
     fi
 done
@@ -122,6 +135,22 @@ complete=$(find "$BENCH" -maxdepth 1 -type d -name "matrix_W_s*_$STAMP" \
              -exec test -f '{}/RUN_COMPLETE.json' ';' -printf . | wc -c)
 echo "sessions:$sessions  validated:$complete  expected:$SESSIONS"
 rc=0
+
+# Stop the sampler deliberately and read its exit status, then require the trace
+# to cover the run rather than merely to exist.
+RUN_T1=$(date +%s)
+kill "$TELE_PID" 2>/dev/null || true
+tele_rc=0
+wait "$TELE_PID" 2>/dev/null || tele_rc=$?
+# 143 is SIGTERM, which is how it is meant to end
+[ "$tele_rc" -eq 0 ] || [ "$tele_rc" -eq 143 ] || {
+    echo "FAIL: telemetry exited $tele_rc" >&2; rc=1; }
+TELE_CSV=$(find "$BENCH" -maxdepth 1 -name "gpu_telemetry_W_$STAMP.csv" | head -1)
+if [ -z "$TELE_CSV" ]; then
+    echo "FAIL: no telemetry trace for this run" >&2; rc=1
+else
+    python3 "$BENCH_ROOT_TELECHECK" "$TELE_CSV" "$RUN_T0" "$RUN_T1" "$TELE_INTERVAL" || rc=1
+fi
 [ -z "$FAILED" ] || { echo "FAIL: sessions failed:$FAILED" >&2; rc=1; }
 [ "$sessions" -eq "$SESSIONS" ] || { echo "FAIL: $sessions sessions" >&2; rc=1; }
 [ "$complete" -eq "$SESSIONS" ] || { echo "FAIL: $complete validated" >&2; rc=1; }

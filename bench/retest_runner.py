@@ -1017,7 +1017,18 @@ def chat(system: str, user, *, hardcap: bool) -> dict:
         "timings": t,
         "predicted_ms": t.get("predicted_ms", 0),
         "predicted_n": t.get("predicted_n", 0),
+        # llama.cpp's own field divides n-1 tokens by the time for n. It is
+        # kept under its own name because every published figure is a mean of
+        # it, and the canonical rate is recorded beside it so future analysis
+        # does not have to choose between an upstream quirk and a silent
+        # re-baselining. On this data the gap is 0.33 % at a 300-token cap and
+        # 0.90 to 1.57 % on the thinking-off freerun arms, and it is nearly the
+        # same for every arm within a run, so arm-vs-baseline ratios barely
+        # move while absolute rates do.
+        "upstream_reported_predicted_per_second": t.get("predicted_per_second", 0),
         "predicted_per_second": t.get("predicted_per_second", 0),
+        "request_tok_s": (1000.0 * t["predicted_n"] / t["predicted_ms"]
+                          if t.get("predicted_ms") and t.get("predicted_n") else 0),
         "draft_n": t.get("draft_n", 0),
         "draft_n_accepted": t.get("draft_n_accepted", 0),
         # full text, both channels - the audit found Exp 2 unauditable

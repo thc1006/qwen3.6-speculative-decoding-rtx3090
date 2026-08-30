@@ -654,8 +654,32 @@ def cell_probe(tables_: list[dict], shard: tuple[int, int] = (0, 1)) -> list[dic
                         lines[j] = raw
                         p.write_text("\n".join(lines) + "\n", encoding="utf-8")
                     new_fails = sorted(fails - base_fails)
-                    # an abort is a detection, and it shows as a short run
-                    caught = bool(new_fails) or ran < base_n or rc != base_rc
+                    # An abort is a detection and it shows as a short run --
+                    # but a short run is also what a transient failure looks
+                    # like, and eight worktrees sharing one `.git` produced
+                    # three of those on 2026-08-29. A NAMED new failure is
+                    # attributable to the perturbation; a bare assertion-count
+                    # drop or exit-code change is not, so it is confirmed by
+                    # repeating the same mutation once before being believed.
+                    if new_fails:
+                        caught, caught_by = True, "assertion"
+                    elif ran < base_n or rc != base_rc:
+                        lines[j] = raw[:a] + now + raw[b:]
+                        p.write_text("\n".join(lines) + "\n", encoding="utf-8")
+                        try:
+                            f2, ran2, rc2 = _run(wt)
+                        finally:
+                            lines[j] = raw
+                            p.write_text("\n".join(lines) + "\n", encoding="utf-8")
+                        again = sorted(f2 - base_fails) or ran2 < base_n or rc2 != base_rc
+                        caught = bool(again)
+                        caught_by = "abort, repeated" if caught else "abort, not repeatable"
+                        if not caught:
+                            print(f"  FLAKE {t['doc']}:{j + 1} col{col} {was} -> {now}: "
+                                  f"the first reading aborted and the repeat did not",
+                                  file=sys.stderr, flush=True)
+                    else:
+                        caught, caught_by = False, "nothing"
                     rec = {"doc": t["doc"], "table_line": t["line"],
                            "row": j + 1, "col": col,
                            # the exact character span, so a cell holding two
@@ -666,6 +690,7 @@ def cell_probe(tables_: list[dict], shard: tuple[int, int] = (0, 1)) -> list[dic
                            "start": a, "end": b,
                            "perturbation": f"{was} -> {now}",
                            "probe": "caught" if caught else "SURVIVED",
+                           "caught_by": caught_by,
                            "noticed_by": new_fails[:1]
                            or ([f"aborted after {ran} of {base_n}"]
                                if ran < base_n else [f"exit {rc}"])}
