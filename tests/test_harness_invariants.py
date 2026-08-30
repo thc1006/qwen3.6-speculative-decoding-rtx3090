@@ -2179,6 +2179,34 @@ class EveryPerturbationAnchorMustResolve(unittest.TestCase):
         self.assertIn("must be exactly one", src,
                       "edit_doc accepts an anchor that matches more than once")
 
+    def test_every_code_mutation_anchor_is_unique_too(self):
+        """The uniqueness rule was written for the document perturbations and
+        never applied to the code mutations beside them, which use
+        `replace(..., 1)` and so silently mutate whichever match comes first.
+        One had already gone ambiguous: two teardown tests share three verbatim
+        lines, so the sleep-patch anchor matched both."""
+        sys.path.insert(0, str(self.ROOT / "tests"))
+        import mutate
+        self.assertGreater(len(mutate.MUTATIONS), 40)
+        for name, rel, correct, _defect, _test in mutate.MUTATIONS:
+            n = (self.ROOT / rel).read_text(encoding="utf-8").count(correct)
+            self.assertEqual(n, 1,
+                             f"{rel}: the anchor for {name!r} matches {n} times")
+
+    def test_every_code_mutation_names_a_test_that_exists(self):
+        """A mutation pointed at a class that has been renamed reports the
+        mutation as caught, because the runner exits non-zero either way."""
+        sys.path.insert(0, str(self.ROOT / "tests"))
+        import mutate
+        src = (self.ROOT / "tests" / "test_harness_invariants.py").read_text(
+            encoding="utf-8")
+        for name, _rel, _c, _d, test in mutate.MUTATIONS:
+            leaf = test.rsplit(".", 1)[1]
+            mod = test.rsplit(".", 2)[0] if test.count(".") > 1 else test
+            if mod.endswith("test_harness_invariants"):
+                self.assertIn(f"class {leaf}(", src,
+                              f"{name!r} names a class that does not exist")
+
 
 class TheGitlessAssertionGapMustBeTheDeclaredOne(unittest.TestCase):
     """`verify_claims.py` skips eight checks where there is no git history.
@@ -2479,6 +2507,70 @@ class TheTelemetryGapA16NamesMustBeReal(unittest.TestCase):
         hg = (self.ROOT / "bench" / "host_guard.py").read_text(encoding="utf-8")
         self.assertIn("def sample(", hg)
         self.assertIn("--sample", hg)
+
+    def test_the_sampler_attributes_to_a_named_root_and_says_which(self):
+        """Descent needs a root, and picking it by searching every cmdline for
+        "llama-server" put the naming problem back one level: a stranger's
+        server became a root and its whole tree counted as ours, so the
+        interference this sampler exists to see went invisible. Run for real,
+        not asserted from the source: the column has to appear in the file."""
+        hg_py = str(self.ROOT / "bench" / "host_guard.py")
+        with tempfile.TemporaryDirectory() as d:
+            out = Path(d) / "load.csv"
+            root = subprocess.Popen(["sleep", "30"])
+            try:
+                subprocess.run([sys.executable, hg_py, "--sample", str(out),
+                                "1", "--root-pid", str(root.pid)], timeout=20)
+            except subprocess.TimeoutExpired:
+                pass
+            finally:
+                root.kill(); root.wait()
+            rows = out.read_text(encoding="utf-8").splitlines()
+            self.assertIn("attribution", rows[0],
+                          "the row does not say how it attributed")
+            self.assertGreater(len(rows), 1, "no samples written")
+            self.assertEqual(rows[1].split(",")[7], "root-pid",
+                             "a named root was not used")
+
+    def test_the_sampler_refuses_a_root_that_is_not_running(self):
+        hg_py = str(self.ROOT / "bench" / "host_guard.py")
+        with tempfile.TemporaryDirectory() as d:
+            r = subprocess.run(
+                [sys.executable, hg_py, "--sample", str(Path(d) / "x.csv"),
+                 "1", "--root-pid", "999999"],
+                capture_output=True, text=True, timeout=30)
+            self.assertNotEqual(r.returncode, 0,
+                                "it sampled against a pid that does not exist")
+            self.assertIn("not running", r.stderr + r.stdout)
+
+    def test_root_selection_no_longer_greps_every_cmdline(self):
+        """The fallback picks roots through `_benchmark_name`, which matches by
+        position, so an editor or a grep naming the binary is not a root.
+
+        Scoped to `sample()`'s own source. The first version of this test
+        searched the whole file, and `_benchmark_name(argv)` also appears in
+        `measuring_processes`, so reverting the sampler left the needle in
+        place and the mutation survived. That is the defect this repository has
+        recorded under "a grep for a phrase is satisfied by another
+        occurrence", committed inside the test written to catch it.
+        """
+        import ast as _ast
+        src = (self.ROOT / "bench" / "host_guard.py").read_text(encoding="utf-8")
+        body = _ast.get_source_segment(src, next(
+            n for n in _ast.walk(_ast.parse(src))
+            if isinstance(n, _ast.FunctionDef) and n.name == "sample")) or ""
+        self.assertTrue(body, "sample() not found")
+        self.assertNotIn("in cmd for n in", body,
+                         "the sampler still chooses roots by substring")
+        self.assertIn("_benchmark_name(argv)", body,
+                      "the fallback does not use the positional matcher")
+        self.assertIn("_starttime(root_pid) == root_start", body,
+                      "a reused pid can inherit the benchmark's attribution")
+        sys.path.insert(0, str(self.ROOT / "bench"))
+        import host_guard as hgm
+        self.assertIsNotNone(hgm._starttime(os.getpid()))
+        self.assertIsNone(hgm._starttime(999999),
+                          "a pid that never existed reports a start time")
 
 
 class TheRerunScriptsMustBeSelfContainedAndFailClosed(unittest.TestCase):
@@ -3267,11 +3359,14 @@ class TheSuiteMustRunOnAStockInterpreter(unittest.TestCase):
     def test_no_test_module_imports_anything_third_party(self):
         import ast as _ast
         stdlib = set(sys.stdlib_module_names)
+        # every name here is a module of this repository, imported by a test
+        # that reads it. `mutate` is one: two invariants check the mutation
+        # table's own anchors, which needs the table.
         allowed = stdlib | {"host_guard", "publish_pr_body", "carryover",
                             "length_mode", "paired_blocks", "rr_under_test",
                             "rederive_from_logs", "past_threshold_fit",
                             "verify_claims", "extract_checkpoint_timers",
-                            "table_coverage"}
+                            "table_coverage", "mutate", "data_mutate"}
         offenders = []
         for f in sorted((self.ROOT / "tests").glob("*.py")):
             tree = _ast.parse(f.read_text(encoding="utf-8"))
@@ -4099,6 +4194,308 @@ class TheConcurrentPathMustSendTheSameTreatmentAsTheSequentialOne(unittest.TestC
                       f"chat() must take hardcap keyword-only with no default; got {sig[0]!r}")
         self.assertNotIn("hardcap: bool = ", sig[0],
                          "a default on hardcap is what let the concurrent path omit it")
+
+
+class AVersionThatIsNotATagMustSayItIsNotOne(unittest.TestCase):
+    """`CITATION.cff` names `v4.2` and asks a citer to state which release they
+    are citing. v4.0, v4.1 and v4.2 are in that file and in the changelog and
+    in no tag: `git tag` stops at v3.0, and so do the GitHub releases. The
+    version string is not wrong, because it names the release this branch
+    prepares, but presenting it beside a release date with nothing saying it is
+    uncut is a claim about something a reader cannot check out.
+
+    The tag is deliberately cut at merge, so this does not demand a tag. It
+    demands that the file says so while there is none.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    def _tags(self):
+        r = subprocess.run(["git", "tag", "-l"], cwd=self.ROOT,
+                           capture_output=True, text=True)
+        if r.returncode:
+            self.skipTest("no git history here")
+        return set(r.stdout.split())
+
+    def _cff_version(self) -> str:
+        for line in (self.ROOT / "CITATION.cff").read_text(
+                encoding="utf-8").splitlines():
+            if line.startswith("version:"):
+                return line.split(":", 1)[1].strip()
+        self.fail("CITATION.cff has no version")
+
+    def test_the_named_version_is_a_tag_or_the_file_says_it_is_not(self):
+        v, tags = self._cff_version(), self._tags()
+        if v in tags:
+            return                      # released, and the tag is the evidence
+        cff = (self.ROOT / "CITATION.cff").read_text(encoding="utf-8")
+        self.assertIn("Neither is a tag yet", cff,
+                      f"CITATION.cff names {v}, no such tag exists, and the "
+                      f"file does not say so")
+        self.assertIn("RELEASE_PROCEDURE.md", cff,
+                      "it does not point at the procedure that cuts the tag")
+
+    def test_the_changelog_versions_without_tags_are_the_known_ones(self):
+        """A v4 section without a tag is expected while this branch is open. A
+        new one appearing that way would be a fresh instance of the same thing.
+
+        The list is three, not two: writing this test found `v2.2`, a dated
+        section from 2026-04-26 with no tag and no GitHub release, four months
+        older than this branch and never noticed. That is what the check is
+        for, and it caught its own author's assumption first.
+        """
+        import re
+        cl = (self.ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+        versions = set(re.findall(r"^## \[(v[\d.]+)\]", cl, re.M))
+        untagged = sorted(versions - self._tags())
+        self.assertEqual(untagged, ["v2.2", "v4.0", "v4.1"],
+                         "a released-looking section has no tag, and it is not "
+                         "one of the three this repository accounts for")
+
+    def test_the_release_procedure_names_the_version_the_cff_does(self):
+        v = self._cff_version()
+        proc = (self.ROOT / "v4_audit_2026_08_25" /
+                "RELEASE_PROCEDURE.md").read_text(encoding="utf-8")
+        self.assertIn(v.lstrip("v"), proc,
+                      f"the procedure does not mention {v}, so the tag it "
+                      f"describes cutting is not the one the citation names")
+
+
+class ThePullRequestBodyMustKeepTheStyleItDeclares(unittest.TestCase):
+    """Its own header says "No em-dashes or en-dashes in here", because a local
+    pre-tool hook refuses to post GitHub text containing them. Nothing checked
+    it, and the publisher reaches `api.github.com` through `urllib` rather than
+    `gh`, so the hook never sees the body either: eleven em dashes had accrued
+    in a file that says it has none. A rule with nothing enforcing it is the
+    defect this whole branch is about, in the document that describes it."""
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    def _body(self) -> str:
+        sys.path.insert(0, str(self.ROOT / "tools"))
+        import publish_pr_body
+        return publish_pr_body.strip_header(
+            (self.ROOT / "PULL_REQUEST.md").read_text(encoding="utf-8"))
+
+    def test_the_published_body_has_no_em_or_en_dash(self):
+        body = self._body()
+        for ch, name in (("\u2014", "em dash"), ("\u2013", "en dash")):
+            bad = [i for i, line in enumerate(body.split("\n"), 1) if ch in line]
+            self.assertEqual(
+                bad, [],
+                f"{name} on line(s) {bad[:6]} of the published body; the header "
+                f"says there are none and the hook refuses to post them")
+
+    def test_the_minus_sign_is_still_allowed(self):
+        """U+2212 is a negative number, not punctuation, and the tables use it.
+        A check that swept it up would push the body back to ASCII hyphens and
+        change every published figure's typography."""
+        self.assertIn("\u2212", self._body(),
+                      "the body no longer uses a typographic minus, so this "
+                      "test is no longer measuring the distinction it is for")
+
+    def test_the_header_still_states_the_rule(self):
+        head = (self.ROOT / "PULL_REQUEST.md").read_text(encoding="utf-8")
+        self.assertIn("No em-dashes or en-dashes in here", head,
+                      "the rule was deleted rather than kept")
+
+    def test_the_header_counts_its_own_tables_correctly(self):
+        """"the seven tables below" is a number in a document like any other,
+        and nothing read it. A table added to the body without a reader would
+        leave the sentence true about the old body and false about this one."""
+        sys.path.insert(0, str(self.ROOT / "analysis"))
+        import table_coverage as tc
+        c = tc.census()
+        n = sum(1 for t in c["covered"] + c["uncovered"]
+                if t["doc"] == "PULL_REQUEST.md")
+        words = {5: "five", 6: "six", 7: "seven", 8: "eight", 9: "nine",
+                 10: "ten", 11: "eleven", 12: "twelve"}
+        head = (self.ROOT / "PULL_REQUEST.md").read_text(encoding="utf-8")
+        self.assertIn(f"the {words[n]} tables below", head,
+                      f"the body carries {n} measurement tables and its header "
+                      f"says otherwise")
+        self.assertEqual(
+            n, sum(1 for t in c["covered"] if t["doc"] == "PULL_REQUEST.md"),
+            "a table in the body is not parsed cell by cell")
+
+
+class TheDataMirrorMustHoldEveryPathTheCheckerOpens(unittest.TestCase):
+    """`tests/data_mutate.py` copies a list of paths and runs the checker in
+    the copy. When the checker grew an assertion that reads
+    `.github/workflows/evidence.yml`, the list did not grow with it: the
+    mirror's checker died at 3034 of 3708 with a FileNotFoundError, the suite
+    refused to run at all, and the CI job stayed red for three commits while
+    84 data perturbations measured nothing.
+
+    Every path literal in the checker that exists in this tree must be
+    reachable in the mirror. Compared as top-level names, which is what `COPY`
+    is a list of.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    def test_every_path_the_checker_reads_is_mirrored(self):
+        import ast as _ast
+        sys.path.insert(0, str(self.ROOT / "tests"))
+        import data_mutate
+        copied = set(data_mutate.COPY)
+        src = (self.ROOT / "analysis" / "verify_claims.py").read_text(
+            encoding="utf-8")
+        missing = set()
+        for n in _ast.walk(_ast.parse(src)):
+            if not (isinstance(n, _ast.Constant) and isinstance(n.value, str)):
+                continue
+            rel = n.value.strip()
+            if (not rel or rel.startswith("/") or "\n" in rel or len(rel) > 200
+                    or " " in rel.rsplit("/", 1)[-1]):
+                continue
+            try:
+                if not (self.ROOT / rel).exists():
+                    continue
+            except OSError:
+                continue
+            top = rel.split("/")[0]
+            # `.git` is deliberately absent: the mirror is the gitless
+            # environment, and the eleven provenance assertions it skips are
+            # the declared difference `_GITLESS_SKIPPED` accounts for.
+            if top in {".git"}:
+                continue
+            if top not in copied:
+                missing.add(f"{rel} (top-level {top!r} is not in COPY)")
+        self.assertEqual(
+            sorted(missing), [],
+            "the checker opens these and the mirror does not have them, so "
+            "tests/data_mutate.py cannot run")
+
+
+class TheExtractorsMustBeBounded(unittest.TestCase):
+    """A malformed log used to hang an extractor, and the only limit was the
+    45-minute Actions budget for the whole job, so one bad input took the whole
+    evidence workflow with it and the log said nothing about which extractor or
+    which file. The timeout shipped with no test, so removing it again would
+    have cost nothing. This runs a deliberately hanging extractor."""
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    def test_a_hanging_extractor_is_killed_and_named(self):
+        """Driven from OUTSIDE the process under test, with a bound of its own.
+
+        Calling `run()` in-process detects a missing timeout by hanging with
+        it, and the mutation runner can only observe that as its own
+        600-second timeout. A child with a parent-side deadline fails in
+        seconds either way, and says which of the two happened.
+        """
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "analysis").mkdir()
+            (Path(d) / "analysis" / "hangs.py").write_text(
+                "import time\nwhile True: time.sleep(1)\n", encoding="utf-8")
+            prog = (
+                "import sys\n"
+                f"sys.path.insert(0, {str(self.ROOT / 'analysis')!r})\n"
+                "import rederive_from_logs as r\n"
+                f"r.ROOT = {d!r}\n"
+                "r.EXTRACTOR_TIMEOUT_S = 2\n"
+                "r.run('hangs.py', 'some_input.log')\n")
+            try:
+                p = subprocess.run([sys.executable, "-c", prog],
+                                   capture_output=True, text=True, timeout=45)
+            except subprocess.TimeoutExpired:
+                self.fail("the extractor call is unbounded: a child that never "
+                          "returns took the parent with it")
+        self.assertNotEqual(p.returncode, 0, "a hanging extractor succeeded")
+        msg = p.stdout + p.stderr
+        self.assertIn("hangs.py", msg, "the message does not name the extractor")
+        self.assertIn("did not finish", msg)
+        self.assertIn("some_input.log", msg,
+                      "the message does not name the last input")
+
+    def test_the_timeout_is_actually_passed_to_subprocess(self):
+        src = (self.ROOT / "analysis" / "rederive_from_logs.py").read_text(
+            encoding="utf-8")
+        body = src[src.index("def run("):src.index("def run(") + 900]
+        self.assertIn("timeout=EXTRACTOR_TIMEOUT_S", body,
+                      "the extractor call is unbounded again")
+        self.assertIn("subprocess.TimeoutExpired", body,
+                      "a timeout would surface as a traceback, not a verdict")
+
+
+class TheCensusMustNotDropASmallTable(unittest.TestCase):
+    """"Few numbers" and "no derivable numbers" are different claims.
+
+    The threshold used to be `value_cells < 3`, so a table carrying one or two
+    measurements left the coverage population entirely, and a two-cell
+    before/after table can be the most important result in a document. Nothing
+    on this tree can catch a revert, because no published table has one or two
+    value cells -- reverting it and running the whole claim checker produces no
+    new failure at all, which is the definition of an unguarded fix. These are
+    the fixtures that make it catchable.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    def _census_of(self, body: str) -> dict:
+        """Run the real census, unmodified, over one synthetic document.
+
+        `ROOT` is left alone: `parsed_headers()` reads the real checker out of
+        it, and a census with no reader registry would not be the real census.
+        `DOCS` takes an ABSOLUTE path instead, because `ROOT / rel` on an
+        absolute `rel` is that path -- so the parser, the number extractor and
+        the classification are all the shipped ones.
+        """
+        sys.path.insert(0, str(self.ROOT / "analysis"))
+        import table_coverage as tc
+        with tempfile.TemporaryDirectory() as d:
+            doc = Path(d) / "SYNTHETIC.md"
+            doc.write_text(body, encoding="utf-8")
+            old_docs, old_ex = tc.DOCS, tc.EXCLUDED_TABLES
+            tc.DOCS, tc.EXCLUDED_TABLES = [str(doc)], {}
+            try:
+                return tc.census()
+            finally:
+                tc.DOCS, tc.EXCLUDED_TABLES = old_docs, old_ex
+
+    def test_a_one_cell_and_a_two_cell_table_are_in_the_population(self):
+        for n, body in (
+            (1, "| before |\n|---|\n| 12.5 |\n"),
+            (2, "| before | after |\n|---|---|\n| 12.5 | 13.9 |\n"),
+        ):
+            c = self._census_of(body)
+            self.assertEqual(
+                c["carrying_values"], 1,
+                f"a table with {n} measurement cell(s) left the population")
+            self.assertEqual(c["no_values"], 0)
+            self.assertEqual(c["not_parsed"], 1,
+                             "it is in the population but not counted unparsed")
+
+    def test_a_table_of_paths_only_is_not_in_the_population(self):
+        c = self._census_of("| Path | Contents |\n|---|---|\n"
+                            "| `analysis/` | the checker |\n")
+        self.assertEqual(c["carrying_values"], 0, "a path table carries values")
+        self.assertEqual(c["no_values"], 1)
+
+    def test_a_commit_hash_beside_two_numbers_still_counts_as_two(self):
+        """A hash is not a value, and its presence must not hide the two that
+        are: the not-a-value filter was once applied to whole cells, so one
+        commit hash hid every measurement beside it."""
+        c = self._census_of("| build | before | after |\n|---|---|---|\n"
+                            "| `3737e4137` | 12.5 | 13.9 |\n")
+        self.assertEqual(c["carrying_values"], 1)
+        self.assertEqual(
+            (c["covered"] + c["uncovered"])[0]["value_cells"], 2,
+            "the hash was counted as a value, or it hid the two beside it")
+
+    def test_the_population_is_decided_before_coverage(self):
+        """A zero-value table a parser happens to read is still a zero-value
+        table. Asking "is it parsed?" first put `README.md`'s path map into
+        `carrying_values`, so the published count of tables carrying
+        measurements was one too high."""
+        src = (self.ROOT / "analysis" / "table_coverage.py").read_text(
+            encoding="utf-8")
+        body = src[src.index("def census()"):]
+        self.assertLess(
+            body.index('t["value_cells"] == 0'),
+            body.index("hn.startswith(norm(p))"),
+            "coverage is tested before the table is known to carry values")
 
 
 class ShardAttestationsMustCoverThePopulationExactlyOnce(unittest.TestCase):

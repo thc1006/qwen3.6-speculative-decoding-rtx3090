@@ -41,10 +41,88 @@ ROOT = Path(__file__).resolve().parents[1]
 
 # (description, file, correct fragment, defect to restore, test that must fail)
 MUTATIONS = [
+    # --- the fifth review's findings ----------------------------------------
+    # Each fix below shipped with a test and none of them shipped with a
+    # mutation, so nothing had shown the tests were not decorative. That is the
+    # contract this file opens with, applied to the batch that answered the
+    # review rather than only to the batches before it.
+    ("the concurrent path stops passing the arm's hard-cap treatment",
+     "bench/retest_runner.py",
+     "pool.submit(chat, sysmsg, usermsg, hardcap=hardcap)",
+     "pool.submit(chat, sysmsg, usermsg, hardcap=False)",
+     "tests.test_harness_invariants."
+     "TheConcurrentPathMustSendTheSameTreatmentAsTheSequentialOne"),
+    ("`chat` takes a hard-cap default again, so a missed argument is silent",
+     "bench/retest_runner.py",
+     "def chat(system: str, user, *, hardcap: bool) -> dict:",
+     "def chat(system: str, user, *, hardcap: bool = False) -> dict:",
+     "tests.test_harness_invariants."
+     "TheConcurrentPathMustSendTheSameTreatmentAsTheSequentialOne"),
+    ("the census files a one- or two-value table as carrying none",
+     "analysis/table_coverage.py",
+     'elif t["value_cells"] == 0:',
+     'elif t["value_cells"] < 3:',
+     "tests.test_harness_invariants.TheCensusMustNotDropASmallTable"),
+    ("the census asks whether a table is parsed before whether it has values",
+     "analysis/table_coverage.py",
+     '            if (rel, t["header"]) in EXCLUDED_TABLES:\n',
+     '            if any(rel == doc and hn.startswith(norm(p)) for doc, p in known):\n'
+     '                covered.append(t)\n'
+     '            elif (rel, t["header"]) in EXCLUDED_TABLES:\n',
+     "tests.test_harness_invariants.TheCensusMustNotDropASmallTable"),
+    ("an extractor becomes unbounded again",
+     "analysis/rederive_from_logs.py",
+     "                           timeout=EXTRACTOR_TIMEOUT_S)",
+     "                           )",
+     "tests.test_harness_invariants.TheExtractorsMustBeBounded"),
+    ("the host sampler picks its roots by searching every command line",
+     "bench/host_guard.py",
+     "                roots = {pid for pid, (_, _c, argv) in proc.items()\n"
+     "                         if _benchmark_name(argv)}",
+     '                _own = ("retest_runner.py", "llama-server", "llama-bench")\n'
+     "                roots = {pid for pid, (_, cmd, _a) in proc.items()\n"
+     "                         if any(n in cmd for n in _own)}",
+     "tests.test_harness_invariants.TheTelemetryGapA16NamesMustBeReal"),
+    ("a probe stopped with SIGTERM leaks its worktree again",
+     "analysis/table_coverage.py",
+     "    _unwind_on_signal(stack)\n",
+     "",
+     "tests.test_harness_invariants.AKilledProbeMustNotLeaveItsWorktree"),
+    ("the cell probe stops re-checking its control after the work",
+     "analysis/table_coverage.py",
+     "        end_fails, end_n, end_rc = _run(wt)\n"
+     "        if end_fails or end_rc != 0 or end_n != base_n:\n"
+     "            raise SystemExit(\n"
+     '                f"shard {shard[0]}/{shard[1]}: the control no longer passes "',
+     "        end_fails, end_n, end_rc = (set(), base_n, 0)\n"
+     "        if False:\n"
+     "            raise SystemExit(\n"
+     '                f"shard {shard[0]}/{shard[1]}: the control no longer passes "',
+     "tests.test_harness_invariants.AProbeMustCheckItsControlAtBothEnds"),
+    ("the publisher calls a character count a byte count again",
+     "tools/publish_pr_body.py",
+     '        print(f"live body matches {SOURCE.name}: {len(want)} characters, "\n'
+     "              f\"{len(want.encode('utf-8'))} bytes\")",
+     '        print(f"live body matches {SOURCE.name}: {len(want)} bytes")',
+     "tests.test_harness_invariants.ThePublishToolMustParseAndVerify"),
+    # The anchor was three lines two tests share verbatim, so it matched twice
+    # and `replace(..., 1)` mutated whichever came first. `edit_doc` already
+    # refuses an ambiguous anchor for the same reason; this file did not check,
+    # and now does. Extended with the one line that differs between them.
     ("a test replaces time.sleep for the whole process and never restores it",
      "tests/test_harness_invariants.py",
-     'self.patch(rr.time, "sleep", lambda *_a: None)',
-     "rr.time.sleep = lambda *_a: None",
+     "        rr.gpu_mem_used_mib = lambda: 16650\n"
+     "        proc = types.SimpleNamespace(pid=1, returncode=0, poll=lambda: 0,\n"
+     "                                     wait=lambda timeout=None: 0)\n"
+     '        self.patch(rr.os, "killpg", lambda *a, **k: None)\n'
+     '        self.patch(rr.os, "getpgid", lambda p: 1)\n'
+     '        self.patch(rr.time, "sleep", lambda *_a: None)',
+     "        rr.gpu_mem_used_mib = lambda: 16650\n"
+     "        proc = types.SimpleNamespace(pid=1, returncode=0, poll=lambda: 0,\n"
+     "                                     wait=lambda timeout=None: 0)\n"
+     '        self.patch(rr.os, "killpg", lambda *a, **k: None)\n'
+     '        self.patch(rr.os, "getpgid", lambda p: 1)\n'
+     "        rr.time.sleep = lambda *_a: None",
      "tests.test_harness_invariants.NoTestMayLeaveTheStandardLibraryPatched"),
     ("the stub server stops exiting when the process that started it dies",
      "tests/fake_llama_server.py",

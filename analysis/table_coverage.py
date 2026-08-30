@@ -372,9 +372,14 @@ def census() -> dict:
     for rel in DOCS:
         for t in tables(rel):
             hn = norm(t["header"])
-            if any(rel == doc and hn.startswith(norm(p)) for doc, p in known):
-                covered.append(t)
-            elif (rel, t["header"]) in EXCLUDED_TABLES:
+            # Order matters, and it was wrong. Asking "is it parsed?" first put
+            # `README.md`'s `| Path | Contents |` -- zero numeric cells, read by
+            # a parser that wants its paths -- into `carrying_values`, so the
+            # published "125 tables carry measurements" counted one that
+            # carries none. Whether a parser reads a table says nothing about
+            # whether the table has a measurement in it, so the population is
+            # decided first and coverage second.
+            if (rel, t["header"]) in EXCLUDED_TABLES:
                 seen_ex.add((rel, t["header"]))
                 excluded.append(dict(t, reason=EXCLUDED_TABLES[(rel, t["header"])]))
             elif t["value_cells"] == 0:
@@ -385,6 +390,8 @@ def census() -> dict:
                 # document. "Few numbers" and "no derivable numbers" are different
                 # claims, and only the second one licenses skipping the table.
                 no_values.append(t)
+            elif any(rel == doc and hn.startswith(norm(p)) for doc, p in known):
+                covered.append(t)
             else:
                 uncovered.append(t)
     numeric = len(covered) + len(uncovered)

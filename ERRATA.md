@@ -1897,10 +1897,10 @@ the nine published documents, and `--probe` writes a wrong number into one cell
 of each in turn, runs the claim checker, and asks whether an assertion that was
 passing now fails. Measured on the tree this entry is committed in:
 
-Of **136** tables, **6** carry no number at all (paths, links, prose), **5** are
+Of **136** tables, **7** carry no number at all (paths, links, prose), **5** are
 excluded by name and reason in `EXCLUDED_TABLES` -- an upstream PR tracker, a
 commit-hash comparison, two checklists and a table of arm definitions whose only
-digit is a tokenizer id -- and **125** carry measurements. All **125** of those
+digit is a tokenizer id -- and **124** carry measurements. All **124** of those
 are parsed cell by cell by `analysis/verify_claims.py`; **0** are not.
 
 The split used to be three ways, with anything under three numeric cells filed
@@ -1934,7 +1934,7 @@ perturbed **2 252** numbers across the **119** tables parsed at the time and
 **33** of them changed nothing. The runs it took are the point: the population
 grows as the coverage does, so a clean run is only clean for the tree it ran
 on, and parsing the last six tables grew it again. On 2026-08-30, on the tree
-this entry is committed in, all **2 373** numbers across all **125** tables
+this entry is committed in, all **2 373** numbers across all **124** tables
 were perturbed one at a time and **every one was caught**, in eight shards
 whose control passed before the work and again after it. The eight shard outputs were not
 attested as a set until 2026-08-30: nothing showed that all eight ran, that
@@ -1983,8 +1983,8 @@ now are numbers the readers written for the tables happen to reach, which is
 the only reason the figure moved. The prose half of this repository is, to a
 first approximation, unchecked.
 
-**What this pass changed.** Eighty-one tables count as parsed that did not:
-eight are the census correction above and seventy-three are new readers. They
+**What this pass changed.** Eighty tables count as parsed that did not:
+eight are the census correction above and seventy-two are new readers. They
 include every cell of the thirteen-arm run C table, run O's head-to-head, the
 v1 representative table with both of its range rows, run J and run K, run L's
 two halves, the V2 and V3 columns of the W table in both documents that carry
@@ -1994,7 +1994,7 @@ the BOS-override table in the two documents that publish it, run I's
 acceptance under batching, the README's length-matched comparison, and last
 the six named above.
 
-**Thirty-three published statements were wrong and are corrected.** They are
+**Thirty-nine published statements were wrong and are corrected.** They are
 listed rather than summarised, because a count of corrections is itself a
 number and this file exists because of unchecked numbers.
 
@@ -2079,6 +2079,48 @@ number and this file exists because of unchecked numbers.
     split into eight census corrections and sixty-seven new readers, while
     the changelog said eighty-one and seventy-three for the same pass. The
     census gives eighty-one, and a check now derives the split from it.
+34. The census counted `README.md`'s `| Path | Contents |` among the tables
+    carrying measurements. It has no numeric cell at all; it was counted
+    because the census asked whether a parser reads a table before asking
+    whether the table has a value in it, and a parser does read that one, for
+    its paths. The population is decided first now, and the published figure
+    is **124** carrying measurements, not 125. The number of numbers in it is
+    unchanged at 2 373, which is the check that the table really carried none.
+35. Nine fixes made for the fifth review shipped with tests and without
+    mutations, so nothing had shown those tests were not decorative. This file
+    opens by saying a mutation that survives means its guard is decorative;
+    the rule had been applied to every earlier batch and not to that one.
+36. `tests/mutate.py` had no uniqueness rule for its own anchors, only
+    `data_mutate.py` did, and one had already gone ambiguous: two teardown
+    tests share three verbatim lines, so the sleep-patch anchor matched both
+    and `replace(..., 1)` mutated whichever came first.
+37. `CITATION.cff` names `v4.2` beside a release date, and asks a citer to
+    state which release they are citing, while v4.0, v4.1 and v4.2 exist in no
+    tag: `git tag` stops at v3.0. The tag is cut at merge deliberately, so the
+    file says that now rather than implying a release exists. Writing the check
+    found a fourth: **`v2.2`**, a dated changelog section from 2026-04-26 with
+    no tag and no GitHub release, four months older than this branch and never
+    noticed. Both are annotated where they appear.
+38. The test written to stop the host sampler choosing its roots by substring
+    checked for `if _benchmark_name(argv)` **anywhere in the file**, and that
+    string also appears in `measuring_processes`. Reverting the sampler left
+    the needle in place, so the mutation for it survived: the point of adding
+    the mutation was to find out whether the test was decorative, and it was.
+    Scoped to `sample()`'s own source now. This file has recorded a grep
+    satisfied by another occurrence seven times before; the eighth is inside
+    the test written to catch it.
+39. The data perturbation suite could not run, and said so into a CI job
+    nobody read. It copies a list of paths into a mirror and runs the checker
+    there; the checker grew an assertion that opens
+    `.github/workflows/evidence.yml` and the list did not grow with it, so the
+    mirror's checker died with `FileNotFoundError` at **3 034 of 3 708**
+    assertions and the suite refused rather than measure against a broken
+    control. That refusal is correct and it is not visible: `unit and mutation`
+    was red on three consecutive commits, including one pushed from here after
+    checking only that `static` had gone green. Eighty-four data perturbations
+    measured nothing for that whole stretch. A test now requires every path
+    literal the checker opens to be reachable in the mirror, `.git` excepted
+    because the mirror is the gitless environment on purpose.
 
 A test now refuses any table row with no header above it, and another refuses
 any path the checker opens that a fresh clone would not have.

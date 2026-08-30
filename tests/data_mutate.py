@@ -47,7 +47,14 @@ COPY = ("analysis", "bench", "tests", "v4_audit_2026_08_25", "results",
         # fails on the unperturbed copy
         "pr_comment.md",
         "run_matrix.sh", "run_p0_matrix.sh", "run_verify_matrix.sh",
-        "collect_env.sh")
+        "collect_env.sh",
+        # the checker reads `.github/workflows/evidence.yml` -- the path filter
+        # is held to the import closure of `verify_claims.py`, and the archive
+        # digests are grepped out of the job. Without it the mirror's checker
+        # dies with FileNotFoundError at 3034 of 3708 assertions and this suite
+        # refuses to run at all, which is what it did from the commit that
+        # added that assertion until 2026-08-30.
+        ".github")
 
 
 def mirror(into: Path) -> Path:

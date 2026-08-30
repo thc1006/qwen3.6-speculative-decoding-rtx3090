@@ -230,14 +230,15 @@ and leave the predecessor fixed, so neither could say why.
 **Run W is the design that can.** Five sessions of a 10 x 10 Williams square,
 row order shuffled from a per-session seed, 500 of 500 arm-runs. It uses V3's
 treatment definitions, prompts, models and server build, with a Williams
-schedule and a later harness revision — **not V3 verbatim**, which this section
+schedule and a later harness revision, **not V3 verbatim**, which this section
 used to claim. The two manifests record different runner hashes, and the diff
 between exactly those blobs is archived at
 [`v4_audit_2026_08_25/harness/V3_to_W_runner.diff`](v4_audit_2026_08_25/harness/V3_to_W_runner.diff)
 with every hunk classified: 189 lines, all of it the schedule builder,
 provenance assertions and provenance records, none of it reaching the request
-body, server argv, timing collection, teardown or aggregation. Every arm visits every position exactly once
-**and** is preceded by every other arm exactly once within a repeat, verified
+body, server argv, timing collection, teardown or aggregation. Every arm
+visits every position exactly once **and** is preceded by every other arm
+exactly once within a repeat, verified
 from the arm-runs' own `t_start` order rather than from the manifest, in all
 five sessions. The analysis plan was committed while the run was at 360 of 500
 and the checker asserts that commit is an ancestor of the one carrying the
@@ -258,7 +259,7 @@ between-invocation crossover does not.
 **No capped-predecessor association was detected, at this power.** With every
 arm preceded by every other exactly once within a row, the contrast between
 running after a capped neighbour and after a free-running one is **−1.05 %**
-[−2.97, +0.86] for `spec-dflash-n2` — the largest of any arm, pointing the way
+[−2.97, +0.86] for `spec-dflash-n2`, the largest of any arm, pointing the way
 A17 guessed, negative in four sessions of five, and **no arm's interval excludes
 zero**. Reported as no detectable effect at this power, with the interval, not
 as absence.
@@ -266,14 +267,14 @@ as absence.
 That figure is the **identity-matched** estimator. The grouped one this
 paragraph used to quote, −1.20 % [−2.61, +0.22], is not a mode contrast: for an
 uncapped arm `X` the capped group contains `X-cap`, its own twin, while the free
-group cannot contain `X`, because nothing precedes itself — so it carries the
+group cannot contain `X`, because nothing precedes itself, so it carries the
 predecessor's mode, one unmatched predecessor identity, and a five-against-four
 weighting together. Pairing each capped predecessor with its own free
 counterpart and dropping the twin moves the estimate to −1.05 % and **widens**
 the interval, which is where the removed precision was coming from.
 
 This does not rule the predecessor out, and an earlier version of this paragraph
-said it did — under the heading "It is not the predecessor", and with the claim
+said it did, under the heading "It is not the predecessor", and with the claim
 that an effect big enough to explain a 2.4 pp gap "would be far outside" the
 interval. **−2.4 is inside [−2.61, +0.22]**, and inside the wider matched
 interval as well. The two numbers are also different estimands: −1.05 % is a
@@ -336,8 +337,8 @@ adversarial pass over this branch's own commits found:
   the row is 30.4 % and the column consequently added to 100.1 (**B9**). Those
   five are parsed cell by cell now, but "all of them" was a statement about the
   ones that had been found, not about the class, and each had been found by
-  accident. The class is counted instead. Of 136 published tables 125 carry
-  measurements and 125 are parsed cell by cell. When 80 were still unparsed,
+  accident. The class is counted instead. Of 136 published tables 124 carry
+  measurements and all 124 are parsed cell by cell. When 80 were still unparsed,
   perturbing one cell of each left 67 that accept a wrong number with nothing
   noticing; all 80 of those are parsed now, and no published table that
   carries a measurement is left unparsed.
@@ -347,9 +348,9 @@ adversarial pass over this branch's own commits found:
   assertion notices: whole interval columns read as `.split("[")[0]` and
   stopped, a configuration column nobody read, the `100 %` on a total row. Each
   is compared against a value derived from the data, and the measurement says
-  so: on 2026-08-30 the probe perturbed all 2 373 numbers across all 125
+  so: on 2026-08-30 the probe perturbed all 2 373 numbers across all 124
   parsed tables and caught every one, in eight shards whose control passed
-  before the work and again after it — and, since 2026-08-30, whose union is
+  before the work and again after it, and, since 2026-08-30, whose union is
   checked to be the population exactly once by
   `analysis/table_coverage.py --aggregate`, over attestations carrying the head,
   the checker hash, the population digest, both controls and every location as a
@@ -358,7 +359,7 @@ adversarial pass over this branch's own commits found:
   grows as the coverage does and a clean run is only clean for the tree it ran
   on: the run before this one covered 2 252 numbers across 119 tables.
   `analysis/table_coverage.py --probe --covered --every-cell` is the
-  measurement and **A19** the accounting; 84 data and document perturbations
+  measurement and **A19** the accounting; 69 code and 84 data and document perturbations
   remain permanent tests.
 
   Parsing the rest of them, rather than reading them, found seventeen more
@@ -409,7 +410,7 @@ adversarial pass over this branch's own commits found:
   the checker inside a clean checkout of HEAD, and there it died 373 assertions
   early, so the probe's own baseline was broken and it was measuring nothing.
   The logs are committed now and a test refuses any path the checker opens that
-  a fresh clone would not have. A clean checkout runs all 3660 assertions and
+  a fresh clone would not have. A clean checkout runs all 3708 assertions and
   exits 0, which it did not before.
 
   Figures in those tables that are not re-derivable here say so rather than
@@ -465,7 +466,7 @@ changed. Nothing in it was rejected.
   **The published tag does not publish this tree.** `raw-evidence-2026-08-27`
   points at `de6f33bf`, this branch's base: the whole `v4_audit_2026_08_25`
   directory, the verifier and run W's data all postdate it, while its assets do
-  not — a third tranche was added to a mutable release whose source revision
+  not: a third tranche was added to a mutable release whose source revision
   stayed behind. The tag is deliberately not retargeted, because silently moving
   a published tag destroys the one property a tag has; its notes now say where
   it points and why. A final versioned release is cut at the exact
@@ -488,7 +489,7 @@ changed. Nothing in it was rejected.
   `python analysis/rederive_from_logs.py <bench-root>` checks every file
   against `EVIDENCE_MANIFEST.sha256` and re-runs the extractors. **It
   regenerates four log-derived audit files, not the primary per-request
-  benchmark JSON** — the server logs carry no per-request timing rows, so those
+  benchmark JSON**: the server logs carry no per-request timing rows, so those
   files are integrity-checked against the manifest and nothing more.
   `v4_audit_2026_08_25/EVIDENCE_REGISTRY.json` says which is which, and holds
   each artifact's expected run set independently of the artifact, so a run
@@ -522,17 +523,52 @@ published. **9.5 hours on the bench card, 618 arm-runs, none failed**, and run
 W added 500 more the next day. What keeps this a draft is below, under
 *Not closed*.
 
+## What the fifth review found, and what answering it found
+
+Every P0 and P1 in the fifth review is closed, and none of them needed the
+card. The concurrent path passes the arm's hard cap and `chat()` has no default
+to fall back to; run W's mode estimate is published with the row-boundary
+arm-runs excluded and the design is described as carryover-balanced *within
+rows*; the predecessor contrast is matched pair by pair with the arm's own twin
+dropped; the V3-to-W runner diff is archived and classified hunk by hunk; the
+plan is a prospective analysis plan finalised at 360 of 500 and says so; one
+registry says what was run and another says what the re-derivation covers; the
+published tag is reported as not binding this tree rather than silently
+retargeted; and the shard outputs carry a head, a checker hash, a population
+hash and a control verdict at both ends, checked as a disjoint union.
+
+Answering it turned up five more, all in the answering rather than in the
+review:
+
+- **Nine fixes shipped with a test and without a mutation.** This repository's
+  rule is that a mutation which survives means its guard is decorative, and it
+  had not been applied to the batch that answered the review. Two of the nine
+  turned out to matter. Reverting the census threshold to `< 3` and running the
+  whole claim checker produced **no new failure at all**, because no published
+  table has one or two value cells: the fix was right and completely unguarded.
+  Synthetic fixtures carry it now.
+- **The mutation anchors had no uniqueness rule of their own**, and one had
+  already gone ambiguous.
+- **The host sampler picked its roots by searching every command line**, so a
+  `llama-server` belonging to somebody else counted as ours and the
+  interference it exists to see went invisible.
+- **The census counted a table with no numbers in it** among those carrying
+  measurements, because it asked whether a parser reads a table before asking
+  whether the table has a value. 124, not 125.
+- **An extractor's timeout had no test**, so removing it again would have cost
+  nothing.
+
 ## Checking it
 
 ```
 python analysis/rederive_from_logs.py bench   # raw logs -> four audit files
 python analysis/verify_claims.py          # 3708 assertions, re-derived
 python analysis/check_data_integrity.py   # structure of all 65 run directories
-python -m unittest discover tests         # 248 regressions for defects shipped here
+python -m unittest discover tests         # 267 regressions for defects shipped here
 python tests/mutate.py                    # break each fix, require its test to fail
 python tests/data_mutate.py               # perturb a measurement or a published
                                           #   figure, require the checker to fail
-                                          #   60 code and 84 data perturbations,
+                                          #   69 code and 84 data perturbations,
                                           #   with a clean-mirror re-check after
                                           #   the last restore
 python analysis/plot_v4_runs.py --check   # charts still match the data
@@ -557,7 +593,7 @@ literals. Six of them did, and were rewritten.
 - **A randomised-order run at a power that could resolve the predecessor.**
   V2 and V3 balance position and fix the predecessor, so neither can test
   whether `spec-dflash-n2` is sensitive to what ran before it. Run W is that
-  experiment and it is complete — 500 of 500 arm-runs — and it returns no
+  experiment and it is complete (500 of 500 arm-runs) and it returns no
   detectable predecessor-mode association, with the widest matched interval
   spanning [−2.97, +0.86] %. That is a bound, not an answer: an effect of the
   size that would matter sits inside it. What is still missing is the power to
@@ -576,14 +612,16 @@ literals. Six of them did, and were rewritten.
   Measured rather than left as a caveat: the gap is 0.33 % at a fixed
   300-token cap, which is why the pooled headline does not move, and
   **0.90 % to 1.57 %** on the thinking-off freerun arms where the lengths
-  vary. Within one run it is nearly the same for every arm — the widest
-  spread across arms in a run is **0.11 pp** — so arm-vs-baseline ratios
+  vary. Within one run it is nearly the same for every arm, and the widest
+  spread across arms in a run is **0.11 pp**, so arm-vs-baseline ratios
   move far less than the absolute rates do. The runner records
   `request_tok_s` = `1000 × predicted_n / predicted_ms` beside the
   upstream field from now on, so a future analysis does not have to
   choose between an upstream quirk and a silent re-baselining, and the
   three bounds above are assertions rather than prose.
-- The ~3 GB of llama-server logs are not committed. That is the size `bench/collect_evidence.sh` states in three places and the audit README beside it; this line said 7 GB.
+- The ~3 GB of llama-server logs are not committed. That is the size
+  `bench/collect_evidence.sh` states in three places and the audit README
+  beside it; this line said 7 GB.
   `v4_audit_2026_08_25/EVIDENCE_MANIFEST.sha256` holds the SHA-256 of all 1820
   of them and of the 22 telemetry traces; all three compressed tranches are published
   as release assets, and `analysis/rederive_from_logs.py` re-runs the

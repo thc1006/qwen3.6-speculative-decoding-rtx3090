@@ -267,8 +267,12 @@ def _cpu_totals() -> tuple[int, int]:
     return total - idle, total
 
 
-def _proc_jiffies() -> dict[int, tuple[int, str]]:
-    """{pid: (utime+stime, cmdline)} for every readable process."""
+def _proc_jiffies() -> dict[int, tuple[int, str, list[str]]]:
+    """{pid: (utime+stime, cmdline, argv)} for every readable process.
+
+    argv as well as the joined string, because picking the benchmark's root by
+    searching that string is what `_benchmark_name` exists to avoid.
+    """
     out = {}
     for entry in Path("/proc").iterdir():
         if not entry.name.isdigit():
@@ -277,15 +281,39 @@ def _proc_jiffies() -> dict[int, tuple[int, str]]:
             stat = (entry / "stat").read_text(encoding="utf-8")
             tail = stat[stat.rfind(")") + 1:].split()
             jiffies = int(tail[11]) + int(tail[12])          # utime, stime
-            cmd = (entry / "cmdline").read_bytes().replace(b"\0", b" ").decode(
-                "utf-8", "replace").strip() or f"[{entry.name}]"
+            raw = (entry / "cmdline").read_bytes()
+            argv = [a for a in raw.decode("utf-8", "replace").split("\0") if a]
+            cmd = " ".join(argv) or f"[{entry.name}]"
         except (OSError, IndexError, ValueError):
             continue
-        out[int(entry.name)] = (jiffies, cmd)
+        out[int(entry.name)] = (jiffies, cmd, argv)
     return out
 
 
-def sample(out_path: str, interval: float = 5.0) -> None:
+def _starttime(pid: int) -> int | None:
+    """Field 22 of `/proc/<pid>/stat`, in clock ticks since boot.
+
+    A pid is reused; the pair (pid, starttime) is not, within a boot. Checking
+    it each tick is what stops the sampler from following a stranger that
+    happened to inherit the number the benchmark had.
+
+    Index 19 into the tail after the last `)`: the tail begins at field 3, the
+    state letter, so field 22 is 22 - 3 = 19. Verified against
+    `/proc/stat`'s `btime` plus this value over `SC_CLK_TCK`.
+    """
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
+    except OSError:
+        return None
+    tail = stat[stat.rfind(")") + 1:].split()
+    try:
+        return int(tail[19])
+    except (IndexError, ValueError):
+        return None
+
+
+def sample(out_path: str, interval: float = 5.0,
+           root_pid: int | None = None) -> None:
     """Record host load beside the GPU trace, until killed.
 
     `bench/gpu_telemetry.sh` queries `nvidia-smi` and nothing else, so no run
@@ -297,17 +325,34 @@ def sample(out_path: str, interval: float = 5.0) -> None:
     sibling repository matched on names and got it wrong in both directions at
     once: it counted a run's own `nvidia-smi` sampler as competition, and never
     counted an analysis script that genuinely was competing.
+
+    But descent needs a root, and picking that root by searching every cmdline
+    for `"llama-server"` put the naming problem back one level: a `llama-server`
+    belonging to somebody else became a root, its whole tree counted as OURS,
+    and the interference this file exists to see went invisible in the one
+    reading that mattered. `root_pid` is the answer -- the driver knows which
+    process it started -- and it is checked against its start time each tick,
+    because a pid is reused and the pair is not.
+
+    Without `root_pid` the fallback picks roots by POSITION, through the same
+    `_benchmark_name` the refusal path uses, so an editor or a grep naming the
+    binary is not a root. It still cannot tell a stranger's real server from
+    ours; the `attribution` column says which of the two modes produced the row,
+    so nothing has to guess afterwards.
     """
     import time
-    own_names = ("retest_runner.py", "llama-server", "llama-bench")
     out = Path(out_path).expanduser()
     new = not out.exists()
     with open(out, "a", encoding="utf-8", buffering=1) as fh:
         if new:
             fh.write("wall_iso,busy_pct,load1,ncpu,own_pct,other_pct,"
-                     "top_other_pct,top_other\n")
+                     "top_other_pct,attribution,top_other\n")
         prev_busy, prev_total = _cpu_totals()
         prev_proc = _proc_jiffies()
+        root_start = _starttime(root_pid) if root_pid is not None else None
+        if root_pid is not None and root_start is None:
+            raise SystemExit(f"host_guard --sample: pid {root_pid} is not "
+                             f"running, so there is no tree to attribute to")
         ncpu = os.cpu_count() or 1
         while True:
             time.sleep(interval)
@@ -319,15 +364,22 @@ def sample(out_path: str, interval: float = 5.0) -> None:
                 continue
             busy_pct = 100.0 * (busy - prev_busy) / d_total
 
-            # which pids belong to the benchmark, by descent
-            roots = {pid for pid, (_, cmd) in proc.items()
-                     if any(n in cmd for n in own_names)}
+            # which pids belong to the benchmark, by descent from a root
+            # the driver named, or from a positional match if it named none
+            if root_pid is not None:
+                alive = _starttime(root_pid) == root_start
+                roots = {root_pid} if alive else set()
+                mode = "root-pid" if alive else "root-gone"
+            else:
+                roots = {pid for pid, (_, _c, argv) in proc.items()
+                         if _benchmark_name(argv)}
+                mode = "by-name"
             own_tree = _descendants(roots) if roots else set()
 
             own = other = 0.0
             top_pct, top_cmd = 0.0, ""
-            for pid, (jif, cmd) in proc.items():
-                d = jif - prev_proc.get(pid, (jif, ""))[0]
+            for pid, (jif, cmd, _argv) in proc.items():
+                d = jif - prev_proc.get(pid, (jif, "", []))[0]
                 if d <= 0:
                     continue
                 pct = 100.0 * d * ncpu / d_total
@@ -338,7 +390,7 @@ def sample(out_path: str, interval: float = 5.0) -> None:
                     if pct > top_pct:
                         top_pct, top_cmd = pct, cmd[:60].replace(",", " ")
             fh.write(f"{_now()},{busy_pct:.1f},{_load1():.2f},{ncpu},"
-                     f"{own:.1f},{other:.1f},{top_pct:.1f},{top_cmd}\n")
+                     f"{own:.1f},{other:.1f},{top_pct:.1f},{mode},{top_cmd}\n")
             prev_busy, prev_total, prev_proc = busy, total, proc
 
 
@@ -384,8 +436,21 @@ def _load1() -> float:
 
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "--sample":
-        # bench/host_guard.py --sample <out.csv> [interval]
-        sample(sys.argv[2], float(sys.argv[3]) if len(sys.argv) > 3 else 5.0)
+        # bench/host_guard.py --sample <out.csv> [interval] [--root-pid N]
+        _argv = sys.argv[2:]
+        _root = None
+        if "--root-pid" in _argv:
+            _i = _argv.index("--root-pid")
+            try:
+                _root = int(_argv[_i + 1])
+            except (IndexError, ValueError):
+                raise SystemExit("--root-pid needs an integer pid")
+            del _argv[_i:_i + 2]
+        if not _argv:
+            raise SystemExit("bench/host_guard.py --sample <out.csv> "
+                             "[interval] [--root-pid N]")
+        sample(_argv[0], float(_argv[1]) if len(_argv) > 1 else 5.0,
+               root_pid=_root)
     else:
         lock = lock_held()
         running = measuring_processes()

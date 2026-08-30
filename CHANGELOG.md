@@ -12,7 +12,7 @@ publication point with its own data set.
 is now measured rather than assumed.** `analysis/table_coverage.py` counts the
 tables in the nine published documents; `--probe` writes a wrong number into
 one cell of each in turn and asks whether an assertion that was passing now
-fails. Of 136 tables, 125 carry measurements and all 125 are parsed cell by cell.
+fails. Of 136 tables, 124 carry measurements and all 124 are parsed cell by cell.
 When 80 were still unparsed, perturbing one cell of each left **67 that accept
 a wrong number and nothing notices**; all 80 of those are parsed now.
 Full accounting in [`ERRATA.md`](ERRATA.md) A19.
@@ -25,7 +25,7 @@ nobody read, the `100 %` on a total row. Guarding those grew the parsed set and
 the probe over the grown set found 33 more; the run after that perturbed all
 2 252 numbers in the 119 tables parsed at the time and none survived, and
 parsing the last six grew the population again. The run on 2026-08-30 perturbs
-all 2 373 numbers across all 125 tables and catches every one, in eight shards
+all 2 373 numbers across all 124 tables and catches every one, in eight shards
 whose control passed before the work and again after it. That is
 what the W three-design table had done, in both documents that carry it: only
 the W column was read, so V2's `+12.03` and V3's `+12.17`, two thirds of a
@@ -109,8 +109,8 @@ the other box's GPU and CUDA cannot be recovered from anything committed
 here. Each is marked; the alternative was to check a literal against itself
 and call it verified.
 
-Eighty-one tables are parsed that were not, eight of them census corrections
-and seventy-three new readers: every cell of run C's thirteen arms, run O's
+Eighty tables are parsed that were not, eight of them census corrections
+and seventy-two new readers: every cell of run C's thirteen arms, run O's
 head-to-head, the v1 representative table including both of its range rows,
 runs J, K, L and N, the V2 and V3 columns of the W table, both run registries,
 A4's log reconstruction, A14's M1-against-Q comparison, A16's six invocations,
@@ -138,6 +138,52 @@ always had for its mirror, and they check it again after the work: passing
 once does not bound half an hour of running beside seven other shards, and
 the second check also catches a perturbation that was written and never
 restored.
+
+**Nine fixes answered a review, and none of them had a mutation.** This file
+opens by saying that a mutation which survives means its guard is decorative,
+and the rule had been applied to every earlier batch and not to the one that
+answered the fifth review: the concurrent hard cap, the census threshold, the
+extractor timeout, the sampler's root selection, the probe's signal handling
+and its end-of-run control, and the publisher's counts all shipped with a test
+and without a mutation. Nine are added, so the suite runs 69. Two of them were
+found to be needed rather than assumed: reverting the census threshold to
+`< 3` and running the whole claim checker produced no new failure at all,
+because no published table has one or two value cells, so the fix was correct
+and completely unguarded. Synthetic fixtures now carry it: a one-cell table, a
+two-cell table, a path table, and a commit hash beside two real numbers.
+
+**The mutation anchors had no uniqueness rule of their own.** `data_mutate.py`
+has refused an ambiguous document anchor since the split table perturbed
+whichever of two identical rows came first; `mutate.py` uses
+`replace(..., 1)` on source and never checked, and one anchor had already gone
+ambiguous, because two teardown tests share three verbatim lines. Both files
+are held to the rule now, and a second check refuses a mutation that names a
+test class which no longer exists, since the runner exits non-zero either way
+and would report it caught.
+
+**The host sampler chose its roots by searching every command line.** Its own
+docstring says attribution is by descent and not by name, and the descent
+started from roots picked with `any(n in cmd for n in ("llama-server", ...))`.
+A `llama-server` belonging to somebody else became a root, its whole process
+tree counted as ours, and the interference this sampler exists to see went
+invisible in the one reading that mattered. It takes `--root-pid` from the
+driver now, checked against `/proc/<pid>/stat`'s start time each tick because a
+pid is reused and the pair is not; without one it falls back to the positional
+matcher rather than a substring, and every row records which of the two
+produced it.
+
+**The census counted a table with no numbers among those carrying
+measurements.** `README.md`'s `| Path | Contents |` has no numeric cell at all
+and was counted because the classification asked whether a parser reads a table
+before asking whether the table has a value in it, and a parser does read that
+one, for its paths. The population is decided first now: **124** tables carry
+measurements, not 125. The number of numbers in it does not move, still 2 373,
+which is the check that the table really carried none.
+
+**An extractor could hang with nothing to stop it.** The timeout that bounds it
+shipped without a test, so removing it again would have cost nothing; a test
+runs an extractor that never returns and requires the failure to name it and
+the last input it was given.
 
 **The publisher called a character count a byte count.** It reported "31015
 bytes" for a body GitHub's API returns as 31083, because the pull-request body
@@ -1108,7 +1154,13 @@ repo](https://github.com/thc1006/qwen3.6-vllm-2x3090) v3.0/v4.0 shows vLLM MTP
   paragraph and the "Why" paragraph have been corrected.
 - README banner updated; `v2_3090_followup` directory expanded.
 
-## [v2.2] — 2026-04-26
+## [v2.2] — 2026-04-26 · documented, never tagged
+
+> This section is dated like a release and there is no `v2.2` tag and no
+> GitHub release for it; `git tag` goes v2.1, v2.3. It was found on
+> 2026-08-30 by a check written for v4.0 and v4.1, which are untagged for
+> a different and deliberate reason (the tag is cut at merge). Cite v2.1
+> or v2.3 by tag, or this section by commit.
 
 ### Changed
 - README cross-engine paragraph: disclose 3090 vLLM published config

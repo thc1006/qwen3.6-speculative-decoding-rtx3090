@@ -8901,7 +8901,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import table_coverage as _tcov                                    # noqa: E402
 _cov = _tcov.census()
 chk("coverage: published tables", _cov["tables"], 136)
-chk("coverage: those carrying measurements", _cov["carrying_values"], 125)
+chk("coverage: those carrying measurements", _cov["carrying_values"], 124)
 # EXACT, not "may only rise". `parsed >= 119` and `not_parsed <= 67` were a
 # ratchet that permitted six unparsed measurement tables to stand indefinitely,
 # and the census that fed them filed any table with fewer than three numeric
@@ -8955,7 +8955,9 @@ _WORDS = {20: "Twenty", 21: "Twenty-one", 22: "Twenty-two",
           23: "Twenty-three", 24: "Twenty-four", 25: "Twenty-five",
           26: "Twenty-six", 27: "Twenty-seven", 28: "Twenty-eight",
           29: "Twenty-nine", 30: "Thirty", 31: "Thirty-one",
-          32: "Thirty-two", 33: "Thirty-three", 34: "Thirty-four"}
+          32: "Thirty-two", 33: "Thirty-three", 34: "Thirty-four",
+          35: "Thirty-five", 36: "Thirty-six", 37: "Thirty-seven",
+          38: "Thirty-eight", 39: "Thirty-nine", 40: "Forty"}
 chk("ERRATA A19: the corrections are numbered from one, without a gap",
     [int(_x) for _x in _A19_LIST], list(range(1, len(_A19_LIST) + 1)))
 chk("ERRATA A19: and the count it states is the length of that list",
@@ -8974,17 +8976,17 @@ chk("CHANGELOG: the census it publishes is the census",
 # written, eight more turned out to have been parsed all along, and the rest
 # are readers written since. The 119 in this paragraph went stale unnoticed
 # because nothing subtracted anything.
-chk("CHANGELOG: eighty-one more are parsed, eight of them census corrections",
-    (_cov["parsed"] - 44, _cov["parsed"] - 44 - 8), (81, 73))
+chk("CHANGELOG: eighty more are parsed, eight of them census corrections",
+    (_cov["parsed"] - 44, _cov["parsed"] - 44 - 8), (80, 72))
 chk("CHANGELOG: and that is the split it publishes",
-    "Eighty-one tables are parsed that were not, eight of them census "
-    "corrections and seventy-three new readers" in _CL_FLAT, True)
+    "Eighty tables are parsed that were not, eight of them census "
+    "corrections and seventy-two new readers" in _CL_FLAT, True)
 chk("ERRATA A19: the census it publishes is the census",
     (_cov["tables"], _cov["no_values"], _cov["excluded_tables"],
      _cov["carrying_values"], _cov["parsed"], _cov["not_parsed"]),
-    (136, 6, 5, 125, 125, 0))
-for _want, _what in ((136, "tables"), (125, "carrying measurements"),
-                     (125, "parsed"), (0, "not parsed"), (6, "no number at all"),
+    (136, 7, 5, 124, 124, 0))
+for _want, _what in ((136, "tables"), (124, "carrying measurements"),
+                     (124, "parsed"), (0, "not parsed"), (7, "no number at all"),
                      (5, "named exclusions")):
     chk(f"ERRATA A19 prints the {_what} count", _want in _A19N, True)
 chk("ERRATA A19: it names the three commands that reproduce the probe figures",
@@ -9044,7 +9046,7 @@ def _wilson_low(_k, _n, _z=1.959964):
 # tool's output. `cell_population` is what the probe itself would perturb.
 _A19_POP = _tcov.cell_population(_cov["covered"])
 chk("A19: the probe population it publishes is the one the tool would perturb",
-    (_A19_POP, len(_cov["covered"])), (2373, 125))
+    (_A19_POP, len(_cov["covered"])), (2373, 124))
 # not `_grouped`, which returns the digit groups a table cell splits into:
 # this is prose, and the question is whether the sentence contains the number.
 # `str.split()` treats the thin space as whitespace, so normalising both sides
@@ -9069,8 +9071,8 @@ chk("ERRATA A19: and the entry states that pair",
 # the split of what this pass parsed, which the entry and the changelog give
 # separately and which went stale in the entry at seventy-five
 chk("ERRATA A19: the newly parsed count is the census's difference too",
-    ("**What this pass changed.** Eighty-one tables count as parsed that did "
-     "not: eight are the census correction above and seventy-three are new "
+    ("**What this pass changed.** Eighty tables count as parsed that did "
+     "not: eight are the census correction above and seventy-two are new "
      "readers." in " ".join(_A19.split())), True)
 chk("ERRATA A19: and it says the measurement was wrong four times, once",
     (_A19.count("The measurement was wrong"),

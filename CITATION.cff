@@ -7,6 +7,14 @@ message: >-
   v1.0 through v3.0 contain claims retracted by the 2026-08-25 audit; see
   ERRATA.md.
 type: dataset
+# `version` names the release this branch prepares, and `date-released` is the
+# day its last run finished. Neither is a tag yet: v4.0, v4.1 and v4.2 exist in
+# this file and in the changelog and nowhere in `git tag`, where the newest is
+# v3.0. The tag is cut at merge, deliberately and not before, so that it names
+# the commit carrying the dataset and the verifier together; the procedure and
+# the check that enforces the binding are in
+# `v4_audit_2026_08_25/RELEASE_PROCEDURE.md`. Cite v3.0 or earlier by tag; cite
+# this work by commit until the tag exists.
 version: v4.2
 date-released: 2026-08-28
 authors:
