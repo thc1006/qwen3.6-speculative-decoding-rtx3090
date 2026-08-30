@@ -350,12 +350,14 @@ adversarial pass over this branch's own commits found:
   is compared against a value derived from the data, and the measurement says
   so: on 2026-08-30 the probe perturbed all 2 373 numbers across all 124
   parsed tables and caught every one, in eight shards whose control passed
-  before the work and again after it, and, since 2026-08-30, whose union is
-  checked to be the population exactly once by
-  `analysis/table_coverage.py --aggregate`, over attestations carrying the head,
-  the checker hash, the population digest, both controls and every location as a
-  character span. Before that nothing showed the eight had all run, or were
-  disjoint, or were the same tree. It took four runs, because the population
+  before the work and again after it. Their union is checked rather than
+  assumed: `analysis/table_coverage.py --aggregate` over the eight real
+  attestations reports **8 shards, one head, one checker, 2 373 locations
+  covered exactly once, 0 survived**, each attestation carrying the head, the
+  checker hash, the population digest, both controls and every location as a
+  character span. Before 2026-08-30 nothing showed the eight had all run, or
+  were disjoint, or were the same tree, and `--shard=8/8` selected nothing and
+  exited 0. It took four runs, because the population
   grows as the coverage does and a clean run is only clean for the tree it ran
   on: the run before this one covered 2 252 numbers across 119 tables.
   `analysis/table_coverage.py --probe --covered --every-cell` is the
