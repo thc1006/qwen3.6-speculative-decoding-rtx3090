@@ -200,18 +200,28 @@ requests. Any master comparison must pass `--spec-type` explicitly.
 - ~~**A carryover-balanced version of that design.**~~ **Done 2026-08-28.**
   Run W: five sessions of a 10 x 10 Williams square, row order shuffled from a
   per-session seed, 500 of 500 arm-runs, run V3 verbatim except for the
-  schedule. Every arm preceded by every other exactly once within a repeat,
-  verified from the data. The mode effect survives: `spec-dflash-n4`'s sign
-  flip holds at +12.03, +12.17 and +12.10 pp across three designs, and
-  `spec-dflash-n2` reads +8.29 pp [+7.97, +8.60], overlapping V3 and not V2
+  schedule, and run W2: the same square again for twelve sessions and 1200
+  arm-runs. Every arm preceded by every other exactly once within a repeat,
+  verified from the data in every session of both. The mode effect survives:
+  `spec-dflash-n4`'s sign flip holds at +12.03, +12.17, +12.10 and +12.13 pp,
+  and `spec-dflash-n2` reads +8.29 pp [+7.97, +8.60] in W and
+  +8.50 pp [+8.08, +8.91] in W2, both overlapping V3 and neither overlapping V2
   ([A17](ERRATA.md#a17-the-thinking-off-comparisons-are-not-comparisons-of-the-same-amount-of-work)).
-- ~~**Does the predecessor explain `spec-dflash-n2`?**~~ **Answered 2026-08-28,
-  and the answer is no.** W's balanced schedule gives the contrast between
-  running after a capped neighbour and after a free-running one: −1.20 %
-  [−2.61, +0.22] for that arm, the largest of any by six times and pointing the
-  way A17 guessed, with **no arm's interval excluding zero**. Reported as no
-  detectable effect at five sessions, not as absence. It removes the one
-  candidate this repository had been able to name for the V2/V3 gap.
+- ~~**Does the predecessor explain `spec-dflash-n2`?**~~ **Answered 2026-08-31
+  by run W2, and the answer is no.** W's balanced schedule gave the contrast
+  between running after a capped neighbour and after a free-running one:
+  −1.20 % [−2.61, +0.22] for that arm, the largest of any by six times and
+  pointing the way A17 guessed, with **no arm's interval excluding zero**. This
+  entry said that answered it on 2026-08-28. It did not: −2.4 is inside
+  [−2.61, +0.22], so W bounded the effect without excluding the size that
+  mattered, and the entry was one of three copies of a sentence the pull
+  request body had already retracted. W2's twelve sessions close it. The
+  pre-registered matched contrast is **−0.14 % [−0.68, +0.41]**, and on the
+  quantity the 2.4 pp is actually quoted in, A17's `shift_pp`, the predecessor
+  moves it by **+0.49 pp [−0.80, +1.77]** where W's five sessions gave
+  +1.52 pp [−0.98, +4.02]. W's interval contains 2.4; W2's does not. That
+  removes the one candidate this repository had been able to name for the
+  V2/V3 gap.
 - **What the gap actually is.** W and V3 agree and the crossover does not, so
   the difference is between measuring the two modes inside one invocation and
   across two. That is [A16](ERRATA.md#a16-two-runs-identical-in-every-recorded-respect-and-byte-identical-in-output-differ-by-34--on-one-arm),

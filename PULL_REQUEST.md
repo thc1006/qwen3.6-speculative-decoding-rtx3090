@@ -244,17 +244,21 @@ five sessions. The analysis plan was committed while the run was at 360 of 500
 and the checker asserts that commit is an ancestor of the one carrying the
 data.
 
-| arm | V2, between | V3, within | **W, within and carryover-balanced** |
-|---|---:|---:|---:|
-| `spec-dflash-n4` | +12.03 [+11.67, +12.38] | +12.17 | **+12.10** [+11.87, +12.34] |
-| `spec-mtp-n2` | +9.54 [+9.14, +9.93] | +9.53 | **+9.53** [+9.34, +9.73] |
-| `spec-dflash-n2` | **+5.92** [+4.86, +6.99] | **+8.65** | **+8.29** [+7.97, +8.60] |
-| `spec-draft-n8` | +6.31 [+6.29, +6.33] | +6.30 | **+6.35** [+6.32, +6.38] |
+| arm | V2, between | V3, within | **W, within and carryover-balanced** | **W2, the same design again** |
+|---|---:|---:|---:|---:|
+| `spec-dflash-n4` | +12.03 [+11.67, +12.38] | +12.17 | **+12.10** [+11.87, +12.34] | **+12.13** [+11.97, +12.28] |
+| `spec-mtp-n2` | +9.54 [+9.14, +9.93] | +9.53 | **+9.53** [+9.34, +9.73] | **+9.60** [+9.41, +9.79] |
+| `spec-dflash-n2` | **+5.92** [+4.86, +6.99] | **+8.65** | **+8.29** [+7.97, +8.60] | **+8.50** [+8.08, +8.91] |
+| `spec-draft-n8` | +6.31 [+6.29, +6.33] | +6.30 | **+6.35** [+6.32, +6.38] | **+6.34** [+6.32, +6.36] |
 
-`spec-dflash-n4`'s sign flip holds at +12.03, +12.17 and +12.10 across three
-schedules. For `spec-dflash-n2`, W's interval **overlaps V3's and does not
-overlap V2's at all**: the two within-invocation designs agree and the
-between-invocation crossover does not.
+`spec-dflash-n4`'s sign flip holds at +12.03, +12.17, +12.10 and +12.13 across
+three schedules and two separate invocations of the third. For
+`spec-dflash-n2`, W's interval **overlaps V3's and does not overlap V2's at
+all**: the two within-invocation designs agree and the between-invocation
+crossover does not. W2 is the same design run again, twelve sessions instead of
+five, started to answer a different question, and its **[+8.08, +8.91]** clears
+V2's [+4.86, +6.99] as W's did. Its four intervals all overlap W's, and nothing
+about W2 was chosen after these numbers were seen.
 
 **No capped-predecessor association was detected, at this power.** With every
 arm preceded by every other exactly once within a row, the contrast between
@@ -379,10 +383,12 @@ adversarial pass over this branch's own commits found:
   assertion notices: whole interval columns read as `.split("[")[0]` and
   stopped, a configuration column nobody read, the `100 %` on a total row. Each
   is compared against a value derived from the data, and the measurement says
-  so: on 2026-08-31 the probe perturbed all 2 415 numbers across all 127
-  parsed tables and caught every one, in eight shards whose control passed
-  before the work and again after it. Their union is checked rather than
-  assumed: `analysis/table_coverage.py --aggregate` over the eight real
+  so: on 2026-08-30 the probe perturbed all 2 373 numbers across the 127
+  parsed tables of commit `0334c60dac82` and caught every one, in eight shards
+  whose control passed before the work and again after it. This tree holds
+  **2 439** and no pass has yet covered that population; the difference is
+  run W2's tables. Their union is checked rather than assumed:
+  `analysis/table_coverage.py --aggregate` over the eight real
   attestations reports **8 shards, one head, one checker, 2 373 locations
   covered exactly once, 0 survived**, each attestation carrying the head, the
   checker hash, the population digest, both controls and every location as a
@@ -392,7 +398,7 @@ adversarial pass over this branch's own commits found:
   grows as the coverage does and a clean run is only clean for the tree it ran
   on: the run before this one covered 2 252 numbers across 119 tables.
   `analysis/table_coverage.py --probe --covered --every-cell` is the
-  measurement and **A19** the accounting; 78 code and 84 data and document perturbations
+  measurement and **A19** the accounting; 83 code and 84 data and document perturbations
   remain permanent tests.
 
   Parsing the rest of them, rather than reading them, found seventeen more
@@ -443,7 +449,7 @@ adversarial pass over this branch's own commits found:
   the checker inside a clean checkout of HEAD, and there it died 373 assertions
   early, so the probe's own baseline was broken and it was measuring nothing.
   The logs are committed now and a test refuses any path the checker opens that
-  a fresh clone would not have. A clean checkout runs all 3758 assertions and
+  a fresh clone would not have. A clean checkout runs all 3782 assertions and
   exits 0, which it did not before.
 
   Figures in those tables that are not re-derivable here say so rather than
@@ -597,13 +603,13 @@ review:
 
 ```
 python analysis/rederive_from_logs.py bench   # raw logs -> four audit files
-python analysis/verify_claims.py          # 3758 assertions, re-derived
+python analysis/verify_claims.py          # 3782 assertions, re-derived
 python analysis/check_data_integrity.py   # structure of all 77 run directories
-python -m unittest discover tests         # 279 regressions for defects shipped here
+python -m unittest discover tests         # 288 regressions for defects shipped here
 python tests/mutate.py                    # break each fix, require its test to fail
 python tests/data_mutate.py               # perturb a measurement or a published
                                           #   figure, require the checker to fail
-                                          #   78 code and 84 data perturbations,
+                                          #   83 code and 84 data perturbations,
                                           #   with a clean-mirror re-check after
                                           #   the last restore
 python analysis/plot_v4_runs.py --check   # charts still match the data

@@ -154,6 +154,28 @@ def t_critical_975(df: int) -> float:
     return (lo + hi) / 2.0
 
 
+def f_critical_95(d1: int, d2: int) -> float:
+    """Upper 5 % point of F(d1, d2), by the same bisection as the t above.
+
+    A17 compares two session-level SD estimates, one on four degrees of freedom
+    and one on eleven, and says the difference is not significant. That is a
+    published number like any other and a table lookup is not re-derivable, so
+    it is computed here from `_betainc` rather than quoted.
+    """
+    if d1 < 1 or d2 < 1:
+        return float("inf")
+    lo, hi = 0.0, 1000.0
+    for _ in range(200):
+        mid = (lo + hi) / 2.0
+        # P(F > mid) = I_{d2/(d2+d1*mid)}(d2/2, d1/2)
+        tail = _betainc(d2 / 2.0, d1 / 2.0, d2 / (d2 + d1 * mid))
+        if tail > 0.05:
+            lo = mid
+        else:
+            hi = mid
+    return (lo + hi) / 2.0
+
+
 def bootstrap_ci(log_ratios: list[float], iters: int, seed: int) -> tuple[float, float]:
     rng = random.Random(seed)
     n = len(log_ratios)

@@ -517,6 +517,42 @@ MUTATIONS = [
      '        buckets[k].setdefault(d["arm"], []).append(d["tok_s"])',
      "tests.test_harness_invariants."
      "ThePredecessorMustBeTestedInThePublishedUnits"),
+    # --- the F point A17 publishes ---------------------------------------
+    ("the F critical value solves the lower tail instead of the upper",
+     "analysis/paired_blocks.py",
+     "        tail = _betainc(d2 / 2.0, d1 / 2.0, d2 / (d2 + d1 * mid))",
+     "        tail = _betainc(d1 / 2.0, d2 / 2.0, d1 * mid / (d2 + d1 * mid))",
+     "tests.test_harness_invariants.ACriticalValueMustBeComputedAndCorrect"),
+    ("the F critical value stops depending on the second df",
+     "analysis/paired_blocks.py",
+     "def f_critical_95(d1: int, d2: int) -> float:",
+     "def f_critical_95(d1: int, d2: int = 11) -> float:\n"
+     "    d2 = 11",
+     "tests.test_harness_invariants.ACriticalValueMustBeComputedAndCorrect"),
+    # --- the retracted-claim scanner --------------------------------------
+    ("the retraction window widens until any retraction clears every copy",
+     "analysis/verify_claims.py",
+     'def _unretracted(text, needle, marks=("inside", "retract"), window=200):',
+     'def _unretracted(text, needle, marks=("inside", "retract"), window=20000):',
+     "tests.test_harness_invariants."
+     "ARetractedSentenceMustNotSurviveOutsideItsRetraction"),
+    ("the scanner reports the first occurrence and stops",
+     "analysis/verify_claims.py",
+     "        i = text.find(needle, i + 1)\n"
+     "    return out",
+     "        i = -1\n"
+     "    return out",
+     "tests.test_harness_invariants."
+     "ARetractedSentenceMustNotSurviveOutsideItsRetraction"),
+    ("one of the four documents drops out of the scan entirely",
+     "analysis/verify_claims.py",
+     '                     ("RETEST_TODO.md",\n'
+     '                      " ".join((pathlib.Path(__file__).resolve().parents[1]\n'
+     '                                / "RETEST_TODO.md")\n'
+     '                               .read_text(encoding="utf-8").split()))):',
+     '                     ):',
+     "tests.test_harness_invariants."
+     "ARetractedSentenceMustNotSurviveOutsideItsRetraction"),
 ]
 
 

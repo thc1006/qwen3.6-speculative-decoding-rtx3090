@@ -4729,6 +4729,117 @@ class AStrangersBenchmarkIsInterferenceNotOurs(unittest.TestCase):
                              f"by name, and a stranger's server would be absorbed")
 
 
+class ARetractedSentenceMustNotSurviveOutsideItsRetraction(unittest.TestCase):
+    """One claim stood in three documents after the fourth had retracted it.
+
+    The checker scans for it now. A scanner that returns nothing because its
+    window is too wide, or because it looks for the wrong marker, is
+    indistinguishable from a clean tree, so it is driven here with text that
+    is known to contain a survivor and text that is known not to.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    def _fn(self):
+        src = (self.ROOT / "analysis" / "verify_claims.py").read_text(
+            encoding="utf-8")
+        tree = ast.parse(src)
+        fn = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)
+                  and n.name == "_unretracted")
+        ns = {}
+        exec(compile(ast.Module(body=[fn], type_ignores=[]), "x", "exec"), ns)
+        return ns["_unretracted"]
+
+    def test_a_bare_claim_is_found(self):
+        f = self._fn()
+        self.assertEqual(
+            len(f("the effect would be far outside the interval, so it is "
+                  "ruled out. " + "padding. " * 40, "far outside")), 1)
+
+    def test_a_retracted_claim_is_not(self):
+        f = self._fn()
+        self.assertEqual(
+            f("an earlier version said it would be far outside the interval; "
+              "-2.4 is inside it.", "far outside"), [])
+
+    def test_the_window_does_not_reach_the_next_paragraph(self):
+        """A marker 400 characters away must not excuse a bare claim, or one
+        retraction anywhere in the document clears every copy of it."""
+        f = self._fn()
+        text = ("it would be far outside the interval. " + "x " * 300
+                + " -2.4 is inside it.")
+        self.assertEqual(len(f(text, "far outside")), 1)
+
+    def test_it_reports_every_occurrence_not_the_first(self):
+        f = self._fn()
+        text = ("far outside " + "y " * 300 + "far outside " + "z " * 300)
+        self.assertEqual(len(f(text, "far outside")), 2)
+
+    def test_the_checker_scans_all_four_documents(self):
+        """By POSITION, off the loop's own iterable. The first version of this
+        searched an 800-character window for each name, and the name of the
+        document also appears in the `pathlib` expression two lines below the
+        label, so renaming the label left the needle in place and the mutation
+        survived. That is the ninth time this repository has recorded the
+        shape."""
+        src = (self.ROOT / "analysis" / "verify_claims.py").read_text(
+            encoding="utf-8")
+        tree = ast.parse(src)
+        loops = [n for n in ast.walk(tree)
+                 if isinstance(n, ast.For) and isinstance(n.target, ast.Tuple)
+                 and [getattr(e, "id", None) for e in n.target.elts]
+                 == ["_rdoc", "_rtxt"]]
+        self.assertEqual(len(loops), 1, "the retraction scan loop moved")
+        scanned = [e.elts[0].value for e in loops[0].iter.elts]
+        self.assertEqual(sorted(scanned),
+                         ["CHANGELOG.md", "ERRATA.md", "PULL_REQUEST.md",
+                          "RETEST_TODO.md"])
+
+
+class ACriticalValueMustBeComputedAndCorrect(unittest.TestCase):
+    """`t_critical_975` replaced a table that fell back to 1.96 above df=10.
+
+    `f_critical_95` is the same shape of thing and gets the same treatment: it
+    is checked against values a reader can look up, at both ends of its range,
+    because a bisection that converges on the wrong tail is a smooth function
+    that is wrong everywhere and looks fine.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    def setUp(self):
+        sys.path.insert(0, str(self.ROOT / "analysis"))
+        import paired_blocks
+        self.pb = paired_blocks
+
+    def test_it_matches_the_published_table(self):
+        # Rothamsted's 5 % points, the ones in every statistics text
+        for d1, d2, want in ((1, 1, 161.4), (2, 5, 5.786), (4, 11, 3.357),
+                             (10, 10, 2.978), (12, 20, 2.278)):
+            got = self.pb.f_critical_95(d1, d2)
+            self.assertAlmostEqual(
+                got, want, delta=0.002 * want,
+                msg=f"F({d1}, {d2}) is {got}, the table says {want}")
+
+    def test_it_is_the_upper_tail_and_not_the_lower(self):
+        """The bisection solves P(F > x) = 0.05. Solving the other tail gives a
+        number under 1 for every df pair here, and every comparison against it
+        would then pass."""
+        self.assertGreater(self.pb.f_critical_95(4, 11), 1.0)
+        self.assertGreater(self.pb.f_critical_95(1, 1), 100.0)
+
+    def test_it_falls_with_degrees_of_freedom(self):
+        prev = float("inf")
+        for d2 in (2, 5, 11, 30, 120):
+            cur = self.pb.f_critical_95(4, d2)
+            self.assertLess(cur, prev, f"F(4, {d2}) did not fall")
+            prev = cur
+
+    def test_the_t_it_sits_beside_is_still_right(self):
+        for df, want in ((1, 12.706), (4, 2.776), (11, 2.201), (30, 2.042)):
+            self.assertAlmostEqual(self.pb.t_critical_975(df), want, delta=0.002)
+
+
 class ThePredecessorMustBeTestedInThePublishedUnits(unittest.TestCase):
     """A bound on one rate does not bound a difference of two ratios.
 

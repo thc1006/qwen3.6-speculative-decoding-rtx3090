@@ -1766,16 +1766,23 @@ analysis plan was committed in
 was at 360 of 500, and `analysis/verify_claims.py` asserts that commit is an
 ancestor of this one.
 
-| arm | V2, 8 sessions, between | V3, 2 sessions, within | **W, 5 sessions, within and carryover-balanced** |
-|---|---:|---:|---:|
-| `spec-dflash-n4` | +12.03 [+11.67, +12.38] | +12.17 | **+12.10** [+11.87, +12.34] |
-| `spec-mtp-n2` | +9.54 [+9.14, +9.93] | +9.53 | **+9.53** [+9.34, +9.73] |
-| `spec-dflash-n2` | **+5.92** [+4.86, +6.99] | **+8.65** | **+8.29** [+7.97, +8.60] |
-| `spec-draft-n8` | +6.31 [+6.29, +6.33] | +6.30 | **+6.35** [+6.32, +6.38] |
+| arm | V2, 8 sessions, between | V3, 2 sessions, within | **W, 5 sessions, within and carryover-balanced** | **W2, 12 sessions, the same design again** |
+|---|---:|---:|---:|---:|
+| `spec-dflash-n4` | +12.03 [+11.67, +12.38] | +12.17 | **+12.10** [+11.87, +12.34] | **+12.13** [+11.97, +12.28] |
+| `spec-mtp-n2` | +9.54 [+9.14, +9.93] | +9.53 | **+9.53** [+9.34, +9.73] | **+9.60** [+9.41, +9.79] |
+| `spec-dflash-n2` | **+5.92** [+4.86, +6.99] | **+8.65** | **+8.29** [+7.97, +8.60] | **+8.50** [+8.08, +8.91] |
+| `spec-draft-n8` | +6.31 [+6.29, +6.33] | +6.30 | **+6.35** [+6.32, +6.38] | **+6.34** [+6.32, +6.36] |
 
 Three of four agree with both earlier designs. `spec-dflash-n4`'s sign flip,
-the strongest result in this section, now holds at +12.03, +12.17 and +12.10
-across three schedules, so it is not an artefact of any of them.
+the strongest result in this section, now holds at +12.03, +12.17, +12.10 and
++12.13 across three schedules and two separate invocations of the third, so it
+is not an artefact of any of them.
+
+The last column is a separate invocation two days after W, started to answer a
+different question, and every one of its four intervals overlaps W's. Nothing
+in this table was tuned to make that happen: W2's session count and its
+estimand were fixed before it started, and its estimand is the predecessor
+contrast below rather than any row of this table.
 
 **And the fourth arm resolves, but not the way the schedule was supposed to
 resolve it.** W's interval for `spec-dflash-n2` **overlaps V3's and does not
@@ -1838,9 +1845,12 @@ resampling unit:
 | W | 5 | −1.05 % | [−2.97 %, +0.86 %] |
 | **W2** | **12** | **−0.14 %** | **[−0.68 %, +0.41 %]** |
 
-The session-level SD is **0.858**, against the 1.543 implied by W's five
-sessions; four degrees of freedom had overestimated it, which is why twelve
-sessions bought more than the square root of the extra count. The two
+The session-level SD is **0.858**, against the **1.543** implied by W's five
+sessions. The interval is **3.5** times narrower and twelve sessions against
+five account for **1.95** of that on their own; the rest is the SD estimate
+moving, which four degrees of freedom permit. No claim is made here that W was
+the noisier run: the two variances differ by a factor of **3.23**, against an
+F(4, 11) upper 5 % point of **3.36**. The two
 sensitivities the plan named agree with the primary: the grouped contrast W
 published is **−0.21 % [−0.78 %, +0.35 %]**, and including the row-boundary
 adjacencies the square cannot balance gives **−0.19 % [−0.75 %, +0.38 %]**
@@ -2013,10 +2023,14 @@ the parsed set, and the probe over the grown set found more: on 2026-08-29 it
 perturbed **2 252** numbers across the **119** tables parsed at the time and
 **33** of them changed nothing. The runs it took are the point: the population
 grows as the coverage does, so a clean run is only clean for the tree it ran
-on, and parsing the last six tables grew it again. On 2026-08-30, on the tree
-this entry is committed in, all **2 415** numbers across all **127** tables
-were perturbed one at a time and **every one was caught**, in eight shards
-whose control passed before the work and again after it. The eight shard
+on: parsing the last six tables grew it, and so did run W2's three tables and
+the column it added to A17's. The population on this tree is **2 439** numbers
+across all **127** tables, **and no pass has yet covered that population**.
+The last complete pass covered **2 373** numbers across **124** tables at
+commit `0334c60dac82`, one at a time, and **every one was caught**, in eight
+shards whose control passed before the work and again after it. Sixty-six
+numbers of this tree are therefore covered by nothing, which is stated here
+rather than left for a reader to derive by subtracting two figures. The eight shard
 outputs were not attested as a set until 2026-08-30: nothing showed that all
 eight ran, that their locations were disjoint, that the union was the whole
 population, or that they shared a head and a checker -- and `--shard=8/8`
@@ -2057,8 +2071,8 @@ because passing once does not bound half an hour of running.
 return rows, and assert nothing about the column you changed, which is exactly
 what the W three-design table did, in two documents, until this pass.
 
-**The larger half is not tables.** **1 312** decimal numbers sit in prose,
-outside every table; **677** of them do not appear as a string literal anywhere
+**The larger half is not tables.** **1 352** decimal numbers sit in prose,
+outside every table; **707** of them do not appear as a string literal anywhere
 in the checker, counting only literals that are not assertion labels; a label
 is prose about a check and not a check, and leaving them in made the count move
 whenever an assertion was reworded. That criterion is an upper bound on the gap
@@ -2256,10 +2270,11 @@ number and this file exists because of unchecked numbers.
     grounds that an effect large enough to explain the 2.4 pp gap "would have
     to be far outside this interval". −2.4 is **inside** [−2.61, +0.22] and
     inside the matched [−2.97, +0.86]. The pull request body was corrected on
-    2026-08-29 and the ERRATA passage and the changelog's copy of it were left
-    standing for two days, which is item 27's shape again with the list and the
-    passage swapped. Run W2 is what actually excludes it, and both copies now
-    say which run did.
+    2026-08-29 and the ERRATA passage, the changelog's copy of it and
+    `RETEST_TODO.md`'s were left standing for two days, which is item 27's
+    shape again with the list and the passage swapped. Three copies, found by
+    grepping for the retracted claim rather than for the numbers around it.
+    Run W2 is what actually excludes it, and all three now say which run did.
 47. **The evidence manifest's own header said "702 logs and 19 traces"** while
     the file held 1820 and 22. Nothing read the header; the counts the
     documents publish come from `RUN_REGISTRY.json`, so the file that is the

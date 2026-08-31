@@ -24,9 +24,11 @@ interval columns reached through `.split("[")[0]`, a configuration column
 nobody read, the `100 %` on a total row. Guarding those grew the parsed set and
 the probe over the grown set found 33 more; the run after that perturbed all
 2 252 numbers in the 119 tables parsed at the time and none survived, and
-parsing the last six grew the population again. The run on 2026-08-30 perturbs
-all 2 415 numbers across all 127 tables and catches every one, in eight shards
-whose control passed before the work and again after it. That is
+parsing the last six grew the population again, as run W2's tables did after
+that. The complete pass on 2026-08-30 perturbed all 2 373 numbers across the
+124 tables of commit 0334c60dac82 and caught every one, in eight shards whose
+control passed before the work and again after it. This tree holds 2 439
+numbers across 127 tables and no pass has yet covered that population. That is
 what the W three-design table had done, in both documents that carry it: only
 the W column was read, so V2's `+12.03` and V3's `+12.17`, two thirds of a
 three-way comparison, could have been anything.
@@ -312,7 +314,16 @@ ran.** 2026-08-30 to 2026-08-31, the same 10 x 10 Williams square, 1200 of 1200
 arm-runs, none failed, 17.07 h of continuous telemetry, a separate invocation
 under its own `BENCH_RUN_LABEL` so nothing pools it with W. The thermal
 slowdown flags appear on 13 and 10 of its 10 271 loaded samples, the same order
-as W's, and the card stays between 45 and 73 °C. The pre-registered
+as W's, and the card stays between 45 and 73 °C.
+
+It also replicates the mode contrast it was not run to measure. A17's table
+gains a W2 column and all four of its intervals overlap W's: +12.13 against
++12.10, +9.60 against +9.53, +8.50 against +8.29 and +6.34 against +6.35. For
+`spec-dflash-n2` that puts a second within-invocation interval, [+8.08, +8.91],
+clear of V2's [+4.86, +6.99] on twelve sessions rather than five. Nothing about
+W2 was chosen after those four numbers were seen; its session count and
+estimand were fixed before it started, and its estimand is the predecessor
+contrast rather than this. The pre-registered
 matched contrast for `spec-dflash-n2` is **−0.14 % [−0.68, +0.41]** against W's
 −1.05 % [−2.97, +0.86], with a session SD of 0.858 where W's five sessions had
 implied 1.543. Tested in the units the 2.4 pp gap is quoted in, the predecessor

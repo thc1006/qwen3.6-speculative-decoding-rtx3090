@@ -6020,6 +6020,10 @@ chk("and every other arm moves less than half as far",
 print("\n=== run W: the carryover-balanced design ===")
 _W = sorted((pathlib.Path(__file__).resolve().parents[1] / "v4_audit_2026_08_25"
              / "data").glob("matrix_W_s*_20260828_104222"))
+# bound here rather than in W2's own section, because A17's table now carries a
+# W2 column and this file reads that table 1700 lines before that section
+_W2 = sorted((pathlib.Path(__file__).resolve().parents[1] / "v4_audit_2026_08_25"
+              / "data").glob("matrix_W2_s*_20260830_220554"))
 chk("W sessions on disk", len(_W), 5)
 chk("W arm-runs", sum(len(list(d.glob("*__rep*.json"))) for d in _W), 500)
 chk("every W session validated",
@@ -6059,7 +6063,8 @@ for _d in _W:
         _wmode[_a].append(_v["shift_pp"])
 _WT = {r[0]: r[1:] for r in _md_table(
     "| arm | V2, 8 sessions, between | V3, 2 sessions, within | "
-    "**W, 5 sessions, within and carryover-balanced** |")}
+    "**W, 5 sessions, within and carryover-balanced** | "
+    "**W2, 12 sessions, the same design again** |")}
 chk("A17's four-design table rows", len(_WT), 4)
 
 
@@ -6093,6 +6098,30 @@ for _a, _row in sorted(_WT.items()):
         (round(_v2i[1], 2), round(_v2i[2], 2)), _iv_cell(_row[0])[1:])
     chk(f"W table {_a}: its V3 column is V3's two-session mean",
         round(st.mean(_v3_shift[_a]), 2), _iv_cell(_row[1])[0], 0.005)
+# W2's column, recomputed from its own arm-runs through the same two
+# functions. It is a replication of the design, not a fifth design, and the
+# only reason it is in this table is that it can disagree: nothing about W2
+# was chosen after seeing these four numbers.
+_w2mode = defaultdict(list)
+for _d in _W2:
+    _arms = _lm.arms_of(str(_d))
+    _free = {a: _lm.pooled(str(_d), a)["tok_s"] for a in _arms
+             if not a.endswith("-cap") and _lm.pooled(str(_d), a)}
+    _cap = {a[:-4]: _lm.pooled(str(_d), a)["tok_s"] for a in _arms
+            if a.endswith("-cap") and _lm.pooled(str(_d), a)}
+    for _a, _v in _lm.contrast(_free, _cap).items():
+        _w2mode[_a].append(_v["shift_pp"])
+for _a, _row in sorted(_WT.items()):
+    _m2, _lo2, _hi2, _n2 = _lm.interval(_w2mode[_a])
+    chk(f"W2 {_a} shift (pp)", round(_m2, 2), _iv_cell(_row[3])[0], 0.005)
+    chk(f"W2 {_a} interval (pp)",
+        (round(_lo2, 2), round(_hi2, 2)), _iv_cell(_row[3])[1:])
+    chk(f"W2 {_a} sessions", _n2, 12)
+    chk(f"W2 {_a}: and its interval overlaps W's, which is the claim",
+        (_lo2 <= _lm.interval(_wmode[_a])[2]
+         and _hi2 >= _lm.interval(_wmode[_a])[1]), True)
+chk("W2's spec-dflash-n2 interval does not overlap V2's either",
+    _lm.interval(_w2mode["spec-dflash-n2"])[1] > 6.99, True)
 chk("W's spec-dflash-n2 interval does not overlap V2's",
     _lm.interval(_wmode["spec-dflash-n2"])[1] > 6.99, True)
 chk("and does overlap V3's",
@@ -7749,7 +7778,6 @@ print("\n=== run W2: the same square at the power to answer it ===")
 # functions the tool publishes from. The three tables W2 added are parsed cell
 # by cell here because the census counts a table nobody parses as a hole, and
 # three new holes is what it reported the moment they were written.
-_W2 = sorted(_DATA.glob("matrix_W2_s*_20260830_220554"))
 chk("W2: twelve sessions committed", len(_W2), 12)
 chk("W2: a hundred arm-runs in each",
     sorted({len(_co.arm_runs(str(_d))) for _d in _W2}), [100])
@@ -7782,6 +7810,24 @@ chk("W2: the session SD of the primary estimand",
     round(st.stdev(
         _w2rep["across_sessions_matched"]["spec-dflash-n2"]["per_session"]), 3),
     0.858)
+# A17 says the two SD estimates differ by no more than four degrees of freedom
+# permit. That is an inference, so both halves of it are computed here: the
+# variance ratio from the two runs' own per-session values, and the critical
+# value from `paired_blocks`, which computes it rather than quoting a table.
+import paired_blocks as _pbf                                       # noqa: E402
+_sd_w = st.stdev(_wrep["across_sessions_matched"]["spec-dflash-n2"]["per_session"])
+_sd_w2 = st.stdev(_w2rep["across_sessions_matched"]["spec-dflash-n2"]["per_session"])
+chk("W2: W's SD, which A17 quotes beside it", round(_sd_w, 3), 1.543)
+chk("W2: the variance ratio A17 publishes",
+    round((_sd_w / _sd_w2) ** 2, 2), 3.23)
+chk("W2: and the F point it is compared with, computed not tabulated",
+    round(_pbf.f_critical_95(4, 11), 2), 3.36)
+chk("W2: so the difference is not significant, which is what A17 says",
+    (_sd_w / _sd_w2) ** 2 < _pbf.f_critical_95(4, 11), True)
+chk("A17 states the ratio, the F point and that no claim rests on it",
+    all(_x in " ".join(_ER_LINES) for _x in
+        ("**3.23**", "F(4, 11) upper 5 % point of **3.36**",
+         "No claim is made here that W was")), True)
 
 # the boundary-inclusive sensitivity is a different population, so it is a
 # second invocation of the tool rather than a field of the first
@@ -9281,6 +9327,48 @@ chk("ERRATA A19: and the count it states is the length of that list",
 # the changelog publishes the same census and had no check on it, which is
 # how it kept saying 119 while ERRATA moved
 _CL_FLAT = " ".join("\n".join(_CH_LINES).split())
+
+
+# The retracted sentence, guarded the way a withdrawn number is. It stood in
+# three documents at once because the correction was written into the pull
+# request body and propagated by looking for the numbers around it. Every
+# surviving occurrence must be inside a quotation that retracts it, which is
+# checkable: the four here each sit within 200 characters of the word "inside"
+# or "retracted".
+def _unretracted(text, needle, marks=("inside", "retract"), window=200):
+    """Occurrences of `needle` that are NOT inside a passage retracting it.
+
+    Extracted so it can be driven with synthetic text: a scanner that returns
+    an empty list because its window is wrong looks exactly like a clean tree.
+    Returns a list of excerpts, so a failure names where.
+    """
+    out, i = [], text.find(needle)
+    while i != -1:
+        win = text[max(0, i - window):i + window]
+        if not any(m in win for m in marks):
+            out.append(text[max(0, i - 60):i + 60])
+        i = text.find(needle, i + 1)
+    return out
+
+
+_still = []
+for _rdoc, _rtxt in (("ERRATA.md", " ".join(_ER_LINES)),
+                     ("CHANGELOG.md", _CL_FLAT),
+                     ("PULL_REQUEST.md", " ".join(_PR.split())),
+                     ("RETEST_TODO.md",
+                      " ".join((pathlib.Path(__file__).resolve().parents[1]
+                                / "RETEST_TODO.md")
+                               .read_text(encoding="utf-8").split()))):
+    _still += [(_rdoc, _x) for _x in _unretracted(_rtxt, "far outside")]
+chk("the retracted carryover claim survives only where it is retracted",
+    _still, [])
+chk("and no document still says W answered the predecessor question",
+    [_d for _d, _x in (("RETEST_TODO", " ".join(
+        (pathlib.Path(__file__).resolve().parents[1] / "RETEST_TODO.md")
+        .read_text(encoding="utf-8").split())),)
+     if "Answered 2026-08-28, and the answer is no" in _x], [])
+
+
 chk("CHANGELOG: the census it publishes is the census",
     (f"Of {_cov['tables']} tables, {_cov['carrying_values']} carry measurements "
      f"and all {_cov['parsed']} are parsed cell by cell." in _CL_FLAT,
@@ -9331,9 +9419,9 @@ chk("prose probe: records whose value repeats on its own line",
 
 _pcov = _tcov.prose_census()
 chk("coverage: decimal numbers in prose, outside every table",
-    _pcov["prose_numbers"], 1312)
+    _pcov["prose_numbers"], 1352)
 chk("coverage: those that are not a literal in this file",
-    _pcov["not_a_literal"], 677)
+    _pcov["not_a_literal"], 707)
 # tested on a supplied source, not by searching this file for a phrase: the
 # first version of this check searched for a label's own words, and the search
 # string was itself a literal in the argument position, so it always found it.
@@ -9369,7 +9457,7 @@ def _wilson_low(_k, _n, _z=1.959964):
 # tool's output. `cell_population` is what the probe itself would perturb.
 _A19_POP = _tcov.cell_population(_cov["covered"])
 chk("A19: the probe population it publishes is the one the tool would perturb",
-    (_A19_POP, len(_cov["covered"])), (2415, 127))
+    (_A19_POP, len(_cov["covered"])), (2439, 127))
 # not `_grouped`, which returns the digit groups a table cell splits into:
 # this is prose, and the question is whether the sentence contains the number.
 # `str.split()` treats the thin space as whitespace, so normalising both sides
