@@ -579,18 +579,34 @@ def cell_population(tables_: list[dict]) -> int:
     return n
 
 
-_CTRL = {"before": None, "after": None}
+# `checker_sha` and `head` are recorded from the WORKTREE the shard measured
+# in, not from the repository the shard was launched from. `_checker_sha()`
+# below reads this file's own parent, which is the launch tree, and a launch
+# tree that changes mid-run gives shards that finish at different times
+# different hashes for a checker none of them used. The aggregator refused a
+# real run for that on 2026-09-01 and its diagnosis was right for the wrong
+# reason: the shards had measured with one checker and reported two.
+_CTRL = {"before": None, "after": None, "checker_sha": None, "head": None}
 
 
-def _head_sha() -> str:
+def _head_sha(root: pathlib.Path | None = None) -> str:
     """The commit these shards were taken on. Eight attestations from different
-    heads are eight measurements of different documents."""
+    heads are eight measurements of different documents.
+
+    `root` is the worktree when a shard has one, because that is the tree whose
+    documents were perturbed. Defaulting to the launch tree keeps every other
+    caller working.
+    """
     try:
-        return subprocess.run(["git", "-C", str(ROOT), "rev-parse", "HEAD"],
-                              capture_output=True, text=True,
-                              check=True).stdout.strip()
+        return subprocess.run(
+            ["git", "-C", str(root or ROOT), "rev-parse", "HEAD"],
+            capture_output=True, text=True, check=True).stdout.strip()
     except Exception:                                              # noqa: BLE001
         return ""
+
+
+def _sha_file(path: pathlib.Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest() if path.exists() else ""
 
 
 def _checker_sha() -> str:
@@ -630,6 +646,15 @@ def cell_probe(tables_: list[dict], shard: tuple[int, int] = (0, 1)) -> list[dic
     with contextlib.ExitStack() as stack:
         wt = _worktree(stack)
         base_fails, base_n, base_rc = _run(wt)
+        # RECORDED, not assumed. `_CTRL` was written by `prose_probe` alone, so
+        # a cell-probe attestation carried `control_before: pass` whichever way
+        # the control had gone: `"pass" if not _CTRL["before"]` reads `None` as
+        # passing. The refusal below is what actually protected the run, and a
+        # field that is true whatever happens is the shape this repository
+        # spends its time removing.
+        _CTRL["before"] = bool(base_fails) or base_rc != 0
+        _CTRL["checker_sha"] = _sha_file(wt / "analysis" / "verify_claims.py")
+        _CTRL["head"] = _head_sha(wt)
         print(f"shard {shard[0]}/{shard[1]}: {len(picked)} tables, baseline "
               f"{base_n} assertions, {len(base_fails)} failing, exit {base_rc}",
               file=sys.stderr, flush=True)
@@ -731,6 +756,7 @@ def cell_probe(tables_: list[dict], shard: tuple[int, int] = (0, 1)) -> list[dic
         # perturbation that was written and not restored leaves the worktree
         # dirty, and every reading after it was against a different document.
         end_fails, end_n, end_rc = _run(wt)
+        _CTRL["after"] = bool(end_fails) or end_rc != 0 or end_n != base_n
         if end_fails or end_rc != 0 or end_n != base_n:
             raise SystemExit(
                 f"shard {shard[0]}/{shard[1]}: the control no longer passes "
@@ -934,8 +960,10 @@ def main() -> None:
             # population, not that they were the same head and the same checker.
             # `--aggregate` below verifies exactly that against these files.
             print(json.dumps({
-                "head_sha": _head_sha(),
-                "checker_sha256": _checker_sha(),
+                # from the worktree that did the measuring, falling back to
+                # the launch tree only when no shard recorded one
+                "head_sha": _CTRL["head"] or _head_sha(),
+                "checker_sha256": _CTRL["checker_sha"] or _checker_sha(),
                 "population_sha256": _population_sha(picked),
                 "population_size": cell_population(picked),
                 "shard": list(shard),

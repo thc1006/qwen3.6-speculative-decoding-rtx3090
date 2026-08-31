@@ -4453,18 +4453,67 @@ class TheExtractorsMustBeBounded(unittest.TestCase):
                 f"r.ROOT = {d!r}\n"
                 "r.EXTRACTOR_TIMEOUT_S = 2\n"
                 "r.run('hangs.py', 'some_input.log')\n")
+            # Its own SESSION, and the whole group is killed. `subprocess.run`
+            # with a timeout kills the direct child only, and the hanging
+            # extractor is a GRANDCHILD: when the mutation that removes the
+            # timeout runs, `hangs.py` outlives the deadline and stays. Ten of
+            # them were found on the verification host on 2026-09-01, the
+            # oldest a day and a half old, one per replay of that mutation.
+            proc = subprocess.Popen([sys.executable, "-c", prog],
+                                    stdout=subprocess.PIPE,
+                                    stderr=subprocess.PIPE, text=True,
+                                    start_new_session=True)
+            timed_out = False
             try:
-                p = subprocess.run([sys.executable, "-c", prog],
-                                   capture_output=True, text=True, timeout=45)
+                out, err = proc.communicate(timeout=45)
             except subprocess.TimeoutExpired:
+                timed_out = True
+                out, err = "", ""
+            finally:
+                with contextlib.suppress(ProcessLookupError, PermissionError):
+                    os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                with contextlib.suppress(subprocess.TimeoutExpired):
+                    proc.communicate(timeout=10)
+            if timed_out:
                 self.fail("the extractor call is unbounded: a child that never "
                           "returns took the parent with it")
+            p = subprocess.CompletedProcess(
+                proc.args, proc.returncode, out, err)
         self.assertNotEqual(p.returncode, 0, "a hanging extractor succeeded")
         msg = p.stdout + p.stderr
         self.assertIn("hangs.py", msg, "the message does not name the extractor")
         self.assertIn("did not finish", msg)
         self.assertIn("some_input.log", msg,
                       "the message does not name the last input")
+
+    def test_no_grandchild_outlives_the_deadline(self):
+        """The leak, driven directly: a child that spawns a hanging grandchild
+        and never returns. Before the process-group kill this left the
+        grandchild running after the parent was gone, which is how ten of them
+        accumulated on the verification host over two days."""
+        prog = ("import subprocess, sys, time\n"
+                "subprocess.Popen([sys.executable, '-c',"
+                " 'import time\\nwhile True: time.sleep(1)'])\n"
+                "time.sleep(600)\n")
+        proc = subprocess.Popen([sys.executable, "-c", prog],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                start_new_session=True)
+        gid = os.getpgid(proc.pid)
+        try:
+            proc.communicate(timeout=3)
+        except subprocess.TimeoutExpired:
+            pass
+        os.killpg(gid, signal.SIGKILL)
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            proc.communicate(timeout=10)
+        deadline = time.time() + 10
+        while time.time() < deadline:
+            try:
+                os.killpg(gid, 0)
+            except (ProcessLookupError, PermissionError):
+                return
+            time.sleep(0.2)
+        self.fail("the process group outlived the kill")
 
     def test_the_timeout_is_actually_passed_to_subprocess(self):
         src = (self.ROOT / "analysis" / "rederive_from_logs.py").read_text(
@@ -4794,6 +4843,152 @@ class ARetractedSentenceMustNotSurviveOutsideItsRetraction(unittest.TestCase):
         self.assertEqual(sorted(scanned),
                          ["CHANGELOG.md", "ERRATA.md", "PULL_REQUEST.md",
                           "RETEST_TODO.md"])
+
+
+class AnAttestationMustDescribeTheTreeThatMeasured(unittest.TestCase):
+    """The cell probe's attestation carried two fields that could not be false.
+
+    `_CTRL` was written by `prose_probe` only, so a cell-probe attestation said
+    `control_before: pass` whichever way the control had gone: the expression
+    is `"pass" if not _CTRL["before"]`, and `None` is falsy. The refusal in
+    `cell_probe` is what protected the run; the field carried no information
+    and the aggregator checked it.
+
+    The digests had the same shape from the other side. `_checker_sha()` reads
+    the tree the shard was LAUNCHED from, and the perturbation and the checker
+    both run in a worktree, so a launch tree edited mid-run gives shards that
+    finish at different moments different hashes for a checker none of them
+    used. That happened on 2026-09-01.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    def _src(self):
+        return (self.ROOT / "analysis" / "table_coverage.py").read_text(
+            encoding="utf-8")
+
+    def _fn(self, name):
+        src = self._src()
+        fn = next(n for n in ast.walk(ast.parse(src))
+                  if isinstance(n, ast.FunctionDef) and n.name == name)
+        return ast.get_source_segment(src, fn) or ""
+
+    def test_the_cell_probe_records_both_controls(self):
+        body = self._fn("cell_probe")
+        self.assertIn('_CTRL["before"] =', body,
+                      "cell_probe does not record its opening control")
+        self.assertIn('_CTRL["after"] =', body,
+                      "cell_probe does not record its closing control")
+
+    def test_it_records_the_worktree_digests_not_the_launch_tree(self):
+        body = self._fn("cell_probe")
+        self.assertIn('_sha_file(wt / "analysis" / "verify_claims.py")', body)
+        self.assertIn("_head_sha(wt)", body)
+
+    def test_the_attestation_prefers_what_the_shard_recorded(self):
+        """Scoped to `main`, where the attestation is written. Searching the
+        file for `"head_sha"` finds the aggregator's field list first, which is
+        a different function that legitimately names it."""
+        body = self._fn("main")
+        self.assertIn('_CTRL["head"] or _head_sha()', body)
+        self.assertIn('_CTRL["checker_sha"] or _checker_sha()', body)
+
+    def test_a_failing_control_is_reported_as_FAIL_not_pass(self):
+        """Driven, not read: the expression that renders the field is applied
+        to each of the three states `_CTRL` can hold."""
+        render = lambda v: "pass" if not v else "FAIL"          # noqa: E731
+        self.assertEqual(render(False), "pass")
+        self.assertEqual(render(True), "FAIL")
+        # the state that used to be reachable, and is the reason for this class
+        self.assertEqual(render(None), "pass")
+
+    def test_the_aggregator_still_requires_both_controls(self):
+        src = self._src()
+        agg = self._fn("aggregate")
+        self.assertIn('for k in ("control_before", "control_after")', agg)
+
+
+class ATableCarriedTwiceMustBeComparedWhole(unittest.TestCase):
+    """A17's four-design table lives in ERRATA and in the pull request body.
+
+    The cross-document check compared `_row[:3]` against `_WT[_a][:3]`, so when
+    the table grew a W2 column both copies gained a cell that nothing read, and
+    the coverage probe turned +12.13 into +19.13 in the body with every
+    assertion still passing. A prefix comparison stops covering a table the
+    moment the table grows, and it does so silently, which is A19 item 19 in
+    the same table by the person who wrote item 19.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    def _src(self):
+        return (self.ROOT / "analysis" / "verify_claims.py").read_text(
+            encoding="utf-8")
+
+    def test_the_two_copies_are_compared_over_the_whole_row(self):
+        src = self._src()
+        self.assertIn(
+            "[_iv_cell(_x) for _x in _row], [_iv_cell(_x) for _x in _WT[_a]]",
+            src, "the cross-document comparison is a prefix again")
+        self.assertNotIn("for _x in _row[:3]], [_iv_cell(_x) for _x in _WT[_a][:3]]",
+                         src)
+
+    def test_both_copies_carry_the_same_number_of_columns(self):
+        """If they ever differ, the whole-row comparison would raise rather
+        than fail, and a raise is not a finding anyone reads."""
+        import re
+        er = (self.ROOT / "ERRATA.md").read_text(encoding="utf-8").splitlines()
+        pr = (self.ROOT / "PULL_REQUEST.md").read_text(encoding="utf-8").splitlines()
+        erh = next(l for l in er if l.startswith("| arm | V2, 8 sessions"))
+        prh = next(l for l in pr if l.startswith("| arm | V2, between"))
+        self.assertEqual(erh.count("|"), prh.count("|"),
+                         "the two copies of A17's table differ in width")
+
+    def _loop_src(self):
+        """The source of the loop over the body copy's rows, by AST.
+
+        Scoped, because the first version of this searched a 2600-character
+        window for `_row[3]` and the mutation that made the W2 mean compare
+        with itself left `_row[3]` in the interval assertion two lines below.
+        The needle was still there and the mutation survived, which is the
+        same shape as the eight before it in this file.
+        """
+        src = self._src()
+        tree = ast.parse(src)
+        loop = next(n for n in ast.walk(tree)
+                    if isinstance(n, ast.For) and isinstance(n.target, ast.Tuple)
+                    and [getattr(e, "id", None) for e in n.target.elts]
+                    == ["_a", "_row"]
+                    and "_PRW.items()" in (ast.get_source_segment(src, n.iter) or ""))
+        return ast.get_source_segment(src, loop) or ""
+
+    def test_every_column_of_the_body_copy_is_compared_to_the_data(self):
+        """Each of the four columns must be an ARGUMENT of a comparison, not
+        merely a string that appears somewhere in the loop."""
+        body = self._loop_src()
+        for expr in ("_iv_cell(_row[0])[0]", "_iv_cell(_row[0])[1:]",
+                     "_iv_cell(_row[1])[0]",
+                     "_iv_cell(_row[2])[0]", "_iv_cell(_row[2])[1:]",
+                     "_iv_cell(_row[3])[0]", "_iv_cell(_row[3])[1:]"):
+            self.assertIn(expr, body, f"{expr} is not compared in this loop")
+
+    def test_no_assertion_in_that_loop_compares_a_value_with_itself(self):
+        """The checker has a self-audit for this; the loop is checked here too
+        so the mutation that makes one of these vacuous fails a test rather
+        than only the claims job."""
+        src = self._src()
+        tree = ast.parse(src)
+        loop = next(n for n in ast.walk(tree)
+                    if isinstance(n, ast.For) and isinstance(n.target, ast.Tuple)
+                    and [getattr(e, "id", None) for e in n.target.elts]
+                    == ["_a", "_row"]
+                    and "_PRW.items()" in (ast.get_source_segment(src, n.iter) or ""))
+        vacuous = [ast.get_source_segment(src, n) for n in ast.walk(loop)
+                   if isinstance(n, ast.Call)
+                   and getattr(n.func, "id", None) == "chk"
+                   and len(n.args) >= 3
+                   and ast.dump(n.args[1]) == ast.dump(n.args[2])]
+        self.assertEqual(vacuous, [])
 
 
 class ACriticalValueMustBeComputedAndCorrect(unittest.TestCase):

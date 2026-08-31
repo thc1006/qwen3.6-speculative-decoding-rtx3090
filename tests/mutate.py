@@ -102,10 +102,12 @@ MUTATIONS = [
     ("the cell probe stops re-checking its control after the work",
      "analysis/table_coverage.py",
      "        end_fails, end_n, end_rc = _run(wt)\n"
+     '        _CTRL["after"] = bool(end_fails) or end_rc != 0 or end_n != base_n\n'
      "        if end_fails or end_rc != 0 or end_n != base_n:\n"
      "            raise SystemExit(\n"
      '                f"shard {shard[0]}/{shard[1]}: the control no longer passes "',
      "        end_fails, end_n, end_rc = (set(), base_n, 0)\n"
+     '        _CTRL["after"] = bool(end_fails) or end_rc != 0 or end_n != base_n\n'
      "        if False:\n"
      "            raise SystemExit(\n"
      '                f"shard {shard[0]}/{shard[1]}: the control no longer passes "',
@@ -553,6 +555,36 @@ MUTATIONS = [
      '                     ):',
      "tests.test_harness_invariants."
      "ARetractedSentenceMustNotSurviveOutsideItsRetraction"),
+    # --- the table two documents carry ------------------------------------
+    ("the cross-document table comparison goes back to a prefix",
+     "analysis/verify_claims.py",
+     "        [_iv_cell(_x) for _x in _row], [_iv_cell(_x) for _x in _WT[_a]])",
+     "        [_iv_cell(_x) for _x in _row[:3]], [_iv_cell(_x) for _x in _WT[_a][:3]])",
+     "tests.test_harness_invariants.ATableCarriedTwiceMustBeComparedWhole"),
+    ("the body copy's W2 column stops being read",
+     "analysis/verify_claims.py",
+     '    chk(f"PR body W2 {_a} shift (pp)", round(_m2, 2), _iv_cell(_row[3])[0], 0.005)',
+     '    chk(f"PR body W2 {_a} shift (pp)", round(_m2, 2), round(_m2, 2), 0.005)',
+     "tests.test_harness_invariants.ATableCarriedTwiceMustBeComparedWhole"),
+    # --- the attestation's own fields -------------------------------------
+    ("the cell probe stops recording its opening control",
+     "analysis/table_coverage.py",
+     '        _CTRL["before"] = bool(base_fails) or base_rc != 0\n'
+     '        _CTRL["checker_sha"] = _sha_file(wt / "analysis" / "verify_claims.py")',
+     '        _CTRL["checker_sha"] = _sha_file(wt / "analysis" / "verify_claims.py")',
+     "tests.test_harness_invariants.AnAttestationMustDescribeTheTreeThatMeasured"),
+    ("the digest goes back to the tree the shard was launched from",
+     "analysis/table_coverage.py",
+     '        _CTRL["checker_sha"] = _sha_file(wt / "analysis" / "verify_claims.py")\n'
+     '        _CTRL["head"] = _head_sha(wt)',
+     '        _CTRL["checker_sha"] = _checker_sha()\n'
+     '        _CTRL["head"] = _head_sha()',
+     "tests.test_harness_invariants.AnAttestationMustDescribeTheTreeThatMeasured"),
+    ("the attestation stops preferring what the shard recorded",
+     "analysis/table_coverage.py",
+     '                "head_sha": _CTRL["head"] or _head_sha(),',
+     '                "head_sha": _head_sha(),',
+     "tests.test_harness_invariants.AnAttestationMustDescribeTheTreeThatMeasured"),
 ]
 
 

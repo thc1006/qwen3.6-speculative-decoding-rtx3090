@@ -5653,7 +5653,13 @@ chk("PR body headline: and it drafts nothing",
     (_cell(_pr_ns[3]),
      sum(x["draft_n"] for _f in glob.glob(f"{_O2}/baseline__rep*.json")
          for x in json.load(open(_f))["rows"])), (0.0, 0))
-chk("PR body headline: every cell of it agrees with the audit README's copy",
+# NOT "every cell": this compares the rate and change columns, two of the five
+# both tables carry. The other three are checked against the data on each side
+# separately, which is what the coverage probe confirms by finding nothing in
+# either copy that can be changed unnoticed. The label said "every cell" and a
+# label that overstates what a check does is how a reader stops reading them.
+chk("PR body headline: its rate and change columns agree with the audit "
+    "README's copy",
     {_a: [_cell(_x) for _x in _r[:2]] for _a, _r in _PRH.items()
      if _a != "no speculation"},
     {_a: [_cellv4(_c[0]), _cellv4(_c[1])] for _a, _c in _V4O2.items()
@@ -6256,9 +6262,20 @@ for _a, _row in sorted(_PRW.items()):
         (round(_v2i[1], 2), round(_v2i[2], 2)), _iv_cell(_row[0])[1:])
     chk(f"PR body W {_a}: its V3 column is V3's two-session mean",
         round(st.mean(_v3_shift[_a]), 2), _iv_cell(_row[1])[0], 0.005)
-    # the two documents carry the same table; every cell of it must agree
+    # W2's column, from its own arm-runs. The probe found this: the column was
+    # added to BOTH documents and wired to an assertion in only one of them, so
+    # +12.13 could become +19.13 here and nothing failed. That is item 19's
+    # defect, in the same table, committed by the person who wrote item 19.
+    _m2, _lo2, _hi2, _ = _lm.interval(_w2mode[_a])
+    chk(f"PR body W2 {_a} shift (pp)", round(_m2, 2), _iv_cell(_row[3])[0], 0.005)
+    chk(f"PR body W2 {_a} interval (pp)",
+        (round(_lo2, 2), round(_hi2, 2)), _iv_cell(_row[3])[1:])
+    # The two documents carry the same table, and the comparison is over the
+    # WHOLE row rather than a prefix of it. `_row[:3]` was what let a fourth
+    # column exist in both copies and be checked in neither: a prefix
+    # comparison silently stops covering a table the moment it grows.
     chk(f"PR body W {_a}: every cell agrees with A17's copy",
-        [_iv_cell(_x) for _x in _row[:3]], [_iv_cell(_x) for _x in _WT[_a][:3]])
+        [_iv_cell(_x) for _x in _row], [_iv_cell(_x) for _x in _WT[_a]])
 _PRV3 = {r[0]: r[1:] for r in
          _pr_table("| arm | V3, within invocation | V2, between invocations |")}
 chk("the PR body's V3-against-V2 table rows", len(_PRV3), 4)
