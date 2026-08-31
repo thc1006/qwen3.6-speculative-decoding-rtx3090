@@ -166,10 +166,19 @@ jobs:
             fi
           done
           # A loop over a set that turned out to be empty passes, and reads as
-          # though every attested run were clean. There are 36 of them; the
-          # floor moves only when a run is added.
-          echo "$n attested runs aggregated"
-          [ "$n" -ge 36 ] || { echo "FAIL: only $n attested runs, expected 36" >&2; exit 1; }
+          # though every attested run were clean. `-ge 36` was written when
+          # there were 36 and stood while 48 acquired the marker, so twelve
+          # could have lost it silently: a floor is a ratchet, and this
+          # repository has removed the same shape from its census twice.
+          # Counted against the tree, not against a number written here.
+          want=$(find v4_audit_2026_08_25/data -maxdepth 2 -name RUN_COMPLETE.json | wc -l)
+          echo "$n attested runs aggregated, $want carry the marker"
+          [ "$n" -eq "$want" ] || {
+            echo "FAIL: aggregated $n of $want attested runs" >&2; exit 1; }
+          [ "$n" -ge 36 ] || {
+            echo "FAIL: only $n attested runs; the audit had 36 in 2026-08-28" >&2
+            exit 1
+          }
 
   audit-charts:
     name: charts

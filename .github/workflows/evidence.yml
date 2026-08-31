@@ -187,8 +187,34 @@ jobs:
           M=v4_audit_2026_08_25/EVIDENCE_MANIFEST.sha256
           ! grep -q '^# --- PENDING TRANCHE' "$M" || {
             echo "FAIL: the manifest still marks a pending tranche" >&2; exit 1; }
-          grep -v '^#' "$M" | grep -v '^$' > /tmp/manifest
-          echo "$(wc -l < /tmp/manifest) manifest entries, none pending"
+          grep -v '^#' "$M" | grep -v '^$' > /tmp/manifest_all
+          # Four tranches unpacked at once is 15.2 GB of logs, and the run that
+          # last passed here held 9.4 GB. Rather than find out on a release
+          # commit whether a hosted runner has the difference, run W2's tranche
+          # is verified in a root of its own and removed before the other three
+          # are unpacked. Peak is then 6.8 GB and 10.1 GB in turn, and the
+          # second is the footprint that already succeeded.
+          #
+          # `sha256sum -c` over a SLICE is only as good as the slice, so the two
+          # are proved to partition the file: every line in exactly one, and the
+          # counts adding up. A slice that silently lost lines would verify
+          # fewer files and say nothing.
+          OOB=20260830_220554
+          # `|| true`: under `set -e` a grep that matches nothing aborts the
+          # step with no message, and the emptiness check below is exactly the
+          # one that should report it.
+          grep    "$OOB" /tmp/manifest_all > /tmp/manifest_oob   || true
+          grep -v "$OOB" /tmp/manifest_all > /tmp/manifest_bench || true
+          a=$(wc -l < /tmp/manifest_all); o=$(wc -l < /tmp/manifest_oob)
+          b=$(wc -l < /tmp/manifest_bench)
+          [ $((o + b)) -eq "$a" ] || {
+            echo "FAIL: the manifest slices are $o + $b, not $a" >&2; exit 1; }
+          [ "$o" -gt 0 ] && [ "$b" -gt 0 ] || {
+            echo "FAIL: a slice is empty, so one of them verifies nothing" >&2
+            exit 1
+          }
+          echo "$a manifest entries, none pending: $b staged, $o verified apart"
+          df -h --output=source,size,used,avail,pcent / | sed 's/^/  df /'
           python3 bench/preflight_tar.py /tmp/manifest \
               <(unzstd -c evidence/raw_logs.tar.zst) \
               <(unzstd -c evidence/raw_logs_20260827.tar.zst) \
@@ -198,6 +224,24 @@ jobs:
               <(unzstd -c evidence/telemetry_20260828.tar.zst) \
               <(unzstd -c evidence/raw_logs_20260831.tar.zst) \
               <(unzstd -c evidence/telemetry_20260831.tar.zst)
+          # The fourth tranche, in a root of its own. Verified in full and
+          # then deleted with its archives, so the three that the
+          # re-derivation actually reads are unpacked into a runner that is
+          # holding nothing else.
+          mkdir -p /tmp/oob
+          tar --use-compress-program=unzstd -xf evidence/raw_logs_20260831.tar.zst -C /tmp/oob
+          tar --use-compress-program=unzstd -xf evidence/telemetry_20260831.tar.zst -C /tmp/oob
+          ( cd /tmp/oob && sha256sum -c /tmp/manifest_oob > /dev/null )
+          got=$(find /tmp/oob -name '*.log' | wc -l)
+          want=$(grep -c '\.log$' /tmp/manifest_oob)
+          [ "$got" -eq "$want" ] || {
+            echo "FAIL: $got logs in the fourth tranche, $want in its slice" >&2
+            exit 1
+          }
+          echo "$got logs verified out of band, and no log its slice does not name"
+          rm -rf /tmp/oob evidence/raw_logs_20260831.tar.zst \
+                 evidence/telemetry_20260831.tar.zst
+          df -h --output=avail / | tail -1 | sed 's/^/  df avail after the fourth tranche: /'
           # Three tranches, and no `if [ -f ]` around any of them: the step
           # above fails when one of the six archives is absent, so the guards
           # that used to be here could never be false, and they read as though
@@ -211,14 +255,12 @@ jobs:
           # third tranche: run W's 500 logs and its telemetry trace
           tar --use-compress-program=unzstd -xf evidence/raw_logs_20260828.tar.zst -C bench
           tar --use-compress-program=unzstd -xf evidence/telemetry_20260828.tar.zst -C bench
-          # fourth: run W2's 1200 logs and its trace
-          tar --use-compress-program=unzstd -xf evidence/raw_logs_20260831.tar.zst -C bench
-          tar --use-compress-program=unzstd -xf evidence/telemetry_20260831.tar.zst -C bench
-          cd bench && sha256sum -c /tmp/manifest
+          df -h --output=avail / | tail -1 | sed 's/^/  df avail after unpacking: /'
+          cd bench && sha256sum -c /tmp/manifest_bench
           # `sha256sum -c` proves every file the manifest names is intact. It
           # says nothing about a file the archive carries and the manifest does
           # not, so the count is compared rather than printed.
-          want=$(grep -c '\.log$' /tmp/manifest)
+          want=$(grep -c '\.log$' /tmp/manifest_bench)
           got=$(find . -name '*.log' | wc -l)
           [ "$want" -eq "$got" ] || {
             echo "FAIL: $got logs unpacked, $want in the manifest" >&2
@@ -263,12 +305,16 @@ jobs:
           # only trace would have been a smaller number in the line above,
           # which nothing read.
           #
-          # Two again: the fourth tranche is published, so run W2's twelve
-          # directories have archived logs like every other run. This was
-          # derived from the manifest's pending half for the one commit that
-          # had one.
+          # Two, plus whatever the out-of-band slice named: those logs are
+          # verified against the manifest and then deleted, because the
+          # re-derivation does not read them and a runner cannot hold all four
+          # tranches at once. Read out of the slice rather than written here,
+          # so changing which tranche is handled that way changes one line.
           got=$(printf '%s\n' "${skipped[@]:-}" | sort | tr '\n' ' ')
-          want="A_bcb5eeb64_legacy B_master_3737e4137 "
+          oob=$(cut -d' ' -f3- /tmp/manifest_oob | cut -d/ -f1 \
+                | grep -v '\.csv$' | sort -u | tr '\n' ' ')
+          want=$(printf '%s\n' A_bcb5eeb64_legacy B_master_3737e4137 $oob \
+                 | sort | tr '\n' ' ')
           [ "$got" = "$want" ] || {
             echo "FAIL: runs with no archived logs are now [$got], not [$want]" >&2
             exit 1

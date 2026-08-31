@@ -383,14 +383,12 @@ adversarial pass over this branch's own commits found:
   assertion notices: whole interval columns read as `.split("[")[0]` and
   stopped, a configuration column nobody read, the `100 %` on a total row. Each
   is compared against a value derived from the data, and the measurement says
-  so: on 2026-08-30 the probe perturbed all 2 373 numbers across the 124
-  parsed tables of commit `0334c60dac82` and caught every one, in eight shards
-  whose control passed before the work and again after it. This tree holds
-  **2 446** and no pass has yet covered that population; the difference is
-  run W2's tables. Their union is checked rather than assumed:
-  `analysis/table_coverage.py --aggregate` over the eight real
-  attestations reports **8 shards, one head, one checker, 2 373 locations
-  covered exactly once, 0 survived**, each attestation carrying the head, the
+  so: on 2026-09-01 the probe perturbed all 2 446 numbers across all 128
+  parsed tables of commit `ec2b28293c09` and caught every one, in eight shards whose
+  control passed before the work and again after it. Their union is checked
+  rather than assumed: `analysis/table_coverage.py --aggregate` over the eight
+  attestations, which are committed under
+  `v4_audit_2026_08_25/coverage_attestations/`, reports **8 shards, one head ec2b28293c09, one checker b42fa4c1ec41, 2 446 locations covered exactly once, 0 survived**, each attestation carrying the head, the
   checker hash, the population digest, both controls and every location as a
   character span. Before 2026-08-30 nothing showed the eight had all run, or
   were disjoint, or were the same tree, and `--shard=8/8` selected nothing and
@@ -401,46 +399,12 @@ adversarial pass over this branch's own commits found:
   measurement and **A19** the accounting; 88 code and 84 data and document perturbations
   remain permanent tests.
 
-  Parsing the rest of them, rather than reading them, found seventeen more
-  published statements wrong. The run registry had run C at three repeats
-  where its manifest says five and run D at thirteen arms where it has five;
-  it said "30 requests each" for runs A and B, which is B, while run A's two
-  speculative arms abort part way at twelve. Run E's row named three of the
-  four draft lengths it swept. A blank line had orphaned the tier registry's
-  **v4 audit** row from its header, so GitHub rendered the controlled tier as
-  literal pipes. A14 called two runs' recorded argv byte-identical when one of
-  the thirty tokens, the listening port, differs. A17's split table carried run
-  V's largest **mode** contrast in a column asking for its largest
-  length-matching shift, said the external drafter appears three times across
-  the thinking-off runs where it appears five, and quoted three coefficients
-  under a four-row table so that a reader lining them up read the wrong arm's.
-  A15's O2-against-T baseline row read +0.54 % where the pooled rates give
-  +0.53 %. `BENCHMARK_ENV.md` put run N in the `-fit on` group when N ran
-  pinned, named no run W, and counted seventeen telemetry traces where the tree
-  holds sixteen. The v4 file map said forty-one directories a line above a row
-  saying sixty-five, and the README's data map counted 62 v2 logs where the
-  three directories hold 61. Four more came out of the last batch: the v4
-  README's prompt-set table put a figure in a column headed "run M3" for an arm
-  run M3 does not carry, and the number it held was run L's thinking-**on**
-  figure; the thinking-off table beside it took one column from run M1's
-  aggregate and the other from run M3's pooled rate without saying so; B8's row
-  census still counted the tree as it stood before run W, 13 344 rows where it
-  now holds 18 344; run W's carryover table said the arms it does not name move
-  under 0.15 % where the largest moves 0.18 %; and the changelog credited run M
-  with a range that is run O's two metrics for the same arm.
-
-  Four more came out of the two tables nothing had ever read at all. The
-  status board still credited the BOS defect with +0.3 %, which is A2's
-  superseded figure, and A2's own entry still carried it too: the +0.3 % is
-  `33.7 / 33.6`, the ratio of two rounded request-means from A2's own table
-  on the master binary alone, and the `-1.2 % to +3.7 %` beside it is that
-  binary's six v1-tagged prompts, which drops `zh_hant` at -2.2 %. Pooled
-  over both binaries the difference is +0.2 %, and across the sixteen
-  (binary, prompt) cells the span is -2.2 % to +3.7 %. Four places reported
-  the thinking control as "50/50 in D, 0/50 in C" with nothing to say the 50
-  was per arm; over the whole run it is 250 of 250 against 0 of 650. And the
-  host table called the target model 22 GiB, in a cell arguing 29 GiB of free
-  disk was too little for it, where this repository's own listing gives 21G.
+  Parsing them rather than reading them found twenty-one more published
+  statements wrong, in the run registry, the tier registry, A14, A15, A17,
+  `BENCHMARK_ENV.md`, the v4 file map, B8's row census and the changelog.
+  Four of those came out of two tables nothing had ever read at all, one of
+  which had A2's superseded +0.3 % still standing in two places. Every one is
+  numbered, quoted and corrected in **A19**; they are not repeated here.
 
   One of the new checks read a file no clone has. The fitter placement A14
   cites lives in `v4_audit_2026_08_25/data/matrix_M.log`, and `.gitignore`
@@ -449,7 +413,7 @@ adversarial pass over this branch's own commits found:
   the checker inside a clean checkout of HEAD, and there it died 373 assertions
   early, so the probe's own baseline was broken and it was measuring nothing.
   The logs are committed now and a test refuses any path the checker opens that
-  a fresh clone would not have. A clean checkout runs all 3789 assertions and
+  a fresh clone would not have. A clean checkout runs all 3792 assertions and
   exits 0, which it did not before.
 
   Figures in those tables that are not re-derivable here say so rather than
@@ -501,30 +465,24 @@ changed. Nothing in it was rejected.
   unresolved path into the checkout; `stage_mtp_source.py` could stage two
   checkpoint generations at once. Thirteen new mutations and eleven new tests.
 
-- **The raw evidence is published**, so the extraction can be re-run instead of
-  **The published tag does not publish this tree.** `raw-evidence-2026-08-27`
+- **The published tag does not publish this tree.** `raw-evidence-2026-08-27`
   points at `de6f33bf`, this branch's base: the whole `v4_audit_2026_08_25`
   directory, the verifier and run W's data all postdate it, while its assets do
-  not: a third tranche was added to a mutable release whose source revision
-  stayed behind. The tag is deliberately not retargeted, because silently moving
-  a published tag destroys the one property a tag has; its notes now say where
-  it points and why. A final versioned release is cut at the exact
-  dataset-and-verifier commit instead, by
+  not, because a third tranche was added to a mutable release whose source
+  revision stayed behind. The tag is deliberately not retargeted, because
+  silently moving a published tag destroys the one property a tag has; its
+  notes say where it points and why. A final versioned release is cut at the
+  exact dataset-and-verifier commit instead, by
   [`v4_audit_2026_08_25/RELEASE_PROCEDURE.md`](v4_audit_2026_08_25/RELEASE_PROCEDURE.md),
   and `bench/check_release_binding.py` fails any `raw-evidence-*` tag whose
   commit does not carry the manifest, both registries and the three verifier
   scripts that `HEAD` does.
-
-  trusted. `raw-evidence-2026-08-27` carries `raw_logs.tar.zst` (702 logs,
-  4071 MB uncompressed) and `telemetry.tar.zst` (19 traces), plus a second
-  tranche `raw_logs_20260827.tar.zst` (618 logs, 2.9 GB, sha256 `d56a7f88…`)
-  for V2, V3 and T4, kept separate so the first archive's digest keeps meaning
-  what it meant, and a third, `raw_logs_20260828.tar.zst`, for run W. The
-  manifest is **3020 server logs and 23 telemetry traces**; the first 1820 of
-  those logs are packaged in **three tranches** published as six release
-  assets, and run W2's 1200 are hashed in the manifest but not yet packaged,
-  which the registry records as a pending fourth tranche. Every new entry was
-  verified against the manifest before publishing. These counts come from
+- **The raw evidence is published**, so the extraction can be re-run rather
+  than trusted. The manifest is **3020 server logs and 23 telemetry traces**,
+  packaged as four tranches and eight release assets: the original 702 logs,
+  618 for V2, V3 and T4, 500 for run W and 1200 for run W2. Each tranche is a
+  separate archive rather than one rebuilt file, so an earlier digest keeps
+  meaning what it meant. The counts come from
   `v4_audit_2026_08_25/RUN_REGISTRY.json`, which the checker compares against
   the data directories and the manifest.
   `python analysis/rederive_from_logs.py <bench-root>` checks every file
@@ -603,9 +561,9 @@ review:
 
 ```
 python analysis/rederive_from_logs.py bench   # raw logs -> four audit files
-python analysis/verify_claims.py          # 3789 assertions, re-derived
+python analysis/verify_claims.py          # 3792 assertions, re-derived
 python analysis/check_data_integrity.py   # structure of all 77 run directories
-python -m unittest discover tests         # 298 regressions for defects shipped here
+python -m unittest discover tests         # 304 regressions for defects shipped here
 python tests/mutate.py                    # break each fix, require its test to fail
 python tests/data_mutate.py               # perturb a measurement or a published
                                           #   figure, require the checker to fail

@@ -430,7 +430,9 @@ def _unwind_on_signal(stack: contextlib.ExitStack) -> None:
     2026-08-29 and 2026-08-30, had `/tmp` at 176 MB free on a 16 GB tmpfs.
 
     Raising SystemExit from the handler is what unwinds the stack. SIGKILL
-    cannot be caught, and `git worktree prune` above is the answer to that.
+    cannot be caught; since the copy became a clone rather than a `git
+    worktree` there is no registry entry to leave behind, only a directory
+    under the system temporary directory, which is what `mkdtemp` is for.
     """
     def _bail(signum, _frame):
         raise SystemExit(f"stopped by signal {signum}")
@@ -443,28 +445,38 @@ def _unwind_on_signal(stack: contextlib.ExitStack) -> None:
 
 
 def _worktree(stack: contextlib.ExitStack) -> pathlib.Path:
-    """A throwaway copy of the working tree, so probing never dirties the real one.
+    """A throwaway copy of the tree, so probing never dirties the real one.
 
     The probe writes a wrong number into a published document and restores it
     afterwards. A crash, a timeout or a Ctrl-C between those two writes would
-    leave the document wrong, so neither write touches the repository the user
-    is working in. `git worktree` shares `.git`, which the claim checker needs
-    for the provenance assertions, and uncommitted edits are copied across so
-    the probe measures what is on disk rather than what is committed.
+    leave the document wrong, so neither write touches the repository the
+    operator is working in.
+
+    A CLONE, not a `git worktree`. A worktree shares one `.git`, and the claim
+    checker's provenance assertions run `git` on every invocation, so sixteen
+    shards against one object store made three of those assertions flake on
+    2026-08-29 and the run had to be held to eight. `git clone --local`
+    hardlinks the object store, which costs nothing on disk and takes a second,
+    and gives each shard its own refs, index and locks. Twenty-eight shards
+    then fit on a thirty-two core host at 185 MB each, and the run that took
+    110 minutes takes about thirty.
+
+    Uncommitted edits are copied across, so the probe measures what is on disk
+    rather than what is committed.
     """
     _unwind_on_signal(stack)
-    # a registry entry whose directory is already gone, from a run that was
-    # killed before this handler existed
-    subprocess.run(["git", "worktree", "prune"], cwd=ROOT, capture_output=True)
-    dest = pathlib.Path(tempfile.mkdtemp(prefix="table-probe-"))/ "wt"
+    dest = pathlib.Path(tempfile.mkdtemp(prefix="table-probe-")) / "wt"
     stack.callback(shutil.rmtree, dest.parent, ignore_errors=True)
-    subprocess.run(["git", "worktree", "add", "--detach", "-q", str(dest), "HEAD"],
-                   cwd=ROOT, check=True, capture_output=True)
-    stack.callback(lambda: subprocess.run(
-        ["git", "worktree", "remove", "--force", str(dest)],
-        cwd=ROOT, capture_output=True))
+    head = _head_sha() or "HEAD"
+    subprocess.run(["git", "clone", "--local", "--quiet", str(ROOT), str(dest)],
+                   check=True, capture_output=True)
+    # detached at exactly the commit the launch tree is on, so `head_sha` in the
+    # attestation is the commit that was measured and not whatever branch the
+    # clone happened to check out
+    subprocess.run(["git", "-C", str(dest), "checkout", "--detach", "--quiet", head],
+                   check=True, capture_output=True)
     # tracked-and-modified plus untracked: this file itself is usually the
-    # second of those, and a worktree without it measures the wrong tree
+    # second of those, and a copy without it measures the wrong tree
     dirty = subprocess.run(["git", "diff", "--name-only", "HEAD"], cwd=ROOT,
                            check=True, capture_output=True, text=True).stdout.split()
     dirty += subprocess.run(["git", "ls-files", "--others", "--exclude-standard"],
@@ -586,7 +598,8 @@ def cell_population(tables_: list[dict]) -> int:
 # different hashes for a checker none of them used. The aggregator refused a
 # real run for that on 2026-09-01 and its diagnosis was right for the wrong
 # reason: the shards had measured with one checker and reported two.
-_CTRL = {"before": None, "after": None, "checker_sha": None, "head": None}
+_CTRL = {"before": None, "after": None, "checker_sha": None, "head": None,
+         "population_sha": None}
 
 
 def _head_sha(root: pathlib.Path | None = None) -> str:
@@ -655,6 +668,18 @@ def cell_probe(tables_: list[dict], shard: tuple[int, int] = (0, 1)) -> list[dic
         _CTRL["before"] = bool(base_fails) or base_rc != 0
         _CTRL["checker_sha"] = _sha_file(wt / "analysis" / "verify_claims.py")
         _CTRL["head"] = _head_sha(wt)
+        # Computed IN the worktree, by the worktree's own copy of this module,
+        # for the reason the two above are: `census()` reads `DOCS` under this
+        # module's `ROOT`, which is the tree the shard was launched from. On
+        # 2026-09-01 that tree was edited while eight shards ran and they
+        # reported two population digests for one set of documents none of them
+        # had seen change. `head_sha` and `checker_sha256` had been moved to the
+        # worktree an hour earlier and this one was missed, which is why the
+        # aggregator refused a second consecutive run.
+        _pop = subprocess.run(
+            [sys.executable, "analysis/table_coverage.py", "--population-sha"],
+            cwd=wt, capture_output=True, text=True, timeout=600)
+        _CTRL["population_sha"] = _pop.stdout.strip() if _pop.returncode == 0 else ""
         print(f"shard {shard[0]}/{shard[1]}: {len(picked)} tables, baseline "
               f"{base_n} assertions, {len(base_fails)} failing, exit {base_rc}",
               file=sys.stderr, flush=True)
@@ -937,11 +962,17 @@ def main() -> None:
             shard = (i, n)
         else:
             argv.append(a)
+    if "--population-sha" in argv:
+        # one line, so a shard can ask the worktree what its own documents hash
+        # to without importing this module across trees
+        print(_population_sha(census()["covered"]))
+        return
     if argv and argv[0] == "--aggregate":
         sys.exit(aggregate(argv[1:]))
     unknown = [a for a in argv
                if a not in ("--json", "--probe", "--covered", "--prose",
-                            "--every-cell", "--count", "--aggregate")]
+                            "--every-cell", "--count", "--aggregate",
+                            "--population-sha")]
     if unknown:
         sys.exit(f"unrecognised option(s): {' '.join(unknown)}")
     if "--every-cell" in argv:
@@ -964,7 +995,8 @@ def main() -> None:
                 # the launch tree only when no shard recorded one
                 "head_sha": _CTRL["head"] or _head_sha(),
                 "checker_sha256": _CTRL["checker_sha"] or _checker_sha(),
-                "population_sha256": _population_sha(picked),
+                "population_sha256": (_CTRL["population_sha"]
+                                      or _population_sha(picked)),
                 "population_size": cell_population(picked),
                 "shard": list(shard),
                 "control_before": "pass" if not _CTRL["before"] else "FAIL",

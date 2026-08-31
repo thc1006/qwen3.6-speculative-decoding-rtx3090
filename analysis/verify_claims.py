@@ -3813,8 +3813,14 @@ for _f in _armruns:
             if _k in _r and _k in _t and _r[_k] != _t[_k]:
                 _disagree.append(f"{_f.parent.name}/{_f.name}: {_k} "
                                  f"{_r[_k]!r} at the top level, {_t[_k]!r} in timings")
-chk("arm-run files scanned", len(_armruns) > 1200, True)
-chk("request rows scanned", _rows_seen > 13000, True)
+# EXACT. `> 1200` beside a tree holding 3005, and `> 13000` beside 30 344, are
+# the ratchet this file removed from the census and from the attested-run count
+# and left standing here: 1805 arm-runs and 17 344 rows could have gone without
+# a word. B8's own totals pin the same two numbers eighty lines below, so this
+# was redundant as well as loose, and redundant-and-loose is how a guard ends
+# up being the only one left.
+chk("arm-run files scanned", len(_armruns), 3005)
+chk("request rows scanned", _rows_seen, 30344)
 chk("the two copies of every measurement agree", _disagree[:3], [])
 
 # B8: `predicted_per_second` is llama.cpp's own field and it reports a rate over
@@ -4364,7 +4370,14 @@ chk("v4 README states the run-directory count",
 chk("every run directory carries a manifest",
     sorted(d.name for d in _dirs if not (d / "manifest.json").is_file()), [])
 _attested = [d for d in _dirs if (d / "RUN_COMPLETE.json").is_file()]
-chk("attested runs carry the completeness marker", len(_attested) >= 3, True)
+# EXACT, not a floor. `>= 3` was written when three runs had the marker and it
+# stayed while forty-eight acquired one, so forty-five of them could have lost
+# it without a word. That is the ratchet this file removed from the census
+# ("EXACT, not 'may only rise'") left standing beside it, and the CI job that
+# aggregates these runs held the same shape at `>= 36`.
+chk("attested runs carry the completeness marker", len(_attested), 48)
+chk("and the ones without it are the legacy runs, named",
+    len(_dirs) - len(_attested), 29)
 # `paired_blocks.py` writes its output INTO the run directory, so an
 # exploratory invocation with different options silently replaces committed
 # data. Two of these were committed at --iters=2000 from a run I made while
@@ -7869,6 +7882,41 @@ chk("W2 excludes a 2.4 pp predecessor effect on it and W does not, "
 # the outcome the plan named in advance and did not expect
 _w2zero = sorted(a for a, v in _w2rep["across_sessions_matched"].items()
                  if v["lo"] > 0 or v["hi"] < 0)
+# `bench/check_telemetry_cover.py` was written for run W, was broken for its
+# whole life -- it could not parse nvidia-smi's compact `ts` and so failed on
+# every trace this repository holds -- and no workflow has ever run it. Fixing
+# it left a verifier nothing executes, which is the same as not having one.
+# The claims job runs this file, so the check runs here, on the two runs whose
+# telemetry coverage is published.
+import datetime as _dt                                              # noqa: E402
+_TEL_FMT = "%Y-%m-%dT%H:%M:%S%z"
+_tel_cover = []
+for _tl, _tstamp, _tdirs in (("W", "20260828_104222", _W),
+                             ("W2", "20260830_220554", _W2)):
+    # boundaries from the DATA: the first session's `created` and the last
+    # session's `completed_at`. File mtimes say when the files were copied into
+    # the repository, and reading them nearly published "the trace ends 76
+    # minutes before the run did" about a trace that ends 2.6 seconds after it.
+    _tt0 = min(_dt.datetime.strptime(
+        json.loads((_d / "manifest.json").read_text(encoding="utf-8"))["created"],
+        _TEL_FMT) for _d in _tdirs).timestamp()
+    _tt1 = max(_dt.datetime.strptime(
+        json.loads((_d / "RUN_COMPLETE.json").read_text(encoding="utf-8"))["completed_at"],
+        _TEL_FMT) for _d in _tdirs).timestamp()
+    _tr = _sp.run(
+        [sys.executable,
+         str(pathlib.Path(__file__).resolve().parents[1] / "bench"
+             / "check_telemetry_cover.py"),
+         str(_DATA / f"gpu_telemetry_{_tl}_{_tstamp}.csv"),
+         f"{_tt0:.0f}", f"{_tt1:.0f}", "5"],
+        capture_output=True, text=True)
+    _tel_cover.append((_tl, _tr.returncode, (_tr.stdout + _tr.stderr).strip()[:60]))
+chk("telemetry: the cover check passes for both Williams runs",
+    [(_x[0], _x[1]) for _x in _tel_cover], [("W", 0), ("W2", 0)])
+chk("telemetry: and it says so rather than exiting quietly",
+    [_x[0] for _x in _tel_cover
+     if not _x[2].startswith("telemetry covers the run")], [])
+
 chk("W2: which arms' matched intervals exclude zero",
     _w2zero, ["spec-draft-n8", "spec-mtp-n2-cap"])
 chk("W2: and neither of them is the estimand the plan is about",
@@ -9305,8 +9353,11 @@ chk("coverage: every markdown file is either censused or excluded with a reason"
     sorted(set(_tcov.DOCS) | set(_tcov.EXCLUDED)))
 chk("coverage: and no exclusion is left unexplained",
     [_k for _k, _v in _tcov.EXCLUDED.items() if not _v.strip()], [])
+# `>= 57` while 128 are parsed: seventy-one tables could have stopped being
+# read and this would have said so was fine. The exact count is asserted twelve
+# lines above; this restatement is now the same number, not a floor under it.
 chk("coverage: parsed cell by cell, restated after the exclusions",
-    _cov["parsed"] >= 57, True)
+    _cov["parsed"], _cov["carrying_values"])
 
 # A19 publishes the census, so the census has to be what A19 says. The probe
 # figures beside them - 67 unguarded of 80, 44 of 44 parsed caught, 40 of 40
@@ -9336,7 +9387,7 @@ _WORDS = {20: "Twenty", 21: "Twenty-one", 22: "Twenty-two",
           41: "Forty-one", 42: "Forty-two", 43: "Forty-three",
           44: "Forty-four", 45: "Forty-five", 46: "Forty-six",
           47: "Forty-seven", 48: "Forty-eight", 49: "Forty-nine",
-          50: "Fifty"}
+          50: "Fifty", 51: "Fifty-one", 52: "Fifty-two"}
 chk("ERRATA A19: the corrections are numbered from one, without a gap",
     [int(_x) for _x in _A19_LIST], list(range(1, len(_A19_LIST) + 1)))
 chk("ERRATA A19: and the count it states is the length of that list",
@@ -9438,9 +9489,9 @@ chk("prose probe: records whose value repeats on its own line",
 
 _pcov = _tcov.prose_census()
 chk("coverage: decimal numbers in prose, outside every table",
-    _pcov["prose_numbers"], 1352)
+    _pcov["prose_numbers"], 1338)
 chk("coverage: those that are not a literal in this file",
-    _pcov["not_a_literal"], 704)
+    _pcov["not_a_literal"], 698)
 # tested on a supplied source, not by searching this file for a phrase: the
 # first version of this check searched for a label's own words, and the search
 # string was itself a literal in the argument position, so it always found it.

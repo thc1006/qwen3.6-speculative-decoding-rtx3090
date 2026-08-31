@@ -2296,20 +2296,32 @@ class AKilledProbeMustNotLeaveItsWorktree(unittest.TestCase):
             for s, h in before.items():
                 signal.signal(s, h)
 
-    def test_the_worktree_helper_installs_it_and_prunes_first(self):
+    def test_the_copy_helper_installs_the_handler_before_it_copies(self):
+        """The copy is a CLONE now, not a `git worktree`, so there is no
+        registry to prune: a killed run leaves a directory under the system
+        temporary directory and nothing else. What still has to hold is the
+        order -- the signal handler before anything exists to clean up -- and
+        that the removal is registered on the stack rather than written at the
+        end of the function, where a raise would skip it."""
         src = (self.ROOT / "analysis" / "table_coverage.py").read_text(
             encoding="utf-8")
         body = ast.get_source_segment(src, next(
             n for n in ast.walk(ast.parse(src))
             if isinstance(n, ast.FunctionDef) and n.name == "_worktree")) or ""
         self.assertIn("_unwind_on_signal(stack)", body,
-                      "a probe stopped with SIGTERM leaks its worktree")
-        # SIGKILL cannot be caught, so the registry is cleared on the way in
-        self.assertIn('"worktree", "prune"', body,
-                      "a worktree left by a SIGKILLed run stays registered")
+                      "a probe stopped with SIGTERM leaks its copy")
+        self.assertIn("stack.callback(shutil.rmtree", body,
+                      "the copy is not removed by the stack, so a raise keeps it")
+        self.assertIn('"clone", "--local"', body)
+        self.assertNotIn('"worktree", "add"', body,
+                         "back to a shared .git, which is what held the run to "
+                         "eight shards")
         self.assertLess(body.index("_unwind_on_signal(stack)"),
-                        body.index('"worktree", "add"'),
-                        "the handler must be installed before the worktree exists")
+                        body.index("mkdtemp"),
+                        "the handler must be installed before the copy exists")
+        self.assertLess(body.index("stack.callback(shutil.rmtree"),
+                        body.index('"clone", "--local"'),
+                        "the removal must be registered before the clone runs")
 
 
 class AProbeMustCheckItsControlAtBothEnds(unittest.TestCase):
@@ -4845,6 +4857,80 @@ class ARetractedSentenceMustNotSurviveOutsideItsRetraction(unittest.TestCase):
                           "RETEST_TODO.md"])
 
 
+class TheWorkflowsMustDeclareTheJobsTheySayTheyHave(unittest.TestCase):
+    """`audit.yml` opens with "Five required jobs" and nothing checked that.
+
+    Every other list in this repository that says what must exist is guarded --
+    the analysers that glob `matrix_W_*`, the paths the checker opens, the
+    documents the census covers. The set of CI jobs was not, so deleting one,
+    or renaming it out of the branch protection's required list, would have
+    been invisible here.
+
+    Parsed by indentation rather than with PyYAML: the unit job installs
+    nothing, so a test that imports yaml passes locally and errors in CI, which
+    is the failure mode this class exists to make impossible for jobs.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    def _jobs(self, wf):
+        text = (self.ROOT / ".github" / "workflows" / wf).read_text(
+            encoding="utf-8").splitlines()
+        i = next(k for k, l in enumerate(text) if l.rstrip() == "jobs:")
+        out, cur = {}, None
+        for l in text[i + 1:]:
+            if l and not l.startswith(" "):
+                break
+            if l.startswith("  ") and not l.startswith("   ") and l.rstrip().endswith(":"):
+                cur = l.strip().rstrip(":")
+                out[cur] = None
+            elif cur and l.startswith("    name:"):
+                if out[cur] is None:
+                    out[cur] = l.split("name:", 1)[1].strip().strip("'\"")
+        return out
+
+    def test_audit_declares_exactly_five_named_jobs(self):
+        self.assertEqual(
+            self._jobs("audit.yml"),
+            {"audit-static": "static",
+             "audit-unit": "unit and mutation",
+             "audit-data-integrity": "data integrity",
+             "audit-claims": "claims",
+             "audit-charts": "charts"})
+
+    def test_the_header_counts_them(self):
+        head = (self.ROOT / ".github" / "workflows" / "audit.yml").read_text(
+            encoding="utf-8")[:400]
+        self.assertIn("Five required jobs", head)
+        self.assertEqual(len(self._jobs("audit.yml")), 5)
+
+    def test_evidence_declares_exactly_one(self):
+        self.assertEqual(
+            list(self._jobs("evidence.yml")), ["rederive"])
+
+    def test_each_job_still_runs_the_thing_it_is_named_for(self):
+        wf = (self.ROOT / ".github" / "workflows" / "audit.yml").read_text(
+            encoding="utf-8")
+        for cmd in ("python -m unittest discover -s tests",
+                    "python tests/mutate.py",
+                    "python tests/data_mutate.py",
+                    "python analysis/verify_claims.py",
+                    "python analysis/check_data_integrity.py",
+                    "python analysis/check_links.py",
+                    "python analysis/plot_v4_runs.py --check",
+                    "pyflakes $files",
+                    "shellcheck --severity=style $files"):
+            self.assertIn(cmd, wf, f"no job runs {cmd!r} any more")
+
+    def test_every_job_has_a_timeout(self):
+        for wf in ("audit.yml", "evidence.yml"):
+            text = (self.ROOT / ".github" / "workflows" / wf).read_text(
+                encoding="utf-8")
+            self.assertEqual(
+                len(self._jobs(wf)), text.count("timeout-minutes:"),
+                f"{wf}: a job without a timeout costs the default six hours")
+
+
 class AnAttestationMustDescribeTheTreeThatMeasured(unittest.TestCase):
     """The cell probe's attestation carried two fields that could not be false.
 
@@ -4881,9 +4967,38 @@ class AnAttestationMustDescribeTheTreeThatMeasured(unittest.TestCase):
                       "cell_probe does not record its closing control")
 
     def test_it_records_the_worktree_digests_not_the_launch_tree(self):
+        """All THREE of them. Two were moved to the worktree and the population
+        digest was missed, so the aggregator refused a second consecutive run
+        for the same reason as the first. A test that named two of three is how
+        the third stayed wrong for an hour."""
         body = self._fn("cell_probe")
         self.assertIn('_sha_file(wt / "analysis" / "verify_claims.py")', body)
         self.assertIn("_head_sha(wt)", body)
+        self.assertIn("cwd=wt", body)
+        self.assertIn("--population-sha", body)
+
+    def test_every_field_the_aggregator_pins_comes_from_the_worktree(self):
+        """By name, off the aggregator's own list, so a fourth pinned field
+        cannot be added without being sourced."""
+        src = self._src()
+        agg = self._fn("aggregate")
+        i = agg.index('for field in (')
+        pinned = [x.strip().strip('",\'')
+                  for x in agg[i + len('for field in ('):agg.index(')', i)].split(",")
+                  if x.strip()]
+        self.assertEqual(sorted(pinned),
+                         ["checker_sha256", "head_sha", "population_sha256"])
+        probe = self._fn("cell_probe")
+        for key in ("checker_sha", "head", "population_sha"):
+            self.assertIn(f'_CTRL["{key}"] =', probe,
+                          f"{key} is not recorded from the worktree")
+        for field, expr in (("head_sha", '_CTRL["head"]'),
+                            ("checker_sha256", '_CTRL["checker_sha"]'),
+                            ("population_sha256", '_CTRL["population_sha"]')):
+            j = src.index(f'"{field}":')
+            self.assertIn(expr, src[j:j + 160],
+                          f"the attestation's {field} does not prefer the "
+                          f"shard's own record")
 
     def test_the_attestation_prefers_what_the_shard_recorded(self):
         """Scoped to `main`, where the attestation is written. Searching the
@@ -4903,7 +5018,6 @@ class AnAttestationMustDescribeTheTreeThatMeasured(unittest.TestCase):
         self.assertEqual(render(None), "pass")
 
     def test_the_aggregator_still_requires_both_controls(self):
-        src = self._src()
         agg = self._fn("aggregate")
         self.assertIn('for k in ("control_before", "control_after")', agg)
 
@@ -4936,7 +5050,6 @@ class ATableCarriedTwiceMustBeComparedWhole(unittest.TestCase):
     def test_both_copies_carry_the_same_number_of_columns(self):
         """If they ever differ, the whole-row comparison would raise rather
         than fail, and a raise is not a finding anyone reads."""
-        import re
         er = (self.ROOT / "ERRATA.md").read_text(encoding="utf-8").splitlines()
         pr = (self.ROOT / "PULL_REQUEST.md").read_text(encoding="utf-8").splitlines()
         erh = next(l for l in er if l.startswith("| arm | V2, 8 sessions"))

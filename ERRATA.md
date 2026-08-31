@@ -2024,13 +2024,10 @@ perturbed **2 252** numbers across the **119** tables parsed at the time and
 **33** of them changed nothing. The runs it took are the point: the population
 grows as the coverage does, so a clean run is only clean for the tree it ran
 on: parsing the last six tables grew it, and so did run W2's three tables and
-the column it added to A17's. The population on this tree is **2 446** numbers
-across all **128** tables, **and no pass has yet covered that population**.
-The last complete pass covered **2 373** numbers across **124** tables at
-commit `0334c60dac82`, one at a time, and **every one was caught**, in eight
-shards whose control passed before the work and again after it. Sixty-six
-numbers of this tree are therefore covered by nothing, which is stated here
-rather than left for a reader to derive by subtracting two figures. The eight shard
+the column it added to A17's. On 2026-09-01, at commit
+`ec2b28293c09`, all **2 446** numbers across all **128** tables were perturbed one
+at a time and **every one was caught**, in eight shards whose control passed
+before the work and again after it. The eight shard
 outputs were not attested as a set until 2026-08-30: nothing showed that all
 eight ran, that their locations were disjoint, that the union was the whole
 population, or that they shared a head and a checker -- and `--shard=8/8`
@@ -2039,12 +2036,23 @@ selected no tables, reported "0 numbers perturbed, 0 survived" and exited 0.
 each carry the head, the checker hash, the population digest, both control
 readings and every location as a character span.
 
-That check had only ever been run against fixtures. Run against the eight real
-outputs it reports: **8 shards, one head `0334c60dac82`, one checker
-`ccf9d92dd4d7`, 2 373 locations covered exactly once, 0 survived.** Covered
-*exactly once* is the part the earlier sentence could not say: no location
-probed twice, none missed, and every shard on the same tree with the same
-checker.
+That check had only ever been run against fixtures until 2026-09-01, when it
+refused a real set twice. Once for twelve survivors, which is item 51 below.
+Once because the eight shards did not report one `checker_sha256`, which was
+this operator editing the tree the shards were launched from while they ran:
+the attestation took its digests from that tree rather than from the worktree
+each shard measured in, so shards that finished at different moments described
+a checker none of them had used. It takes them from the worktree now, at the
+moment the opening control passes.
+
+Over the eight attestations committed under
+[`coverage_attestations/`](v4_audit_2026_08_25/coverage_attestations) it
+reports: **8 shards, one head `ec2b28293c09`, one checker `b42fa4c1ec41`, 2 446 locations covered exactly once, 0 survived** Covered *exactly once* is the part the earlier sentence
+could not say: no location probed twice, none missed, and every shard on the
+same tree with the same checker. The attestations are in the repository, so
+that sentence is a reading of files rather than a memory of a run, and
+`analysis/verify_claims.py` compares it with the aggregator's own output
+character for character.
 
 The measurement was wrong four times before it measured anything, and all
 four are recorded in the file. The first used the claim checker's exit status,
@@ -2071,8 +2079,8 @@ because passing once does not bound half an hour of running.
 return rows, and assert nothing about the column you changed, which is exactly
 what the W three-design table did, in two documents, until this pass.
 
-**The larger half is not tables.** **1 352** decimal numbers sit in prose,
-outside every table; **704** of them do not appear as a string literal anywhere
+**The larger half is not tables.** **1 338** decimal numbers sit in prose,
+outside every table; **698** of them do not appear as a string literal anywhere
 in the checker, counting only literals that are not assertion labels; a label
 is prose about a check and not a check, and leaving them in made the count move
 whenever an assertion was reworded. That criterion is an upper bound on the gap
@@ -2095,7 +2103,7 @@ the BOS-override table in the two documents that publish it, run I's
 acceptance under batching, the README's length-matched comparison, and last
 the six named above.
 
-**Fifty published statements were wrong and are corrected.** They are
+**Fifty-two published statements were wrong and are corrected.** They are
 listed rather than summarised, because a count of corrections is itself a
 number and this file exists because of unchecked numbers.
 
@@ -2292,6 +2300,21 @@ number and this file exists because of unchecked numbers.
     traces**, and its compact-schema row counted eleven files. Seventeen and
     twelve. The trace W2 wrote is the seventeenth, and A17's "a seventeenth
     session, run V2, was meant to be traced and is not" is now the eighteenth.
+51. **A17's four-design table gained a W2 column in both documents that carry
+    it, and only one copy was wired to an assertion.** Twelve numbers in the
+    pull request body could be changed with the claims job, 298 regressions, 88
+    code mutations and 84 data perturbations all passing; the per-number probe
+    is what found them. This is item 19 in the same table, and the cause was
+    the same shape one level up: the cross-document comparison was over
+    `_row[:3]`, a PREFIX, so it stopped covering the table the moment the table
+    grew. It compares whole rows now, and the column is checked against W2's
+    own arm-runs.
+52. **The paragraph above said sixty-six numbers of this tree were covered by
+    nothing**, on the same line as the words "rather than left for a reader to
+    derive by subtracting two figures". The subtraction gives 73. The figure
+    was right when the population was 2 439 and was not moved when three
+    tables and a column were added. Nothing has to state it now: the pass
+    covers all 2 446.
 
 A test now refuses any table row with no header above it, and another refuses
 any path the checker opens that a fresh clone would not have.
