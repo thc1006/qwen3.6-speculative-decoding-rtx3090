@@ -12,7 +12,7 @@ publication point with its own data set.
 is now measured rather than assumed.** `analysis/table_coverage.py` counts the
 tables in the nine published documents; `--probe` writes a wrong number into
 one cell of each in turn and asks whether an assertion that was passing now
-fails. Of 136 tables, 124 carry measurements and all 124 are parsed cell by cell.
+fails. Of 139 tables, 127 carry measurements and all 127 are parsed cell by cell.
 When 80 were still unparsed, perturbing one cell of each left **67 that accept
 a wrong number and nothing notices**; all 80 of those are parsed now.
 Full accounting in [`ERRATA.md`](ERRATA.md) A19.
@@ -25,7 +25,7 @@ nobody read, the `100 %` on a total row. Guarding those grew the parsed set and
 the probe over the grown set found 33 more; the run after that perturbed all
 2 252 numbers in the 119 tables parsed at the time and none survived, and
 parsing the last six grew the population again. The run on 2026-08-30 perturbs
-all 2 373 numbers across all 124 tables and catches every one, in eight shards
+all 2 415 numbers across all 127 tables and catches every one, in eight shards
 whose control passed before the work and again after it. That is
 what the W three-design table had done, in both documents that carry it: only
 the W column was read, so V2's `+12.03` and V3's `+12.17`, two thirds of a
@@ -109,8 +109,8 @@ the other box's GPU and CUDA cannot be recovered from anything committed
 here. Each is marked; the alternative was to check a literal against itself
 and call it verified.
 
-Eighty tables are parsed that were not, eight of them census corrections
-and seventy-two new readers: every cell of run C's thirteen arms, run O's
+Eighty-three tables are parsed that were not, eight of them census corrections
+and seventy-five new readers: every cell of run C's thirteen arms, run O's
 head-to-head, the v1 representative table including both of its range rows,
 runs J, K, L and N, the V2 and V3 columns of the W table, both run registries,
 A4's log reconstruction, A14's M1-against-Q comparison, A16's six invocations,
@@ -176,9 +176,10 @@ produced it.
 measurements.** `README.md`'s `| Path | Contents |` has no numeric cell at all
 and was counted because the classification asked whether a parser reads a table
 before asking whether the table has a value in it, and a parser does read that
-one, for its paths. The population is decided first now: **124** tables carry
-measurements, not 125. The number of numbers in it does not move, still 2 373,
-which is the check that the table really carried none.
+one, for its paths. The population is decided first now: on the tree that pass
+ran on **124** tables carried measurements, not 125, and the number of numbers
+in it did not move, still the 2 373 it then held, which is the check that the
+table really carried none.
 
 **An extractor could hang with nothing to stop it.** The timeout that bounds it
 shipped without a test, so removing it again would have cost nothing; a test
@@ -294,14 +295,33 @@ with both earlier designs to a tenth of a point.
 V3's and does not overlap the crossover's [+4.86, +6.99] at all. The two
 within-invocation designs agree; the between-invocation one does not.
 
-**It is not first-order carryover, which is the point of the design.** With
-every arm preceded by every other exactly once, the contrast between running
-after a capped neighbour and after a free-running one is −1.20 % [−2.61, +0.22]
-for that arm (the largest of any by six times, pointing the way A17 guessed,
-negative in four sessions of five) and **no arm's interval excludes zero**. At
-five sessions that is a null at this power, reported with the interval; but an
-effect large enough to explain a 2.4 pp gap would sit far outside it. The one
-candidate this repository had been able to name is removed.
+**The design can ask about first-order carryover; five sessions could not
+answer.** With every arm preceded by every other exactly once, the contrast
+between running after a capped neighbour and after a free-running one is
+−1.20 % [−2.61, +0.22] for that arm (the largest of any by six times, pointing
+the way A17 guessed, negative in four sessions of five) and **no arm's interval
+excludes zero**. At five sessions that is a null at this power, reported with
+the interval. An earlier version of this entry added that an effect large
+enough to explain a 2.4 pp gap "would sit far outside it": −2.4 is inside
+[−2.61, +0.22], so it said the opposite of what the interval supports, and the
+two are different estimands besides. Run W2 below is what removes the
+candidate; this entry claimed it two days early ([A19](ERRATA.md#a19-how-much-of-what-this-repository-publishes-would-notice-if-it-were-wrong) item 46).
+
+**Run W2 answers it: twelve sessions, and the plan committed before the driver
+ran.** 2026-08-30 to 2026-08-31, the same 10 x 10 Williams square, 1200 of 1200
+arm-runs, none failed, 17.07 h of continuous telemetry, a separate invocation
+under its own `BENCH_RUN_LABEL` so nothing pools it with W. The thermal
+slowdown flags appear on 13 and 10 of its 10 271 loaded samples, the same order
+as W's, and the card stays between 45 and 73 °C. The pre-registered
+matched contrast for `spec-dflash-n2` is **−0.14 % [−0.68, +0.41]** against W's
+−1.05 % [−2.97, +0.86], with a session SD of 0.858 where W's five sessions had
+implied 1.543. Tested in the units the 2.4 pp gap is quoted in, the predecessor
+moves A17's published `shift_pp` by **+0.49 pp [−0.80, +1.77]** where W's five
+sessions gave +1.52 pp [−0.98, +4.02]: W's interval contains 2.4 and W2's does
+not. Two arms of ten have intervals excluding zero, `spec-mtp-n2-cap` at
++0.11 % [+0.00, +0.23] and `spec-draft-n8` at +0.06 % [+0.01, +0.10], both
+under an eighth of a per cent and both reported because the plan named that
+outcome in advance. What is left is A16, unchanged.
 
 What is left is A16, and W reproduces it on the largest dataset yet: mean
 within-session CV of **1.69 %** for `spec-dflash-n2` against **0.31 %** for no

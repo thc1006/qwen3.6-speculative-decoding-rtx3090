@@ -428,7 +428,7 @@ the repository's runs, including every run behind the headline, actually used.
 | A, B, C, D, E, H, I2, N | pinned `999` | 16384 | — | placement fixed by hand |
 | J, J2 | unset (`-fit on`) | 16384 | default 1024 | the BF16 DFlash drafter only loads with `-ngl` unset; `common_fit_params` aborts when it is pinned |
 | K, K1, L | unset (`-fit on`) | 8192 | 2048 | the default 1024 MiB margin is where the drafter has to live, and it does not fit — see the run K section |
-| M1, M2, M3, M4, O, **O2**, O3, P, Q, R, T, T3, **T4**, U1, U2, U3, U4, U5, U6, V, **V2**, **V3**, **W** | unset (`-fit on`) | 8192 | 3072 | 2048 still leaves the DFlash arm inside 630 MiB of headroom; 3072 is where every arm of the nine-method matrix starts reliably |
+| M1, M2, M3, M4, O, **O2**, O3, P, Q, R, T, T3, **T4**, U1, U2, U3, U4, U5, U6, V, **V2**, **V3**, **W**, **W2** | unset (`-fit on`) | 8192 | 3072 | 2048 still leaves the DFlash arm inside 630 MiB of headroom; 3072 is where every arm of the nine-method matrix starts reliably |
 
 That last row is why runs K1 and L are excluded from cross-run comparisons of
 `spec-dflash-n2`: they read about +21 % at `--fit-target 2048` where the 3072
@@ -444,8 +444,8 @@ table; every matrix carries its own baseline for that reason.
 - continuous `nvidia-smi` trace including the throttle-reason bitmask for the
   whole of every session, one file per session. **Three schemas were used, and
   `bench/gpu_telemetry.sh` carried only one of them until 2026-08-26** — it
-  produced one of the sixteen traces the repository carries; the other two
-  forms lived inline in driver scripts. A seventeenth session, run V2, was
+  produced one of the seventeen traces the repository carries; the other two
+  forms lived inline in driver scripts. An eighteenth session, run V2, was
   meant to be traced and is not: its sampler exited at start-up and wrote no
   file at all ([A17](ERRATA.md#a17-the-thinking-off-comparisons-are-not-comparisons-of-the-same-amount-of-work)). All three are in that file now, selected
   by its first argument, so any committed trace can be reproduced:
@@ -453,7 +453,7 @@ table; every matrix carries its own baseline for that reason.
   | schema | fields | interval | traces | what reads it |
   |---|---:|---:|---:|---|
   | `full` | 19 | 5 s | 1 | ERRATA C4b's thermal table |
-  | `compact` | 9 | 5 s | 11 | runs I/J through O2, and run T — including A16's thermal comparison |
+  | `compact` | 9 | 5 s | 12 | runs I/J through O2, run T, and the two Williams runs W and W2 — including A16's thermal comparison |
   | `raw` | 10 | 1 s | 4 | runs T3, O3 and later |
 
   The trace belonging to a run shares its timestamp:

@@ -1177,11 +1177,11 @@ on `bcb5eeb64` on the same host.
 ## Files
 
 This table listed two of the run directories and the harness. There are
-65, of which 62 are runs and three are start-up checks.
+77, of which 74 are runs and three are start-up checks.
 
 | Path | Contents |
 |---|---|
-| `data/<run>/` | one directory per run — `manifest.json`, one `<arm>__rep<n>.json` per arm-run, and `RUN_COMPLETE.json` on the runs the harness validated. 65 directories, 1805 arm-runs. |
+| `data/<run>/` | one directory per run — `manifest.json`, one `<arm>__rep<n>.json` per arm-run, and `RUN_COMPLETE.json` on the runs the harness validated. 77 directories, 3005 arm-runs. |
 | `data/matrix_O2_latin_*/`, `data/matrix_O3_latin_*/` | the balanced nine-arm matrix the README leads with, and its five-hours-later replication on the same stock binary — 810 of 810 request-pairs byte-identical. Each carries its own `paired_blocks.json` |
 | `data/matrix_T_timers_*/`, `data/matrix_T3_timers_*/` | the two source-timed checkpoint runs behind [ERRATA A12](../ERRATA.md#a12-what-the-checkpoint-path-costs-measured-with-timers-in-the-source) and [A16](../ERRATA.md#a16-two-runs-identical-in-every-recorded-respect-and-byte-identical-in-output-differ-by-34--on-one-arm), with `checkpoint_timers.json` and the SHA-256 of every log they were extracted from |
 | `data/matrix_U*_dflashvar_*/` | six independent invocations of one configuration, the designed test behind [A16](../ERRATA.md#a16-two-runs-identical-in-every-recorded-respect-and-byte-identical-in-output-differ-by-34--on-one-arm) |
@@ -1224,7 +1224,12 @@ logs, with `telemetry_20260828.tar.zst` at **58 905 bytes**, sha256
 `72e331bf0cbfaaee73619acf320523598cab4a46b7a7daa51fabbd6e2c455bf3`, and all
 **501** of its entries were verified against the unpacked archive before
 publishing, which is the check that was missing when the manifest named them
-one commit early.
+one commit early. Run W2's **1200 logs and 1 trace** are hashed into
+`EVIDENCE_MANIFEST.sha256` and are **not yet packaged**: the manifest ties the
+committed JSON to the files it came from, and cutting the fourth tranche is a
+release step, done in [`RELEASE_PROCEDURE.md`](RELEASE_PROCEDURE.md).
+`RUN_REGISTRY.json` records it as `tranches_pending: 1` rather than leaving the
+gap to be inferred from a count.
 
 Committed hashes tie the derived JSON
 to files nobody else could see, which is a weaker claim than it sounds; the

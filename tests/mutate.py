@@ -447,6 +447,76 @@ MUTATIONS = [
      'bash "$TELE_SH" "$BENCH/gpu_telemetry_V2.csv" &',
      "tests.test_harness_invariants.ARunScriptMustSetEveryFieldItClaimsToReproduce"),
 
+    # --- W2's pre-registered boundary sensitivity -------------------------
+    # The plan promises a figure computed including row boundaries. Producing
+    # it needed a flag through two functions that the primary estimand also
+    # uses, which is the shape where a default slips and rewrites the answer.
+    ("the boundary flag stops reaching the grouped contrast",
+     "analysis/carryover.py",
+     '        if (not d["usable"] or d["predecessor"] is None\n'
+     '                or not (boundaries or d["same_repeat"])):\n'
+     '            continue\n'
+     '        key = "after_cap"',
+     '        if (not d["usable"] or d["predecessor"] is None\n'
+     '                or not d["same_repeat"]):\n'
+     '            continue\n'
+     '        key = "after_cap"',
+     "tests.test_harness_invariants."
+     "TheBoundarySensitivityMustBeADifferentPopulation"),
+    ("the run with no predecessor is counted as having one",
+     "analysis/carryover.py",
+     '        if (not d["usable"] or d["predecessor"] is None\n'
+     '                or not (boundaries or d["same_repeat"])):\n'
+     '            continue\n'
+     '        key = "after_cap"',
+     '        if not d["usable"] or not (boundaries or d["same_repeat"]):\n'
+     '            continue\n'
+     '        key = "after_cap"',
+     "tests.test_harness_invariants."
+     "TheBoundarySensitivityMustBeADifferentPopulation"),
+    ("the unbalanced split is refused, so the sensitivity cannot run",
+     "analysis/carryover.py",
+     "        if unbalanced and not boundaries:",
+     "        if unbalanced:",
+     "tests.test_harness_invariants."
+     "TheBoundarySensitivityMustBeADifferentPopulation"),
+    ("the sensitivity output stops declaring which population it used",
+     "analysis/carryover.py",
+     '    out: dict = {"runs": [], "refused": [],\n'
+     '                 "row_boundaries_included": boundaries}',
+     '    out: dict = {"runs": [], "refused": [],\n'
+     '                 "row_boundaries_included": False}',
+     "tests.test_harness_invariants."
+     "TheBoundarySensitivityMustBeADifferentPopulation"),
+    ("the mode-shift restates `shift_pp` instead of calling it",
+     "analysis/carryover.py",
+     '        out[k] = contrast(free, cap)',
+     '        out[k] = {a: {"shift_pp": 0.0} for a in free if a in cap}',
+     "tests.test_harness_invariants."
+     "ThePredecessorMustBeTestedInThePublishedUnits"),
+    ("the mode-shift difference stops being its own two halves",
+     "analysis/carryover.py",
+     '    return {a: {"after_cap_pp": out["cap"][a]["shift_pp"],\n'
+     '                "after_free_pp": out["free"][a]["shift_pp"],\n'
+     '                "delta_pp": out["cap"][a]["shift_pp"] - out["free"][a]["shift_pp"]}',
+     '    return {a: {"after_cap_pp": out["cap"][a]["shift_pp"],\n'
+     '                "after_free_pp": out["free"][a]["shift_pp"],\n'
+     '                "delta_pp": out["cap"][a]["shift_pp"]}',
+     "tests.test_harness_invariants."
+     "ThePredecessorMustBeTestedInThePublishedUnits"),
+    ("the mode-shift counts the run that has no predecessor",
+     "analysis/carryover.py",
+     '        if (not d["usable"] or d["predecessor"] is None\n'
+     '                or not (boundaries or d["same_repeat"])):\n'
+     '            continue\n'
+     '        k = "cap" if d["predecessor"].endswith(suffix) else "free"\n'
+     '        buckets[k].setdefault(d["arm"], []).append(d["tok_s"])',
+     '        if not d["usable"] or not (boundaries or d["same_repeat"]):\n'
+     '            continue\n'
+     '        k = "cap" if d["predecessor"].endswith(suffix) else "free"\n'
+     '        buckets[k].setdefault(d["arm"], []).append(d["tok_s"])',
+     "tests.test_harness_invariants."
+     "ThePredecessorMustBeTestedInThePublishedUnits"),
 ]
 
 

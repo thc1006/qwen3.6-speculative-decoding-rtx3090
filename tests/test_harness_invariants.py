@@ -4729,6 +4729,140 @@ class AStrangersBenchmarkIsInterferenceNotOurs(unittest.TestCase):
                              f"by name, and a stranger's server would be absorbed")
 
 
+class ThePredecessorMustBeTestedInThePublishedUnits(unittest.TestCase):
+    """A bound on one rate does not bound a difference of two ratios.
+
+    ERRATA A17 publishes `shift_pp`: an arm's advantage over the baseline under
+    the hard cap minus its advantage free-running. The V2-versus-W gap that run
+    W2 exists to settle is 2.4 of those points. `capped_predecessor_matched` is
+    a relative difference in ONE rate, and the pull request body already says
+    the two do not bound each other, after an earlier version of that paragraph
+    claimed they did. So the predecessor also gets tested in the units the
+    claim is made in, and this file is what keeps that computation honest:
+    it must reuse `length_mode.contrast`, not restate its formula.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+    W2 = "v4_audit_2026_08_25/data/matrix_W2_s1_20260830_220554"
+
+    def _json(self, *dirs):
+        out = subprocess.run(
+            [sys.executable, "analysis/carryover.py", "--json",
+             *(str(self.ROOT / d) for d in dirs)],
+            cwd=self.ROOT, capture_output=True, text=True, timeout=300)
+        self.assertEqual(out.returncode, 0, out.stderr[-2000:])
+        return json.loads(out.stdout)
+
+    def test_the_shift_is_reported_and_is_its_own_two_halves(self):
+        rec = self._json(self.W2)["runs"][0]
+        self.assertIn("mode_shift", rec)
+        for arm, v in rec["mode_shift"].items():
+            self.assertAlmostEqual(
+                v["delta_pp"], v["after_cap_pp"] - v["after_free_pp"], places=9,
+                msg=f"{arm}: the reported difference is not its own two halves")
+        self.assertIn("spec-dflash-n2", rec["mode_shift"])
+
+    def test_it_reuses_the_published_definition(self):
+        """B8 is about the same quantity computed by two formulas in two
+        places. `shift_pp` has one definition and this must call it."""
+        src = (self.ROOT / "analysis" / "carryover.py").read_text(
+            encoding="utf-8")
+        tree = ast.parse(src)
+        fn = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)
+                  and n.name == "mode_shift_by_predecessor")
+        body = ast.get_source_segment(src, fn) or ""
+        self.assertIn("contrast(free, cap)", body)
+        self.assertNotIn("cap_pct - free_pct", body,
+                         "restating the formula is how the two copies drift")
+        imported = {a.name for n in ast.walk(tree)
+                    if isinstance(n, ast.ImportFrom) and n.module == "length_mode"
+                    for a in n.names}
+        self.assertIn("contrast", imported)
+
+    def test_the_first_arm_run_is_excluded_here_too(self):
+        src = (self.ROOT / "analysis" / "carryover.py").read_text(
+            encoding="utf-8")
+        tree = ast.parse(src)
+        fn = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)
+                  and n.name == "mode_shift_by_predecessor")
+        self.assertIn('d["predecessor"] is None',
+                      ast.get_source_segment(src, fn) or "")
+
+    def test_one_sessions_value_is_what_it_was_measured_to_be(self):
+        v = self._json(self.W2)["runs"][0]["mode_shift"]["spec-dflash-n2"]
+        self.assertEqual(round(v["delta_pp"], 4), -0.4139)
+
+
+class TheBoundarySensitivityMustBeADifferentPopulation(unittest.TestCase):
+    """W2's plan pre-registers a boundary-inclusive figure as sensitivity.
+
+    A published number nobody can re-derive is the defect this repository
+    exists to document, and that figure was computed in a shell once. The flag
+    that produces it has to do three things or it is worse than not having it:
+    change the adjacency population, leave the primary estimand untouched, and
+    say in its own output that the split it used is unbalanced.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+    W2 = "v4_audit_2026_08_25/data/matrix_W2_s1_20260830_220554"
+
+    def _json(self, *flags):
+        out = subprocess.run(
+            [sys.executable, "analysis/carryover.py", "--json", *flags,
+             str(self.ROOT / self.W2)],
+            cwd=self.ROOT, capture_output=True, text=True, timeout=300)
+        self.assertEqual(out.returncode, 0, out.stderr[-2000:])
+        return json.loads(out.stdout)
+
+    def test_the_flag_widens_the_population_and_says_so(self):
+        plain = self._json()
+        wide = self._json("--include-row-boundaries")
+        self.assertFalse(plain["row_boundaries_included"])
+        self.assertTrue(wide["row_boundaries_included"])
+        p_arm = plain["runs"][0]["capped_predecessor"]["spec-dflash-n2"]
+        w_arm = wide["runs"][0]["capped_predecessor"]["spec-dflash-n2"]
+        self.assertGreater(
+            w_arm["n_cap"] + w_arm["n_free"], p_arm["n_cap"] + p_arm["n_free"],
+            "folding the row boundaries in must add adjacencies, or the flag "
+            "is doing nothing and the sensitivity figure equals the primary")
+        self.assertTrue(plain["runs"][0]["capped_predecessor"]
+                        ["spec-dflash-n2"]["split_is_balanced"])
+        self.assertIn("split_unbalanced_by_construction", wide["runs"][0])
+
+    def test_the_primary_estimand_does_not_move(self):
+        """The flag must not touch the default path. It shares both functions
+        with it, so a default-value slip would silently rewrite the answer."""
+        plain = self._json()
+        got = plain["runs"][0]["capped_predecessor_matched"]["spec-dflash-n2"]
+        self.assertEqual(round(got["delta_pct"], 4), -0.4622)
+
+    def test_the_first_arm_run_of_a_session_is_never_a_successor(self):
+        """It has no predecessor at all. `same_repeat` was hiding that, so
+        folding the boundaries in walked straight into `None.endswith`."""
+        src = (self.ROOT / "analysis" / "carryover.py").read_text(
+            encoding="utf-8")
+        tree = ast.parse(src)
+        for name in ("capped_contrast", "capped_contrast_matched"):
+            fn = next(n for n in ast.walk(tree)
+                      if isinstance(n, ast.FunctionDef) and n.name == name)
+            body = ast.get_source_segment(src, fn) or ""
+            self.assertIn('d["predecessor"] is', body,
+                          f"{name} must exclude the run with no predecessor")
+
+    def test_an_unbalanced_schedule_is_still_refused_without_the_flag(self):
+        """The flag suspends one refusal and must not suspend the other: a
+        schedule that is not Williams-balanced still gets no contrast."""
+        src = (self.ROOT / "analysis" / "carryover.py").read_text(
+            encoding="utf-8")
+        self.assertIn("if unbalanced and not boundaries:", src)
+        tree = ast.parse(src)
+        fn = next(n for n in ast.walk(tree)
+                  if isinstance(n, ast.FunctionDef) and n.name == "report")
+        body = ast.get_source_segment(src, fn) or ""
+        self.assertIn("refusing to report a carryover contrast", body,
+                      "the balance refusal is unconditional and stays so")
+
+
 class TheTarPreflightMustWorkOnThePipeCiActuallyGivesIt(unittest.TestCase):
     """The workflow hands it `<(unzstd -c ...)`, which is a FIFO.
 

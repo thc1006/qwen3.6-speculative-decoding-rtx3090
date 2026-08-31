@@ -3,6 +3,8 @@
 
     python analysis/carryover.py <run-dir> [<run-dir> ...]
     python analysis/carryover.py --json <run-dir> ...
+    python analysis/carryover.py --include-row-boundaries <run-dir> ...
+    python analysis/carryover.py --vs baseline <run-dir> ...
 
 Why this exists
 ---------------
@@ -36,7 +38,7 @@ from collections import defaultdict
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from length_mode import interval  # noqa: E402  the same t interval A17 publishes
+from length_mode import contrast, interval  # noqa: E402  A17's own two
 
 
 def arm_runs(run_dir: str) -> list[dict]:
@@ -125,7 +127,8 @@ def is_balanced(runs: list[dict]) -> tuple[bool, str]:
     return True, "every arm preceded by every other exactly once"
 
 
-def capped_contrast(runs: list[dict], suffix: str) -> dict:
+def capped_contrast(runs: list[dict], suffix: str,
+                    boundaries: bool = False) -> dict:
     """Rate after a capped predecessor minus rate after an uncapped one.
 
     The one hypothesis A17 names and cannot test: that the arm is slower after
@@ -137,11 +140,17 @@ def capped_contrast(runs: list[dict], suffix: str) -> dict:
     the schedule this repository actually ran: `spec-dflash-n2` gets 6 capped
     and 4 free predecessors using every adjacency, against the 5 and 4 the
     design promises, and that arm is the one the experiment is about.
+
+    `boundaries=True` folds them in anyway. That is the pre-registered
+    sensitivity analysis for run W2 and nothing else: it answers "does the
+    answer depend on the boundary rule", and its split is unbalanced BY
+    CONSTRUCTION, which `split_is_balanced` still reports per arm.
     """
     by_arm: dict[str, dict[str, list[float]]] = defaultdict(
         lambda: {"after_cap": [], "after_free": []})
     for d in runs:
-        if not d["same_repeat"] or not d["usable"]:
+        if (not d["usable"] or d["predecessor"] is None
+                or not (boundaries or d["same_repeat"])):
             continue
         key = "after_cap" if d["predecessor"].endswith(suffix) else "after_free"
         by_arm[d["arm"]][key].append(d["tok_s"])
@@ -163,7 +172,8 @@ def capped_contrast(runs: list[dict], suffix: str) -> dict:
     return out
 
 
-def capped_contrast_matched(runs: list[dict], suffix: str) -> dict:
+def capped_contrast_matched(runs: list[dict], suffix: str,
+                            boundaries: bool = False) -> dict:
     """The same question, with predecessor IDENTITY held fixed.
 
     `capped_contrast` above pools every capped predecessor against every free
@@ -185,7 +195,8 @@ def capped_contrast_matched(runs: list[dict], suffix: str) -> dict:
 
     per: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
     for d in runs:
-        if d["same_repeat"] and d["usable"]:
+        if (d["usable"] and d["predecessor"] is not None
+                and (boundaries or d["same_repeat"])):
             per[d["arm"]][d["predecessor"]].append(d["tok_s"])
 
     out = {}
@@ -224,6 +235,46 @@ def capped_contrast_matched(runs: list[dict], suffix: str) -> dict:
     return out
 
 
+def mode_shift_by_predecessor(runs: list[dict], suffix: str,
+                             boundaries: bool = False) -> dict:
+    """`shift_pp` computed twice, on each half of the predecessor split.
+
+    The rate contrasts above are one rate each. What A17's four-design table
+    publishes is `length_mode.contrast`'s `shift_pp`: an arm's advantage over
+    the baseline under the hard cap MINUS its advantage free-running, in
+    percentage points. The V2-versus-W disagreement that run W2 exists to
+    settle is 2.4 of those points, and a bound on one rate does not bound a
+    difference of two ratios of four rates. This computes the published
+    quantity separately for the arm-runs that follow a capped neighbour and
+    those that follow a free one, so the two are in the same units and no
+    conversion stands between them.
+
+    GROUPED, not matched: an uncapped arm's after-cap bucket contains its own
+    twin as a predecessor and its after-free bucket cannot contain itself, the
+    same asymmetry `capped_contrast_matched` exists to remove. Matching here
+    would need `shift_pp` per predecessor identity, which is one observation
+    per cell per session. This is reported as the grouped figure it is.
+    """
+    buckets: dict[str, dict[str, list[float]]] = {"cap": {}, "free": {}}
+    for d in runs:
+        if (not d["usable"] or d["predecessor"] is None
+                or not (boundaries or d["same_repeat"])):
+            continue
+        k = "cap" if d["predecessor"].endswith(suffix) else "free"
+        buckets[k].setdefault(d["arm"], []).append(d["tok_s"])
+    out = {}
+    for k, by_arm in buckets.items():
+        rates = {a: st.mean(v) for a, v in by_arm.items()}
+        free = {a: r for a, r in rates.items() if not a.endswith(suffix)}
+        cap = {a[:-len(suffix)]: r for a, r in rates.items()
+               if a.endswith(suffix)}
+        out[k] = contrast(free, cap)
+    return {a: {"after_cap_pp": out["cap"][a]["shift_pp"],
+                "after_free_pp": out["free"][a]["shift_pp"],
+                "delta_pp": out["cap"][a]["shift_pp"] - out["free"][a]["shift_pp"]}
+            for a in sorted(out["cap"]) if a in out["free"]}
+
+
 def spread_by_predecessor(runs: list[dict]) -> dict:
     """How much an arm's rate moves across its nine predecessors."""
     per: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
@@ -245,10 +296,13 @@ def spread_by_predecessor(runs: list[dict]) -> dict:
     return out
 
 
-def report(dirs: list[str], as_json: bool) -> dict:
-    out: dict = {"runs": [], "refused": []}
+def report(dirs: list[str], as_json: bool, boundaries: bool = False,
+           reference: str = "") -> dict:
+    out: dict = {"runs": [], "refused": [],
+                 "row_boundaries_included": boundaries}
     per_arm_delta: dict[str, list[float]] = defaultdict(list)
     per_arm_delta_matched: dict[str, list[float]] = defaultdict(list)
+    per_arm_shift: dict[str, list[float]] = defaultdict(list)
     for d in sorted(dirs):
         runs = arm_runs(d)
         name = os.path.basename(d.rstrip("/"))
@@ -261,6 +315,11 @@ def report(dirs: list[str], as_json: bool) -> dict:
         if not as_json:
             print(f"\n=== {name} — {len(runs)} arm-runs ===")
             print(f"  carryover balance: {'YES' if ok else 'NO'} — {why}")
+            if boundaries:
+                # printed per session, not once at the top, because the tables
+                # below are what gets copied out of this output
+                print("  ROW BOUNDARIES INCLUDED: sensitivity only. The "
+                      "predecessor split is unbalanced by construction.")
         if not ok:
             # a number computed here would be the predecessor and the treatment
             # at once, which is the thing this file exists to avoid
@@ -280,12 +339,14 @@ def report(dirs: list[str], as_json: bool) -> dict:
                 print("  refusing: the manifest does not name the hard-cap suffix")
             continue
         rec["hardcap_suffix"] = suffix
-        rec["capped_predecessor"] = capped_contrast(runs, suffix)
-        rec["capped_predecessor_matched"] = capped_contrast_matched(runs, suffix)
+        rec["capped_predecessor"] = capped_contrast(runs, suffix, boundaries)
+        rec["capped_predecessor_matched"] = capped_contrast_matched(
+            runs, suffix, boundaries)
         rec["spread"] = spread_by_predecessor(runs)
+        rec["mode_shift"] = mode_shift_by_predecessor(runs, suffix, boundaries)
         unbalanced = sorted(a for a, v in rec["capped_predecessor"].items()
                             if not v["split_is_balanced"])
-        if unbalanced:
+        if unbalanced and not boundaries:
             # the file printed n_cap and n_free and never looked at them, so its
             # own contamination was invisible in its own output
             rec["refused"] = (f"the capped/free predecessor split is not the "
@@ -294,10 +355,18 @@ def report(dirs: list[str], as_json: bool) -> dict:
             if not as_json:
                 print(f"  refusing: unbalanced predecessor split for {unbalanced[:3]}")
             continue
+        if unbalanced:
+            # Under --include-row-boundaries the split is unbalanced by
+            # construction, so refusing would refuse the sensitivity analysis
+            # itself. It is reported instead, marked, and every consumer that
+            # reads this file has to see the marker before it sees a number.
+            rec["split_unbalanced_by_construction"] = unbalanced
         for a, v in rec["capped_predecessor"].items():
             per_arm_delta[a].append(v["delta_pct"])
         for a, v in rec["capped_predecessor_matched"].items():
             per_arm_delta_matched[a].append(v["delta_pct"])
+        for a, v in rec["mode_shift"].items():
+            per_arm_shift[a].append(v["delta_pp"])
         if not as_json:
             print(f"  {'arm':<24} {'after -cap':>11} {'after free':>11} "
                   f"{'delta':>8}   {'spread over 9 predecessors':>26}")
@@ -342,12 +411,71 @@ def report(dirs: list[str], as_json: bool) -> dict:
             if not as_json:
                 rng = "" if lo is None else f"[{lo:+.2f} %, {hi:+.2f} %]"
                 print(f"  {a:<24} {m:>+8.2f} % {rng:>22} {n:>9}")
+
+    if per_arm_shift and max(len(v) for v in per_arm_shift.values()) > 1:
+        out["across_sessions_mode_shift"] = {}
+        if not as_json:
+            print("\n  THE PUBLISHED QUANTITY, split by predecessor mode: A17's "
+                  "`shift_pp` computed\n  on the arm-runs that follow a capped "
+                  "neighbour minus the same on those that\n  follow a free one. "
+                  "Percentage points, so a gap quoted in points compares with\n"
+                  "  it directly. GROUPED, and post hoc: run W2's plan "
+                  "pre-registers the matched\n  rate contrast above, not this.")
+            print(f"  {'arm':<24} {'mean':>9} {'95 % t':>22} {'sessions':>9}")
+        for a, vs in sorted(per_arm_shift.items(),
+                            key=lambda kv: -abs(st.mean(kv[1]))):
+            m, lo, hi, n = interval(vs)
+            out["across_sessions_mode_shift"][a] = {
+                "mean_delta_pp": m, "lo": lo, "hi": hi, "sessions": n,
+                "per_session": vs}
+            if not as_json:
+                rng = "" if lo is None else f"[{lo:+.2f}, {hi:+.2f}]"
+                print(f"  {a:<24} {m:>+7.2f} pp {rng:>22} {n:>9}")
+
+    if reference and reference in per_arm_delta_matched:
+        out["across_sessions_matched_vs"] = {"reference": reference, "arms": {}}
+        ref = per_arm_delta_matched[reference]
+        if not as_json:
+            print(f"\n  AGAINST `{reference}`, per session: this arm's matched "
+                  f"contrast minus\n  `{reference}`'s. A speedup is a ratio of "
+                  f"two rates, so only the part of a\n  predecessor effect that "
+                  f"does NOT also move `{reference}` can move a speedup.\n"
+                  f"  This is the quantity a gap quoted in percentage POINTS has "
+                  f"to be compared\n  with; the tables above are one rate each "
+                  f"and do not bound it.")
+            print(f"  {'arm':<24} {'mean':>9} {'95 % t':>22} {'sessions':>9}")
+        for a, vs in sorted(per_arm_delta_matched.items(),
+                            key=lambda kv: -abs(st.mean(
+                                [x - y for x, y in zip(kv[1], ref)]))):
+            if len(vs) != len(ref) or a == reference:
+                # the reference against itself is identically zero, and a
+                # zero-width 95 % interval in a table of intervals is a number
+                # someone will quote
+                continue
+            diffs = [x - y for x, y in zip(vs, ref)]
+            m, lo, hi, n = interval(diffs)
+            out["across_sessions_matched_vs"]["arms"][a] = {
+                "mean_delta_pct": m, "lo": lo, "hi": hi, "sessions": n,
+                "per_session": diffs}
+            if not as_json:
+                rng = "" if lo is None else f"[{lo:+.2f} %, {hi:+.2f} %]"
+                print(f"  {a:<24} {m:>+8.2f} % {rng:>22} {n:>9}")
     return out
 
 
 def main() -> None:
     as_json = "--json" in sys.argv
-    args = [a for a in sys.argv[1:] if a != "--json"]
+    boundaries = "--include-row-boundaries" in sys.argv
+    argv = sys.argv[1:]
+    reference = ""
+    if "--vs" in argv:
+        i = argv.index("--vs")
+        if i + 1 >= len(argv) or argv[i + 1].startswith("-"):
+            sys.exit("--vs needs an arm name, for example `--vs baseline`")
+        reference = argv[i + 1]
+        argv = argv[:i] + argv[i + 2:]
+    args = [a for a in argv
+            if a not in ("--json", "--include-row-boundaries")]
     unknown = [a for a in args if a.startswith("-")]
     if unknown:
         sys.exit(f"unrecognised option(s): {' '.join(unknown)}. A mistyped flag "
@@ -355,8 +483,9 @@ def main() -> None:
                  f"directories', which hides the typo.")
     dirs = [d for a in args for d in glob.glob(a) if os.path.isdir(d)]
     if not dirs:
-        sys.exit("usage: python analysis/carryover.py [--json] <run-dir> [...]")
-    out = report(dirs, as_json)
+        sys.exit("usage: python analysis/carryover.py [--json] "
+                 "[--include-row-boundaries] [--vs <arm>] <run-dir> [...]")
+    out = report(dirs, as_json, boundaries, reference)
     if as_json:
         print(json.dumps(out, indent=2, sort_keys=True))
     elif not any(r.get("first_order_carryover_balanced") for r in out["runs"]):

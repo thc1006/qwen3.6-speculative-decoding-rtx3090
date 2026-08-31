@@ -13,8 +13,8 @@
 > benchmark of all RTX 3090 systems, of all Qwen3.6 quantisations, of all
 > speculative-decoding methods, or of end-to-end voice-agent latency.
 >
-> The **controlled tier** is runs A to W, 1802 arm-runs in 62 directories,
-> collected 2026-08-25 to 2026-08-28. Run A is the legacy `bcb5eeb64` binary,
+> The **controlled tier** is runs A to W2, 3002 arm-runs in 74 directories,
+> collected 2026-08-25 to 2026-08-31. Run A is the legacy `bcb5eeb64` binary,
 > kept as the comparison; every other run is post-merge master `3737e4137`.
 > Each is repeated arm-runs with a matched no-speculation baseline
 > inside each run, thinking suppression verified per request rather than
@@ -376,7 +376,7 @@ are not a cumulative body of evidence for one hypothesis and must not be pooled.
 | **v2 follow-up** | 2026-04-22 | different single-3090 host; `llama-cli`; commits `9789512` and `bcb5eeb64` | 5 prompts; `temperature=0.5`; 200-token cap; different runner and host | Directional check, not a controlled replication of v1 absolute rates. Thinking control did not work ([D1/D2](ERRATA.md#d1--d2--no-cnv-was-rejected-and-no_think-did-not-disable-thinking)). |
 | **Exp 2 code/JSON** | 2026-04-25/26 | v2 host; `llama-cli` at `bcb5eeb64` | 5 prompts × 3 trials × 3 configs | Exploratory only. Intended workload unverified and per-request outputs not committed ([D3](ERRATA.md#d3-exp-2-cannot-be-audited-so-it-cannot-refute-anything)). |
 | **v3 DFlash** | 2026-05-07 | v2 host; `llama-cli` | 5 prompts × 1 run × 3 draft-max settings | Exploratory only. Baseline and treatment used **different binaries** ([D4](ERRATA.md#d4-v3-dflash-compares-two-different-binaries)). |
-| **v4 audit** | 2026-08-25 to 2026-08-28 | one RTX 3090 (`3090` host); `llama-server` at `bcb5eeb64` and `3737e4137` | runs A to W, 1802 arm-runs in 62 committed directories, beside three one-request start-up checks; 2 to 10 repeats per arm; arm order ABBA, then a Latin square from run O2, then a Williams square in run W; per-request JSON with full text and token ids, continuous GPU telemetry, pre-registered predictions | The controlled tier. Each run carries its own matched no-speculation baseline. |
+| **v4 audit** | 2026-08-25 to 2026-08-31 | one RTX 3090 (`3090` host); `llama-server` at `bcb5eeb64` and `3737e4137` | runs A to W2, 3002 arm-runs in 74 committed directories, beside three one-request start-up checks; 2 to 10 repeats per arm; arm order ABBA, then a Latin square from run O2, then a Williams square in run W; per-request JSON with full text and token ids, continuous GPU telemetry, pre-registered predictions | The controlled tier. Each run carries its own matched no-speculation baseline. |
 
 The v4 runs, and what each one is for:
 
@@ -400,6 +400,7 @@ The v4 runs, and what each one is for:
 | U | how far does one configuration move between invocations? | the same two arms, six invocations back to back |
 | V / V2 / V3 | what does forcing every request to the same length change? | free-running against a hard cap; V2 is eight sessions, V3 two within-invocation squares |
 | W | is the mode contrast an artefact of what ran before it? | five sessions of a 10 × 10 Williams square, 500 arm-runs, balanced for position **and** for first-order carryover |
+| W2 | the same question at the power to answer it | twelve sessions of the same 10 × 10 square, 1200 arm-runs, analysis plan committed before the driver was invoked |
 
 The `smoke` directories are start-up checks and carry one arm-run each.
 

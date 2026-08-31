@@ -2499,10 +2499,14 @@ if _HAS_GIT and _blobs:
     chk("every recorded harness hash resolves, in history or in the archive",
         sorted(k for k, v in _declared.items()
                if v not in _blobs and v not in _ARCH), [])
+    # `matrix_W_` and `matrix_W2_`: W2 ran the same runner as W, which was
+    # never committed, so it resolves through the archive for the same reason
+    # rather than through a second copy of the same file.
     chk("and the archive is used only where history does not have it",
         sorted(k for k, v in _declared.items()
                if v in _ARCH and v not in _blobs),
-        sorted(k for k in _declared if k.startswith("matrix_W_")))
+        sorted(k for k in _declared
+               if k.startswith(("matrix_W_", "matrix_W2_"))))
     # deliberately NOT asserting that the working-tree file is in history: it
     # is not, until it is committed, and a check that cannot fail is worse than
     # no check. The assertion above is the one that matters.
@@ -2593,8 +2597,8 @@ for _f in glob.glob("v4_audit_2026_08_25/data/*/*__rep*.json"):
         if _x["predicted_n"] != _m["max_tokens"]:
             _short += 1
 chk("A17 and every one of them generated exactly max_tokens", _short, 0)
-# run W adds 500 thinking-off arm-runs, half of them capped
-chk("A17 thinking-off requests that stopped early", _stops["off"]["stop"], 4951)
+# runs W and W2 add 1700 thinking-off arm-runs, half of them capped
+chk("A17 thinking-off requests that stopped early", _stops["off"]["stop"], 9391)
 # the second reading A17 overturns: acceptance, not only throughput
 _D = [r for r in _lm if r["run"].startswith("D_master")][0]
 _Con = [r for r in _lm if r["run"] == "C_master_matrix_think_on"][0]
@@ -3176,13 +3180,44 @@ print("\n=== the raw-evidence manifest ===")
 _man = pathlib.Path(__file__).resolve().parents[1] / "v4_audit_2026_08_25" / "EVIDENCE_MANIFEST.sha256"
 _mlines = [l for l in _man.read_text(encoding="utf-8").splitlines()
            if l and not l.startswith("#")]
-chk("manifest entries", len(_mlines), 1842)
+chk("manifest entries", len(_mlines), 3043)
 chk("every entry is a sha256 and a path",
     sorted({bool(re.fullmatch(r"[0-9a-f]{64}  \S.*", l)) for l in _mlines}), [True])
-chk("logs in the manifest", sum(1 for l in _mlines if l.endswith(".log")), 1820)
+chk("logs in the manifest", sum(1 for l in _mlines if l.endswith(".log")), 3020)
 chk("telemetry traces in the manifest",
-    sum(1 for l in _mlines if l.endswith(".csv")), 22)
+    sum(1 for l in _mlines if l.endswith(".csv")), 23)
 chk("no duplicate paths", len({l.split("  ", 1)[1] for l in _mlines}), len(_mlines))
+# The manifest now has a published half and a pending one: W2's logs are hashed
+# and not packaged. `sha256sum -c` over the whole file reports 1201 missing
+# files on a tree where nothing is wrong, so `evidence.yml` splits on a marker.
+# A marker a workflow depends on is a structural claim, and this is where it is
+# checked without waiting for CI. Both directions, because moving a published
+# entry below the line would hide a failed digest exactly as well as it hides a
+# pending one.
+_EVY = (pathlib.Path(__file__).resolve().parents[1] / ".github"
+        / "workflows" / "evidence.yml").read_text(encoding="utf-8")
+_mtext = _man.read_text(encoding="utf-8").splitlines()
+_mmark = [i for i, l in enumerate(_mtext)
+          if l.startswith("# --- PENDING TRANCHE")]
+chk("manifest: exactly one pending-tranche marker", len(_mmark), 1)
+_mpub = [l for l in _mtext[:_mmark[0]] if l and not l.startswith("#")]
+_mpend = [l for l in _mtext[_mmark[0]:] if l and not l.startswith("#")]
+chk("manifest: the published half is the three released tranches",
+    (len(_mpub), sum(1 for l in _mpub if l.endswith(".log")),
+     sum(1 for l in _mpub if l.endswith(".csv"))), (1842, 1820, 22))
+# the needle is the run stamp, not "W2_20260830_220554": the log paths are
+# `matrix_W2_s8_20260830_220554/...`, so the session number sits between the
+# label and the stamp and the obvious needle matched only the trace
+chk("manifest: the pending half is run W2 and nothing else",
+    (len(_mpend), sorted({"20260830_220554" in l for l in _mpend})),
+    (1201, [True]))
+chk("manifest: and no W2 entry sits above the marker",
+    [l for l in _mpub if "20260830_220554" in l], [])
+chk("manifest: the two halves are the whole file",
+    len(_mpub) + len(_mpend), len(_mlines))
+chk("evidence.yml splits on that marker rather than reading the whole file",
+    ("PENDING TRANCHE" in _EVY and "/tmp/pending" in _EVY
+     and "sed '/^# --- PENDING TRANCHE/,$d'" in _EVY), True)
 _v4r = pathlib.Path(__file__).resolve().parents[1] / "v4_audit_2026_08_25" / "README.md"
 chk("the archive hash is recorded in both places",
     all("29c2401f100390268bbd52e43b5c2da9a61440bad3dabe502ca1684478771fd6" in t
@@ -3840,7 +3875,7 @@ _b8all = [x for v in _B8.values() for x in v.values()]
 # including an empty one: it named a population and asserted nothing about it,
 # and the self-audit below only refused two LITERALS, not one expression twice.
 chk("B8: every thinking-off run with a freerun arm is in the population",
-    (len(_B8), sum(len(_v) for _v in _B8.values())), (20, 98))
+    (len(_B8), sum(len(_v) for _v in _B8.values())), (32, 158))
 chk("B8: and the run the old filename glob dropped is one of them",
     "D_master_matrix_think_off" in _B8, True)
 chk("B8: the numerator bias on thinking-off freerun arms",
@@ -3854,7 +3889,7 @@ chk("B8: within a run it is nearly the same for every arm, so ratios barely move
     (max(_b8spread.values()), max(_b8spread, key=_b8spread.get)),
     (0.26, "D_master_matrix_think_off"))
 
-chk("B8 rows where the server reports 1000*(n-1)/ms", _nm1, 18300)
+chk("B8 rows where the server reports 1000*(n-1)/ms", _nm1, 30300)
 chk("B8 rows where it reports 1000*n/ms", _nn, 44)
 chk("B8 rows matching neither", _neither, 0)
 chk("B8 the 44 are the legacy binary's",
@@ -4471,10 +4506,10 @@ _REG_ALL = [_d for _d in sorted(glob.glob("v4_audit_2026_08_25/data/*/"))
             if glob.glob(f"{_d}*__rep*.json")]
 _REG_SMOKE = [_d for _d in _REG_ALL if "smoke" in _d]
 chk("registry: directories carrying arm-runs, and how many are start-up checks",
-    (len(_REG_ALL), len(_REG_SMOKE)), (65, 3))
+    (len(_REG_ALL), len(_REG_SMOKE)), (77, 3))
 _REG_ARMRUNS = sum(len(glob.glob(f"{_d}*__rep*.json"))
                    for _d in _REG_ALL if _d not in _REG_SMOKE)
-chk("registry: arm-runs outside the start-up checks", _REG_ARMRUNS, 1802)
+chk("registry: arm-runs outside the start-up checks", _REG_ARMRUNS, 3002)
 # counted, not tested for membership: the README says it twice, once in prose
 # and once in the tier registry, and `in` is satisfied by either
 chk("registry: and the README quotes that number, in both places it states it",
@@ -4508,8 +4543,15 @@ _reg_v4row = [_l for _l in _ROOT_TEXT.splitlines()
               and "**v4 audit**" in _l.split("|")[1]]
 chk("registry: there is exactly one v4 audit row to check",
     len(_reg_v4row), 1)
+# The span is the manifests' own first and last `created`. Written as a
+# literal it went stale the moment W2 landed, and a row that names a date
+# range is exactly the kind of number nothing else re-derives.
+_reg_created = sorted(
+    json.loads(pathlib.Path(_p).read_text(encoding="utf-8"))["created"]
+    for _p in glob.glob("v4_audit_2026_08_25/data/*/manifest.json"))
+_reg_span = f"{_reg_created[0][:10]} to {_reg_created[-1][:10]}"
 chk("registry: the tier description gives the full date span, in that row",
-    "2026-08-25 to 2026-08-28" in " ".join(_reg_v4row[0].split()), True)
+    _reg_span in " ".join(_reg_v4row[0].split()), True)
 chk("registry: it no longer says runs A to L",
     ("runs A–L" in _ROOT_TEXT or "runs A-L" in _ROOT_TEXT), False)
 
@@ -5312,6 +5354,24 @@ chk("ERRATA no longer claims the two throttle rates are the same",
     "the same software power-cap events at the same rate" in _er_a16, False)
 chk("ERRATA says the fractions are not comparable",
     "cannot be set beside each other" in _er_a16, True)
+
+# W2's telemetry, on the same definition of loaded. A first draft of A17's W2
+# paragraph said "zero throttle samples"; the driver prints no such summary and
+# nothing here had counted the trace, so the sentence rested on nothing.
+_tW = [(u, r) for u, r in _trace("gpu_telemetry_W_20260828_104222.csv",
+                                 "util", "throttle") if u >= 50]
+_tW2 = [(u, r) for u, r in _trace("gpu_telemetry_W2_20260830_220554.csv",
+                                  "util", "throttle") if u >= 50]
+chk("W and W2 loaded telemetry samples", (len(_tW), len(_tW2)), (4297, 10271))
+chk("W2: the throttle flags on those samples",
+    (_bits(_tW2, "throttle", 0x4), _bits(_tW2, "throttle", 0x20),
+     _bits(_tW2, "throttle", 0x40)), (1762, 13, 10))
+chk("W: the same three, which A17 quotes beside them",
+    (_bits(_tW, "throttle", 0x4), _bits(_tW, "throttle", 0x20),
+     _bits(_tW, "throttle", 0x40)), (706, 4, 3))
+chk("W2: and the card stays far below the throttle point",
+    (round(min(float(r["temp"]) for _u, r in _tW2)),
+     round(max(float(r["temp"]) for _u, r in _tW2))), (45, 73))
 chk("A16 T3 is position-balanced", _mT3.get("schedule_is_position_balanced"), True)
 chk("A16 T3 asserted the instrumented library per arm-run",
     (_mT3.get("expect_lib_sha256") or "")[:16], "ce94855f4f2d82ba")
@@ -6324,7 +6384,7 @@ _all_runs = sorted((pathlib.Path(__file__).resolve().parents[1]
                     / "v4_audit_2026_08_25" / "data").glob("matrix_*"))
 _stamps = sorted({d.name.rsplit("_", 2)[-2] for d in _all_runs
                   if d.name.rsplit("_", 2)[-2].startswith("2026")})
-chk("the newest committed run is from 2026-08-28", _stamps[-1], "20260828")
+chk("the newest committed run is from 2026-08-30", _stamps[-1], "20260830")
 chk("CITATION.cff's release date is not older than the newest run",
     re.search(r"^date-released:\s*(\S+)", _CFF, re.M).group(1) >= "2026-08-28", True)
 chk("CITATION.cff no longer says the controlled-tier logs are unpublished",
@@ -6431,6 +6491,30 @@ if _HAS_GIT:
         # count a property of the code.
         chk("W's data is not committed yet, so the ancestry check is pending",
             _w_commit == "", True)
+
+    # W2's plan makes a stronger claim than W's: not merely committed before
+    # the data, but before the driver was invoked. Ancestry can show the first
+    # half of that and nothing can show the second, which the plan itself says.
+    _pw2 = _sp2.run(["git", "-C", str(_repo), "log", "--follow", "--format=%H",
+                     "--", "v4_audit_2026_08_25/PROSPECTIVE_ANALYSIS_PLAN_W2.md"],
+                    capture_output=True, text=True).stdout.strip().splitlines()
+    _pw2 = _pw2[-1] if _pw2 else ""
+    chk("W2's plan has a commit of its own", bool(_pw2), True)
+    _w2dirs = sorted((pathlib.Path(__file__).resolve().parents[1]
+                      / "v4_audit_2026_08_25" / "data").glob("matrix_W2_*"))
+    _w2_commit = ""
+    if _w2dirs:
+        _w2_commit = _sp2.run(["git", "-C", str(_repo), "log", "--format=%H", "-1",
+                               "--", str(_w2dirs[0].relative_to(_repo))],
+                              capture_output=True, text=True).stdout.strip()
+    if _w2_commit:
+        chk("and it is an ancestor of the commit that adds W2's data",
+            _sp2.run(["git", "-C", str(_repo), "merge-base", "--is-ancestor",
+                      _pw2, _w2_commit], capture_output=True).returncode == 0,
+            True)
+    else:
+        chk("W2's data is not committed yet, so its ancestry check is pending",
+            _w2_commit == "", True)
 
 print("\n=== the checker audits itself ===")
 # A chk() whose computed side contains no name is comparing one literal with
@@ -7297,8 +7381,8 @@ _B8_LENGTHS = [20, 187, 300, 1000]
 chk("B8 table: the lengths it tabulates",
     sorted(int(_k) for _k in _B8T), _B8_LENGTHS)
 # Was "300 is the cap every v4 request runs to", checked over ONE file of one
-# thinking-on run, where it is true. Across the corpus it is not: 4951 of
-# 18344 rows stop short, every one of them thinking-off, which is exactly the
+# thinking-on run, where it is true. Across the corpus it is not: 9391 of
+# 30344 rows stop short, every one of them thinking-off, which is exactly the
 # condition the documents attach to this figure ("on a run where every request
 # hits the same cap"). Measured over every committed row, so the condition is
 # supported rather than assumed.
@@ -7321,7 +7405,7 @@ for _d in sorted((pathlib.Path(__file__).resolve().parents[1] / "v4_audit_2026_0
                 _b8cap_short += 1
                 _b8cap_think.add(_mth)
 chk("B8: committed rows that reach the 300-token cap, and those that stop short",
-    (_b8cap_at, _b8cap_short, _b8cap_at + _b8cap_short), (13393, 4951, 18344))
+    (_b8cap_at, _b8cap_short, _b8cap_at + _b8cap_short), (20953, 9391, 30344))
 chk("B8: and every row that stops short is a thinking-off one, which is the "
     "condition the documents attach",
     sorted(_b8cap_think), ["off"])
@@ -7648,7 +7732,148 @@ for _k, _want in (("1000 × (n − 1) / predicted_ms", [1000, 1] + _grouped(_b8_
                   ("neither", _grouped(_b8_neither))):
     _num_row_check(f"B8 rows following {_k}", _B8R[_k], _want)
 chk("B8: the totals the paragraph above it quotes",
-    (_b8_rows, _b8_files), (18344, 1805))
+    (_b8_rows, _b8_files), (30344, 3005))
+# and the paragraph is read, not assumed. The pair above compares the tree with
+# two literals in this file and never opens ERRATA, so the lead-in sat at
+# "18 344 rows of 1805 files" through two runs with nothing to say otherwise.
+_b8_lead = [_l for _l in _ER_LINES
+            if _l.startswith("Across all **") and "committed arm-run files" in _l]
+chk("B8: exactly one paragraph states them", len(_b8_lead), 1)
+chk("B8: and it states the totals this run measured",
+    [float(_x) for _x in _NUM_RE.findall(_b8_lead[0])],
+    [float(_g) for _g in _grouped(_b8_rows) + _grouped(_b8_files)])
+
+
+print("\n=== run W2: the same square at the power to answer it ===")
+# Every figure below is recomputed from the committed arm-runs through the same
+# functions the tool publishes from. The three tables W2 added are parsed cell
+# by cell here because the census counts a table nobody parses as a hole, and
+# three new holes is what it reported the moment they were written.
+_W2 = sorted(_DATA.glob("matrix_W2_s*_20260830_220554"))
+chk("W2: twelve sessions committed", len(_W2), 12)
+chk("W2: a hundred arm-runs in each",
+    sorted({len(_co.arm_runs(str(_d))) for _d in _W2}), [100])
+chk("W2: every arm preceded by every other exactly once, read from t_start",
+    sorted({_co.is_balanced(_co.arm_runs(str(_d)))[0] for _d in _W2}), [True])
+chk("W2: it is a separate invocation, so nothing pools it with W",
+    sorted({_d.name.split("_")[1] for _d in _W2 + _W}), ["W", "W2"])
+
+_w2rep = _co.report([str(_d) for _d in _W2], True)
+_wrep = _co.report([str(_d) for _d in _W], True)
+
+
+def _iv(rep, key, arm, places=2):
+    """(mean, lo, hi) of one arm, rounded the way the tables print it."""
+    _v = rep[key][arm]
+    return tuple(round(_v[_k], places)
+                 for _k in ("mean_delta_pct" if "shift" not in key
+                            else "mean_delta_pp", "lo", "hi"))
+
+
+chk("W2: the pre-registered matched contrast for spec-dflash-n2",
+    _iv(_w2rep, "across_sessions_matched", "spec-dflash-n2"),
+    (-0.14, -0.68, 0.41))
+chk("W: the same estimand, for the row above it in the table",
+    _iv(_wrep, "across_sessions_matched", "spec-dflash-n2"),
+    (-1.05, -2.97, 0.86))
+chk("W2: and the grouped contrast the plan names as a sensitivity",
+    _iv(_w2rep, "across_sessions", "spec-dflash-n2"), (-0.21, -0.78, 0.35))
+chk("W2: the session SD of the primary estimand",
+    round(st.stdev(
+        _w2rep["across_sessions_matched"]["spec-dflash-n2"]["per_session"]), 3),
+    0.858)
+
+# the boundary-inclusive sensitivity is a different population, so it is a
+# second invocation of the tool rather than a field of the first
+_w2bnd = _co.report([str(_d) for _d in _W2], True, True)
+chk("W2: the boundary-inclusive sensitivity, and it says which it is",
+    (_iv(_w2bnd, "across_sessions_matched", "spec-dflash-n2"),
+     _w2bnd["row_boundaries_included"]), ((-0.19, -0.75, 0.38), True))
+
+# the published quantity, which is what the 2.4 pp is quoted in
+chk("W2: the predecessor's effect on shift_pp, and W's beside it",
+    (_iv(_w2rep, "across_sessions_mode_shift", "spec-dflash-n2"),
+     _iv(_wrep, "across_sessions_mode_shift", "spec-dflash-n2")),
+    ((0.49, -0.80, 1.77), (1.52, -0.98, 4.02)))
+chk("W2 excludes a 2.4 pp predecessor effect on it and W does not, "
+    "which is the whole reason the run exists",
+    (_w2rep["across_sessions_mode_shift"]["spec-dflash-n2"]["hi"] < 2.4,
+     _wrep["across_sessions_mode_shift"]["spec-dflash-n2"]["hi"] < 2.4),
+    (True, False))
+
+# the outcome the plan named in advance and did not expect
+_w2zero = sorted(a for a, v in _w2rep["across_sessions_matched"].items()
+                 if v["lo"] > 0 or v["hi"] < 0)
+chk("W2: which arms' matched intervals exclude zero",
+    _w2zero, ["spec-draft-n8", "spec-mtp-n2-cap"])
+chk("W2: and neither of them is the estimand the plan is about",
+    "spec-dflash-n2" in _w2zero, False)
+
+# --- the three tables, parsed cell by cell -------------------------------
+_W2T = _num_rows(_ER_LINES, "| run | sessions | matched contrast |")
+chk("A17's W-versus-W2 table: two rows", sorted(_W2T), ["W", "W2"])
+for _r, _rep in (("W", _wrep), ("W2", _w2rep)):
+    _m, _lo, _hi = _iv(_rep, "across_sessions_matched", "spec-dflash-n2")
+    _n = 12 if _r == "W2" else 5
+    _num_row_check(f"A17 matched contrast row {_r}", _W2T[_r],
+                   [_n, abs(_m), abs(_lo), abs(_hi)])
+def _rows_under(lines, header_startswith, n):
+    """The n data rows of one table, raw. The extractor drops the sign and the
+    yes/no cells have no number at all, so both are read off the row text; a
+    literal that looks like a table header would be counted as an unread table
+    by the census, which is why this takes a position rather than a needle."""
+    i = next(i for i, _l in enumerate(lines)
+             if _l.strip().startswith(header_startswith))
+    return lines[i + 2:i + 2 + n]
+
+
+# `_num_rows` returns magnitudes, so a flipped sign in either table would pass
+# every check above it. The rows are read a second time with the minus sign
+# normalised, which is what `_pr_table` does for the body's copy.
+def _signed_row(raw):
+    return [float(_x) for _x in
+            _NUM_RE.findall(_norm_early(raw).split("|", 2)[2])]
+
+
+for _hdr2, _key2, _pl in (("| run | sessions | matched contrast |",
+                           "across_sessions_matched", 2),
+                          ("| run | sessions | `shift_pp` after capped",
+                           "across_sessions_mode_shift", 2)):
+    _rows2 = _rows_under(_ER_LINES, _hdr2, 2)
+    for _raw2, _rep2 in zip(_rows2, (_wrep, _w2rep)):
+        _m2, _lo2, _hi2 = _iv(_rep2, _key2, "spec-dflash-n2")
+        chk(f"A17 {_key2}: the row prints the signs too",
+            _signed_row(_raw2)[1:], [_m2, _lo2, _hi2])
+
+_W2S = _num_rows(_ER_LINES, "| run | sessions | `shift_pp` after capped")
+chk("A17's shift_pp table: two rows", sorted(_W2S), ["W", "W2"])
+for _r, _rep in (("W", _wrep), ("W2", _w2rep)):
+    _m, _lo, _hi = _iv(_rep, "across_sessions_mode_shift", "spec-dflash-n2")
+    _n = 12 if _r == "W2" else 5
+    _num_row_check(f"A17 shift_pp row {_r}", _W2S[_r],
+                   [_n, abs(_m), abs(_lo), abs(_hi)])
+chk("A17: the shift_pp table says which interval contains 2.4",
+    [_r.split("|")[-2].strip().replace("*", "") for _r in
+     _rows_under(_ER_LINES, "| run | sessions | `shift_pp` after capped", 2)],
+    ["yes", "no"])
+
+_PRW2 = {_r[0]: [float(_x) for _x in _NUM_RE.findall(" ".join(_r[1:]))]
+         for _r in _pr_table("| quantity | W, 5 sessions | W2, 12 sessions |")}
+chk("PR body: the W-versus-W2 table has five rows", len(_PRW2), 5)
+# `_pr_table` normalises the minus sign, so these are SIGNED and a flip fails
+_num_row_check("PR body matched contrast row",
+               _PRW2["matched contrast, spec-dflash-n2"],
+               [-1.05, -2.97, 0.86, -0.14, -0.68, 0.41])
+_num_row_check("PR body grouped contrast row",
+               _PRW2["grouped contrast, the same arm"],
+               [-1.20, -2.61, 0.22, -0.21, -0.78, 0.35])
+_num_row_check("PR body boundary row", _PRW2["including row boundaries"],
+               [-0.19, -0.75, 0.38])
+_num_row_check("PR body shift_pp row",
+               _PRW2["shift_pp after capped minus after free"],
+               [1.52, -0.98, 4.02, 0.49, -0.80, 1.77])
+_num_row_check("PR body session SD row",
+               _PRW2["session SD of the matched contrast"], [1.543, 0.858])
 
 
 print("\n=== the -fit on control, and the CHANGELOG's run summary ===")
@@ -7964,11 +8189,11 @@ for _d in sorted(glob.glob("v4_audit_2026_08_25/data/*/")):
         os.path.basename(_d))
 chk("A8: the audit ran two binaries, and only run A the legacy one",
     sorted((len(_v), sorted(_v)[0][:1]) for _v in _pm_bins.values()),
-    [(1, "A"), (64, "B")])
+    [(1, "A"), (76, "B")])
 chk("A8: the row counts the directories on master",
-    max(len(_v) for _v in _pm_bins.values()), 64)
+    max(len(_v) for _v in _pm_bins.values()), 76)
 chk("A8: and the table says so rather than naming four runs",
-    ("every other audit run: 64 of the 65 directories" in _ER_LINES_TEXT
+    ("every other audit run: 76 of the 77 directories" in _ER_LINES_TEXT
      and "the whole audit matrix: runs B, C, D, E" not in _ER_LINES_TEXT), True)
 chk("A8: only run H sets the flag anywhere in the audit",
     sorted(os.path.basename(_d.rstrip("/")) for _d in
@@ -8203,11 +8428,11 @@ for _name, _fields in (("full", 19), ("compact", 9), ("raw", 10)):
     _files = _SCHEMA[_fields]
     _num_row_check(f"telemetry schema {_name}", _SCHT[_name],
                    [_fields, _schema_interval(_files[0]), len(_files)])
-chk("telemetry: sixteen traces in total, and the file says so",
+chk("telemetry: seventeen traces in total, and the file says so",
     (sum(len(_v) for _v in _SCHEMA.values()),
-     "sixteen traces the repository carries" in " ".join(
+     "seventeen traces the repository carries" in " ".join(
          pathlib.Path("BENCHMARK_ENV.md").read_text(encoding="utf-8").split())),
-    (16, True))
+    (17, True))
 chk("telemetry: every trace of one schema samples at one interval",
     sorted({len({_schema_interval(_f) for _f in _v}) for _v in _SCHEMA.values()}),
     [1])
@@ -8439,6 +8664,7 @@ _Ed, _Hd = "E_past_threshold", "H_pmin_sweep"
 _Kd = "matrix_K1_sweep_20260826_025615"
 _Od2, _Od3 = "matrix_O2_latin_20260826_153711", "matrix_O3_latin_20260826_203251"
 _Wd = sorted(str(_x.name) for _x in _DATA.glob("matrix_W_s*"))
+_W2d = sorted(str(_x.name) for _x in _DATA.glob("matrix_W2_s*"))
 
 _REG_EXPECT = {
     # A and B share a design; A's two speculative arms abort, so only its
@@ -8473,6 +8699,8 @@ _REG_EXPECT = {
     "V / V2 / V3": [],
     "W": [len(_rg_arms(_Wd[0])), _rg_mf(_Wd[0])["repeats"],
           sum(len(_rg_runs(_d)) for _d in _Wd)],
+    "W2": [len(_rg_arms(_W2d[0])), _rg_mf(_W2d[0])["repeats"],
+           sum(len(_rg_runs(_d)) for _d in _W2d)],
 }
 
 
@@ -8982,8 +9210,8 @@ print("\n=== how much of what is published is checked ===")
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import table_coverage as _tcov                                    # noqa: E402
 _cov = _tcov.census()
-chk("coverage: published tables", _cov["tables"], 136)
-chk("coverage: those carrying measurements", _cov["carrying_values"], 124)
+chk("coverage: published tables", _cov["tables"], 139)
+chk("coverage: those carrying measurements", _cov["carrying_values"], 127)
 # EXACT, not "may only rise". `parsed >= 119` and `not_parsed <= 67` were a
 # ratchet that permitted six unparsed measurement tables to stand indefinitely,
 # and the census that fed them filed any table with fewer than three numeric
@@ -9041,7 +9269,9 @@ _WORDS = {20: "Twenty", 21: "Twenty-one", 22: "Twenty-two",
           35: "Thirty-five", 36: "Thirty-six", 37: "Thirty-seven",
           38: "Thirty-eight", 39: "Thirty-nine", 40: "Forty",
           41: "Forty-one", 42: "Forty-two", 43: "Forty-three",
-          44: "Forty-four", 45: "Forty-five"}
+          44: "Forty-four", 45: "Forty-five", 46: "Forty-six",
+          47: "Forty-seven", 48: "Forty-eight", 49: "Forty-nine",
+          50: "Fifty"}
 chk("ERRATA A19: the corrections are numbered from one, without a gap",
     [int(_x) for _x in _A19_LIST], list(range(1, len(_A19_LIST) + 1)))
 chk("ERRATA A19: and the count it states is the length of that list",
@@ -9061,14 +9291,14 @@ chk("CHANGELOG: the census it publishes is the census",
 # are readers written since. The 119 in this paragraph went stale unnoticed
 # because nothing subtracted anything.
 chk("CHANGELOG: eighty more are parsed, eight of them census corrections",
-    (_cov["parsed"] - 44, _cov["parsed"] - 44 - 8), (80, 72))
+    (_cov["parsed"] - 44, _cov["parsed"] - 44 - 8), (83, 75))
 chk("CHANGELOG: and that is the split it publishes",
-    "Eighty tables are parsed that were not, eight of them census "
-    "corrections and seventy-two new readers" in _CL_FLAT, True)
+    "Eighty-three tables are parsed that were not, eight of them census "
+    "corrections and seventy-five new readers" in _CL_FLAT, True)
 chk("ERRATA A19: the census it publishes is the census",
     (_cov["tables"], _cov["no_values"], _cov["excluded_tables"],
      _cov["carrying_values"], _cov["parsed"], _cov["not_parsed"]),
-    (136, 7, 5, 124, 124, 0))
+    (139, 7, 5, 127, 127, 0))
 for _want, _what in ((_cov["tables"], "tables"),
                      (_cov["carrying_values"], "carrying measurements"),
                      (_cov["parsed"], "parsed"),
@@ -9097,13 +9327,13 @@ chk("prose probe: and the spans are unique",
 chk("prose probe: records whose value repeats on its own line",
     sum(1 for n in _PN
         if sum(1 for m in _PN if m["doc"] == n["doc"] and m["line"] == n["line"]
-               and m["value"] == n["value"]) > 1), 28)
+               and m["value"] == n["value"]) > 1), 30)
 
 _pcov = _tcov.prose_census()
 chk("coverage: decimal numbers in prose, outside every table",
-    _pcov["prose_numbers"], 1254)
+    _pcov["prose_numbers"], 1312)
 chk("coverage: those that are not a literal in this file",
-    _pcov["not_a_literal"], 640)
+    _pcov["not_a_literal"], 677)
 # tested on a supplied source, not by searching this file for a phrase: the
 # first version of this check searched for a label's own words, and the search
 # string was itself a literal in the argument position, so it always found it.
@@ -9139,7 +9369,7 @@ def _wilson_low(_k, _n, _z=1.959964):
 # tool's output. `cell_population` is what the probe itself would perturb.
 _A19_POP = _tcov.cell_population(_cov["covered"])
 chk("A19: the probe population it publishes is the one the tool would perturb",
-    (_A19_POP, len(_cov["covered"])), (2373, 124))
+    (_A19_POP, len(_cov["covered"])), (2415, 127))
 # not `_grouped`, which returns the digit groups a table cell splits into:
 # this is prose, and the question is whether the sentence contains the number.
 # `str.split()` treats the thin space as whitespace, so normalising both sides
@@ -9164,9 +9394,9 @@ chk("ERRATA A19: and the entry states that pair",
 # the split of what this pass parsed, which the entry and the changelog give
 # separately and which went stale in the entry at seventy-five
 chk("ERRATA A19: the newly parsed count is the census's difference too",
-    ("**What this pass changed.** Eighty tables count as parsed that did "
-     "not: eight are the census correction above and seventy-two are new "
-     "readers." in " ".join(_A19.split())), True)
+    ("**What this pass changed.** Eighty-three tables count as parsed that "
+     "did not: eight are the census correction above and seventy-five are "
+     "new readers." in " ".join(_A19.split())), True)
 chk("ERRATA A19: and it says the measurement was wrong four times, once",
     (_A19.count("The measurement was wrong"),
      "wrong four times before it measured anything" in _A19), (1, True))
@@ -9229,7 +9459,7 @@ chk("checker: number of assertions", len([1 for _n in _ast.walk(_tree)
 # the one a full checkout produces, and this compares against that rather than
 # pretending the two are the same number. `tests/data_mutate.py` runs the
 # checker in exactly such a mirror, which is how the difference surfaced.
-_GITLESS_SKIPPED = 11
+_GITLESS_SKIPPED = 13
 _pr_total = len(RAN) + 1 + (0 if _HAS_GIT else _GITLESS_SKIPPED)
 chk("PR body: the assertion count it quotes is a full checkout's",
     f"# {_pr_total} assertions" in _PR, True)

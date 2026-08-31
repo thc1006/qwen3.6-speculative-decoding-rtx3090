@@ -23,15 +23,30 @@ TOLERANCE_S = 5.0
 MIN_FRACTION = 0.5
 
 
+# `nvidia-smi --format=csv` writes `2026/08/30 22:05:54.200`, with slashes,
+# and `fromisoformat` cannot read it. The first version of this file accepted
+# only ISO, so it failed on EVERY trace this repository holds, including the
+# one for the run it was written to guard -- and nothing noticed, because it
+# had no test and the driver looked for a filename that no longer existed.
+_FORMATS = ("%Y/%m/%d %H:%M:%S.%f", "%Y/%m/%d %H:%M:%S")
+
+
 def _stamp(row: dict) -> float | None:
-    for k in ("timestamp", "time", "ts"):
-        v = row.get(k)
+    for k in ("timestamp", "time", "ts", "wall_iso"):
+        v = (row.get(k) or "").strip()
         if not v:
             continue
         try:
             return dt.datetime.fromisoformat(v.replace("Z", "+00:00")).timestamp()
         except ValueError:
-            continue
+            pass
+        for fmt in _FORMATS:
+            try:
+                # naive, and the run bounds are local epoch seconds, so it is
+                # read in the local zone rather than assumed to be UTC
+                return dt.datetime.strptime(v, fmt).timestamp()
+            except ValueError:
+                continue
     return None
 
 

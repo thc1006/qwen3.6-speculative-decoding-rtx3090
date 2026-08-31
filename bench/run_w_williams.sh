@@ -154,7 +154,11 @@ wait "$TELE_PID" 2>/dev/null || tele_rc=$?
 # 143 is SIGTERM, which is how it is meant to end
 [ "$tele_rc" -eq 0 ] || [ "$tele_rc" -eq 143 ] || {
     echo "FAIL: telemetry exited $tele_rc" >&2; rc=1; }
-TELE_CSV=$(find "$BENCH" -maxdepth 1 -name "gpu_telemetry_W_$STAMP.csv" | head -1)
+# `$LABEL`, not a hardcoded `W`. The telemetry file is named for the label
+# and this lookup was not, so run W2 wrote a complete trace, this found
+# nothing, and the cover check never ran. The driver reported the failure,
+# which is the only reason it was seen.
+TELE_CSV=$(find "$BENCH" -maxdepth 1 -name "gpu_telemetry_${LABEL}_$STAMP.csv" | head -1)
 if [ -z "$TELE_CSV" ]; then
     echo "FAIL: no telemetry trace for this run" >&2; rc=1
 else

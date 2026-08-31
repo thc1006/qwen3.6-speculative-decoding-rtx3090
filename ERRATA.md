@@ -467,7 +467,7 @@ this repository has used:**
 |---|---:|---|
 | `9789512` † | 0.75 | the entire v1 matrix |
 | `bcb5eeb64` † | 0.75 | v2, Exp 2, v3, and audit run A |
-| master `3737e4137` | **0.00** | **every other audit run: 64 of the 65 directories** |
+| master `3737e4137` | **0.00** | **every other audit run: 76 of the 77 directories** |
 
 † The two older defaults are upstream source values and nothing here
 re-derives them. What is measured is master's: run H drafts 16641 tokens on
@@ -1797,9 +1797,89 @@ not. With every arm preceded by every other exactly once, the contrast between
 times and points the way A17 guessed (slower after a capped neighbour, in four
 sessions of five) but at five sessions the interval spans zero. Per the
 pre-registered plan this is reported as **no detectable predecessor effect at
-this power**, with the interval, and not as "there is none". What it does rule
-out is first-order carryover as the *explanation* for a 2.4 pp gap between V2
-and W: an effect that size would have to be far outside this interval.
+this power**, with the interval, and not as "there is none".
+
+**What this paragraph claimed next, and why it was wrong.** It said run W ruled
+out first-order carryover as the *explanation* for the 2.4 pp gap between V2
+and W, on the grounds that an effect that size "would have to be far outside
+this interval". **−2.4 is inside [−2.61, +0.22]**, and inside the wider matched
+interval [−2.97, +0.86] as well, so W excluded nothing of the sort. The two
+numbers are also different estimands: −1.20 % is a relative difference in one
+arm's decode rate by predecessor mode, and 2.4 pp is a difference between two
+arm-over-baseline ratios, one per mode. Neither bounds the other. The pull
+request body was corrected on 2026-08-29; this paragraph and the changelog's
+copy of it were not, and that is A19 item 46.
+
+Closing it needed power, not a different design, and that is run W2.
+
+**Run W2: the same square, twelve sessions, and the plan written before the
+driver was invoked.** 2026-08-30 to 2026-08-31, 1200 of 1200 arm-runs, none
+failed, 17.07 h of continuous telemetry. The card was not near its throttle
+point: across the **10 271** loaded samples, on A16's own definition of
+loaded, the software power cap is flagged on **1 762**, the software thermal
+slowdown on **13** and the hardware one on **10**, between 45 and 73 °C against
+the ~83 °C point A16 measures, which is the same order as W's 4 and 3 in 4 297.
+Every session: 100 files, 10 arms, 1000 request rows, 630 at the cap,
+first-order carryover balanced verified from `t_start`. It is a separate invocation with its own `BENCH_RUN_LABEL`, so no
+analyser can pool it with W by accident, and the runner and server hashes are
+identical to W's. Twelve sessions was fixed in advance from W's own spread, in
+[`PROSPECTIVE_ANALYSIS_PLAN_W2.md`](v4_audit_2026_08_25/PROSPECTIVE_ANALYSIS_PLAN_W2.md),
+along with the estimand and what each outcome would mean; that file is an
+ancestor of the commit that adds the data, and `analysis/verify_claims.py`
+asserts it.
+
+The pre-registered quantity is the **matched** capped-versus-free predecessor
+contrast for `spec-dflash-n2`, with its own twin dropped, each capped
+predecessor paired against its free counterpart and the session as the
+resampling unit:
+
+| run | sessions | matched contrast | 95 % t |
+|---|---:|---:|---|
+| W | 5 | −1.05 % | [−2.97 %, +0.86 %] |
+| **W2** | **12** | **−0.14 %** | **[−0.68 %, +0.41 %]** |
+
+The session-level SD is **0.858**, against the 1.543 implied by W's five
+sessions; four degrees of freedom had overestimated it, which is why twelve
+sessions bought more than the square root of the extra count. The two
+sensitivities the plan named agree with the primary: the grouped contrast W
+published is **−0.21 % [−0.78 %, +0.35 %]**, and including the row-boundary
+adjacencies the square cannot balance gives **−0.19 % [−0.75 %, +0.38 %]**
+(`analysis/carryover.py --include-row-boundaries`, whose split is unbalanced by
+construction and says so in its own output).
+
+**And the 2.4 pp question, asked in the units it is quoted in.** The paragraph
+above says a rate contrast does not bound a difference of two ratios, so the
+predecessor is also tested directly on `shift_pp`, the quantity A17's
+four-design table publishes: the arm's advantage over the baseline under the
+hard cap minus its advantage free-running, computed on the arm-runs that follow
+a capped neighbour and again on those that follow a free one.
+
+| run | sessions | `shift_pp` after capped minus after free | 95 % t | contains 2.4? |
+|---|---:|---:|---|---|
+| W | 5 | +1.52 pp | [−0.98, +4.02] | **yes** |
+| **W2** | **12** | **+0.49 pp** | **[−0.80, +1.77]** | **no** |
+
+W could not exclude a 2.4 pp predecessor effect on its own published quantity.
+W2 excludes it, with the interval's far end at +1.77. This test is **post hoc**
+and **grouped**: the plan pre-registers the matched rate contrast above and not
+this, and an uncapped arm's after-capped bucket contains its own twin, the
+asymmetry the matched estimator exists to remove. It is reported as the check
+it is, and it is what licenses the sentence the earlier version of this section
+had no grounds for.
+
+**Two arms' intervals do exclude zero, and the plan says to report that.** In
+the matched table, `spec-mtp-n2-cap` is **+0.11 % [+0.00 %, +0.23 %]** and
+`spec-draft-n8` is **+0.06 % [+0.01 %, +0.10 %]**. Both are under an eighth of
+a per cent, both are positive where A17's guess was negative, and twenty
+intervals at 95 % are expected to produce about one exclusion by chance. The
+pre-registered outcome "interval excludes zero" was written about
+`spec-dflash-n2`, whose interval does not; these two are named because the plan
+requires an outcome it did not expect to be reported rather than absorbed, not
+because anything here treats them as a finding.
+
+**What W2 does not do** is make the V2-versus-W disagreement go away. It
+removes the one mechanism this repository had been able to name for it. The
+disagreement is still there, and it is A16's.
 
 **What is left is A16.** The gap is between measuring the two modes inside one
 invocation and measuring them across two, and this repository already has a
@@ -1897,10 +1977,10 @@ the nine published documents, and `--probe` writes a wrong number into one cell
 of each in turn, runs the claim checker, and asks whether an assertion that was
 passing now fails. Measured on the tree this entry is committed in:
 
-Of **136** tables, **7** carry no number at all (paths, links, prose), **5** are
+Of **139** tables, **7** carry no number at all (paths, links, prose), **5** are
 excluded by name and reason in `EXCLUDED_TABLES` -- an upstream PR tracker, a
 commit-hash comparison, two checklists and a table of arm definitions whose only
-digit is a tokenizer id -- and **124** carry measurements. All **124** of those
+digit is a tokenizer id -- and **127** carry measurements. All **127** of those
 are parsed cell by cell by `analysis/verify_claims.py`; **0** are not.
 
 The split used to be three ways, with anything under three numeric cells filed
@@ -1934,7 +2014,7 @@ perturbed **2 252** numbers across the **119** tables parsed at the time and
 **33** of them changed nothing. The runs it took are the point: the population
 grows as the coverage does, so a clean run is only clean for the tree it ran
 on, and parsing the last six tables grew it again. On 2026-08-30, on the tree
-this entry is committed in, all **2 373** numbers across all **124** tables
+this entry is committed in, all **2 415** numbers across all **127** tables
 were perturbed one at a time and **every one was caught**, in eight shards
 whose control passed before the work and again after it. The eight shard
 outputs were not attested as a set until 2026-08-30: nothing showed that all
@@ -1977,12 +2057,12 @@ because passing once does not bound half an hour of running.
 return rows, and assert nothing about the column you changed, which is exactly
 what the W three-design table did, in two documents, until this pass.
 
-**The larger half is not tables.** **1 254** decimal numbers sit in prose,
-outside every table; **640** of them do not appear as a string literal anywhere
+**The larger half is not tables.** **1 312** decimal numbers sit in prose,
+outside every table; **677** of them do not appear as a string literal anywhere
 in the checker, counting only literals that are not assertion labels; a label
 is prose about a check and not a check, and leaving them in made the count move
 whenever an assertion was reworded. That criterion is an upper bound on the gap
-rather than the gap, so a fixed sample of **40** of the 640 was perturbed the
+rather than the gap, so a fixed sample of **40** of the 640 it then held was perturbed the
 same way, seed `20260828`: **36 of 40 accepted a wrong number**, and the 95 %
 Wilson interval puts the unguarded fraction of that population at **76 % or
 above**. The run before this one caught none of its forty; the four it catches
@@ -1990,8 +2070,8 @@ now are numbers the readers written for the tables happen to reach, which is
 the only reason the figure moved. The prose half of this repository is, to a
 first approximation, unchecked.
 
-**What this pass changed.** Eighty tables count as parsed that did not:
-eight are the census correction above and seventy-two are new readers. They
+**What this pass changed.** Eighty-three tables count as parsed that did
+not: eight are the census correction above and seventy-five are new readers. They
 include every cell of the thirteen-arm run C table, run O's head-to-head, the
 v1 representative table with both of its range rows, run J and run K, run L's
 two halves, the V2 and V3 columns of the W table in both documents that carry
@@ -2001,7 +2081,7 @@ the BOS-override table in the two documents that publish it, run I's
 acceptance under batching, the README's length-matched comparison, and last
 the six named above.
 
-**Forty-five published statements were wrong and are corrected.** They are
+**Fifty published statements were wrong and are corrected.** They are
 listed rather than summarised, because a count of corrections is itself a
 number and this file exists because of unchecked numbers.
 
@@ -2091,8 +2171,9 @@ number and this file exists because of unchecked numbers.
     because the census asked whether a parser reads a table before asking
     whether the table has a value in it, and a parser does read that one, for
     its paths. The population is decided first now, and the published figure
-    is **124** carrying measurements, not 125. The number of numbers in it is
-    unchanged at 2 373, which is the check that the table really carried none.
+    was **124** carrying measurements, not 125, on the tree that pass ran on.
+    The number of numbers in it was unchanged at the 2 373 the population
+    then held, which is the check that the table really carried none.
 35. Nine fixes made for the fifth review shipped with tests and without
     mutations, so nothing had shown those tests were not decorative. This file
     opens by saying a mutation that survives means its guard is decorative;
@@ -2165,12 +2246,37 @@ number and this file exists because of unchecked numbers.
     the location was part of the claim.
 45. An assertion labelled "300 is the cap every v4 request runs to" checked
     one file of one thinking-on run, where it holds. Across the committed
-    corpus it does not: **13 393 of 18 344** rows reach the cap and **4 951**
+    corpus it does not: **20 953 of 30 344** rows reach the cap and **9 391**
     stop short, every one of them thinking-off. No document made the
     unconditional claim -- all four attach the condition "on a run where every
     request hits the same cap" -- so this corrects an assertion rather than a
     published figure, and the assertion now measures the split over every
     committed row, which is what supports the condition the documents attach.
+46. **A17's run-W paragraph said W ruled first-order carryover out**, on the
+    grounds that an effect large enough to explain the 2.4 pp gap "would have
+    to be far outside this interval". −2.4 is **inside** [−2.61, +0.22] and
+    inside the matched [−2.97, +0.86]. The pull request body was corrected on
+    2026-08-29 and the ERRATA passage and the changelog's copy of it were left
+    standing for two days, which is item 27's shape again with the list and the
+    passage swapped. Run W2 is what actually excludes it, and both copies now
+    say which run did.
+47. **The evidence manifest's own header said "702 logs and 19 traces"** while
+    the file held 1820 and 22. Nothing read the header; the counts the
+    documents publish come from `RUN_REGISTRY.json`, so the file that is the
+    evidence for those counts was the one place carrying a stale pair. It
+    states 3020 and 23 now, and it is the manifest for W2's logs as well.
+48. **B8's lead-in said "18 344 request rows of 1805 committed arm-run
+    files"**, the corpus before run W2. The assertion beside it compared the
+    tree with two literals in the checker and never opened this document, so
+    the paragraph could say anything. It says **30 344** and **3005**, and the
+    check now reads the paragraph.
+49. **A8's `p_min` row said "64 of the 65 directories"** ran the master binary.
+    With W2 committed it is **76 of the 77**, and the assertion held the same
+    two literals as the row rather than the count it walks.
+50. **`BENCHMARK_ENV.md` said the repository carries sixteen telemetry
+    traces**, and its compact-schema row counted eleven files. Seventeen and
+    twelve. The trace W2 wrote is the seventeenth, and A17's "a seventeenth
+    session, run V2, was meant to be traced and is not" is now the eighteenth.
 
 A test now refuses any table row with no header above it, and another refuses
 any path the checker opens that a fresh clone would not have.
@@ -2357,11 +2463,11 @@ repository with a **request-mean** column is the arithmetic mean of it:
 `analysis/matrix_report.py`, `analysis/plot.py` and `analysis/plot_v4_runs.py`
 all read it rather than dividing tokens by time themselves.
 
-Across all **18 344** request rows of all **1805** committed arm-run files:
+Across all **30 344** request rows of all **3005** committed arm-run files:
 
 | what the server reported | rows |
 |---|---:|
-| `1000 × (n − 1) / predicted_ms` | **18 300** |
+| `1000 × (n − 1) / predicted_ms` | **30 300** |
 | `1000 × n / predicted_ms` | 44 |
 | neither | **0** |
 

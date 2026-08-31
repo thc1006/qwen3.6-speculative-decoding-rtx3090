@@ -172,7 +172,28 @@ jobs:
           # `..`, a symlink out of the tree, a duplicated member that overwrites
           # its first copy, or simply an extra file. The pinned digests make that
           # unlikely for these archives; the verifier was still not closed-world.
-          grep -v '^#' v4_audit_2026_08_25/EVIDENCE_MANIFEST.sha256 | grep -v '^$' > /tmp/manifest
+          # The manifest holds one pending tranche: run W2's logs are hashed
+          # and not yet packaged, so `sha256sum -c` over the whole file would
+          # report 1201 missing files and exit non-zero on a tree where nothing
+          # is wrong. Split on the marker, verify the published half, and prove
+          # the pending half is exactly what it claims to be rather than a
+          # place a published entry could be moved to hide a failure.
+          M=v4_audit_2026_08_25/EVIDENCE_MANIFEST.sha256
+          grep -q '^# --- PENDING TRANCHE' "$M" || {
+            echo "FAIL: the manifest has no pending-tranche marker" >&2; exit 1; }
+          sed '/^# --- PENDING TRANCHE/,$d' "$M" | grep -v '^#' | grep -v '^$' > /tmp/manifest
+          sed -n '/^# --- PENDING TRANCHE/,$p' "$M" | grep -v '^#' | grep -v '^$' > /tmp/pending
+          bad=$(grep -cv '20260830_220554' /tmp/pending || true)
+          [ "$bad" -eq 0 ] || {
+            echo "FAIL: $bad pending entries are not run W2's" >&2; exit 1; }
+          [ "$(wc -l < /tmp/pending)" -eq 1201 ] || {
+            echo "FAIL: $(wc -l < /tmp/pending) pending entries, expected 1201" >&2
+            exit 1
+          }
+          # and no W2 path above the marker, which is the other direction
+          grep -q '20260830_220554' /tmp/manifest && {
+            echo "FAIL: a W2 entry sits in the published half" >&2; exit 1; } || true
+          echo "$(wc -l < /tmp/manifest) published entries, $(wc -l < /tmp/pending) pending" 
           python3 bench/preflight_tar.py /tmp/manifest \
               <(unzstd -c evidence/raw_logs.tar.zst) \
               <(unzstd -c evidence/raw_logs_20260827.tar.zst) \

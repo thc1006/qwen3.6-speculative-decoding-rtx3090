@@ -1,7 +1,7 @@
 <!--
   The body of pull request #2, kept here so its numbers are checked like every
   other published table in this repository. `analysis/verify_claims.py` parses
-  the seven tables below cell by cell and `tests/data_mutate.py` perturbs them;
+  the eight tables below cell by cell and `tests/data_mutate.py` perturbs them;
   a figure that drifts out of agreement with the data fails CI.
 
   Publish with `python tools/publish_pr_body.py --write`, which strips this comment
@@ -282,6 +282,37 @@ relative difference in one arm's raw decode rate by predecessor mode, while
 2.4 pp is a difference between arm-and-baseline mode effects. Neither bounds the
 other.
 
+**Run W2 rules it out, and its plan was committed before the driver was
+invoked.** Twelve sessions of the same square on 2026-08-30 and 2026-08-31,
+1200 of 1200 arm-runs, none failed, a separate invocation under its own
+`BENCH_RUN_LABEL` so no analyser pools it with W. Session count, estimand and
+the meaning of each outcome were fixed in
+`v4_audit_2026_08_25/PROSPECTIVE_ANALYSIS_PLAN_W2.md`, which is an ancestor of
+the commit carrying the data.
+
+| quantity | W, 5 sessions | W2, 12 sessions |
+|---|---:|---:|
+| matched contrast, `spec-dflash-n2` | −1.05 % [−2.97, +0.86] | **−0.14 % [−0.68, +0.41]** |
+| grouped contrast, the same arm | −1.20 % [−2.61, +0.22] | −0.21 % [−0.78, +0.35] |
+| including row boundaries | not computed | −0.19 % [−0.75, +0.38] |
+| `shift_pp` after capped minus after free | +1.52 pp [−0.98, +4.02] | **+0.49 pp [−0.80, +1.77]** |
+| session SD of the matched contrast | 1.543 implied | 0.858 |
+
+The fourth row is the one that answers the paragraph above. Because a rate
+contrast does not bound a difference of two ratios, the predecessor is tested a
+second time on `shift_pp` itself, the quantity A17's four-design table
+publishes, computed on the arm-runs that follow a capped neighbour and again on
+those that follow a free one. W's interval on that quantity **contains** 2.4;
+W2's does not. That test is post hoc and grouped, the plan pre-registers the
+matched rate contrast rather than it, and both facts are stated where the
+number is.
+
+Two arms of ten have matched intervals excluding zero, `spec-mtp-n2-cap` at
++0.11 % [+0.00, +0.23] and `spec-draft-n8` at +0.06 % [+0.01, +0.10]. Both are
+under an eighth of a per cent, twenty intervals at 95 % are expected to produce
+about one exclusion by chance, and the plan named this outcome in advance so
+that it would be reported rather than absorbed.
+
 **What is left is A16.** The difference is between measuring the two modes
 inside one invocation and across two. W reproduces the instability that section
 is about: mean within-session CV of **1.69 %** for `spec-dflash-n2` against
@@ -337,8 +368,8 @@ adversarial pass over this branch's own commits found:
   the row is 30.4 % and the column consequently added to 100.1 (**B9**). Those
   five are parsed cell by cell now, but "all of them" was a statement about the
   ones that had been found, not about the class, and each had been found by
-  accident. The class is counted instead. Of 136 published tables 124 carry
-  measurements and all 124 are parsed cell by cell. When 80 were still unparsed,
+  accident. The class is counted instead. Of 139 published tables 127 carry
+  measurements and all 127 are parsed cell by cell. When 80 were still unparsed,
   perturbing one cell of each left 67 that accept a wrong number with nothing
   noticing; all 80 of those are parsed now, and no published table that
   carries a measurement is left unparsed.
@@ -348,7 +379,7 @@ adversarial pass over this branch's own commits found:
   assertion notices: whole interval columns read as `.split("[")[0]` and
   stopped, a configuration column nobody read, the `100 %` on a total row. Each
   is compared against a value derived from the data, and the measurement says
-  so: on 2026-08-30 the probe perturbed all 2 373 numbers across all 124
+  so: on 2026-08-31 the probe perturbed all 2 415 numbers across all 127
   parsed tables and caught every one, in eight shards whose control passed
   before the work and again after it. Their union is checked rather than
   assumed: `analysis/table_coverage.py --aggregate` over the eight real
@@ -361,7 +392,7 @@ adversarial pass over this branch's own commits found:
   grows as the coverage does and a clean run is only clean for the tree it ran
   on: the run before this one covered 2 252 numbers across 119 tables.
   `analysis/table_coverage.py --probe --covered --every-cell` is the
-  measurement and **A19** the accounting; 71 code and 84 data and document perturbations
+  measurement and **A19** the accounting; 78 code and 84 data and document perturbations
   remain permanent tests.
 
   Parsing the rest of them, rather than reading them, found seventeen more
@@ -412,7 +443,7 @@ adversarial pass over this branch's own commits found:
   the checker inside a clean checkout of HEAD, and there it died 373 assertions
   early, so the probe's own baseline was broken and it was measuring nothing.
   The logs are committed now and a test refuses any path the checker opens that
-  a fresh clone would not have. A clean checkout runs all 3713 assertions and
+  a fresh clone would not have. A clean checkout runs all 3758 assertions and
   exits 0, which it did not before.
 
   Figures in those tables that are not re-derivable here say so rather than
@@ -483,9 +514,11 @@ changed. Nothing in it was rejected.
   tranche `raw_logs_20260827.tar.zst` (618 logs, 2.9 GB, sha256 `d56a7f88…`)
   for V2, V3 and T4, kept separate so the first archive's digest keeps meaning
   what it meant, and a third, `raw_logs_20260828.tar.zst`, for run W. The
-  manifest is **1820 server logs and 22 telemetry traces** across **three
-  tranches**, published as six release assets; every new entry was verified
-  against it before publishing. These counts come from
+  manifest is **3020 server logs and 23 telemetry traces**; the first 1820 of
+  those logs are packaged in **three tranches** published as six release
+  assets, and run W2's 1200 are hashed in the manifest but not yet packaged,
+  which the registry records as a pending fourth tranche. Every new entry was
+  verified against the manifest before publishing. These counts come from
   `v4_audit_2026_08_25/RUN_REGISTRY.json`, which the checker compares against
   the data directories and the manifest.
   `python analysis/rederive_from_logs.py <bench-root>` checks every file
@@ -564,13 +597,13 @@ review:
 
 ```
 python analysis/rederive_from_logs.py bench   # raw logs -> four audit files
-python analysis/verify_claims.py          # 3713 assertions, re-derived
-python analysis/check_data_integrity.py   # structure of all 65 run directories
-python -m unittest discover tests         # 271 regressions for defects shipped here
+python analysis/verify_claims.py          # 3758 assertions, re-derived
+python analysis/check_data_integrity.py   # structure of all 77 run directories
+python -m unittest discover tests         # 279 regressions for defects shipped here
 python tests/mutate.py                    # break each fix, require its test to fail
 python tests/data_mutate.py               # perturb a measurement or a published
                                           #   figure, require the checker to fail
-                                          #   71 code and 84 data perturbations,
+                                          #   78 code and 84 data perturbations,
                                           #   with a clean-mirror re-check after
                                           #   the last restore
 python analysis/plot_v4_runs.py --check   # charts still match the data
@@ -625,9 +658,10 @@ literals. Six of them did, and were rewritten.
 - The ~3 GB of llama-server logs are not committed. That is the size
   `bench/collect_evidence.sh` states in three places and the audit README
   beside it; this line said 7 GB.
-  `v4_audit_2026_08_25/EVIDENCE_MANIFEST.sha256` holds the SHA-256 of all 1820
-  of them and of the 22 telemetry traces; all three compressed tranches are published
-  as release assets, and `analysis/rederive_from_logs.py` re-runs the
+  `v4_audit_2026_08_25/EVIDENCE_MANIFEST.sha256` holds the SHA-256 of all 3020
+  of them and of the 23 telemetry traces; the three compressed tranches
+  covering the first 1820 are published as release assets, run W2's 1200 are
+  hashed and await a fourth, and `analysis/rederive_from_logs.py` re-runs the
   extractors against them.
 - `draft-eagle3` needs three extract layers this model does not expose;
   `--spec-type draft-dspark` is DeepseekV4-only. Nine of eleven measured.

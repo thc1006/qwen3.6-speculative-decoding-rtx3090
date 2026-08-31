@@ -13,19 +13,44 @@
   ],
   "dataset_version": "v4.2",
   "runs": {
-    "V2": {"status": "complete", "sessions": 16, "arm_runs": 400,
-           "design": "between-invocation crossover"},
-    "V3": {"status": "complete", "sessions": 2, "arm_runs": 200,
-           "design": "within-invocation latin square, position-balanced only"},
-    "T4": {"status": "complete", "sessions": 1, "arm_runs": 18,
-           "design": "checkpoint split-timer probe"},
-    "W":  {"status": "complete", "sessions": 5, "arm_runs": 500,
-           "design": "within-invocation 10x10 Williams square, randomised row order"}
+    "V2": {
+      "status": "complete",
+      "sessions": 16,
+      "arm_runs": 400,
+      "design": "between-invocation crossover"
+    },
+    "V3": {
+      "status": "complete",
+      "sessions": 2,
+      "arm_runs": 200,
+      "design": "within-invocation latin square, position-balanced only"
+    },
+    "T4": {
+      "status": "complete",
+      "sessions": 1,
+      "arm_runs": 18,
+      "design": "checkpoint split-timer probe"
+    },
+    "W": {
+      "status": "complete",
+      "sessions": 5,
+      "arm_runs": 500,
+      "design": "within-invocation 10x10 Williams square, randomised row order"
+    },
+    "W2": {
+      "status": "complete",
+      "sessions": 12,
+      "arm_runs": 1200,
+      "design": "within-invocation 10x10 Williams square, randomised row order, twelve sessions fixed in advance by PROSPECTIVE_ANALYSIS_PLAN_W2.md"
+    }
   },
   "raw_evidence": {
     "tranches": 3,
-    "server_logs": 1820,
-    "telemetry_traces": 22,
+    "tranches_published": 3,
+    "tranches_pending": 1,
+    "_pending": "W2's 1200 server logs are hashed in EVIDENCE_MANIFEST.sha256 and not yet packaged as a release asset. The manifest covers them so the committed JSON is tied to the files it came from; publishing the fourth tranche is a release step, and v4_audit_2026_08_25/RELEASE_PROCEDURE.md is where it is done.",
+    "server_logs": 3020,
+    "telemetry_traces": 23,
     "release_assets": 6
   }
 }
