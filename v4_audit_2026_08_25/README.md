@@ -1224,12 +1224,17 @@ logs, with `telemetry_20260828.tar.zst` at **58 905 bytes**, sha256
 `72e331bf0cbfaaee73619acf320523598cab4a46b7a7daa51fabbd6e2c455bf3`, and all
 **501** of its entries were verified against the unpacked archive before
 publishing, which is the check that was missing when the manifest named them
-one commit early. Run W2's **1200 logs and 1 trace** are hashed into
-`EVIDENCE_MANIFEST.sha256` and are **not yet packaged**: the manifest ties the
-committed JSON to the files it came from, and cutting the fourth tranche is a
-release step, done in [`RELEASE_PROCEDURE.md`](RELEASE_PROCEDURE.md).
-`RUN_REGISTRY.json` records it as `tranches_pending: 1` rather than leaving the
-gap to be inferred from a count.
+one commit early. A fourth followed on 2026-08-31 for run W2:
+`raw_logs_20260831.tar.zst`, **365 852 615 bytes**, sha256
+`524ce5db75d494028b7b596f45e98b2384d8234726a924135775cce4f85b4cda`, 1200
+logs, with `telemetry_20260831.tar.zst` at **114 587 bytes**, sha256
+`4abdb6d701171bf0178ae36dad86f3190801cc047e88220d16f5442b7189949b`, and all
+**1201** of its entries were verified against the unpacked archive before
+publishing. It was hashed into `EVIDENCE_MANIFEST.sha256` a commit before it
+was packaged, and for that one commit the manifest carried a marker naming
+exactly what was not yet published rather than leaving the gap to be inferred
+from a count. All four tranches are assets of `raw-evidence-2026-08-31-v4.2`,
+so one release identity verifies the whole manifest.
 
 Committed hashes tie the derived JSON
 to files nobody else could see, which is a weaker claim than it sounds; the

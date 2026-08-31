@@ -16,7 +16,7 @@ on:
     inputs:
       release_tag:
         description: the release holding raw_logs.tar.zst
-        default: raw-evidence-2026-08-27
+        default: raw-evidence-2026-08-31-v4.2
         required: false
   release:
     types: [published]
@@ -111,7 +111,7 @@ jobs:
             ${{
               github.event_name == 'release'
                 && github.event.release.tag_name
-                || (inputs.release_tag || 'raw-evidence-2026-08-27')
+                || (inputs.release_tag || 'raw-evidence-2026-08-31-v4.2')
             }}
         run: |
           set -euo pipefail
@@ -147,8 +147,16 @@ jobs:
             db833395470aeaf842225a33fb544e933f1c0a3047cac161524aca1ac1aef061
           check evidence/telemetry_20260828.tar.zst \
             72e331bf0cbfaaee73619acf320523598cab4a46b7a7daa51fabbd6e2c455bf3
+          # fourth tranche: run W2's 1200 logs and its trace. Hashed into the
+          # manifest on 2026-08-31 and packaged for the v4.2 release, which is
+          # why the manifest carried a pending marker for one commit and does
+          # not now.
+          check evidence/raw_logs_20260831.tar.zst \
+            524ce5db75d494028b7b596f45e98b2384d8234726a924135775cce4f85b4cda
+          check evidence/telemetry_20260831.tar.zst \
+            4abdb6d701171bf0178ae36dad86f3190801cc047e88220d16f5442b7189949b
           # and nothing was downloaded that no `check` above covers: the
-          # pattern is a glob, so a seventh asset added to the release would be
+          # pattern is a glob, so a ninth asset added to the release would be
           # unpacked with its archive digest unverified. Counted against this
           # file rather than a literal, so adding a check is the only way to
           # raise the number.
@@ -172,35 +180,24 @@ jobs:
           # `..`, a symlink out of the tree, a duplicated member that overwrites
           # its first copy, or simply an extra file. The pinned digests make that
           # unlikely for these archives; the verifier was still not closed-world.
-          # The manifest holds one pending tranche: run W2's logs are hashed
-          # and not yet packaged, so `sha256sum -c` over the whole file would
-          # report 1201 missing files and exit non-zero on a tree where nothing
-          # is wrong. Split on the marker, verify the published half, and prove
-          # the pending half is exactly what it claims to be rather than a
-          # place a published entry could be moved to hide a failure.
+          # Every entry is published now. While run W2's logs were hashed
+          # and not packaged the manifest carried a marker and this step
+          # verified the half above it; the marker must be gone, or the job
+          # would check a subset of the file and say nothing about the rest.
           M=v4_audit_2026_08_25/EVIDENCE_MANIFEST.sha256
-          grep -q '^# --- PENDING TRANCHE' "$M" || {
-            echo "FAIL: the manifest has no pending-tranche marker" >&2; exit 1; }
-          sed '/^# --- PENDING TRANCHE/,$d' "$M" | grep -v '^#' | grep -v '^$' > /tmp/manifest
-          sed -n '/^# --- PENDING TRANCHE/,$p' "$M" | grep -v '^#' | grep -v '^$' > /tmp/pending
-          bad=$(grep -cv '20260830_220554' /tmp/pending || true)
-          [ "$bad" -eq 0 ] || {
-            echo "FAIL: $bad pending entries are not run W2's" >&2; exit 1; }
-          [ "$(wc -l < /tmp/pending)" -eq 1201 ] || {
-            echo "FAIL: $(wc -l < /tmp/pending) pending entries, expected 1201" >&2
-            exit 1
-          }
-          # and no W2 path above the marker, which is the other direction
-          grep -q '20260830_220554' /tmp/manifest && {
-            echo "FAIL: a W2 entry sits in the published half" >&2; exit 1; } || true
-          echo "$(wc -l < /tmp/manifest) published entries, $(wc -l < /tmp/pending) pending" 
+          ! grep -q '^# --- PENDING TRANCHE' "$M" || {
+            echo "FAIL: the manifest still marks a pending tranche" >&2; exit 1; }
+          grep -v '^#' "$M" | grep -v '^$' > /tmp/manifest
+          echo "$(wc -l < /tmp/manifest) manifest entries, none pending"
           python3 bench/preflight_tar.py /tmp/manifest \
               <(unzstd -c evidence/raw_logs.tar.zst) \
               <(unzstd -c evidence/raw_logs_20260827.tar.zst) \
               <(unzstd -c evidence/raw_logs_20260828.tar.zst) \
               <(unzstd -c evidence/telemetry.tar.zst) \
               <(unzstd -c evidence/telemetry_20260827.tar.zst) \
-              <(unzstd -c evidence/telemetry_20260828.tar.zst)
+              <(unzstd -c evidence/telemetry_20260828.tar.zst) \
+              <(unzstd -c evidence/raw_logs_20260831.tar.zst) \
+              <(unzstd -c evidence/telemetry_20260831.tar.zst)
           # Three tranches, and no `if [ -f ]` around any of them: the step
           # above fails when one of the six archives is absent, so the guards
           # that used to be here could never be false, and they read as though
@@ -214,6 +211,9 @@ jobs:
           # third tranche: run W's 500 logs and its telemetry trace
           tar --use-compress-program=unzstd -xf evidence/raw_logs_20260828.tar.zst -C bench
           tar --use-compress-program=unzstd -xf evidence/telemetry_20260828.tar.zst -C bench
+          # fourth: run W2's 1200 logs and its trace
+          tar --use-compress-program=unzstd -xf evidence/raw_logs_20260831.tar.zst -C bench
+          tar --use-compress-program=unzstd -xf evidence/telemetry_20260831.tar.zst -C bench
           cd bench && sha256sum -c /tmp/manifest
           # `sha256sum -c` proves every file the manifest names is intact. It
           # says nothing about a file the archive carries and the manifest does
@@ -263,15 +263,12 @@ jobs:
           # only trace would have been a smaller number in the line above,
           # which nothing read.
           #
-          # The pending half is not a second literal here. It is read out of
-          # the manifest, so publishing the fourth tranche shortens this list
-          # by editing one file rather than two, and a run that quietly stops
-          # being archived still fails.
+          # Two again: the fourth tranche is published, so run W2's twelve
+          # directories have archived logs like every other run. This was
+          # derived from the manifest's pending half for the one commit that
+          # had one.
           got=$(printf '%s\n' "${skipped[@]:-}" | sort | tr '\n' ' ')
-          pend=$(cut -d' ' -f3- /tmp/pending | cut -d/ -f1 \
-                 | grep -v '\.csv$' | sort -u | tr '\n' ' ')
-          want=$(printf '%s\n' A_bcb5eeb64_legacy B_master_3737e4137 $pend \
-                 | sort | tr '\n' ' ')
+          want="A_bcb5eeb64_legacy B_master_3737e4137 "
           [ "$got" = "$want" ] || {
             echo "FAIL: runs with no archived logs are now [$got], not [$want]" >&2
             exit 1

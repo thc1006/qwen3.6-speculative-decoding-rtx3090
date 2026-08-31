@@ -1,7 +1,9 @@
 # SHA-256 of every raw llama-server log and GPU telemetry trace behind this
-# repository's controlled tier. 3020 logs and 23 traces, of which 1820 logs
-# and 22 traces are published as release assets and run W2's 1200 and 1
-# are pending, below the marker.
+# repository's controlled tier. 3020 logs and 23 traces, all of them
+# published as release assets in four tranches. Run W2's 1200 logs and its
+# trace were the fourth, pending between 2026-08-31 and the v4.2 release
+# and hashed here throughout, which is what let the workflow verify the
+# published half while naming exactly what was not yet in it.
 # These two counts are what the file holds, checked by
 # analysis/verify_claims.py against the registry; the line used to
 # say 702 and 19 while the file held 1820 and 22, because nothing
@@ -21,6 +23,12 @@
 #
 #   telemetry.tar.zst    162 320 bytes
 #   sha256               8a29cc875e30bc66c6e83913b1bf40b075295218a37eef37897317805b47d03c
+#
+#   raw_logs_20260831.tar.zst   365 852 615 bytes, zstd -19, run W2's 1200 logs
+#   sha256                      524ce5db75d494028b7b596f45e98b2384d8234726a924135775cce4f85b4cda
+#
+#   telemetry_20260831.tar.zst  114 587 bytes
+#   sha256                      4abdb6d701171bf0178ae36dad86f3190801cc047e88220d16f5442b7189949b
 #
 # Published 2026-08-27 as the release asset `raw-evidence-2026-08-27`, with the
 # 19 telemetry traces beside it. Committed hashes tie the derived JSON to files
@@ -1909,16 +1917,6 @@ d3248cb022143b275d559fcb633de4f3e647114bed6ac17b4d75bb29be53122e  matrix_W_s5_20
 7ebd2fd50e0caaae6811ed0d25c036a03f425c3b7abefc1188c14009f1688747  matrix_W_s5_20260828_104222/server_logs/spec-mtp-n2__rep8.log
 f4103a45468e2eff89fbc11745945e6e94d62cb88a4d8ec8c79574ee6f0749ad  matrix_W_s5_20260828_104222/server_logs/spec-mtp-n2__rep9.log
 56f927e1524dc59232a3ca8cb412588052ca26fac0755911eedfef7736182c7a  gpu_telemetry_W_20260828_104222.csv
-#
-# --- PENDING TRANCHE: run W2, hashed here and not yet a release asset ---
-# Everything below this line is run W2's 1200 server logs and its telemetry
-# trace. They are hashed so the committed JSON is tied to the files it came
-# from; packaging them as a fourth tranche is a release step, done in
-# RELEASE_PROCEDURE.md. `.github/workflows/evidence.yml` verifies the
-# published portion above and asserts that this portion is exactly the W2
-# paths and nothing else, so a pending entry cannot be mistaken for a
-# published one and a published one cannot quietly move down here.
-#
 00147d676e2ebb9b1a8e094600d44038ae0ab7619e4ba0ff7be6a4c112f7adb0  matrix_W2_s8_20260830_220554/server_logs/spec-mtp-n2-cap__rep0.log
 0033cef07770669f471a3505de0feb893d733ceb1f47c84dd90062c7c1821c38  matrix_W2_s6_20260830_220554/server_logs/spec-dflash-n2__rep6.log
 006e79ba5f3c4f5182f4c4ad132c8fea9deede6dd7dab8425ae1bce7b65db28a  matrix_W2_s6_20260830_220554/server_logs/baseline-cap__rep9.log

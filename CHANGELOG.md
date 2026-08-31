@@ -12,7 +12,7 @@ publication point with its own data set.
 is now measured rather than assumed.** `analysis/table_coverage.py` counts the
 tables in the nine published documents; `--probe` writes a wrong number into
 one cell of each in turn and asks whether an assertion that was passing now
-fails. Of 139 tables, 127 carry measurements and all 127 are parsed cell by cell.
+fails. Of 141 tables, 128 carry measurements and all 128 are parsed cell by cell.
 When 80 were still unparsed, perturbing one cell of each left **67 that accept
 a wrong number and nothing notices**; all 80 of those are parsed now.
 Full accounting in [`ERRATA.md`](ERRATA.md) A19.
@@ -27,8 +27,8 @@ the probe over the grown set found 33 more; the run after that perturbed all
 parsing the last six grew the population again, as run W2's tables did after
 that. The complete pass on 2026-08-30 perturbed all 2 373 numbers across the
 124 tables of commit 0334c60dac82 and caught every one, in eight shards whose
-control passed before the work and again after it. This tree holds 2 439
-numbers across 127 tables and no pass has yet covered that population. That is
+control passed before the work and again after it. This tree holds 2 446
+numbers across 128 tables and no pass has yet covered that population. That is
 what the W three-design table had done, in both documents that carry it: only
 the W column was read, so V2's `+12.03` and V3's `+12.17`, two thirds of a
 three-way comparison, could have been anything.
@@ -111,8 +111,8 @@ the other box's GPU and CUDA cannot be recovered from anything committed
 here. Each is marked; the alternative was to check a literal against itself
 and call it verified.
 
-Eighty-three tables are parsed that were not, eight of them census corrections
-and seventy-five new readers: every cell of run C's thirteen arms, run O's
+Eighty-four tables are parsed that were not, eight of them census corrections
+and seventy-six new readers: every cell of run C's thirteen arms, run O's
 head-to-head, the v1 representative table including both of its range rows,
 runs J, K, L and N, the V2 and V3 columns of the W table, both run registries,
 A4's log reconstruction, A14's M1-against-Q comparison, A16's six invocations,

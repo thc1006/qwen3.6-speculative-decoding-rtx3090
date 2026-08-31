@@ -37,6 +37,9 @@ COPY = ("analysis", "bench", "tests", "v4_audit_2026_08_25", "results",
         # the CI-install guard reads both locks, so a mirror
         # without them turns that test into a FileNotFoundError
         "requirements-lint.lock", "requirements-plot.lock",
+        # the v4.2 release notes are a censused document and the checker
+        # reads them; a mirror without them dies before it measures
+        "RELEASE_NOTES_v4.2.md",
         # the v1 archive's own request payload carries `temperature: 0.0`, which
         # the tier registry's row is checked against, and `pr_comment.md` is the
         # third document quoting the 0.6B drafter's vocabulary

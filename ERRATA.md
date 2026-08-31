@@ -1987,10 +1987,10 @@ the nine published documents, and `--probe` writes a wrong number into one cell
 of each in turn, runs the claim checker, and asks whether an assertion that was
 passing now fails. Measured on the tree this entry is committed in:
 
-Of **139** tables, **7** carry no number at all (paths, links, prose), **5** are
+Of **141** tables, **7** carry no number at all (paths, links, prose), **6** are
 excluded by name and reason in `EXCLUDED_TABLES` -- an upstream PR tracker, a
 commit-hash comparison, two checklists and a table of arm definitions whose only
-digit is a tokenizer id -- and **127** carry measurements. All **127** of those
+digit is a tokenizer id -- and **128** carry measurements. All **128** of those
 are parsed cell by cell by `analysis/verify_claims.py`; **0** are not.
 
 The split used to be three ways, with anything under three numeric cells filed
@@ -2024,8 +2024,8 @@ perturbed **2 252** numbers across the **119** tables parsed at the time and
 **33** of them changed nothing. The runs it took are the point: the population
 grows as the coverage does, so a clean run is only clean for the tree it ran
 on: parsing the last six tables grew it, and so did run W2's three tables and
-the column it added to A17's. The population on this tree is **2 439** numbers
-across all **127** tables, **and no pass has yet covered that population**.
+the column it added to A17's. The population on this tree is **2 446** numbers
+across all **128** tables, **and no pass has yet covered that population**.
 The last complete pass covered **2 373** numbers across **124** tables at
 commit `0334c60dac82`, one at a time, and **every one was caught**, in eight
 shards whose control passed before the work and again after it. Sixty-six
@@ -2072,7 +2072,7 @@ return rows, and assert nothing about the column you changed, which is exactly
 what the W three-design table did, in two documents, until this pass.
 
 **The larger half is not tables.** **1 352** decimal numbers sit in prose,
-outside every table; **707** of them do not appear as a string literal anywhere
+outside every table; **704** of them do not appear as a string literal anywhere
 in the checker, counting only literals that are not assertion labels; a label
 is prose about a check and not a check, and leaving them in made the count move
 whenever an assertion was reworded. That criterion is an upper bound on the gap
@@ -2084,8 +2084,8 @@ now are numbers the readers written for the tables happen to reach, which is
 the only reason the figure moved. The prose half of this repository is, to a
 first approximation, unchecked.
 
-**What this pass changed.** Eighty-three tables count as parsed that did
-not: eight are the census correction above and seventy-five are new readers. They
+**What this pass changed.** Eighty-four tables count as parsed that did
+not: eight are the census correction above and seventy-six are new readers. They
 include every cell of the thirteen-arm run C table, run O's head-to-head, the
 v1 representative table with both of its range rows, run J and run K, run L's
 two halves, the V2 and V3 columns of the W table in both documents that carry

@@ -67,7 +67,8 @@ DOCS = ["README.md", "ERRATA.md", "CHANGELOG.md", "RETEST_TODO.md",
         "v4_audit_2026_08_25/README.md",
         "v4_audit_2026_08_25/PREREGISTERED_PREDICTION.md",
         "v4_audit_2026_08_25/PROSPECTIVE_ANALYSIS_PLAN_W.md",
-        "v4_audit_2026_08_25/PROSPECTIVE_ANALYSIS_PLAN_W2.md"]
+        "v4_audit_2026_08_25/PROSPECTIVE_ANALYSIS_PLAN_W2.md",
+        "RELEASE_NOTES_v4.2.md"]
 # Not censused, and why. Nothing may be missing from DOCS + EXCLUDED: a new
 # document that is in neither would escape the count silently, which is the
 # failure this whole file exists to stop.
@@ -106,7 +107,8 @@ READER_DOC = {"_md_table": "ERRATA.md",
               # exists: a whole reader was missing from this map and both
               # tables it reads were being counted as unparsed
               "_pre_table":
-                  "v4_audit_2026_08_25/PREREGISTERED_PREDICTION.md"}
+                  "v4_audit_2026_08_25/PREREGISTERED_PREDICTION.md",
+              "_rn_table": "RELEASE_NOTES_v4.2.md"}
 # The generic readers take the document's LINES as their first argument and the
 # header as their second, so the document has to come from the variable name.
 # Adding one of these without adding it here counts its tables as unparsed,
@@ -365,6 +367,10 @@ EXCLUDED_TABLES = {
         "a written/not-written checklist; no quantity in it",
     ("v4_audit_2026_08_25/README.md", "| arm | what it is |"):
         "arm definitions; the digit is a tokenizer id passed with --override-kv",
+    ("RELEASE_NOTES_v4.2.md", "| asset | bytes | sha256 |"):
+        "release asset digests; a sha256 is not a measurement and parsing one "
+        "as numbers yields garbage. The bytes and the digests are checked "
+        "against evidence.yml and the audit README by name in verify_claims.py",
 }
 
 def census() -> dict:

@@ -23,15 +23,22 @@ say where it points and why it is left there.
 A final versioned release, cut at the exact commit that carries the dataset and
 the verifier together, at the end rather than the middle:
 
-    TAG=raw-evidence-2026-08-30-v4.2
+    TAG=raw-evidence-2026-08-31-v4.2
     HEAD_SHA=$(git rev-parse HEAD)
 
-    # 1. the tree must be green at that commit, both gates
+    # 1. the tree must be green at that commit, all four gates
     python3 analysis/verify_claims.py
     python3 -m unittest discover -s tests -p 'test_*.py'
+    python3 tests/mutate.py
+    python3 tests/data_mutate.py
 
-    # 2. the tag goes on that commit and nothing later
-    git tag -s "$TAG" -m "evidence and verifier at $HEAD_SHA" "$HEAD_SHA"
+    # 2. the tag goes on that commit and nothing later. ANNOTATED, not signed:
+    #    this repository has no signing key configured and none of its five
+    #    existing tags is signed, so `-s` would have failed here and `-a` is
+    #    what it has always actually done. Signing needs a key registered with
+    #    GitHub as a signing key, which is an account action, and the release
+    #    notes say the tag is unsigned rather than leaving a reader to check.
+    git tag -a "$TAG" -m "evidence and verifier at $HEAD_SHA" "$HEAD_SHA"
     git push origin "$TAG"
 
     # 3. the binding is checked, not assumed
@@ -42,13 +49,25 @@ the verifier together, at the end rather than the middle:
     #    SHA-256, the verifier commit, the exact log and trace counts, and
     #    which data can only be integrity-checked rather than re-derived
     gh release create "$TAG" --target "$HEAD_SHA" --verify-tag \
-       --title "Evidence and verifier, v4.2" --notes-file RELEASE_NOTES_v4.2.md
+       --title "Evidence and verifier, v4.2" --notes-file RELEASE_NOTES_v4.2.md \
+       ~/tranche4/raw_logs_20260831.tar.zst ~/tranche4/telemetry_20260831.tar.zst \
+       evidence/raw_logs.tar.zst evidence/raw_logs_20260827.tar.zst \
+       evidence/raw_logs_20260828.tar.zst evidence/telemetry.tar.zst \
+       evidence/telemetry_20260827.tar.zst evidence/telemetry_20260828.tar.zst
+
+## Why all eight assets, and not two
+
+`raw-evidence-2026-08-27` keeps its six and is not retargeted. The v4.2 release
+carries all eight so that one tag publishes one complete evidence set: a reader
+who fetches it needs no second identity to verify the manifest, which is the
+property the paragraph at the top of this file says was broken.
 
 ## What the notes must contain
 
 Not a description of the assets — the assets themselves, enumerated:
 
-- every asset, its size in bytes and its SHA-256, all six of them
+- every asset, its size in bytes and its SHA-256, all eight of them: run W2's
+  logs are a fourth tranche, published rather than left pending
 - the SHA-256 of `EVIDENCE_MANIFEST.sha256`
 - the verifier commit, which is the tag's own commit
 - exact counts: server logs, telemetry traces, tranches, run directories

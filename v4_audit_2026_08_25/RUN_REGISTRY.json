@@ -45,12 +45,12 @@
     }
   },
   "raw_evidence": {
-    "tranches": 3,
-    "tranches_published": 3,
-    "tranches_pending": 1,
-    "_pending": "W2's 1200 server logs are hashed in EVIDENCE_MANIFEST.sha256 and not yet packaged as a release asset. The manifest covers them so the committed JSON is tied to the files it came from; publishing the fourth tranche is a release step, and v4_audit_2026_08_25/RELEASE_PROCEDURE.md is where it is done.",
+    "tranches": 4,
+    "tranches_published": 4,
+    "tranches_pending": 0,
+    "_pending": "None. Run W2's 1200 server logs and its telemetry trace were pending between 2026-08-31 and the v4.2 release and are the fourth tranche, published with the other three under one tag so that a reader needs one release identity to verify the whole manifest.",
     "server_logs": 3020,
     "telemetry_traces": 23,
-    "release_assets": 6
+    "release_assets": 8
   }
 }

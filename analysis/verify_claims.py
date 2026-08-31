@@ -3187,37 +3187,39 @@ chk("logs in the manifest", sum(1 for l in _mlines if l.endswith(".log")), 3020)
 chk("telemetry traces in the manifest",
     sum(1 for l in _mlines if l.endswith(".csv")), 23)
 chk("no duplicate paths", len({l.split("  ", 1)[1] for l in _mlines}), len(_mlines))
-# The manifest now has a published half and a pending one: W2's logs are hashed
-# and not packaged. `sha256sum -c` over the whole file reports 1201 missing
-# files on a tree where nothing is wrong, so `evidence.yml` splits on a marker.
-# A marker a workflow depends on is a structural claim, and this is where it is
-# checked without waiting for CI. Both directions, because moving a published
-# entry below the line would hide a failed digest exactly as well as it hides a
-# pending one.
+# The manifest had a published half and a pending one while run W2's logs were
+# hashed and not packaged, and `evidence.yml` split on a marker to verify the
+# first and name the second. The v4.2 release publishes the fourth tranche, so
+# there is no pending half and the marker is gone. Both facts are asserted:
+# a marker left behind would make the workflow verify a subset and say nothing,
+# and a pending entry with no marker would make `sha256sum -c` fail on a tree
+# where nothing is wrong.
 _EVY = (pathlib.Path(__file__).resolve().parents[1] / ".github"
         / "workflows" / "evidence.yml").read_text(encoding="utf-8")
 _mtext = _man.read_text(encoding="utf-8").splitlines()
-_mmark = [i for i, l in enumerate(_mtext)
-          if l.startswith("# --- PENDING TRANCHE")]
-chk("manifest: exactly one pending-tranche marker", len(_mmark), 1)
-_mpub = [l for l in _mtext[:_mmark[0]] if l and not l.startswith("#")]
-_mpend = [l for l in _mtext[_mmark[0]:] if l and not l.startswith("#")]
-chk("manifest: the published half is the three released tranches",
-    (len(_mpub), sum(1 for l in _mpub if l.endswith(".log")),
-     sum(1 for l in _mpub if l.endswith(".csv"))), (1842, 1820, 22))
-# the needle is the run stamp, not "W2_20260830_220554": the log paths are
-# `matrix_W2_s8_20260830_220554/...`, so the session number sits between the
-# label and the stamp and the obvious needle matched only the trace
-chk("manifest: the pending half is run W2 and nothing else",
-    (len(_mpend), sorted({"20260830_220554" in l for l in _mpend})),
-    (1201, [True]))
-chk("manifest: and no W2 entry sits above the marker",
-    [l for l in _mpub if "20260830_220554" in l], [])
-chk("manifest: the two halves are the whole file",
-    len(_mpub) + len(_mpend), len(_mlines))
-chk("evidence.yml splits on that marker rather than reading the whole file",
-    ("PENDING TRANCHE" in _EVY and "/tmp/pending" in _EVY
-     and "sed '/^# --- PENDING TRANCHE/,$d'" in _EVY), True)
+chk("manifest: no pending-tranche marker, because nothing is pending",
+    [_l for _l in _mtext if _l.startswith("# --- PENDING TRANCHE")], [])
+_regev = json.loads((pathlib.Path(__file__).resolve().parents[1]
+                     / "v4_audit_2026_08_25" / "RUN_REGISTRY.json")
+                    .read_text(encoding="utf-8"))["raw_evidence"]
+chk("manifest: and the registry agrees that nothing is pending",
+    (_regev["tranches"], _regev["tranches_published"],
+     _regev["tranches_pending"], _regev["release_assets"]), (4, 4, 0, 8))
+chk("manifest: run W2's entries are in it and are the fourth tranche's",
+    sum(1 for _l in _mlines if "20260830_220554" in _l), 1201)
+# It must not SPLIT on the marker any more, and it must still assert the
+# marker is absent: a workflow that stopped mentioning it would silently accept
+# a manifest that grew a pending half again.
+chk("evidence.yml verifies the whole manifest, not a prefix of it",
+    ("/tmp/pending" not in _EVY
+     and "! grep -q '^# --- PENDING TRANCHE'" in _EVY), True)
+# counted the way the workflow counts it, by LINE: the substring also sits
+# inside the `grep -c` pattern on the line that does the counting, so a
+# substring count says nine and the shell says eight
+chk("evidence.yml names all eight assets",
+    sum(1 for _l in _EVY.splitlines()
+        if _l.startswith("          check evidence/")), 8)
+
 _v4r = pathlib.Path(__file__).resolve().parents[1] / "v4_audit_2026_08_25" / "README.md"
 chk("the archive hash is recorded in both places",
     all("29c2401f100390268bbd52e43b5c2da9a61440bad3dabe502ca1684478771fd6" in t
@@ -9256,8 +9258,8 @@ print("\n=== how much of what is published is checked ===")
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import table_coverage as _tcov                                    # noqa: E402
 _cov = _tcov.census()
-chk("coverage: published tables", _cov["tables"], 139)
-chk("coverage: those carrying measurements", _cov["carrying_values"], 127)
+chk("coverage: published tables", _cov["tables"], 141)
+chk("coverage: those carrying measurements", _cov["carrying_values"], 128)
 # EXACT, not "may only rise". `parsed >= 119` and `not_parsed <= 67` were a
 # ratchet that permitted six unparsed measurement tables to stand indefinitely,
 # and the census that fed them filed any table with fewer than three numeric
@@ -9379,14 +9381,14 @@ chk("CHANGELOG: the census it publishes is the census",
 # are readers written since. The 119 in this paragraph went stale unnoticed
 # because nothing subtracted anything.
 chk("CHANGELOG: eighty more are parsed, eight of them census corrections",
-    (_cov["parsed"] - 44, _cov["parsed"] - 44 - 8), (83, 75))
+    (_cov["parsed"] - 44, _cov["parsed"] - 44 - 8), (84, 76))
 chk("CHANGELOG: and that is the split it publishes",
-    "Eighty-three tables are parsed that were not, eight of them census "
-    "corrections and seventy-five new readers" in _CL_FLAT, True)
+    "Eighty-four tables are parsed that were not, eight of them census "
+    "corrections and seventy-six new readers" in _CL_FLAT, True)
 chk("ERRATA A19: the census it publishes is the census",
     (_cov["tables"], _cov["no_values"], _cov["excluded_tables"],
      _cov["carrying_values"], _cov["parsed"], _cov["not_parsed"]),
-    (139, 7, 5, 127, 127, 0))
+    (141, 7, 6, 128, 128, 0))
 for _want, _what in ((_cov["tables"], "tables"),
                      (_cov["carrying_values"], "carrying measurements"),
                      (_cov["parsed"], "parsed"),
@@ -9421,7 +9423,7 @@ _pcov = _tcov.prose_census()
 chk("coverage: decimal numbers in prose, outside every table",
     _pcov["prose_numbers"], 1352)
 chk("coverage: those that are not a literal in this file",
-    _pcov["not_a_literal"], 707)
+    _pcov["not_a_literal"], 704)
 # tested on a supplied source, not by searching this file for a phrase: the
 # first version of this check searched for a label's own words, and the search
 # string was itself a literal in the argument position, so it always found it.
@@ -9457,7 +9459,7 @@ def _wilson_low(_k, _n, _z=1.959964):
 # tool's output. `cell_population` is what the probe itself would perturb.
 _A19_POP = _tcov.cell_population(_cov["covered"])
 chk("A19: the probe population it publishes is the one the tool would perturb",
-    (_A19_POP, len(_cov["covered"])), (2439, 127))
+    (_A19_POP, len(_cov["covered"])), (2446, 128))
 # not `_grouped`, which returns the digit groups a table cell splits into:
 # this is prose, and the question is whether the sentence contains the number.
 # `str.split()` treats the thin space as whitespace, so normalising both sides
@@ -9482,8 +9484,8 @@ chk("ERRATA A19: and the entry states that pair",
 # the split of what this pass parsed, which the entry and the changelog give
 # separately and which went stale in the entry at seventy-five
 chk("ERRATA A19: the newly parsed count is the census's difference too",
-    ("**What this pass changed.** Eighty-three tables count as parsed that "
-     "did not: eight are the census correction above and seventy-five are "
+    ("**What this pass changed.** Eighty-four tables count as parsed that "
+     "did not: eight are the census correction above and seventy-six are "
      "new readers." in " ".join(_A19.split())), True)
 chk("ERRATA A19: and it says the measurement was wrong four times, once",
     (_A19.count("The measurement was wrong"),
@@ -9549,6 +9551,79 @@ chk("checker: number of assertions", len([1 for _n in _ast.walk(_tree)
 # checker in exactly such a mirror, which is how the difference surfaced.
 _GITLESS_SKIPPED = 13
 _pr_total = len(RAN) + 1 + (0 if _HAS_GIT else _GITLESS_SKIPPED)
+print("\n=== the v4.2 release notes ===")
+# A release note is a published document like any other. Its asset digests are
+# a named exclusion from the census, because a sha256 parsed as numbers is
+# garbage, so they are checked here by identity against the workflow that
+# verifies the downloads and against the audit README that records them. The
+# counts beside them are derived, not transcribed.
+_RN_LINES = (pathlib.Path(__file__).resolve().parents[1]
+             / "RELEASE_NOTES_v4.2.md").read_text(encoding="utf-8").splitlines()
+
+
+def _rn_table(header_startswith):
+    i = next(i for i, l in enumerate(_RN_LINES)
+             if l.startswith(header_startswith))
+    rows = []
+    for l in _RN_LINES[i + 2:]:
+        if not l.startswith("|"):
+            break
+        rows.append([c.strip().strip("*`").replace("`", "").strip("* ").strip()
+                     for c in l.strip("|").split("|")])
+    return rows
+
+
+_RNA = {r[0]: (r[1], r[2]) for r in _rn_table("| asset | bytes | sha256 |")}
+chk("release notes: eight assets, which is what the release carries",
+    len(_RNA), 8)
+chk("release notes: every asset it lists is one evidence.yml checks",
+    sorted(_RNA), sorted(_l.split("evidence/")[1].strip(" \\")
+                         for _l in _EVY.splitlines()
+                         if _l.startswith("          check evidence/")))
+_EVY_SHA = {}
+_evl = _EVY.splitlines()
+for _i, _l in enumerate(_evl):
+    if _l.startswith("          check evidence/"):
+        _EVY_SHA[_l.split("evidence/")[1].strip(" \\")] = _evl[_i + 1].strip()
+chk("release notes: and every digit of every digest is the one it checks",
+    {_k: _v[1] for _k, _v in _RNA.items()}, _EVY_SHA)
+# The workflow greps each digest in BOTH the manifest and the audit README, so
+# an asset the notes list and those two do not is one the job would refuse to
+# verify. Byte counts as well as digests, because a size is the other half of
+# what identifies an archive.
+chk("release notes: every asset's bytes are the audit README's too",
+    sorted(_k for _k, _v in _RNA.items()
+           if _v[0].replace("\u2009", " ") not in _V4TXT
+           and _v[0].replace(" ", "\u2009") not in _V4TXT), [])
+chk("release notes: and every digest is in the manifest and the README",
+    sorted(_k for _k, _v in _RNA.items()
+           if _v[1] not in _man.read_text(encoding="utf-8")
+           or _v[1] not in _V4TXT), [])
+
+_RNC = {r[0]: r[1] for r in _rn_table("| what | count |")}
+_rn_dirs = [d for d in (_pl0.Path(__file__).resolve().parents[1]
+                        / "v4_audit_2026_08_25" / "data").iterdir() if d.is_dir()]
+chk("release notes: the counts it publishes are derived, not transcribed",
+    _RNC,
+    {"server logs": str(_regev["server_logs"]),
+     "telemetry traces": str(_regev["telemetry_traces"]),
+     "manifest entries": str(len(_mlines)),
+     "tranches": str(_regev["tranches"]),
+     "release assets": str(_regev["release_assets"]),
+     "committed run directories": str(len(_rn_dirs)),
+     "arm-runs across them": str(sum(len(list(d.glob("*__rep*.json")))
+                                     for d in _rn_dirs))})
+chk("release notes: it says the tag is not signed",
+    "The tag is annotated and NOT signed" in " ".join(_RN_LINES), True)
+_V4PROC = (pathlib.Path(__file__).resolve().parents[1] / "v4_audit_2026_08_25"
+           / "RELEASE_PROCEDURE.md").read_text(encoding="utf-8")
+chk("release notes: and names the tag the procedure and the workflow name",
+    ("raw-evidence-2026-08-31-v4.2" in _V4PROC
+     and "raw-evidence-2026-08-31-v4.2" in _EVY), True)
+chk("release procedure: it no longer tells you to sign a tag with no key",
+    ("git tag -a " in _V4PROC and "git tag -s " not in _V4PROC), True)
+
+
 chk("PR body: the assertion count it quotes is a full checkout's",
     f"# {_pr_total} assertions" in _PR, True)
 

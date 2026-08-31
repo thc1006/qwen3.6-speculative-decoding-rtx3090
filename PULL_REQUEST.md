@@ -372,8 +372,8 @@ adversarial pass over this branch's own commits found:
   the row is 30.4 % and the column consequently added to 100.1 (**B9**). Those
   five are parsed cell by cell now, but "all of them" was a statement about the
   ones that had been found, not about the class, and each had been found by
-  accident. The class is counted instead. Of 139 published tables 127 carry
-  measurements and all 127 are parsed cell by cell. When 80 were still unparsed,
+  accident. The class is counted instead. Of 141 published tables 128 carry
+  measurements and all 128 are parsed cell by cell. When 80 were still unparsed,
   perturbing one cell of each left 67 that accept a wrong number with nothing
   noticing; all 80 of those are parsed now, and no published table that
   carries a measurement is left unparsed.
@@ -383,10 +383,10 @@ adversarial pass over this branch's own commits found:
   assertion notices: whole interval columns read as `.split("[")[0]` and
   stopped, a configuration column nobody read, the `100 %` on a total row. Each
   is compared against a value derived from the data, and the measurement says
-  so: on 2026-08-30 the probe perturbed all 2 373 numbers across the 127
+  so: on 2026-08-30 the probe perturbed all 2 373 numbers across the 124
   parsed tables of commit `0334c60dac82` and caught every one, in eight shards
   whose control passed before the work and again after it. This tree holds
-  **2 439** and no pass has yet covered that population; the difference is
+  **2 446** and no pass has yet covered that population; the difference is
   run W2's tables. Their union is checked rather than assumed:
   `analysis/table_coverage.py --aggregate` over the eight real
   attestations reports **8 shards, one head, one checker, 2 373 locations
@@ -449,7 +449,7 @@ adversarial pass over this branch's own commits found:
   the checker inside a clean checkout of HEAD, and there it died 373 assertions
   early, so the probe's own baseline was broken and it was measuring nothing.
   The logs are committed now and a test refuses any path the checker opens that
-  a fresh clone would not have. A clean checkout runs all 3782 assertions and
+  a fresh clone would not have. A clean checkout runs all 3781 assertions and
   exits 0, which it did not before.
 
   Figures in those tables that are not re-derivable here say so rather than
@@ -603,7 +603,7 @@ review:
 
 ```
 python analysis/rederive_from_logs.py bench   # raw logs -> four audit files
-python analysis/verify_claims.py          # 3782 assertions, re-derived
+python analysis/verify_claims.py          # 3781 assertions, re-derived
 python analysis/check_data_integrity.py   # structure of all 77 run directories
 python -m unittest discover tests         # 288 regressions for defects shipped here
 python tests/mutate.py                    # break each fix, require its test to fail
