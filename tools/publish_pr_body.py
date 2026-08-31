@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import urllib.request
 from pathlib import Path
 
@@ -41,6 +42,100 @@ ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "PULL_REQUEST.md"
 REPO = "thc1006/qwen3.6-speculative-decoding-rtx3090"
 PR = 2
+
+
+def reflow(text: str) -> str:
+    """Join the lines of each paragraph, because a pull request body is not a file.
+
+    `PULL_REQUEST.md` is wrapped at eighty columns so a diff of it is readable
+    line by line. GitHub Flavored Markdown renders issue and pull request bodies
+    with newlines PRESERVED -- a single newline inside a paragraph becomes
+    `<br>` -- so those wraps are not invisible there the way they are in a
+    README. Rendering the file through GitHub's own markdown endpoint on
+    2026-09-01 counted 412 of them, which is what the body looked like to anyone
+    reading the pull request.
+
+    So the file keeps its wrapping and the body is reflowed on the way out.
+    Three things are structure rather than prose and survived a first version
+    that did not know it, each caught by rendering the result and counting:
+
+    INDENTATION. A table row indented inside a list item came out flush left,
+    which ends the list item and starts a second table. Rows went from 48 to 54.
+    A joined block now keeps the indentation of its own first line.
+
+    A NUMBER IS NOT A LIST MARKER. The test for an ordered item was a leading
+    digit with a `.` anywhere in the first four characters, so a wrapped line
+    beginning `82.079 + 19.266` or `3.3 pp` or `1.96;` was read as opening a new
+    item and the sentence was cut there. Six of the sixteen breaks left after
+    the first fix were this, and the risk was never the break: it was prose
+    being parsed as a list. A marker is digits then `.` or `)` then a space.
+
+    BLOCKQUOTES WRAP TOO. `>` marks the line but what follows it is a paragraph,
+    and GFM breaks inside a quote exactly as it does outside one. The marker is
+    held aside, the content joined, and the marker put back.
+    """
+    marker = re.compile(r"^\d+[.)]\s")
+    quote = re.compile(r"^(?:>\s?)+")
+    out: list[str] = []
+    para: list[str] = []
+    prefix = ""
+
+    def flush() -> None:
+        nonlocal prefix
+        if para:
+            head = para[0]
+            indent = head[:len(head) - len(head.lstrip())]
+            out.append(prefix + indent + " ".join(x.strip() for x in para))
+            para.clear()
+        prefix = ""
+
+    fenced = False
+    for line in text.split("\n"):
+        s = line.rstrip()
+        st = s.lstrip()
+        if st.startswith("```"):
+            flush()
+            fenced = not fenced
+            out.append(s)
+            continue
+        if fenced:
+            out.append(s)
+            continue
+        q = ""
+        m = quote.match(st)
+        if m:
+            q = m.group(0)
+            s = st[len(q):]
+            st = s.lstrip()
+            if not st:                       # a blank line inside the quote
+                flush()
+                out.append(q.rstrip())
+                continue
+            if para and prefix != q:         # a quote at a different depth
+                flush()
+        elif prefix:                         # the quote ended
+            flush()
+        if not st:
+            flush()
+            out.append("")
+            continue
+        # line-oriented: a table row, a heading and a rule are each one line,
+        # and nothing continues them
+        if st.startswith(("|", "#")) or st in ("---", "***", "___"):
+            flush()
+            out.append(q + s)
+            continue
+        # a list item opens a block that its wrapped lines continue
+        if st[:2] in ("- ", "* ", "+ ") or marker.match(st):
+            flush()
+            prefix = q
+            para.append(s)
+            continue
+        if not para:
+            prefix = q
+        para.append(s)
+    flush()
+    return "\n".join(out).strip() + "\n"
 
 
 def strip_header(text: str) -> str:
@@ -103,7 +198,19 @@ def main() -> None:
                    help="PATCH the pull request body, then read it back and compare")
     args = ap.parse_args()
 
-    want = strip_header(SOURCE.read_text(encoding="utf-8"))
+    # reflowed, because GFM renders a newline inside a paragraph of a pull
+    # request body as <br>: the file's eighty-column wrapping showed up as 399
+    # line breaks on the pull request page
+    # Normalised exactly as the read-back below is, and for the reason this
+    # module exists: the two sides of a comparison must be treated the same.
+    # `got` was stripped and `want` was not, `reflow` ends its output with a
+    # newline, and so publishing succeeded and then reported a one character
+    # mismatch against the body it had just written. The docstring above
+    # records the mirror image of this, a checker that shared a defect with the
+    # thing it checked; different normalisation on the two sides is the same
+    # error with the sign flipped.
+    want = reflow(strip_header(SOURCE.read_text(encoding="utf-8"))).replace(
+        "\r\n", "\n").strip()
     if not want:
         raise SystemExit(f"{SOURCE.name}: nothing to publish after the header")
 

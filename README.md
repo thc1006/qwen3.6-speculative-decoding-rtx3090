@@ -1081,9 +1081,16 @@ python analysis/plot_v4_runs.py
 | `v4_audit_2026_08_25/data/smoke_*` | the gate runs that decide a matrix is safe to start |
 
 Each run directory holds one `manifest.json` (hashing the binary and every
-model, and recording the full `BENCH_*` configuration), one
-`<arm>__rep<N>.json` per arm-run with full per-request capture, and an
-`all_results.json` that is the same content concatenated for convenience.
+model, and recording the full `BENCH_*` configuration) and one
+`<arm>__rep<N>.json` per arm-run with full per-request capture. The harness
+also writes an `all_results.json` concatenating the same content. It is not
+committed, as of 2026-09-01. This sentence used to call it "the same content"
+and nothing checked that: 119 MB across 53 directories, read by no analyser,
+assertion or workflow, and in `matrix_O2_latin_20260826_153711`, the run the
+headline table comes from, all 81 of its records disagreed with the arm-run
+files, which had been backfilled with the server's build and commit while the
+concatenation had not. A derived copy nothing reads is a second place for the
+truth to be, and it was already wrong in the one that mattered.
 
 ### Tooling
 

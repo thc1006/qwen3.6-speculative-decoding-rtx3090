@@ -4857,6 +4857,154 @@ class ARetractedSentenceMustNotSurviveOutsideItsRetraction(unittest.TestCase):
                           "RETEST_TODO.md"])
 
 
+class ThePublishedBodyMustNotBeHardWrapped(unittest.TestCase):
+    """GFM renders a newline inside a pull request body as `<br>`.
+
+    `PULL_REQUEST.md` is wrapped at eighty columns so its diffs are readable.
+    Published unchanged, that wrapping became 399 line breaks on the pull
+    request page, which is what it looked like to every reader of it between
+    2026-08-27 and 2026-09-01. The publisher reflows paragraphs on the way out,
+    and the thing that must not regress is that reflowing changes NOTHING
+    else: the first version dropped leading indentation and a table row inside
+    a list item came out flush left, ending the list.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    def _reflowed(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "pub", self.ROOT / "tools" / "publish_pr_body.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        src = mod.strip_header(
+            (self.ROOT / "PULL_REQUEST.md").read_text(encoding="utf-8"))
+        return src, mod.reflow(src)
+
+    def test_every_line_oriented_construct_survives(self):
+        import re
+        src, out = self._reflowed()
+        for name, pat in (("table rows", r"^\s*\|"), ("bullets", r"^\s*[-*+] "),
+                          ("headings", r"^#"), ("fences", r"^```")):
+            self.assertEqual(len(re.findall(pat, src, re.M)),
+                             len(re.findall(pat, out, re.M)),
+                             f"reflowing changed the number of {name}")
+
+    def test_a_blockquote_keeps_its_blocks_and_its_words(self):
+        """A quote's LINES are not the invariant; its blocks and text are.
+
+        This assertion used to count `^>` lines and require the count to be
+        equal, which is exactly the defect written down as a test: `>` marks the
+        line but what follows it is a paragraph, and GFM breaks inside a quote
+        as it does outside one. Eleven wrapped quote lines rendered as ten
+        `<br>`. So the quote is now joined, and what must not change is the
+        number of quoted BLOCKS and the words inside them.
+        """
+        import re
+        src, out = self._reflowed()
+
+        def blocks(t):
+            got, cur = [], []
+            for line in t.split("\n"):
+                st = line.lstrip()
+                if st.startswith(">"):
+                    cur.append(re.sub(r"^(?:>\s?)+", "", st))
+                elif cur:
+                    got.append(" ".join(x for x in cur if x.strip()))
+                    cur = []
+            if cur:
+                got.append(" ".join(x for x in cur if x.strip()))
+            return [" ".join(b.split()) for b in got]
+
+        self.assertEqual(blocks(src), blocks(out),
+                         "reflowing changed a blockquote's blocks or its words")
+        self.assertTrue(blocks(src), "no blockquote to check")
+
+    def test_the_two_sides_of_the_readback_are_normalised_alike(self):
+        """The published body and the body read back get the same treatment.
+
+        `got` was stripped and `want` was not. `reflow` ends its output with a
+        newline, so on 2026-09-01 the publisher wrote the correct body, read it
+        back, and reported a one character mismatch against what it had just
+        written -- a false alarm on the one tool whose whole purpose is to prove
+        the body landed. This walks the source and requires the chain of
+        normalising calls to be the same on both sides, so a `.strip()` added to
+        one of them cannot silently not be added to the other.
+        """
+        import ast
+        src = (self.ROOT / "tools" / "publish_pr_body.py").read_text(
+            encoding="utf-8")
+        fn = next(n for n in ast.walk(ast.parse(src))
+                  if isinstance(n, ast.FunctionDef) and n.name == "main")
+
+        def chain(name):
+            for node in ast.walk(fn):
+                if not (isinstance(node, ast.Assign) and len(node.targets) == 1
+                        and isinstance(node.targets[0], ast.Name)
+                        and node.targets[0].id == name):
+                    continue
+                calls, cur = [], node.value
+                while isinstance(cur, ast.Call) and isinstance(cur.func,
+                                                               ast.Attribute):
+                    calls.append(cur.func.attr
+                                 + "(" + ",".join(ast.unparse(a)
+                                                  for a in cur.args) + ")")
+                    cur = cur.func.value
+                return sorted(calls)
+            self.fail(f"no assignment to {name} in main()")
+
+        w, g = chain("want"), chain("got")
+        self.assertEqual(w, g, f"want is normalised {w}, got is normalised {g}")
+        self.assertIn("strip()", w, "neither side is stripped")
+
+    def test_a_number_beginning_a_line_is_not_an_ordered_list(self):
+        """`82.079 + 19.266` opens a sentence, not an item.
+
+        The first version tested for an ordered item with a leading digit and a
+        `.` anywhere in the first four characters, so any wrapped line starting
+        with a decimal was read as a new item and the sentence was cut there.
+        Six of the sixteen breaks that survived the first fix were this, and the
+        break was the mild half: prose was being parsed as a list.
+        """
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "pub", self.ROOT / "tools" / "publish_pr_body.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        joined = mod.reflow("the README says 101.3 MiB, which is\n"
+                            "82.079 + 19.266, the sum A12 retracted.\n")
+        self.assertEqual(joined.count("\n"), 1, f"cut in two: {joined!r}")
+        kept = mod.reflow("1. first item\n2. second item\n")
+        self.assertEqual(kept.count("\n"), 2, f"an ordered list was joined: {kept!r}")
+
+    def test_it_actually_joins_something(self):
+        src, out = self._reflowed()
+        self.assertLess(len(out.splitlines()), len(src.splitlines()) * 0.6,
+                        "the body is not being reflowed at all")
+
+    def test_indentation_of_a_joined_block_is_kept(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "pub", self.ROOT / "tools" / "publish_pr_body.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        got = mod.reflow("- a bullet whose text\n  wraps here\n\n  | a | b |\n")
+        self.assertIn("- a bullet whose text wraps here", got)
+        self.assertIn("  | a | b |", got,
+                      "an indented table row came out flush left, which ends "
+                      "the list item it belongs to")
+
+    def test_a_fenced_block_is_not_joined(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "pub", self.ROOT / "tools" / "publish_pr_body.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        got = mod.reflow("```\nline one\nline two\n```\n")
+        self.assertIn("line one\nline two", got,
+                      "the commands in the fenced block were run together")
+
+
 class TheWorkflowsMustDeclareTheJobsTheySayTheyHave(unittest.TestCase):
     """`audit.yml` opens with "Five required jobs" and nothing checked that.
 
@@ -5347,3 +5495,120 @@ class TheTarPreflightMustWorkOnThePipeCiActuallyGivesIt(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class ANumberThatCountsItselfMustBeTakenLast(unittest.TestCase):
+    """`_pr_total` counts the assertions that ran, so nothing may run after it.
+
+    It was taken 176 lines before the end of `analysis/verify_claims.py`, with a
+    `+ 1` for the self-reference, and then twelve assertions were appended past
+    that point. The checker ran 3804 and published 3792, and the assertion whose
+    whole job is to catch a stale published count PASSED, because both sides of
+    it were the same short number. That is the shape this repository keeps
+    finding: a figure derived once, at a place the code then grew past.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    def test_no_assertion_follows_the_count_but_the_one_that_reads_it(self):
+        import ast
+        src = (self.ROOT / "analysis" / "verify_claims.py").read_text(
+            encoding="utf-8")
+        tree = ast.parse(src)
+        assigns = [n.lineno for n in ast.walk(tree)
+                   if isinstance(n, ast.Assign) and len(n.targets) == 1
+                   and isinstance(n.targets[0], ast.Name)
+                   and n.targets[0].id == "_pr_total"]
+        self.assertEqual(len(assigns), 1, "_pr_total is assigned more than once")
+        after = [n for n in ast.walk(tree)
+                 if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                 and n.func.id == "chk" and n.lineno > assigns[0]]
+        # the only assertion allowed to follow the count is the one that reads
+        # it, which is what the `+ 1` in the count is for
+        reads = [n for n in after
+                 if "_pr_total" in ast.unparse(ast.Module(body=[ast.Expr(n)],
+                                                          type_ignores=[]))]
+        self.assertEqual(len(after), len(reads),
+                         f"{len(after) - len(reads)} assertion(s) run after "
+                         f"_pr_total is taken and are not counted by it")
+        self.assertEqual(len(reads), 1,
+                         "the count should be read exactly once, last")
+
+    def test_the_count_is_not_a_literal(self):
+        """It has to be derived, or the next append leaves it stale silently."""
+        import ast
+        src = (self.ROOT / "analysis" / "verify_claims.py").read_text(
+            encoding="utf-8")
+        node = next(n for n in ast.walk(ast.parse(src))
+                    if isinstance(n, ast.Assign) and len(n.targets) == 1
+                    and isinstance(n.targets[0], ast.Name)
+                    and n.targets[0].id == "_pr_total")
+        self.assertIn("len(RAN)", ast.unparse(node.value),
+                      "the published assertion count stopped being measured")
+
+
+class TheProseCensusMustCountProseInsideAList(unittest.TestCase):
+    """Four spaces under a list item is a continued paragraph, not code.
+
+    `prose_numbers()` skipped every indented line as an indented code block, so
+    the body of all fifty-five numbered corrections in A19, and the same shape
+    in CHANGELOG, sat outside the population that section measures: 57 decimals,
+    4 % of it, including "-2.4 is inside [-2.61, +0.22]" and the corrected
+    within-run spread. A coverage figure with prose missing from its denominator
+    reports better coverage than it has, and that is the direction an audit is
+    least allowed to be wrong in. Driven both ways on the real documents,
+    because a detector needs a known positive and a known negative.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    def _census(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "tcov_census", self.ROOT / "analysis" / "table_coverage.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod, mod.prose_numbers()
+
+    def test_a_decimal_in_a_list_items_paragraph_is_counted(self):
+        mod, nums = self._census()
+        inside = {(n["doc"], n["value"]) for n in nums}
+        # a sentence in the body of a numbered A19 item, indented four spaces
+        self.assertIn(("ERRATA.md", "2.61"), inside,
+                      "the census cannot see the corrections it publishes")
+        self.assertIn(("CHANGELOG.md", "101.3"), inside,
+                      "the census cannot see a withdrawn figure in a list item")
+
+    def test_a_decimal_in_an_indented_code_block_is_not(self):
+        mod, nums = self._census()
+        doc = "v4_audit_2026_08_25/PROSPECTIVE_ANALYSIS_PLAN_W2.md"
+        text = (self.ROOT / doc).read_text(encoding="utf-8").splitlines()
+        # every indented line in that document that is NOT under a list item
+        import re
+        dec = re.compile(r"(?<![\w.])\d+\.\d+(?![\w])")
+        marker = re.compile(r"^(?:\d+[.)]|[-*+])\s")
+        fenced, in_item, code_lines = False, False, []
+        for i, raw in enumerate(text, 1):
+            s = raw.strip()
+            if s.startswith("```"):
+                fenced = not fenced
+                continue
+            if fenced or not s:
+                continue
+            if len(raw) - len(raw.lstrip(" ")) == 0:
+                in_item = bool(marker.match(s))
+                continue
+            if raw.startswith(("    ", "\t")) and not in_item and dec.search(s):
+                code_lines.append(i)
+        self.assertTrue(code_lines, "no indented code block to use as a control")
+        seen = {n["line"] for n in nums if n["doc"] == doc}
+        self.assertFalse(seen & set(code_lines),
+                         "an indented code block was counted as prose")
+
+    def test_the_population_is_the_one_the_documents_publish(self):
+        """The two copies of this number have to be the same number."""
+        mod, nums = self._census()
+        errata = (self.ROOT / "ERRATA.md").read_text(encoding="utf-8")
+        n = len(nums)
+        self.assertIn(f"{n // 1000} {n % 1000:03d}", errata,
+                      f"A19 does not publish the population it has ({n})")

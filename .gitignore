@@ -14,3 +14,14 @@ social/
 
 # tests/mutate.py writes this only while an older in-place run is recovering
 .mutate-in-progress
+
+# Derivable duplicates of data the repository already holds, untracked on
+# 2026-09-01. `all_results.json` is the run's arm-run files concatenated -- the
+# README said "the same content" and nothing checked it, and for run O2, which
+# the headline table comes from, it was NOT the same content: the arm-run files
+# were backfilled with the server's build and commit and the concatenation was
+# not. 119 MB, and no analyser, assertion or workflow ever read it.
+# `server_logs_sha256.txt` held 164 hashes, all 164 of them already in
+# EVIDENCE_MANIFEST.sha256, and nothing read that either.
+v4_audit_2026_08_25/data/*/all_results.json
+v4_audit_2026_08_25/data/*/server_logs_sha256.txt

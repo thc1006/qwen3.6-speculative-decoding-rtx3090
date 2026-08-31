@@ -2025,8 +2025,9 @@ perturbed **2 252** numbers across the **119** tables parsed at the time and
 grows as the coverage does, so a clean run is only clean for the tree it ran
 on: parsing the last six tables grew it, and so did run W2's three tables and
 the column it added to A17's. On 2026-09-01, at commit
-`ec2b28293c09`, all **2 446** numbers across all **128** tables were perturbed one
-at a time and **every one was caught**, in eight shards whose control passed
+`7751a4e12f4c`, all **2 446** numbers across all **128** tables were perturbed
+one at a time and **every one was caught**, in twenty-eight shards whose control
+passed
 before the work and again after it. The eight shard
 outputs were not attested as a set until 2026-08-30: nothing showed that all
 eight ran, that their locations were disjoint, that the union was the whole
@@ -2038,7 +2039,8 @@ readings and every location as a character span.
 
 That check had only ever been run against fixtures until 2026-09-01, when it
 refused a real set twice. Once for twelve survivors, which is item 51 below.
-Once because the eight shards did not report one `checker_sha256`, which was
+Once because the eight shards of that run did not report one
+`checker_sha256`, which was
 this operator editing the tree the shards were launched from while they ran:
 the attestation took its digests from that tree rather than from the worktree
 each shard measured in, so shards that finished at different moments described
@@ -2047,7 +2049,7 @@ moment the opening control passes.
 
 Over the eight attestations committed under
 [`coverage_attestations/`](v4_audit_2026_08_25/coverage_attestations) it
-reports: **8 shards, one head `ec2b28293c09`, one checker `b42fa4c1ec41`, 2 446 locations covered exactly once, 0 survived** Covered *exactly once* is the part the earlier sentence
+reports: **28 shards, one head `7751a4e12f4c`, one checker `49e094e2a933`, 2 446 locations covered exactly once, 0 survived** Covered *exactly once* is the part the earlier sentence
 could not say: no location probed twice, none missed, and every shard on the
 same tree with the same checker. The attestations are in the repository, so
 that sentence is a reading of files rather than a memory of a run, and
@@ -2079,11 +2081,18 @@ because passing once does not bound half an hour of running.
 return rows, and assert nothing about the column you changed, which is exactly
 what the W three-design table did, in two documents, until this pass.
 
-**The larger half is not tables.** **1 338** decimal numbers sit in prose,
-outside every table; **698** of them do not appear as a string literal anywhere
+**The larger half is not tables.** **1 398** decimal numbers sit in prose,
+outside every table; **724** of them do not appear as a string literal anywhere
 in the checker, counting only literals that are not assertion labels; a label
 is prose about a check and not a check, and leaving them in made the count move
-whenever an assertion was reworded. That criterion is an upper bound on the gap
+whenever an assertion was reworded. Both figures were 57 and 25 smaller until
+2026-09-01, because the census skipped every indented line as an indented code
+block. Inside a list item four spaces is not code, it is how a paragraph
+continues the item, so the body of every numbered correction below sat outside
+the population this section measures. That is the longest run of prose here,
+and it holds sentences like "-2.4 is inside [-2.61, +0.22]" and the corrected
+within-run spread. A coverage measurement that leaves prose out of its
+denominator reports better coverage than it has. That criterion is an upper bound on the gap
 rather than the gap, so a fixed sample of **40** of the 640 it then held was perturbed the
 same way, seed `20260828`: **36 of 40 accepted a wrong number**, and the 95 %
 Wilson interval puts the unguarded fraction of that population at **76 % or
@@ -2103,7 +2112,7 @@ the BOS-override table in the two documents that publish it, run I's
 acceptance under batching, the README's length-matched comparison, and last
 the six named above.
 
-**Fifty-two published statements were wrong and are corrected.** They are
+**Fifty-five published statements were wrong and are corrected.** They are
 listed rather than summarised, because a count of corrections is itself a
 number and this file exists because of unchecked numbers.
 
@@ -2315,6 +2324,48 @@ number and this file exists because of unchecked numbers.
     was right when the population was 2 439 and was not moved when three
     tables and a column were added. Nothing has to state it now: the pass
     covers all 2 446.
+53. **The pull request body was published hard wrapped, and GitHub renders a
+    newline inside a paragraph as a line break.** `PULL_REQUEST.md` is wrapped
+    at eighty columns so its diff reads line by line; issue and pull request
+    bodies are not rendered the way a README is. Measured through GitHub's own
+    markdown endpoint on 2026-09-01: **412** breaks, which is how the body had
+    looked to every reader of it since 2026-08-27. The body is reflowed on the
+    way out now. The first reflow dropped leading indentation and a table row
+    inside a list item came out flush left, ending the list and opening a
+    second table, 48 rows becoming 54; and its test for an ordered list item
+    was a leading digit with a `.` in the first four characters, so a wrapped
+    line beginning `82.079 + 19.266` or `3.3 pp` or `1.96;` was read as opening
+    a new item and the sentence was cut there. The break was the mild half of
+    that one. Both were found by rendering the result and counting, not by
+    reading the code. The body now renders **0** breaks.
+54. **The published assertion count was short by twelve, and the assertion that
+    checks it passed.** `_pr_total` is `len(RAN) + 1`, the `+ 1` being this
+    assertion itself, which is not in `RAN` when it reads the count. It was
+    taken 176 lines before the end of `analysis/verify_claims.py` and twelve
+    assertions were later appended past that point, so the checker ran 3804 and
+    the body said 3792 and the comparison agreed with itself. A figure derived
+    once at a place the code then grows past is the same shape as the five
+    ratchets in item 50. The count is taken last now, and a regression refuses
+    any `chk` after it.
+55. **119 MB of derivable duplicates were committed, and the copy belonging to
+    the run the headline table comes from was stale.** Each run directory
+    carried an `all_results.json`, its arm-run files concatenated, which the
+    README described as "the same content" while nothing checked that it was.
+    Fifty-two of the fifty-three agreed byte for byte. The fifty-third,
+    `matrix_O2_latin_20260826_153711`, disagreed on all 81 of its records: the
+    arm-run files had been backfilled with the server's build and commit and
+    carry `server_identity_backfilled`, and the concatenation had not been.
+    Nothing in `analysis/` ever read any of it. Ten `server_logs_sha256.txt`
+    held 164 digests, every one of them already in `EVIDENCE_MANIFEST.sha256`,
+    and nothing read those either. Both are untracked as of 2026-09-01, and an
+    assertion refuses any committed file that is its directory's arm-runs
+    concatenated or any hash list the evidence manifest already holds. It is
+    written against the shape, not the two names. The first version of it
+    compared records by `(arm, rep)`; run T3's checkpoint timer file spells the
+    field `repeat`, so nine of its records answered `(arm, None)`, nine
+    collapsed to three, and a file carrying eight fields no arm-run file has
+    was reported as a copy of its neighbours. A key that does not identify
+    makes any two things equal.
 
 A test now refuses any table row with no header above it, and another refuses
 any path the checker opens that a fresh clone would not have.

@@ -384,11 +384,11 @@ adversarial pass over this branch's own commits found:
   stopped, a configuration column nobody read, the `100 %` on a total row. Each
   is compared against a value derived from the data, and the measurement says
   so: on 2026-09-01 the probe perturbed all 2 446 numbers across all 128
-  parsed tables of commit `ec2b28293c09` and caught every one, in eight shards whose
+  parsed tables of commit `7751a4e12f4c` and caught every one, in 28 shards whose
   control passed before the work and again after it. Their union is checked
-  rather than assumed: `analysis/table_coverage.py --aggregate` over the eight
+  rather than assumed: `analysis/table_coverage.py --aggregate` over the 28
   attestations, which are committed under
-  `v4_audit_2026_08_25/coverage_attestations/`, reports **8 shards, one head ec2b28293c09, one checker b42fa4c1ec41, 2 446 locations covered exactly once, 0 survived**, each attestation carrying the head, the
+  `v4_audit_2026_08_25/coverage_attestations/`, reports **28 shards, one head 7751a4e12f4c, one checker 49e094e2a933, 2 446 locations covered exactly once, 0 survived**, each attestation carrying the head, the
   checker hash, the population digest, both controls and every location as a
   character span. Before 2026-08-30 nothing showed the eight had all run, or
   were disjoint, or were the same tree, and `--shard=8/8` selected nothing and
@@ -413,7 +413,7 @@ adversarial pass over this branch's own commits found:
   the checker inside a clean checkout of HEAD, and there it died 373 assertions
   early, so the probe's own baseline was broken and it was measuring nothing.
   The logs are committed now and a test refuses any path the checker opens that
-  a fresh clone would not have. A clean checkout runs all 3792 assertions and
+  a fresh clone would not have. A clean checkout runs all 3805 assertions and
   exits 0, which it did not before.
 
   Figures in those tables that are not re-derivable here say so rather than
@@ -561,9 +561,9 @@ review:
 
 ```
 python analysis/rederive_from_logs.py bench   # raw logs -> four audit files
-python analysis/verify_claims.py          # 3792 assertions, re-derived
+python analysis/verify_claims.py          # 3805 assertions, re-derived
 python analysis/check_data_integrity.py   # structure of all 77 run directories
-python -m unittest discover tests         # 304 regressions for defects shipped here
+python -m unittest discover tests         # 316 regressions for defects shipped here
 python tests/mutate.py                    # break each fix, require its test to fail
 python tests/data_mutate.py               # perturb a measurement or a published
                                           #   figure, require the checker to fail
@@ -575,9 +575,12 @@ python analysis/plot_v4_runs.py --check   # charts still match the data
 
 CI runs all of it on every push, with actions pinned to commit SHAs, chart
 dependencies hash-pinned, shellcheck at `--severity=style` and pyflakes. That
-is `.github/workflows/audit.yml`, which is registered and green on this head.
-`.github/workflows/evidence.yml` beside it has also run and passed on this head;
-what it does and does not prove is described where it is introduced.
+is `.github/workflows/audit.yml`. `.github/workflows/evidence.yml` beside it
+downloads the published archives and re-derives four audit files from them; it
+has run and passed on this branch, and on the commit that carries this body it
+fails until the v4.2 release exists, because it names that release rather than
+the mutable one and the tag is created when the release is published. What it
+does and does not prove is described where it is introduced.
 
 `verify_claims.py` parses its own AST and fails if any assertion compares two
 literals. Six of them did, and were rewritten.
@@ -623,10 +626,9 @@ literals. Six of them did, and were rewritten.
   `bench/collect_evidence.sh` states in three places and the audit README
   beside it; this line said 7 GB.
   `v4_audit_2026_08_25/EVIDENCE_MANIFEST.sha256` holds the SHA-256 of all 3020
-  of them and of the 23 telemetry traces; the three compressed tranches
-  covering the first 1820 are published as release assets, run W2's 1200 are
-  hashed and await a fourth, and `analysis/rederive_from_logs.py` re-runs the
-  extractors against them.
+  of them and of the 23 telemetry traces, in four compressed tranches
+  published as eight release assets, and `analysis/rederive_from_logs.py`
+  re-runs the extractors against them.
 - `draft-eagle3` needs three extract layers this model does not expose;
   `--spec-type draft-dspark` is DeepseekV4-only. Nine of eleven measured.
 

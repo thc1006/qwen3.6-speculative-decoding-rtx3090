@@ -7903,12 +7903,19 @@ for _tl, _tstamp, _tdirs in (("W", "20260828_104222", _W),
     _tt1 = max(_dt.datetime.strptime(
         json.loads((_d / "RUN_COMPLETE.json").read_text(encoding="utf-8"))["completed_at"],
         _TEL_FMT) for _d in _tdirs).timestamp()
+    # the offset the run's own manifests carry. nvidia-smi writes no zone, so
+    # without this the verdict depends on the machine's TZ: the same trace
+    # passed on a +0800 host and failed by eight hours on a UTC runner, which
+    # is how CI caught it the first time anything ran this file.
+    _toff = min(_dt.datetime.strptime(
+        json.loads((_d / "manifest.json").read_text(encoding="utf-8"))["created"],
+        _TEL_FMT) for _d in _tdirs).strftime("%z")
     _tr = _sp.run(
         [sys.executable,
          str(pathlib.Path(__file__).resolve().parents[1] / "bench"
              / "check_telemetry_cover.py"),
          str(_DATA / f"gpu_telemetry_{_tl}_{_tstamp}.csv"),
-         f"{_tt0:.0f}", f"{_tt1:.0f}", "5"],
+         f"{_tt0:.0f}", f"{_tt1:.0f}", "5", _toff],
         capture_output=True, text=True)
     _tel_cover.append((_tl, _tr.returncode, (_tr.stdout + _tr.stderr).strip()[:60]))
 chk("telemetry: the cover check passes for both Williams runs",
@@ -9377,21 +9384,36 @@ _A19N = [int(re.sub(r"[\s\u2009\u00a0]", "", _x)) for _x in
 # the count of corrections is a number in a document too, so it is checked
 # against the list it introduces rather than kept in step by hand
 _A19_LIST = re.findall(r"^(\d+)\. ", _A19, re.M)
-_WORDS = {20: "Twenty", 21: "Twenty-one", 22: "Twenty-two",
-          23: "Twenty-three", 24: "Twenty-four", 25: "Twenty-five",
-          26: "Twenty-six", 27: "Twenty-seven", 28: "Twenty-eight",
-          29: "Twenty-nine", 30: "Thirty", 31: "Thirty-one",
-          32: "Thirty-two", 33: "Thirty-three", 34: "Thirty-four",
-          35: "Thirty-five", 36: "Thirty-six", 37: "Thirty-seven",
-          38: "Thirty-eight", 39: "Thirty-nine", 40: "Forty",
-          41: "Forty-one", 42: "Forty-two", 43: "Forty-three",
-          44: "Forty-four", 45: "Forty-five", 46: "Forty-six",
-          47: "Forty-seven", 48: "Forty-eight", 49: "Forty-nine",
-          50: "Fifty", 51: "Fifty-one", 52: "Fifty-two"}
+# Spelled, not tabulated. This was a dict that stopped at fifty-two, so adding
+# a fifty-third correction did not fail the check that the stated count matches
+# the list -- it raised `KeyError: 53` and the whole checker died, 400
+# assertions short. A hand-maintained table of the numbers a document is
+# allowed to reach is the same ceiling as a floor left behind by a growing
+# tree, and this file has now removed six of them.
+_ONES = ("", "one", "two", "three", "four", "five", "six", "seven", "eight",
+         "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen",
+         "sixteen", "seventeen", "eighteen", "nineteen")
+_TENS = ("", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy",
+         "eighty", "ninety")
+
+
+def _word(_n):
+    if not 1 <= _n <= 99:
+        raise ValueError(f"no word for {_n}")
+    if _n < 20:
+        return _ONES[_n].capitalize()
+    _t, _o = divmod(_n, 10)
+    return (_TENS[_t] + ("-" + _ONES[_o] if _o else "")).capitalize()
+
+
+chk("ERRATA A19: the spelled count is spelled, not looked up in a table",
+    [_word(_i) for _i in (1, 13, 20, 52, 55, 60, 99)],
+    ["One", "Thirteen", "Twenty", "Fifty-two", "Fifty-five", "Sixty",
+     "Ninety-nine"])
 chk("ERRATA A19: the corrections are numbered from one, without a gap",
     [int(_x) for _x in _A19_LIST], list(range(1, len(_A19_LIST) + 1)))
 chk("ERRATA A19: and the count it states is the length of that list",
-    f"**{_WORDS[len(_A19_LIST)]} published statements were wrong" in _A19, True)
+    f"**{_word(len(_A19_LIST))} published statements were wrong" in _A19, True)
 
 
 # the changelog publishes the same census and had no check on it, which is
@@ -9485,13 +9507,13 @@ chk("prose probe: and the spans are unique",
 chk("prose probe: records whose value repeats on its own line",
     sum(1 for n in _PN
         if sum(1 for m in _PN if m["doc"] == n["doc"] and m["line"] == n["line"]
-               and m["value"] == n["value"]) > 1), 30)
+               and m["value"] == n["value"]) > 1), 32)
 
 _pcov = _tcov.prose_census()
 chk("coverage: decimal numbers in prose, outside every table",
-    _pcov["prose_numbers"], 1338)
+    _pcov["prose_numbers"], 1398)
 chk("coverage: those that are not a literal in this file",
-    _pcov["not_a_literal"], 698)
+    _pcov["not_a_literal"], 724)
 # tested on a supplied source, not by searching this file for a phrase: the
 # first version of this check searched for a label's own words, and the search
 # string was itself a literal in the argument position, so it always found it.
@@ -9618,7 +9640,6 @@ chk("checker: number of assertions", len([1 for _n in _ast.walk(_tree)
 # pretending the two are the same number. `tests/data_mutate.py` runs the
 # checker in exactly such a mirror, which is how the difference surfaced.
 _GITLESS_SKIPPED = 13
-_pr_total = len(RAN) + 1 + (0 if _HAS_GIT else _GITLESS_SKIPPED)
 print("\n=== the v4.2 release notes ===")
 # A release note is a published document like any other. Its asset digests are
 # a named exclusion from the census, because a sha256 parsed as numbers is
@@ -9692,6 +9713,112 @@ chk("release procedure: it no longer tells you to sign a tag with no key",
     ("git tag -a " in _V4PROC and "git tag -s " not in _V4PROC), True)
 
 
+# --- no derivable duplicate of the data is committed ------------------------
+# Two shapes were, until 2026-09-01, and neither was read by anything here:
+# `all_results.json`, 119 MB of the arm-run files concatenated, which for run O2
+# had gone stale against the files it concatenated; and `server_logs_sha256.txt`,
+# 164 digests every one of which was already in EVIDENCE_MANIFEST.sha256.
+# This is written against the SHAPE and not the two names, because a rename
+# would walk straight past a name.
+_DUP_DIR = pathlib.Path(__file__).resolve().parents[1] / "v4_audit_2026_08_25"
+# git when there is a repository, and the filesystem when there is not. The
+# mutation harnesses run this checker inside a mirror that has no `.git`, where
+# `git ls-files` returns nothing; a duplicate check over an empty file list
+# passes for the wrong reason, and a pass for the wrong reason is what the
+# `data: and the arm-run files themselves are still all here` assertion below
+# exists to make impossible. The two paths agree because both harnesses now
+# build their mirror from the committed tree rather than the working one.
+_gls = _sp.run(["git", "ls-files", "v4_audit_2026_08_25/data"],
+               cwd=_DUP_DIR.parent, capture_output=True, text=True, timeout=120)
+if _gls.returncode == 0 and _gls.stdout.strip():
+    _TRACKED = set(_gls.stdout.split())
+else:
+    _TRACKED = {str(_q.relative_to(_DUP_DIR.parent))
+                for _q in (_DUP_DIR / "data").rglob("*") if _q.is_file()}
+_MAN_HASHES = {ln.split()[0] for ln
+               in (_DUP_DIR / "EVIDENCE_MANIFEST.sha256").read_text(
+                   encoding="utf-8").splitlines()
+               if ln.strip() and not ln.startswith("#") and len(ln.split()[0]) == 64}
+_dup_concat, _dup_hashes = [], []
+
+
+def _identity(rec):
+    """The (arm, repetition) a record is FOR, or None if it does not say.
+
+    The first version of this asked for `rec["rep"]`. `checkpoint_timers.json`
+    spells it `repeat`, so every one of its nine records answered `(arm, None)`,
+    nine collapsed to three, three matched three, and a file holding eight
+    fields no arm-run file has -- the checkpoint create and restore counts and
+    the four load and update timers, which is the whole point of run T3 -- was
+    reported as a concatenation of its neighbours. A key that does not identify
+    makes any two things equal. So both spellings are read, and a set of
+    identities smaller than the list it came from is refused below rather than
+    compared.
+    """
+    if not isinstance(rec, dict):
+        return None
+    for _k in ("rep", "repeat", "replicate"):
+        if _k in rec:
+            return (rec.get("arm"), rec[_k])
+    return None
+
+
+for _rel in sorted(_TRACKED):
+    _f = _DUP_DIR.parent / _rel
+    if not _f.is_file():
+        continue
+    _sib = sorted(_f.parent.glob("*__rep*.json"))
+    if _f.suffix == ".json" and "__rep" not in _f.name and _sib:
+        try:
+            _o = json.loads(_f.read_text(encoding="utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            _o = None
+        if isinstance(_o, list) and _o and all(isinstance(_r, dict) for _r in _o):
+            _recs = [json.loads(_s.read_text(encoding="utf-8")) for _s in _sib]
+            _here = {_identity(_r) for _r in _o}
+            _there = {_identity(_r) for _r in _recs}
+            # one identity per record on both sides, or the comparison is
+            # between two collapsed sets and means nothing
+            _one_to_one = (None not in _here and None not in _there
+                           and len(_here) == len(_o) and len(_there) == len(_recs))
+            # and it introduces no field of its own, so a different
+            # measurement OF the same arm-runs is not mistaken for a copy of
+            # them. Equality was the first rule here and it was wrong in the
+            # direction that mattered: run O2's concatenation was missing
+            # `server_identity_backfilled`, which is precisely how it had gone
+            # stale, so requiring the two field sets to be EQUAL let the one
+            # copy this repository had actually got wrong walk through. T3's
+            # timer file is excluded by the same test read the other way: it
+            # carries eight fields no arm-run file has.
+            _here_f = {_k for _r in _o for _k in _r}
+            _there_f = {_k for _r in _recs for _k in _r}
+            _same_shape = bool(_here_f) and _here_f <= _there_f
+            if _one_to_one and _same_shape and _here == _there:
+                _dup_concat.append(_rel)
+    if _f.suffix in (".txt", ".sha256"):
+        _lines = [l.split() for l in _f.read_text(encoding="utf-8",
+                                                  errors="replace").splitlines()
+                  if l.strip()]
+        if _lines and all(len(w) >= 2 and len(w[0]) == 64 for w in _lines) \
+                and all(w[0] in _MAN_HASHES for w in _lines):
+            _dup_hashes.append(_rel)
+chk("data: no committed file is its directory's arm-runs concatenated",
+    _dup_concat, [])
+chk("data: no committed hash list is one the evidence manifest already holds",
+    _dup_hashes, [])
+chk("data: and the arm-run files themselves are still all here",
+    sum(1 for _r in _TRACKED if "__rep" in _r and _r.endswith(".json")), 3005)
+
+
+# Taken HERE, after the last assertion that is not this one, because it counts
+# what has run. It used to be taken 176 lines earlier and the `+ 1` was for the
+# self-reference: this assertion is not in `RAN` yet when it reads the count.
+# Twelve assertions were then appended past that point, so the published figure
+# was 3792 while the checker ran 3804, and the assertion that exists to catch
+# exactly this passed, because it was comparing the body against the same short
+# count. A number that counts itself has to be taken last, and
+# `tests/test_harness_invariants.py` now refuses any `chk` after this line.
+_pr_total = len(RAN) + 1 + (0 if _HAS_GIT else _GITLESS_SKIPPED)
 chk("PR body: the assertion count it quotes is a full checkout's",
     f"# {_pr_total} assertions" in _PR, True)
 

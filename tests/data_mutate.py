@@ -60,16 +60,41 @@ COPY = ("analysis", "bench", "tests", "v4_audit_2026_08_25", "results",
         ".github")
 
 
+def _ignored_by_git() -> set:
+    """Every path git ignores, so the mirror is the COMMITTED tree.
+
+    `copytree` copies the working tree, which is not what CI checks out and not
+    what a reader clones. The difference used to be only `__pycache__`, so it
+    never mattered; on 2026-09-01 it started mattering, because 119 MB of
+    derivable duplicates were untracked and ignored rather than deleted, and a
+    checker assertion that reads `git ls-files` cannot see them while a mirror
+    built by `copytree` still holds every one. A mirror that carries files the
+    tree does not is a control measuring something other than the subject.
+    """
+    r = subprocess.run(["git", "ls-files", "--others", "--ignored",
+                        "--exclude-standard", "-z", *COPY],
+                       cwd=ROOT, capture_output=True, text=True, timeout=300)
+    if r.returncode != 0:
+        return set()
+    return {(ROOT / p).resolve() for p in r.stdout.split("\0") if p}
+
+
 def mirror(into: Path) -> Path:
     into.mkdir(parents=True, exist_ok=True)
-    for p in COPY:
-        src = ROOT / p
+    skip = _ignored_by_git()
+
+    def _ignore(directory, names):
+        d = Path(directory)
+        return [n for n in names if (d / n).resolve() in skip]
+
+    for rel in COPY:
+        src = ROOT / rel
         if not src.exists():
             continue
-        dst = into / p
+        dst = into / rel
         if src.is_dir():
-            shutil.copytree(src, dst, dirs_exist_ok=True)
-        else:
+            shutil.copytree(src, dst, dirs_exist_ok=True, ignore=_ignore)
+        elif src.resolve() not in skip:
             shutil.copy2(src, dst)
     return into
 

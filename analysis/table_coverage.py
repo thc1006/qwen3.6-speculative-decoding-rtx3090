@@ -251,17 +251,37 @@ def _checker_literals(src: str | None = None) -> str:
 
 
 def prose_numbers() -> list[dict]:
-    """Every decimal number outside a table, a fenced block and an indented block."""
+    """Every decimal number in prose: outside tables, fenced blocks and CODE.
+
+    An indented line used to be skipped unconditionally, as an indented code
+    block. Inside a list item four spaces is not a code block, it is how a
+    paragraph continues the item, and a code block there needs eight. So the
+    continuation text of every numbered item in ERRATA and CHANGELOG was outside
+    this population: 57 decimals on 2026-09-01, 4 % of it, and not marginal
+    ones. They include "-2.4 is inside [-2.61, +0.22]", the corrected within-run
+    spread of "0.90 % to 1.75 %", the withdrawn "101.3 MiB per checkpoint" and
+    the end-to-end "30.2 ... 8.8 tok/s". A19's own list of corrections, which is
+    the longest run of prose in this repository, was the largest block of it.
+    Understating the denominator of a coverage measurement flatters the
+    coverage, which is the one direction an audit must not be wrong in.
+    """
     out = []
     dec = re.compile(r"(?<![\w.])\d+\.\d+(?![\w])")
+    marker = re.compile(r"^(?:\d+[.)]|[-*+])\s")
     for rel in DOCS:
         fenced = False
+        in_item = False
         for i, raw in enumerate((ROOT / rel).read_text(encoding="utf-8").splitlines()):
             line = raw.strip().lstrip("> ").strip()
             if line.startswith("```"):
                 fenced = not fenced
                 continue
-            if fenced or line.startswith("|") or raw.startswith(("    ", "\t")):
+            if fenced or line.startswith("|"):
+                continue
+            indent = 8 if raw.startswith("\t") else len(raw) - len(raw.lstrip(" "))
+            if line and indent == 0:
+                in_item = bool(marker.match(line))
+            if raw.startswith(("    ", "\t")) and not (in_item and indent < 8):
                 continue
             # The SPAN, not just the value. Two identical decimals on one line
             # produced two census records, and `prose_probe` perturbed the first
