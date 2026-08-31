@@ -256,13 +256,22 @@ jobs:
           done
           echo "staged JSON into $staged run directories"
           [ "$staged" -gt 0 ] || { echo "FAIL: staged nothing" >&2; exit 1; }
-          # Two committed runs predate the archive and have no logs in it. That
-          # is the whole list, and it is compared rather than counted: a broken
-          # alias in `as` would drop a run out of the re-derivation silently,
-          # and the only trace would have been a smaller number in the line
-          # above, which nothing read.
+          # Two committed runs predate the archive and have no logs in it, and
+          # a run whose tranche is still pending has none either. That is the
+          # whole list, and it is compared rather than counted: a broken alias
+          # in `as` would drop a run out of the re-derivation silently, and the
+          # only trace would have been a smaller number in the line above,
+          # which nothing read.
+          #
+          # The pending half is not a second literal here. It is read out of
+          # the manifest, so publishing the fourth tranche shortens this list
+          # by editing one file rather than two, and a run that quietly stops
+          # being archived still fails.
           got=$(printf '%s\n' "${skipped[@]:-}" | sort | tr '\n' ' ')
-          want="A_bcb5eeb64_legacy B_master_3737e4137 "
+          pend=$(cut -d' ' -f3- /tmp/pending | cut -d/ -f1 \
+                 | grep -v '\.csv$' | sort -u | tr '\n' ' ')
+          want=$(printf '%s\n' A_bcb5eeb64_legacy B_master_3737e4137 $pend \
+                 | sort | tr '\n' ' ')
           [ "$got" = "$want" ] || {
             echo "FAIL: runs with no archived logs are now [$got], not [$want]" >&2
             exit 1
