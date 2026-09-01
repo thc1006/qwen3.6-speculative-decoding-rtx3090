@@ -547,6 +547,37 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import table_coverage as _tcovn                                    # noqa: E402
 
 
+def _pub_text() -> str:
+    """The root README and the audit appendix, as one corpus.
+
+    Eleven sections moved from the first into the second on 2026-09-01, so a
+    lookup that reads only the README now misses content that is still
+    published, in the same audit, one directory down. Every content lookup here
+    reads the pair; the few assertions that are about the README as a FILE, and
+    not about what the account says, read it on its own and say so.
+    """
+    _r = pathlib.Path(__file__).resolve().parents[1]
+    return ((_r / "README.md").read_text(encoding="utf-8") + "\n"
+            + (_r / "v4_audit_2026_08_25" / "README.md").read_text(encoding="utf-8"))
+
+
+def _docs_saying(needle: str) -> tuple:
+    """Every tracked document that carries `needle`, sorted.
+
+    A hard-coded list of filenames is the edit nobody makes: eleven sections
+    moved out of the root README on 2026-09-01 and three loops kept asking it
+    for text that had gone one directory down. The list is derived, and the
+    assertion that it is not empty is what stops a rename emptying it in
+    silence.
+    """
+    _r = pathlib.Path(__file__).resolve().parents[1]
+    return tuple(sorted(
+        str(_p.relative_to(_r)) for _p in _r.rglob("*.md")
+        if ".git" not in _p.parts and needle in _p.read_text(encoding="utf-8")))
+
+
+
+
 _V1CSV = list(csv.DictReader(
     open(pathlib.Path(__file__).resolve().parent / "summary.csv", encoding="utf-8")))
 
@@ -637,8 +668,7 @@ chk("M1 DFlash beats MTP at the same draft length",
 # the data and comparing it with a literal proves the literal, not the document:
 # `tests/data_mutate.py` changed run M's published aggregate from 127.3 to 130.3
 # and nothing here noticed, because nothing here read that cell.
-_RM_LINES = (pathlib.Path(__file__).resolve().parents[1]
-             / "README.md").read_text(encoding="utf-8").splitlines()
+_RM_LINES = _pub_text().splitlines()
 _RT_LINES = (pathlib.Path(__file__).resolve().parents[1]
              / "RETEST_TODO.md").read_text(encoding="utf-8").splitlines()
 
@@ -954,20 +984,47 @@ chk("v4 README N: and the drafts they came in",
 # of its twelve rows were checked against literals; the other eight were not,
 # and the two range rows never had been. Table driven now, so a row added to
 # the document is a row that has to reconcile with `analysis/summary.csv`.
-_ROOT_TEXT = (pathlib.Path(__file__).resolve().parents[1]
-              / "README.md").read_text(encoding="utf-8")
+_ROOT_TEXT = _pub_text()
 _ROOT_LINES = _ROOT_TEXT.splitlines()
 
 
+# A table's identity is its header row, not the file it is in. On 2026-09-01
+# eleven sections moved from the root README into the audit appendix and this
+# raised StopIteration on the first table it looked for, 600 assertions in, which
+# stops the other 3 200 from running at all. It reads both documents now, in the
+# order a reader meets them, and says which one it found the table in when it
+# cannot find it anywhere.
+_APP_TEXT = ((pathlib.Path(__file__).resolve().parents[1]
+              / "v4_audit_2026_08_25" / "README.md").read_text(encoding="utf-8"))
+_APP_LINES = _APP_TEXT.splitlines()
+# The pair, for the eleven sections that moved from one to the other on
+# 2026-09-01. It is used ONLY where the text it looks for is now in the
+# appendix: an assertion that says "the README says X" and accepts the appendix
+# saying it instead has stopped testing what its name claims, so each site was
+# moved over deliberately rather than by redefining `_ROOT_TEXT` under all 37.
+# `_ROOT_TEXT` IS the pair already, and adding the appendix to it again put
+# every appendix table in twice: the registry found one v4-audit row and
+# reported two, and the footnote's twelve measurements came back as
+# twenty-four. Names that both mean "the pair" are one name.
+_PUB_TEXT = _ROOT_TEXT
+_PUB_LINES = _ROOT_LINES
+
+
 def _root_table(header_startswith):
-    _i = next(_i for _i, _l in enumerate(_ROOT_LINES)
-              if _l.startswith(header_startswith))
-    _rows = []
-    for _l in _ROOT_LINES[_i + 2:]:
-        if not _l.startswith("|"):
-            break
-        _rows.append([_c.strip() for _c in _norm_early(_l).strip("|").split("|")])
-    return _rows
+    for _src in (_PUB_LINES, _APP_LINES):
+        _i = next((_i for _i, _l in enumerate(_src)
+                   if _l.startswith(header_startswith)), None)
+        if _i is None:
+            continue
+        _rows = []
+        for _l in _src[_i + 2:]:
+            if not _l.startswith("|"):
+                break
+            _rows.append([_c.strip() for _c in _norm_early(_l).strip("|").split("|")])
+        return _rows
+    raise SystemExit(
+        f"no table headed {header_startswith!r} in README.md or in "
+        f"v4_audit_2026_08_25/README.md")
 
 
 _NUM_RE = re.compile(r"-?\d+\.?\d*")
@@ -1028,20 +1085,20 @@ _ER_EARLY = pathlib.Path(__file__).resolve().parents[1] \
 _PRC_EARLY = pathlib.Path(__file__).resolve().parents[1] \
     .joinpath("pr_comment.md").read_text(encoding="utf-8")
 chk("README labels the 0.6B drafter with its vocabulary",
-    f"vocab {_VOCAB_DRAFT}, draft never attached" in _ROOT_TEXT, True)
+    f"vocab {_VOCAB_DRAFT}, draft never attached" in _PUB_TEXT, True)
 chk("ERRATA quotes the same vocabulary, against the target's",
     f"vocab {_VOCAB_DRAFT} \u2260 {_VOCAB_TARGET}" in _ER_EARLY, True)
 chk("and the PR comment that started it quotes the drafter's too",
     f"(vocab {_VOCAB_DRAFT})" in _PRC_EARLY, True)
 chk("the target vocabulary is the one the README declares",
-    f"declare `vocab_size = {_VOCAB_TARGET}`" in _ROOT_TEXT, True)
+    f"declare `vocab_size = {_VOCAB_TARGET}`" in _PUB_TEXT, True)
 chk("and the two really differ, which is the point of the row",
     _VOCAB_DRAFT != _VOCAB_TARGET, True)
 # The transposed n_max table: six draft lengths as columns, and the "six
 # distinct draft lengths each reproduce this at r >= +0.996" sentence beside it.
 # Its Pearson r row was never computed from anything - only the single +0.998
 # from run B was, which is a different run and a different arm.
-_NMAXH = next(_l for _l in _ROOT_LINES if _l.startswith("| `--spec-draft-n-max` |"))
+_NMAXH = next(_l for _l in _PUB_LINES if _l.startswith("| `--spec-draft-n-max` |"))
 _NMAX = [_c.strip().strip("`") for _c in _NMAXH.strip("|").split("|")][1:]
 _NMT = {_r[0]: _r[1:] for _r in _root_table("| `--spec-draft-n-max` |")}
 chk("README n_max table: six draft lengths", len(_NMAX), 6)
@@ -1420,11 +1477,24 @@ _TH_SEEN = {}
 # ERRATA's own line list is built further down this file, so this reads it here
 _TH_ER = (pathlib.Path(__file__).resolve().parents[1]
           / "ERRATA.md").read_text(encoding="utf-8").splitlines()
-for _doc, _lines in (("v4 README", _V4R_LINES), ("README", _ROOT_LINES),
-                     ("ERRATA", _TH_ER)):
+# Three copies, and after the migration two of them live in the same file: the
+# appendix's own, headed with the run letters, and the one that came out of the
+# root README, headed without them. Searching both with the same prefix found
+# the first twice and left the second unchecked, so each is named by the header
+# that identifies it.
+for _doc, _lines, _th_head in (
+        ("v4 README", _V4R_LINES, "| method | thinking on (C)"),
+        ("the root account, now in the appendix", _APP_LINES,
+         "| method | thinking on | thinking off |"),
+        ("ERRATA", _TH_ER, "| method | thinking on")):
     _k = next((_j for _j, _l in enumerate(_lines)
-               if _l.startswith("| method | thinking on")), None)
+               if _l.startswith(_th_head)), None)
     chk(f"{_doc}: it carries the thinking on/off table", _k is not None, True)
+    if _k is None:
+        # a chk that reports False and then indexes on the value it just
+        # reported is a crash, and a crash here stops the 1 600 assertions
+        # after it. The same shape as the empty attestation directory.
+        continue
     _rows = []
     for _l in _lines[_k + 2:]:
         if not _l.startswith("|"):
@@ -1461,7 +1531,9 @@ chk("with thinking off ngram-mod drafts nothing at all",
 _TH_ACC = (round(_cd(_C, "spec-draft-n8")["acc"], 1),
            round(_cd(_D, "spec-draft-n8")["acc"], 1))
 chk("the draft model's acceptance, thinking on then off", _TH_ACC, (29.7, 23.1))
-for _doc in ("README.md", "ERRATA.md", "v4_audit_2026_08_25/README.md"):
+_TH_DOCS = _docs_saying(f"to {_TH_ACC[1]} %")
+chk("the rounded acceptance is published somewhere", len(_TH_DOCS) >= 2, True)
+for _doc in _TH_DOCS:
     _t = (pathlib.Path(__file__).resolve().parents[1] / _doc) \
         .read_text(encoding="utf-8")
     chk(f"{_doc} prints the rounded value, not the truncated one",
@@ -1503,7 +1575,7 @@ chk("v4 README P: and the sentence no longer says one",
 # the same sentence is in the root README, and only the audit copy was fixed
 # first; and the root README also had the acceptance ordering backwards
 chk("README P: it does not say one arm either",
-    "and one arm moves *upward*" in _ROOT_TEXT, False)
+    "and one arm moves *upward*" in _PUB_TEXT, False)
 
 chk("v4 README P: on aggregate it would have read as the win halving, which is "
     "the artefact the section is about",
@@ -2167,7 +2239,7 @@ DOC_CLAIMS = [
     ("ERRATA.md",   "+0.998",      "A7 acceptance-speed correlation"),
     ("ERRATA.md",   "29.7",        "A7 master acceptance"),
     ("README.md",   "+0.998",      "README correlation"),
-    ("README.md",   "109.9",       "README pooled draft-max8"),
+    ("v4_audit_2026_08_25/README.md", "109.9",       "README pooled draft-max8"),
     ("README.md",   "-19.0 %",     "README pooled delta"),
     ("v4_audit_2026_08_25/README.md", "16590", "v4 drafted tokens"),
     ("v4_audit_2026_08_25/README.md", "4926",  "v4 accepted tokens"),
@@ -2177,8 +2249,8 @@ DOC_CLAIMS = [
     ("v4_audit_2026_08_25/README.md", "130.2",   "J dflash-n4 aggregate"),
     ("v4_audit_2026_08_25/README.md", "-0.01 %", "J -fit on control"),
     ("v4_audit_2026_08_25/README.md", "55.8 %",  "J dflash-n4 acceptance"),
-    ("README.md",   "+18.7 %",  "README DFlash headline"),
-    ("README.md",   "-47.4 %",  "README DFlash n16"),
+    ("v4_audit_2026_08_25/README.md", "+18.7 %",  "README DFlash headline"),
+    ("v4_audit_2026_08_25/README.md",   "-47.4 %",  "README DFlash n16"),
     ("ERRATA.md",   "+18.7 %",  "D4 resolution"),
     ("ERRATA.md",   "+24.0 %",  "D4 pooled delta"),
     ("ERRATA.md",   "3 / 30",   "A11 dflash-n4 identical streams"),
@@ -2193,8 +2265,8 @@ DOC_CLAIMS = [
     ("v4_audit_2026_08_25/README.md", "+0.946",  "L acceptance correlation"),
     ("v4_audit_2026_08_25/README.md", "48.2 %",  "L break-even acceptance"),
     ("v4_audit_2026_08_25/README.md", "+52.2 pp", "L worst out-of-sample error"),
-    ("README.md",   "48.2 % acceptance", "README acceptance threshold, as fitted"),
-    ("README.md",   "45-48 %", "README reports it as a range, not a point"),
+    ("v4_audit_2026_08_25/README.md", "48.2 % acceptance", "README acceptance threshold, as fitted"),
+    ("v4_audit_2026_08_25/README.md",   "45-48 %", "README reports it as a range, not a point"),
     ("ERRATA.md",   "85 / 200",  "A11 think-off identical streams"),
     ("ERRATA.md",   "70.8 %",    "A11 long-output divergence"),
     ("v4_audit_2026_08_25/README.md", "-0.24 %", "L clock drift"),
@@ -2202,8 +2274,8 @@ DOC_CLAIMS = [
     ("ERRATA.md",   "772",       "A12 checkpoints created"),
     ("ERRATA.md",   "118.71",    "A12 corrected nominal volume"),
     ("ERRATA.md",   "61.88",     "A12 corrected write side"),
-    ("README.md",   "118.7 GiB", "README corrected nominal volume"),
-    ("README.md",   "21.1 %",    "README unattributed share, measured"),
+    ("v4_audit_2026_08_25/README.md", "118.7 GiB", "README corrected nominal volume"),
+    ("v4_audit_2026_08_25/README.md", "21.1 %",    "README unattributed share, measured"),
     ("ERRATA.md",   "68.7 %",    "A12 threshold failure point"),
     ("ERRATA.md",   "0.5 pp",    "A13 no-checkpoint agreement"),
     ("ERRATA.md",   "636 of 1272", "C4b sw_power_cap, corrected"),
@@ -2219,7 +2291,7 @@ DOC_CLAIMS = [
     ("ERRATA.md",   "0.56 pp",   "A14 median between-run spread"),
     ("v4_audit_2026_08_25/README.md", "78 / 86", "threshold scorecard"),
     ("v4_audit_2026_08_25/README.md", "57 / 59", "threshold, self-speculative"),
-    ("README.md",   "57 / 59",   "README threshold scorecard"),
+    ("v4_audit_2026_08_25/README.md", "57 / 59",   "README threshold scorecard"),
     ("ERRATA.md",   "8.57 pp",    "A14 the pair that did not replicate"),
     ("README.md",   "+26.7 %",   "README discloses the same-config replicate"),
     ("v4_audit_2026_08_25/README.md", "292.1 s", "P pooled includes the draft cost"),
@@ -2227,7 +2299,7 @@ DOC_CLAIMS = [
     ("ERRATA.md",   "39.08",     "A12 measured checkpoint total"),
     ("ERRATA.md",   "54.7 %",    "A12 checkpoint share"),
     ("ERRATA.md",   "21.9 ms",   "A12 median create"),
-    ("README.md",   "39.07 s",   "README checkpoint total"),
+    ("v4_audit_2026_08_25/README.md", "39.07 s",   "README checkpoint total"),
     ("README.md",   "69.7 %",    "README the falsifying acceptance"),
     ("README.md",   "146.2",     "README O2 winner"),
     ("README.md",   "+26.3 %",   "README O2 headline"),
@@ -2320,8 +2392,7 @@ chk("threshold: break-even on the length-matched fit (%)", round(_br_lm, 1), 46.
 chk("threshold: break-even on the thinking-on half (%)", round(_br_on, 1), 45.4, 0.05)
 chk("threshold: it moves less than the slope does",
     abs(_br_lm - _br_pub) / _br_pub < abs(_sl_lm - _sl_pub) / _sl_pub, True)
-_rm = " ".join(_norm(pathlib.Path(__file__).resolve().parents[1]
-                     .joinpath("README.md").read_text(encoding="utf-8")).split())
+_rm = " ".join(_norm(_pub_text()).split())
 chk("README reports the threshold as a range", "45-48 %" in _rm, True)
 _pd = json.load(open("analysis/plot_data.json"))["acceptance_threshold"]
 chk("the chart's fit matches the checker's", round(_pd["break_even"], 1),
@@ -2615,10 +2686,15 @@ chk("A17 ngram-cache acceptance returns to its thinking-on value",
     _D["arms"]["ngram-cache"]["acceptance_length_matched"], 1.85, 0.02)
 chk("A17 ngram-mod really does stop drafting with thinking off",
     _D["arms"]["ngram-mod-n24"]["acceptance_all_prompts"], None)
-_readme_txt = " ".join(pathlib.Path(__file__).resolve().parents[1]
-                       .joinpath("README.md").read_text(encoding="utf-8").split())
+# quoted spans dropped, for the reason the positional-pointer guard gives: a
+# retraction has to be able to say what it retracts. Until 2026-09-01 this read
+# the root README alone, and the sentence was standing in the audit appendix,
+# unquoted and live, where nothing looked for it -- so the assertion passed for
+# three days by reading the one document that did not have the defect.
+_readme_txt = " ".join(_pub_text().split())
+_readme_used = re.sub(r'"[^"]*"|\u201c[^\u201d]*\u201d', " ", _readme_txt)
 chk("README no longer states the reading A17 overturns",
-    "reasoning traces are *easier* for a 0.8 B drafter" in _readme_txt, False)
+    "reasoning traces are *easier* for a 0.8 B drafter" in _readme_used, False)
 chk("README shows the length-matched acceptance instead",
     "30.3 %" in _readme_txt, True)
 chk("ERRATA quotes the sign flip", "-2.7 %" in _norm(
@@ -4070,8 +4146,9 @@ chk("prereg law: the step is dwarfed by the scatter",
     abs(_law["step_pp"]) < (_law["residual_arc_pct"][1] - _law["residual_arc_pct"][0]) / 50, True)
 chk("prereg law: residual arc",
     [round(v, 1) for v in _law["residual_arc_pct"]], [-11.0, 10.9])
-for _doc, _what in (("v4_audit_2026_08_25/PREREGISTERED_PREDICTION.md", "the pre-registration"),
-                    ("ERRATA.md", "A7"), ("README.md", "the README")):
+_RES_DOCS = _docs_saying("0.39 percentage")
+chk("the residual step is published somewhere", len(_RES_DOCS) >= 3, True)
+for _doc, _what in ((_d, _d) for _d in _RES_DOCS):
     _t = _norm(pathlib.Path(__file__).resolve().parents[1].joinpath(_doc)
                .read_text(encoding="utf-8"))
     chk(f"{_what}: the residual step is -0.39 percentage points",
@@ -4261,8 +4338,9 @@ chk("A10 records that the rep-0 basis was lifted",
     "computed from repeat 0 alone until 2026-08-27" in _ER_FLAT, True)
 
 # the same p_min table, in the README
-_RMD_LINES = pathlib.Path(__file__).resolve().parents[1] \
-    .joinpath("README.md").read_text(encoding="utf-8").splitlines()
+# the table this reads moved into the appendix on 2026-09-01, so the pair is
+# what is searched; `_PUB_LINES` is defined where the move is explained
+_RMD_LINES = _PUB_LINES
 _i = next(i for i, l in enumerate(_RMD_LINES)
           if l.startswith("| configuration | real acceptance | pooled tok/s | vs baseline |"))
 _rp = {}
@@ -4432,8 +4510,7 @@ print("\n=== the headline table, parsed cell by cell ===")
 # not that the row is right: changing the headline's "+26.3 %" to "+26.9 %"
 # passed every check here, because "+26.3 %" still appeared in the replication
 # table below it. The table is parsed and compared row by row instead.
-_readme_lines = pathlib.Path(__file__).resolve().parents[1] \
-    .joinpath("README.md").read_text(encoding="utf-8").splitlines()
+_readme_lines = _pub_text().splitlines()
 _hdr = next(i for i, l in enumerate(_readme_lines)
             if l.startswith("| arm | pooled tok/s | change |"))
 _table = {}
@@ -4503,7 +4580,7 @@ chk("README: spec-draft-n1 is above one winning arm and below two",
 chk("README: and it is third-highest acceptance in that table",
     sorted(_o2_acc, key=_o2_acc.get, reverse=True).index("spec-draft-n1") + 1, 3)
 chk("README no longer claims it beats all but one winner",
-    "more than every winning arm but one" in _ROOT_TEXT, False)
+    "more than every winning arm but one" in _PUB_TEXT, False)
 
 # --- the experiment registry has to name every run that exists --------------
 # It said "runs A-L" and listed eight while the data held thirty-five labels,
@@ -4528,14 +4605,14 @@ chk("registry: arm-runs outside the start-up checks", _REG_ARMRUNS, 3002)
 # counted, not tested for membership: the README says it twice, once in prose
 # and once in the tier registry, and `in` is satisfied by either
 chk("registry: and the README quotes that number, in both places it states it",
-    " ".join(_ROOT_TEXT.split()).count(f"{_REG_ARMRUNS} arm-runs"), 2)
+    " ".join(_PUB_TEXT.split()).count(f"{_REG_ARMRUNS} arm-runs"), 2)
 chk("registry: with the directory count beside it",
-    f"{len(_REG_ALL) - len(_REG_SMOKE)} directories" in _ROOT_TEXT
-    or f"{len(_REG_ALL) - len(_REG_SMOKE)} committed directories" in _ROOT_TEXT, True)
+    f"{len(_REG_ALL) - len(_REG_SMOKE)} directories" in _PUB_TEXT
+    or f"{len(_REG_ALL) - len(_REG_SMOKE)} committed directories" in _PUB_TEXT, True)
 # the letter families the registry table is allowed to group under one row
 _REG_FAMILY = {re.match(r"([A-Z]+)", _t).group(1) for _t in _REG_DIRS
                if re.match(r"[A-Z]", _t)}
-_reg_text = _ROOT_TEXT.split("The v4 runs, and what each one is for:")[1] \
+_reg_text = _PUB_TEXT.split("The v4 runs, and what each one is for:")[1] \
     .split("The v2 / Exp 2 / v3 files")[0]
 _reg_named = set(re.findall(r"^\| ([A-Z][A-Za-z0-9 /]*?) \|", _reg_text, re.M))
 _reg_named = {_x.strip() for _r in _reg_named for _x in _r.split("/")}
@@ -4553,7 +4630,7 @@ chk("registry: and run W is one of them", "W" in _reg_named, True)
 # to a registered reader, and `"| **v4 audit** |"` is a row, so it tripped that
 # invariant. The invariant is right to be strict; the literal was the wrong
 # shape for what it names.
-_reg_v4row = [_l for _l in _ROOT_TEXT.splitlines()
+_reg_v4row = [_l for _l in _PUB_LINES
               if _l.startswith("|") and _l.count("|") > 2
               and "**v4 audit**" in _l.split("|")[1]]
 chk("registry: there is exactly one v4 audit row to check",
@@ -4568,15 +4645,15 @@ _reg_span = f"{_reg_created[0][:10]} to {_reg_created[-1][:10]}"
 chk("registry: the tier description gives the full date span, in that row",
     _reg_span in " ".join(_reg_v4row[0].split()), True)
 chk("registry: it no longer says runs A to L",
-    ("runs A–L" in _ROOT_TEXT or "runs A-L" in _ROOT_TEXT), False)
+    ("runs A–L" in _PUB_TEXT or "runs A-L" in _PUB_TEXT), False)
 
 # --- five statements the line-by-line README review found imprecise ---------
 # Each was true-ish and narrower or wider than the data behind it. The pattern
 # is the one A18 records: a range that does not contain what it describes.
 chk("README: the thinking-on count separates verified from inferred",
-    ("5770 requests recorded" in _ROOT_TEXT
-     and "134 in runs A and B" in _ROOT_TEXT
-     and "all 5904 thinking-on requests" not in _ROOT_TEXT), True)
+    ("5770 requests recorded" in _PUB_TEXT
+     and "134 in runs A and B" in _PUB_TEXT
+     and "all 5904 thinking-on requests" not in _PUB_TEXT), True)
 _th_field = _th_cap = _no_field = _no_field_cap = 0
 for _f in glob.glob("v4_audit_2026_08_25/data/*/*__rep*.json"):
     for _x in json.load(open(_f))["rows"]:
@@ -4592,10 +4669,10 @@ chk("README: and 134 predate it, also all at the cap",
     (_no_field, _no_field_cap), (134, 134))
 
 chk("README: run O2 is called a Latin square balanced for position, not balanced",
-    ("**Latin square balanced for position**" in _ROOT_TEXT
-     and "as a **balanced Latin square**" not in _ROOT_TEXT), True)
+    ("**Latin square balanced for position**" in _PUB_TEXT
+     and "as a **balanced Latin square**" not in _PUB_TEXT), True)
 chk("README: and it says which run is carryover balanced",
-    "Run W is the design that balances both" in _ROOT_TEXT, True)
+    "Run W is the design that balances both" in _PUB_TEXT, True)
 
 _th_acc_vals = []
 for _half in ("thinkon", "thinkoff"):
@@ -4608,8 +4685,8 @@ for _half in ("thinkon", "thinkoff"):
 chk("README: the constrained prompts' acceptance band contains all four values",
     (round(min(_th_acc_vals)) >= 82, round(max(_th_acc_vals)) <= 92), (True, True))
 chk("README: and the band it prints is that one",
-    ("between 82 % and 92 %" in _ROOT_TEXT
-     and "stays ~85–90 %" not in _ROOT_TEXT), True)
+    ("between 82 % and 92 %" in _PUB_TEXT
+     and "stays ~85–90 %" not in _PUB_TEXT), True)
 
 _sa = json.load(open("v4_audit_2026_08_25/data/spec_accounting_20260826.json"))
 _gen = {(_r["arm"], _r["run"]): _r["drafter_generate_s"] for _r in _sa
@@ -4620,19 +4697,19 @@ _self_spec = [_v for (_a, _r), _v in _gen.items() if _a != "spec-draft-n8"]
 chk("README: the self-speculative heads span 1.89 s to 6.27 s, not 1.89 to 3.43",
     (round(min(_self_spec), 2), round(max(_self_spec), 2)), (1.89, 6.27))
 chk("README: and it now says so",
-    ("1.89 s to 6.27 s" in _ROOT_TEXT
-     and "against 1.89–3.43 s for a head" not in _ROOT_TEXT), True)
+    ("1.89 s to 6.27 s" in _PUB_TEXT
+     and "against 1.89–3.43 s for a head" not in _PUB_TEXT), True)
 
 # The band is given as the measured range, not as a fraction. "A fifth to a
 # quarter" excluded both ends; "a sixth to a quarter" still excluded +26.7 %,
 # because a quarter is 25. A fraction that has to contain 17.3 and 26.7 does not
 # exist in small integers, so the sentence quotes the numbers.
 chk("README: the headline band is the measured range, not a fraction",
-    ("spans **+17.3 % to +26.7 %**" in _ROOT_TEXT
-     and "a fifth to a quarter" not in _ROOT_TEXT
-     and "sixth and a quarter" not in _ROOT_TEXT), True)
+    ("spans **+17.3 % to +26.7 %**" in _PUB_TEXT
+     and "a fifth to a quarter" not in _PUB_TEXT
+     and "sixth and a quarter" not in _PUB_TEXT), True)
 chk("README: the n-gram draft volume names both values it generalises over",
-    ("a sixth to a fifth of tokens, 0.17 and 0.19" in " ".join(_ROOT_TEXT.split())), True)
+    ("a sixth to a fifth of tokens, 0.17 and 0.19" in " ".join(_PUB_TEXT.split())), True)
 _ng_dpg = {}
 for _a in ("ngram-mod-n24", "ngram-cache"):
     _dn = _ng = 0
@@ -4656,8 +4733,7 @@ for _arm in json.load(open(f"{_O2}/manifest.json"))["arms"]:
             _da += _x["draft_n_accepted"]
             _n += _x["predicted_n"]
     _dg[_arm] = (_dn, _da, _n)
-_rmd = " ".join(_norm(pathlib.Path(__file__).resolve().parents[1]
-                      .joinpath("README.md").read_text(encoding="utf-8")).split())
+_rmd = " ".join(_norm(_pub_text()).split())
 for _arm, _want in (("spec-dflash-n2", 0.81), ("spec-mtp-n2", 0.77),
                     ("spec-dflash-n4", 1.24), ("ngram-map-k4v-m8", 0.01),
                     ("ngram-mod-n24", 0.19), ("ngram-cache", 0.17),
@@ -4684,8 +4760,7 @@ print("\n=== the headline interval column is the t interval, and says so ===")
 # block bootstrap. Both are computed; only one is published, and which one is
 # now stated and asserted.
 _pb = json.load(open(f"{_O2}/paired_blocks.json"))
-_README0 = " ".join(_norm(pathlib.Path(__file__).resolve().parents[1]
-                          .joinpath("README.md").read_text(encoding="utf-8")).split())
+_README0 = " ".join(_norm(_pub_text()).split())
 for _a in _pb["arms"]:
     _lo, _hi = _a["ci95_t_pct"]
     _txt = f"[{_lo:+.1f} %, {_hi:+.1f} %]".replace("+0.0", "+0.0")
@@ -4774,8 +4849,7 @@ for _arm in _mO2["arms"]:
     _acc_diff.append(abs(_v[0] - _v[1]))
 chk("O3 acceptance matches O2 to a tenth of a point on every arm",
     round(max(_acc_diff), 2) <= 0.1, True)
-_rmo3 = " ".join(_norm(pathlib.Path(__file__).resolve().parents[1]
-                       .joinpath("README.md").read_text(encoding="utf-8")).split())
+_rmo3 = " ".join(_norm(_pub_text()).split())
 chk("README states the replication", "810 request-pairs are byte-identical" in _rmo3, True)
 # the two intervals A16 says barely overlap
 _pb2 = {a["arm"]: a["ci95_t_pct"] for a in
@@ -4834,8 +4908,9 @@ chk("v4 README O2 table: it is sorted by pooled rate, descending",
 print("\n=== the O2/O3 replication table and the footnote, parsed ===")
 # Same weakness as the headline table had: greping for a value proves the string
 # exists, not that the row says it. Both are parsed.
-_rl = pathlib.Path(__file__).resolve().parents[1].joinpath("README.md") \
-    .read_text(encoding="utf-8").splitlines()
+# the replication table moved into the appendix with its section; `_PUB_LINES`
+# is the pair, defined where the move is explained
+_rl = _PUB_LINES
 _rh = next(i for i, l in enumerate(_rl) if l.startswith("| arm | O2 | O3 | shift |"))
 _rep_rows = {}
 for _l in _rl[_rh + 2:]:
@@ -4976,8 +5051,7 @@ chk("the baseline's CV across the twelve comparable runs (%)",
 chk("the baseline's range across them",
     [round(min(_dfl_base), 2), round(max(_dfl_base), 2)], [115.72, 117.25], 0.005)
 chk("README contrasts the steady reference with the moving arm",
-    "CV of **0.42 %**" in " ".join(pathlib.Path(__file__).resolve().parents[1]
-                                   .joinpath("README.md").read_text(encoding="utf-8").split()),
+    "CV of **0.42 %**" in " ".join(_pub_text().split()),
     True)
 
 
@@ -5525,8 +5599,7 @@ for _d in sorted(glob.glob("v4_audit_2026_08_25/data/matrix_*")):
     _comparable[_tag] = {a: 100 * (_pooled_of(_d, a) / _b - 1)
                          for a in _m["arms"] if a != "baseline" and _pooled_of(_d, a)}
 
-_README = _norm(pathlib.Path(__file__).resolve().parents[1].joinpath("README.md")
-                .read_text(encoding="utf-8"))
+_README = _norm(_pub_text())
 for _tag in ("O", "M1", "O2", "T", "T3", "O3",
              "U1", "U2", "U3", "U4", "U5", "U6"):
     _v = _comparable.get(_tag, {}).get("spec-dflash-n2")
@@ -5725,8 +5798,7 @@ chk("PR body cost: and the shares add up to 100 %",
 # It was never parsed either, and it carried the same 30.5 %: the merged
 # restore row is 21.74 / 71.4 = 30.4 %, and 30.5 was load_tgt's share plus
 # load_dft's, each rounded first. With 30.4 the column adds to exactly 100.
-_RML = (pathlib.Path(__file__).resolve().parents[1] / "README.md") \
-    .read_text(encoding="utf-8").splitlines()
+_RML = _pub_text().splitlines()
 _i = next(i for i, l in enumerate(_RML) if l.startswith("| | seconds | share |"))
 _RMC = {}
 for _l in _RML[_i + 2:]:
@@ -5754,8 +5826,7 @@ chk("README and the PR body publish the same cost table",
     {k: v for k, v in _RMC.items()},
     {k: v for k, v in _PRC.items() if k != "excess over no speculation"})
 chk("README records that the boundary was measured",
-    "0.002 s of 39.09 s" in _norm(pathlib.Path(__file__).resolve().parents[1]
-                                  .joinpath("README.md").read_text(encoding="utf-8")),
+    "0.002 s of 39.09 s" in _norm(_pub_text()),
     True)
 
 # --- run T4: the split that answers the API-boundary objection --------------
@@ -6469,8 +6540,7 @@ _CFF = (pathlib.Path(__file__).resolve().parents[1] / "CITATION.cff") \
     .read_text(encoding="utf-8")
 _TODO = _norm((pathlib.Path(__file__).resolve().parents[1] / "RETEST_TODO.md")
               .read_text(encoding="utf-8"))
-_RDME = _norm((pathlib.Path(__file__).resolve().parents[1] / "README.md")
-              .read_text(encoding="utf-8"))
+_RDME = _norm(_pub_text())
 
 # the newest run directory on disk is what the metadata has to cover
 _all_runs = sorted((pathlib.Path(__file__).resolve().parents[1]
@@ -6512,7 +6582,7 @@ chk("each completed 2026-08-27 run is on disk with its validation",
 # one the README states, so the two cannot drift apart again.
 _cd_root = pathlib.Path(__file__).resolve().parents[1]
 _be_txt = (_cd_root / "BENCHMARK_ENV.md").read_text(encoding="utf-8")
-_rm_txt = (_cd_root / "README.md").read_text(encoding="utf-8")
+_rm_txt = _pub_text()
 _cuda_be = re.search(r"v1 was built with\s+\*\*CUDA ([0-9]+\.[0-9]+)\*\*", _be_txt)
 _cuda_rm = re.search(r"built with the \*\*CUDA ([0-9]+\.[0-9]+)\*\*\s+toolkit",
                      " ".join(_rm_txt.split()))
@@ -6553,7 +6623,21 @@ print("\n=== is every request-mean column labelled for what it is? ===")
 # by a third of a percent. The fourth review's condition for that choice is that
 # every place carrying the column says so, and that none of them is used for a
 # thinking-off cross-arm comparison. That is now a rule, not a habit.
-for _rel in ("README.md", "ERRATA.md", "v4_audit_2026_08_25/README.md"):
+# The rule is about every document that PUBLISHES such a table, not about a
+# list of three filenames: the root README carried one until 2026-09-01 and now
+# links to it instead, and a hard-coded list would have to be edited every time
+# a section moves, which is the edit nobody makes. The list is derived, and the
+# assertion that it is not empty is what stops a rename emptying it silently.
+_RM_DOCS = sorted(
+    str(_p.relative_to(pathlib.Path(__file__).resolve().parents[1]))
+    for _p in pathlib.Path(__file__).resolve().parents[1].rglob("*.md")
+    if ".git" not in _p.parts
+    and "| request-mean |" in _p.read_text(encoding="utf-8"))
+# two, since 2026-09-01: ERRATA and the audit appendix. The root README had the
+# third and now links to it. The number is asserted rather than the shape, so
+# losing one is a failure and not a quietly shorter loop.
+chk("the documents publishing a request-mean column", len(_RM_DOCS), 2)
+for _rel in _RM_DOCS:
     _txt = (pathlib.Path(__file__).resolve().parents[1] / _rel) \
         .read_text(encoding="utf-8")
     _n = _txt.count("| request-mean |")
@@ -7132,7 +7216,7 @@ chk("and thinking off matched five of its ten", (_LM_OFF_N, _LM_OFF_M), (10, 5))
 chk("README length-matched: the paragraph's own two acceptance figures",
     (f"{round(_LM_OFF['spec-draft-n8']['m_acc'], 1)} % against "
      f"{round(_LM_ON['spec-draft-n8']['acc'], 1)} % with thinking on")
-    in " ".join(_ROOT_TEXT.replace("*", "").split()), True)
+    in " ".join(_PUB_TEXT.replace("*", "").split()), True)
 
 
 print("\n=== the BOS-override table, published twice and read in neither ===")
@@ -7456,12 +7540,12 @@ _v2_logs = sorted(_p for _d in ("v2_controls", "v2_master_cross_check",
 _v2_verbose = [_p for _p in _v2_logs if os.path.basename(_p) == "verbose.log"]
 chk("README data map: the v2 log count is what the three directories hold",
     f"{len(_v2_logs) - len(_v2_verbose)} v2 raw `llama-cli` logs + one "
-    f"`--verbose` trace" in _ROOT_TEXT, True)
+    f"`--verbose` trace" in _PUB_TEXT, True)
 chk("README data map: and exactly one of them is the verbose trace",
     len(_v2_verbose), 1)
 chk("README data map: the v1 label count is summary.csv's",
     f"v1 raw per-request JSON, {len({_r['config'] for _r in _V1CSV})} run labels"
-    in _ROOT_TEXT, True)
+    in _PUB_TEXT, True)
 
 
 print("\n=== the A4 terms and counters, in the four places they appear ===")
@@ -8121,7 +8205,7 @@ for _run, _needle in (("I", "+64 %"), ("J", "+18.7 %"), ("L", "+14.1 %"),
                       ("N", "0.0 %"), ("O", "a factor of five")):
     chk(f"CHANGELOG run {_run}: its answer is quoted elsewhere too",
         " ".join(_norm(_needle).split()) in " ".join(_norm(_V4R_TEXT).split())
-        or " ".join(_norm(_needle).split()) in " ".join(_norm(_ROOT_TEXT).split()),
+        or " ".join(_norm(_needle).split()) in " ".join(_norm(_PUB_TEXT).split()),
         True)
 _num_row_check("CHANGELOG run I", _CHR["I"], [64, 8])
 _num_row_check("CHANGELOG run J", _CHR["J"], [18.7])
@@ -8310,7 +8394,7 @@ chk("issue table: the numbers in the left column sit inside the quoted titles",
            for _x in _tcovn._numbers_in(_l, _tcovn._pipe_spans(_l)[0])),
     ["0.0", "2"])
 chk("issue table: and the document says that column is a quotation",
-    "The left column quotes each report's own title" in " ".join(_ROOT_TEXT.split()),
+    "The left column quotes each report's own title" in " ".join(_PUB_TEXT.split()),
     True)
 # the right column, row by row
 _iss_own = {re.match(r"\| \[#(\d+)\]", _l).group(1):
@@ -8742,7 +8826,7 @@ chk("README v4 map: run B's requests an arm, run A's short arms, the "
     [float(_x) for _c, _n in _DM[1] for _x in _n],
     [30.0, 12.0, 1.0, 4.0, 8.0, 5.0])
 chk("README v4 map: the smoke row it ends on names the start-up checks",
-    "the gate runs that decide a matrix is safe to start" in _ROOT_TEXT, True)
+    "the gate runs that decide a matrix is safe to start" in _PUB_TEXT, True)
 chk("README harness map: it carries no measurement at all",
     [_x for _c, _n in _DM[2] for _x in _n], [])
 chk("README v4 map: the telemetry interval it names is the schemas' own",
@@ -8982,7 +9066,7 @@ for _tier, _want in sorted(_TIER_EXPECT.items()):
 chk("the v1 host really had two of those cards",
     _V1RAW["gpu_info"].strip().count("RTX 3090"), 2)
 chk("and the v1 commit the row names is the one the archive recorded",
-    f"commit `{_V1RAW['llama_cpp_commit']}`" in _ROOT_TEXT, True)
+    f"commit `{_V1RAW['llama_cpp_commit']}`" in _PUB_TEXT, True)
 chk("the v1 cap applies to all but the 1000-token label",
     sorted({int(_r["max_tokens"]) for _r in _V1CSV}), [300, 1000])
 chk("Exp 2's own harness line says the same five prompts and cap",
@@ -9405,7 +9489,7 @@ print("\n=== how much of what is published is checked ===")
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import table_coverage as _tcov                                    # noqa: E402
 _cov = _tcov.census()
-chk("coverage: published tables", _cov["tables"], 141)
+chk("coverage: published tables", _cov["tables"], 142)
 chk("coverage: those carrying measurements", _cov["carrying_values"], 128)
 # EXACT, not "may only rise". `parsed >= 119` and `not_parsed <= 67` were a
 # ratchet that permitted six unparsed measurement tables to stand indefinitely,
@@ -9544,7 +9628,9 @@ _RESTATED = (
     # (label, needle, the documents that must all agree, must_contain)
     ("the request-row footnote is at the current corpus",
      "30 300 of 30 344",
-     ("README.md", "ERRATA.md", "CHANGELOG.md", "PULL_REQUEST.md",
+     # the root README stated this until its evidence sections moved into the
+     # appendix on 2026-09-01; it links to them now and states nothing itself
+     ("ERRATA.md", "CHANGELOG.md", "PULL_REQUEST.md",
       "v4_audit_2026_08_25/README.md"), True),
     # NOT the substring "V3 verbatim": the corrected sentence is "is not V3
     # verbatim", which contains it. A needle that matches the claim and its own
@@ -9674,7 +9760,7 @@ chk("CHANGELOG: and that is the split it publishes",
 chk("ERRATA A19: the census it publishes is the census",
     (_cov["tables"], _cov["no_values"], _cov["excluded_tables"],
      _cov["carrying_values"], _cov["parsed"], _cov["not_parsed"]),
-    (141, 7, 6, 128, 128, 0))
+    (142, 7, 7, 128, 128, 0))
 for _want, _what in ((_cov["tables"], "tables"),
                      (_cov["carrying_values"], "carrying measurements"),
                      (_cov["parsed"], "parsed"),
@@ -9707,7 +9793,7 @@ chk("prose probe: records whose value repeats on its own line",
 
 _pcov = _tcov.prose_census()
 chk("coverage: decimal numbers in prose, outside every table",
-    _pcov["prose_numbers"], 1403)
+    _pcov["prose_numbers"], 1405)
 chk("coverage: those that are not a literal in this file",
     _pcov["not_a_literal"], 729)
 # The same prose holds whole numbers, and the census above never counted them.
@@ -10184,8 +10270,7 @@ _CT = [_d for _d in (_DUP_DIR / "data").iterdir()
 _CT_RUNS = sum(len(list(_d.glob("*__rep*.json"))) for _d in _CT)
 chk("README: the controlled tier it sizes is the one on the tree",
     f"{_CT_RUNS} arm-runs in {len(_CT)} directories"
-    in " ".join((pathlib.Path(__file__).resolve().parents[1] / "README.md")
-                .read_text(encoding="utf-8").split()), True)
+    in " ".join(_pub_text().split()), True)
 chk("data: and the arm-run files themselves are still all here",
     sum(1 for _r in _TRACKED if "__rep" in _r and _r.endswith(".json")), 3005)
 

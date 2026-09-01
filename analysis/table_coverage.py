@@ -101,7 +101,12 @@ EXCLUDED = {
 READER_DOC = {"_md_table": "ERRATA.md",
               "_v4_table": "v4_audit_2026_08_25/README.md",
               "_pr_table": "PULL_REQUEST.md",
-              "_root_table": "README.md",
+              # reads the ROOT README AND the audit appendix, because eleven
+              # sections moved from the first to the second on 2026-09-01 and a
+              # table's identity is its header, not the file it is in. Registered
+              # against both, so the same table stays parsed on either side of a
+              # move and this map does not have to be edited to follow it.
+              "_root_table": ("README.md", "v4_audit_2026_08_25/README.md"),
               "_ch_table": "CHANGELOG.md",
               # found by the header-literal scan below, which is why that scan
               # exists: a whole reader was missing from this map and both
@@ -114,8 +119,8 @@ READER_DOC = {"_md_table": "ERRATA.md",
 # Adding one of these without adding it here counts its tables as unparsed,
 # which is the mistake `_pre_table` made above in the other direction.
 LINES_DOC = {"_ER_LINES": "ERRATA.md",
-             "_RM_LINES": "README.md",
-             "_ROOT_LINES": "README.md",
+             "_RM_LINES": ("README.md", "v4_audit_2026_08_25/README.md"),
+             "_PUB_LINES": ("README.md", "v4_audit_2026_08_25/README.md"),
              "_V4R_LINES": "v4_audit_2026_08_25/README.md",
              "_PR_LINES": "PULL_REQUEST.md",
              "_CH_LINES": "CHANGELOG.md",
@@ -141,18 +146,25 @@ def norm(s: str) -> str:
 # other and they come back caught. Four of these were being counted as unparsed
 # and were about to be parsed a second time.
 HAND_PARSED = {
+    # the last three moved into the appendix with their sections; a hand-parsed
+    # table is found by its header, so it is registered wherever it can be
     ("README.md", "| arm | pooled tok/s | change |"),
-    ("README.md", "| arm | O2 | O3 | shift |"),
-    ("README.md", "| configuration | real acceptance | pooled tok/s | vs baseline |"),
-    ("README.md", "| | seconds | share |"),
+    ("v4_audit_2026_08_25/README.md", "| arm | O2 | O3 | shift |"),
+    ("v4_audit_2026_08_25/README.md",
+     "| configuration | real acceptance | pooled tok/s | vs baseline |"),
+    ("v4_audit_2026_08_25/README.md", "| | seconds | share |"),
     ("ERRATA.md", "| arm | freerun, as the archive did it | hard cap | shift |"),
     # one entry, two tables: runs A and B share a header and are located by
     # index, so `_v4_table` cannot tell them apart and neither can the scan
     ("v4_audit_2026_08_25/README.md", "| arm | request-mean | pooled | min |"),
     # one table in three documents, read by index and required to agree
-    ("README.md", "| method | thinking on"),
+    # three copies, two of them now in the appendix: its own, headed with the
+    # run letters, and the one that came out of the root README, headed without
+    # them. Named by the header that identifies each, so the checker's literals
+    # and this registry say the same thing.
     ("ERRATA.md", "| method | thinking on"),
-    ("v4_audit_2026_08_25/README.md", "| method | thinking on"),
+    ("v4_audit_2026_08_25/README.md", "| method | thinking on (C)"),
+    ("v4_audit_2026_08_25/README.md", "| method | thinking on | thinking off |"),
 }
 
 
@@ -171,6 +183,11 @@ def header_literals() -> set[str]:
             and n.value.startswith("| ") and n.value.count("|") >= 2}
 
 
+def _docs_of(v) -> tuple:
+    """A reader reads one document or several; both spellings are allowed."""
+    return (v,) if isinstance(v, str) else tuple(v)
+
+
 def parsed_headers() -> set[tuple[str, str]]:
     """(document, header) for every table the checker feeds to a reader."""
     src = (ROOT / "analysis" / "verify_claims.py").read_text(encoding="utf-8")
@@ -181,12 +198,13 @@ def parsed_headers() -> set[tuple[str, str]]:
         fn = getattr(n.func, "id", "")
         if (fn in READER_DOC and n.args
                 and isinstance(n.args[0], ast.Constant)):
-            out.add((READER_DOC[fn], n.args[0].value))
+            out |= {(_d, n.args[0].value) for _d in _docs_of(READER_DOC[fn])}
         elif (fn in GENERIC_READERS and len(n.args) >= 2
                 and isinstance(n.args[0], ast.Name)
                 and isinstance(n.args[1], ast.Constant)
                 and n.args[0].id in LINES_DOC):
-            out.add((LINES_DOC[n.args[0].id], n.args[1].value))
+            out |= {(_d, n.args[1].value)
+                    for _d in _docs_of(LINES_DOC[n.args[0].id])}
     return out | HAND_PARSED
 
 
@@ -431,6 +449,11 @@ def prose_probe(absent: list[dict]) -> list[dict]:
 # Keyed on (document, first line of the header row) so it survives the table
 # moving within its file. A stale entry -- one that matches no table -- fails.
 EXCLUDED_TABLES = {
+    ("README.md", "| Section | What is in it |"):
+        "the index of the sections that moved into the audit appendix on "
+        "2026-09-01; the only digits in it are inside section titles, `100 %` "
+        "and the two run dates, and perturbing a section's own name would test "
+        "a link and not a measurement",
     ("README.md", "| Open upstream | Status | What it would change here |"):
         "upstream tracker; the digits are PR and issue numbers and dates",
     ("ERRATA.md", "| | `97895129e` (v1) | `3737e4137` (audit) |"):

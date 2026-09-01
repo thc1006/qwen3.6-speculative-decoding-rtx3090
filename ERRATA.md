@@ -2049,11 +2049,13 @@ the nine published documents, and `--probe` writes a wrong number into one cell
 of each in turn, runs the claim checker, and asks whether an assertion that was
 passing now fails. Measured on the tree this entry is committed in:
 
-Of **141** tables, **7** carry no number at all (paths, links, prose), **6** are
-excluded by name and reason in `EXCLUDED_TABLES` -- an upstream PR tracker, a
-commit-hash comparison, two checklists and a table of arm definitions whose only
-digit is a tokenizer id -- and **128** carry measurements. All **128** of those
-are parsed cell by cell by `analysis/verify_claims.py`; **0** are not.
+Of **142** tables, **7** carry no number at all (paths, links, prose), **7**
+are excluded by name and reason in `EXCLUDED_TABLES` -- an upstream PR tracker,
+a commit-hash comparison, two checklists, a table of arm definitions whose only
+digit is a tokenizer id, the release assets' SHA-256 digests, and the index of
+the sections that moved into the audit appendix -- and **128** carry
+measurements. All **128** of those are parsed cell by cell by
+`analysis/verify_claims.py`; **0** are not.
 
 The split used to be three ways, with anything under three numeric cells filed
 as prose. That is a different claim from "no derivable number", and it let a
@@ -2149,7 +2151,7 @@ because passing once does not bound half an hour of running.
 return rows, and assert nothing about the column you changed, which is exactly
 what the W three-design table did, in two documents, until this pass.
 
-**The larger half is not tables.** **1 403** decimal numbers sit in prose,
+**The larger half is not tables.** **1 405** decimal numbers sit in prose,
 outside every table; **729** of them do not appear as a string literal anywhere
 in the checker, counting only literals that are not assertion labels; a label
 is prose about a check and not a check, and leaving them in made the count move
@@ -2170,7 +2172,7 @@ tables happen to reach, which is the only reason the figure moved. The prose
 half of this repository is, to a first approximation, unchecked.
 
 **And that census counts decimals only.** In the same prose, on the same lines,
-sit **2 578** whole numbers, **356** of which are not a string literal in the
+sit **2 588** whole numbers, **355** of which are not a string literal in the
 checker either. They are reported beside the decimals rather than folded into
 them, because the probe below sampled the decimal population and the rate it
 publishes is about that population; widening what a measured rate refers to,

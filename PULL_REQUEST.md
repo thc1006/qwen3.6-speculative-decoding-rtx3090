@@ -373,7 +373,7 @@ adversarial pass over this branch's own commits found:
   the row is 30.4 % and the column consequently added to 100.1 (**B9**). Those
   five are parsed cell by cell now, but "all of them" was a statement about the
   ones that had been found, not about the class, and each had been found by
-  accident. The class is counted instead. Of 141 published tables 128 carry
+  accident. The class is counted instead. Of 142 published tables 128 carry
   measurements and all 128 are parsed cell by cell. When 80 were still unparsed,
   perturbing one cell of each left 67 that accept a wrong number with nothing
   noticing; all 80 of those are parsed now, and no published table that
@@ -418,7 +418,7 @@ adversarial pass over this branch's own commits found:
   the checker inside a clean checkout of HEAD, and there it died 373 assertions
   early, so the probe's own baseline was broken and it was measuring nothing.
   The logs are committed now and a test refuses any path the checker opens that
-  a fresh clone would not have. A clean checkout runs all 3844 assertions and
+  a fresh clone would not have. A clean checkout runs all 3841 assertions and
   exits 0, which it did not before.
 
   Figures in those tables that are not re-derivable here say so rather than
@@ -577,7 +577,7 @@ review:
 
 ```
 python analysis/rederive_from_logs.py bench   # raw logs -> four audit files
-python analysis/verify_claims.py          # 3844 assertions, re-derived
+python analysis/verify_claims.py          # 3841 assertions, re-derived
 python analysis/check_data_integrity.py   # structure of all 77 run directories
 python -m unittest discover tests         # 337 regressions for defects shipped here
 python tests/mutate.py                    # break each fix, require its test to fail

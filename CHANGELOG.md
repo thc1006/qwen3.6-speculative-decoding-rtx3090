@@ -62,7 +62,7 @@ publication point with its own data set.
 is now measured rather than assumed.** `analysis/table_coverage.py` counts the
 tables in the nine published documents; `--probe` writes a wrong number into
 one cell of each in turn and asks whether an assertion that was passing now
-fails. Of 141 tables, 128 carry measurements and all 128 are parsed cell by cell.
+fails. Of 142 tables, 128 carry measurements and all 128 are parsed cell by cell.
 When 80 were still unparsed, perturbing one cell of each left **67 that accept
 a wrong number and nothing notices**; all 80 of those are parsed now.
 Full accounting in [`ERRATA.md`](ERRATA.md) A19.
