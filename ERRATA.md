@@ -2192,7 +2192,7 @@ two halves, the V2 and V3 columns of the W table in both documents that carry
 it, both run registries, A4's log reconstruction, A14's M1-against-Q
 comparison, A16's six invocations, A17's per-repeat rates, B4's family minima,
 the BOS-override table in the two documents that publish it, run I's
-acceptance under batching, the README's length-matched comparison, and last
+acceptance under batching, the appendix's length-matched comparison, and last
 the six named above.
 
 **Fifty-five published statements were wrong and are corrected.** They are
@@ -2520,7 +2520,7 @@ Both are now reported, in `analysis/summary_by_config.csv` and on the charts.
 The last row's request-mean cell said **−13.0 % vs 300-tok base** until
 2026-08-28. It is not: against the 300-token `baseline` that figure is
 **−14.6 %**. −13.0 % is against `baseline-1000tok`, the same reference the
-pooled cell beside it names, which is also what the README's copy of this row
+pooled cell beside it names, which is also what the appendix's copy of the row
 uses. Every cell of this table is now re-derived from `analysis/summary.csv` by
 `analysis/verify_claims.py`, the reference each delta uses read out of the cell
 text rather than assumed, so a cell that names the wrong one fails.

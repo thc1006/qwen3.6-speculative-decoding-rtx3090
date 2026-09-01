@@ -1,8 +1,8 @@
 # v4 — audit measurements, 2026-08-25
 
 New measurements taken during the audit, on the same physical host that
-produced v2 and v3. They exist to settle three questions the archived data
-could not:
+produced v2 and v3, and at the end the sections moved here from the root
+README. They settle three questions the archived data could not:
 
 1. Was the draft model's vocabulary incompatibility responsible for the
    slowdown? (**No.**)
