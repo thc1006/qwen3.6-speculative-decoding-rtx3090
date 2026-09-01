@@ -5878,3 +5878,68 @@ class TypeOverAFillIsStillText(unittest.TestCase):
                     if re.search(r"\.(text|annotate)\(", ctx):
                         bad.append(f"{name}:{i}")
         self.assertEqual(bad, [], f"labels drawn in an unlightened series colour: {bad}")
+
+
+class TheBootstrapAllowanceIsExactlyAsWideAsTheDeadlock(unittest.TestCase):
+    """The probe will not start against a red tree, and it makes the tree red.
+
+    Six assertions in `verify_claims.py` read `coverage_attestations/`. A tree
+    whose attestations are stale, or whose shard count has just changed, fails
+    all six, and the run that would fix them is the one that refuses. That is a
+    deadlock, and on 2026-09-01 it cost a full 32-shard launch: every shard
+    exited 1 without writing an attestation.
+
+    The refusal is right about the hazard it was written for. A perturbation is
+    "caught" when the failure set GROWS, so a FLAKY failure reads as a catch;
+    sixteen shards sharing one `.git` produced three. A stable failure is
+    subtracted out and masks nothing. So the allowance covers stable failures
+    about the probe's own output and nothing else, and these are the tests that
+    keep it that way.
+    """
+
+    SRC = ROOT / "analysis" / "table_coverage.py"
+    SH = ROOT / "bench" / "run_cell_probe.sh"
+
+    def test_the_allowance_is_prefixed_not_a_free_list(self):
+        src = self.SRC.read_text(encoding="utf-8")
+        self.assertIn('_ALLOW_PREFIX = "probe: "', src)
+        self.assertIn("f.startswith(_ALLOW_PREFIX)", src,
+                      "the allowance no longer tests the prefix")
+        self.assertNotIn("--baseline-allow=", src,
+                         "an arbitrary list of allowed failures is not the allowance")
+
+    def test_it_is_off_unless_asked_for(self):
+        src = self.SRC.read_text(encoding="utf-8")
+        self.assertIn("allow_probe_evidence: bool = False", src,
+                      "the allowance defaults to on")
+        sh = self.SH.read_text(encoding="utf-8")
+        self.assertIn('ALLOW=""', sh)
+        self.assertIn("--bootstrap", sh)
+        self.assertNotIn("ALLOW=\"--allow-stale-probe-evidence\"\n"
+                         "if [ \"$BOOTSTRAP\"", sh)
+
+    def test_the_after_control_requires_the_same_set_not_a_subset(self):
+        """A declared failure that STOPS failing is a changed tree too.
+
+        If the after-control only asked for "no new failures", a perturbation
+        that silenced a standing one would read as SURVIVED, which is the
+        reassuring direction.
+        """
+        src = self.SRC.read_text(encoding="utf-8")
+        self.assertIn("end_fails != base_fails", src,
+                      "the after-control accepts a subset again")
+
+    def test_the_attestation_records_what_was_standing(self):
+        src = self.SRC.read_text(encoding="utf-8")
+        self.assertIn('"baseline_allowed": _CTRL["allowed"]', src,
+                      "an attestation that does not say what was red is not evidence")
+
+    def test_the_aggregator_refuses_shards_that_declared_different_sets(self):
+        src = self.SRC.read_text(encoding="utf-8")
+        self.assertIn("the shards declare different standing failures", src)
+        self.assertIn("was allowed to be failing and is not ", src)
+
+    def test_the_checker_holds_the_same_rule(self):
+        src = (ROOT / "analysis" / "verify_claims.py").read_text(encoding="utf-8")
+        self.assertIn("probe: the shards agree on what was already failing", src)
+        self.assertIn("probe: and nothing outside its own evidence", src)

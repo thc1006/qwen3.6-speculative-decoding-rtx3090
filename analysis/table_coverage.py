@@ -673,7 +673,24 @@ def cell_population(tables_: list[dict]) -> int:
 # real run for that on 2026-09-01 and its diagnosis was right for the wrong
 # reason: the shards had measured with one checker and reported two.
 _CTRL = {"before": None, "after": None, "checker_sha": None, "head": None,
-         "population_sha": None}
+         "population_sha": None, "allowed": []}
+
+# The probe's OWN evidence cannot be true before the probe has run. Six
+# assertions read `coverage_attestations/`, and a tree whose attestations are
+# stale, or whose shard count has changed, fails all six; the probe then refuses
+# to start because its control is red, and the only way to make the control
+# green is to run the probe. That is a deadlock and it is the reason a run at 32
+# shards could not follow a run at 28.
+#
+# The refusal exists for FLAKY failures: sixteen shards sharing one `.git`
+# produced three, and a perturbation is "caught" when the failure set GROWS, so
+# a failure that comes and goes reads as a catch. A stable failure is subtracted
+# out by `fails - base_fails` and masks nothing. So the allowance is exactly as
+# wide as the deadlock and no wider: failures whose names begin with this prefix,
+# which are the ones about the probe's own output, and nothing else. Every
+# attestation records what was standing when it was taken, so the evidence says
+# so rather than the operator remembering.
+_ALLOW_PREFIX = "probe: "
 
 
 def _head_sha(root: pathlib.Path | None = None) -> str:
@@ -745,7 +762,8 @@ def cell_locations(picked: list[dict], root: pathlib.Path | None = None) -> set:
     return out
 
 
-def cell_probe(tables_: list[dict], shard: tuple[int, int] = (0, 1)) -> list[dict]:
+def cell_probe(tables_: list[dict], shard: tuple[int, int] = (0, 1),
+               allow_probe_evidence: bool = False) -> list[dict]:
     """Perturb EVERY numeric cell of every table given, one at a time.
 
     The one-cell-per-table probe is too weak to say a table is guarded: the W
@@ -808,11 +826,21 @@ def cell_probe(tables_: list[dict], shard: tuple[int, int] = (0, 1)) -> list[dic
         # produced none, so the reading was contention and the result would
         # have been a clean run that measured nothing. This file has now had to
         # record a broken control three times; it refuses instead.
-        if base_fails or base_rc != 0:
+        _unexpected = {f for f in base_fails
+                       if not (allow_probe_evidence
+                               and f.startswith(_ALLOW_PREFIX))}
+        _CTRL["allowed"] = sorted(base_fails - _unexpected)
+        _CTRL["before"] = bool(_unexpected) or (base_rc != 0
+                                                and not _CTRL["allowed"])
+        if _CTRL["allowed"]:
+            print(f"shard {shard[0]}/{shard[1]}: standing at baseline and "
+                  f"declared: {'; '.join(_CTRL['allowed'])}",
+                  file=sys.stderr, flush=True)
+        if _unexpected or (base_rc != 0 and not _CTRL["allowed"]):
             raise SystemExit(
                 f"shard {shard[0]}/{shard[1]}: the checker does not pass on an "
-                f"unperturbed worktree ({len(base_fails)} failing, exit "
-                f"{base_rc}), so nothing this shard reports would mean "
+                f"unperturbed worktree ({len(_unexpected)} unexpected failing, "
+                f"exit {base_rc}), so nothing this shard reports would mean "
                 f"anything. Fix the tree, or run fewer shards at once: several "
                 f"checkers against one `.git` make the git-gated assertions "
                 f"flake.\n  " + "\n  ".join(sorted(base_fails)[:5]))
@@ -898,8 +926,13 @@ def cell_probe(tables_: list[dict], shard: tuple[int, int] = (0, 1)) -> list[dic
         # perturbation that was written and not restored leaves the worktree
         # dirty, and every reading after it was against a different document.
         end_fails, end_n, end_rc = _run(wt)
-        _CTRL["after"] = bool(end_fails) or end_rc != 0 or end_n != base_n
-        if end_fails or end_rc != 0 or end_n != base_n:
+        # EXACTLY the set that was standing at the start, not merely no more
+        # than it: a declared failure that stops failing is as much a changed
+        # tree as a new one, and the reading it would produce is "SURVIVED".
+        _after_bad = (end_fails != base_fails or end_n != base_n
+                      or (end_rc != 0 and not _CTRL["allowed"]))
+        _CTRL["after"] = _after_bad
+        if _after_bad:
             raise SystemExit(
                 f"shard {shard[0]}/{shard[1]}: the control no longer passes "
                 f"after the run ({len(end_fails)} failing, exit {end_rc}, "
@@ -1014,6 +1047,19 @@ def aggregate(paths: list[str]) -> int:
     if missing:
         bad.append(f"shard(s) {missing} of {n} have no attestation")
 
+    # every shard has to have started from the SAME standing failures, and each
+    # of them has to be one the allowance covers. A shard that quietly ran with a
+    # wider allowance than its siblings would otherwise aggregate with them.
+    _allow = {tuple(d.get("baseline_allowed", ["<field absent>"])) for _, d in shards}
+    if len(_allow) != 1:
+        bad.append(f"the shards declare different standing failures: "
+                   f"{sorted(sorted(a) for a in _allow)}")
+    for _a in sorted(_allow)[:1]:
+        for _name in _a:
+            if not _name.startswith(_ALLOW_PREFIX):
+                bad.append(f"{_name!r} was allowed to be failing and is not "
+                           f"about the probe's own evidence")
+
     for field in ("head_sha", "checker_sha256", "population_sha256"):
         vals = {d.get(field) for _, d in shards}
         if len(vals) != 1:
@@ -1089,7 +1135,7 @@ def main() -> None:
     unknown = [a for a in argv
                if a not in ("--json", "--probe", "--covered", "--prose",
                             "--every-cell", "--count", "--aggregate",
-                            "--population-sha")]
+                            "--population-sha", "--allow-stale-probe-evidence")]
     if unknown:
         sys.exit(f"unrecognised option(s): {' '.join(unknown)}")
     if "--every-cell" in argv:
@@ -1098,7 +1144,8 @@ def main() -> None:
         if "--count" in argv:
             print(f"{len(picked)} tables, {cell_population(picked)} numbers")
             return
-        res = cell_probe(picked, shard)
+        res = cell_probe(picked, shard,
+                         allow_probe_evidence="--allow-stale-probe-evidence" in argv)
         surv = [r for r in res if r["probe"] == "SURVIVED"]
         if "--json" in argv:
             # An ATTESTATION, not a summary. Eight shards were reported as
@@ -1116,6 +1163,11 @@ def main() -> None:
                                       or _population_sha(picked)),
                 "population_size": cell_population(picked),
                 "shard": list(shard),
+                # what was already red when this shard started, declared in
+                # advance and required to be exactly this at both ends. Empty on
+                # a tree that was green, which is every run after a shard count
+                # changes.
+                "baseline_allowed": _CTRL["allowed"],
                 "control_before": "pass" if not _CTRL["before"] else "FAIL",
                 "control_after": "pass" if not _CTRL["after"] else "FAIL",
                 "probed": len(res),

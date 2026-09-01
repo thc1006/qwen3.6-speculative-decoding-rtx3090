@@ -414,7 +414,7 @@ adversarial pass over this branch's own commits found:
   the checker inside a clean checkout of HEAD, and there it died 373 assertions
   early, so the probe's own baseline was broken and it was measuring nothing.
   The logs are committed now and a test refuses any path the checker opens that
-  a fresh clone would not have. A clean checkout runs all 3834 assertions and
+  a fresh clone would not have. A clean checkout runs all 3836 assertions and
   exits 0, which it did not before.
 
   Figures in those tables that are not re-derivable here say so rather than
@@ -562,9 +562,9 @@ review:
 
 ```
 python analysis/rederive_from_logs.py bench   # raw logs -> four audit files
-python analysis/verify_claims.py          # 3834 assertions, re-derived
+python analysis/verify_claims.py          # 3836 assertions, re-derived
 python analysis/check_data_integrity.py   # structure of all 77 run directories
-python -m unittest discover tests         # 329 regressions for defects shipped here
+python -m unittest discover tests         # 335 regressions for defects shipped here
 python tests/mutate.py                    # break each fix, require its test to fail
 python tests/data_mutate.py               # perturb a measurement or a published
                                           #   figure, require the checker to fail

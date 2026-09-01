@@ -27,10 +27,21 @@
 set -euo pipefail
 
 CHECK_ONLY=0
-if [ "${1:-}" = "--check-only" ]; then
-    CHECK_ONLY=1
-    shift
-fi
+BOOTSTRAP=0
+# --bootstrap is for the one case the probe cannot start without help: its own
+# six assertions read the attestations, so a tree whose attestations are stale,
+# or whose shard count has just changed, fails them, and the only way to make
+# them pass is to run the probe. The flag lets THOSE failures stand and nothing
+# else, each shard records the list, and the aggregator refuses a set whose
+# shards declared different ones. It is spelled out on every run that uses it so
+# it cannot become the way the probe is normally launched.
+while [ $# -gt 0 ]; do
+    case ${1:-} in
+        --check-only) CHECK_ONLY=1; shift ;;
+        --bootstrap)  BOOTSTRAP=1; shift ;;
+        *) break ;;
+    esac
+done
 if [ $# -lt 3 ] || [ $# -gt 4 ]; then
     sed -n '2,8p' "$0" >&2
     exit 2
@@ -38,6 +49,13 @@ fi
 SHARDS=$1
 WANT_HEAD=$2
 OUT_DIR=$3
+ALLOW=""
+if [ "$BOOTSTRAP" = 1 ]; then
+    ALLOW="--allow-stale-probe-evidence"
+    echo "BOOTSTRAP: the probe's own six assertions are allowed to be failing" >&2
+    echo "  at the start of each shard, and nothing else is. Each attestation" >&2
+    echo "  records the list and the aggregator checks the shards agree on it." >&2
+fi
 TMP_DIR=${4:-${TMPDIR:-/tmp}}
 
 case $SHARDS in
@@ -78,7 +96,7 @@ echo "  scratch $TMP_DIR: $((FREE_KB / 1024)) MB free, about $((NEED_KB / 1024))
 export TMPDIR="$TMP_DIR"
 pids=""
 for i in $(seq 0 $((SHARDS - 1))); do
-    python3 analysis/table_coverage.py --every-cell --covered --json \
+    python3 analysis/table_coverage.py --every-cell --covered --json $ALLOW \
         "--shard=$i/$SHARDS" > "$OUT_DIR/shard_$i.json" 2> "$OUT_DIR/shard_$i.err" &
     pids="$pids $!"
 done

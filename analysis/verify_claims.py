@@ -9763,6 +9763,18 @@ _ATTJ = [json.loads(_x.read_text(encoding="utf-8")) for _x in _ATT]
 chk("probe: every shard's control passed at both ends",
     sorted({(_a["control_before"], _a["control_after"]) for _a in _ATTJ}),
     [("pass", "pass")])
+# The probe refuses to start against a red tree, and six of its own assertions
+# read the attestations, so a shard count that changes deadlocks it: the only way
+# to make them pass is the run they block. `--bootstrap` lets exactly those stand
+# and each attestation records which. Anything else in that list means a shard ran
+# with a wider allowance than the deadlock needs, and every reading it produced
+# is against a tree that was already failing for a reason nobody declared.
+_ATT_ALLOW = {tuple(_a.get("baseline_allowed", ["<field absent>"])) for _a in _ATTJ}
+chk("probe: the shards agree on what was already failing when they started",
+    len(_ATT_ALLOW), 1)
+chk("probe: and nothing outside its own evidence was allowed to be failing",
+    sorted({_n for _s in _ATT_ALLOW for _n in _s
+            if not _n.startswith("probe: ")}), [])
 chk("probe: nothing survived in any of them",
     sum(len(_a.get("survived", [])) for _a in _ATTJ), 0)
 chk("probe: one head, one checker and one population across the eight",
@@ -9812,7 +9824,11 @@ chk("probe: the aggregator's own line, in its own format",
 _ATT_DOC = _AGG_RAW.replace(str(_A19_POP), _A19_PRINTED)
 for _adoc, _atxt in (("ERRATA A19", _A19), ("PR body", _PR)):
     _aflat = " ".join(_atxt.replace("**", "").replace("`", "").split())
-    chk(f"{_adoc}: quotes the aggregator, with this file's digit grouping",
+    # named for what it reads, not for where it reads it: the bootstrap
+    # allowance is "assertions about the probe's own evidence", and it decides
+    # that by the label. Called "ERRATA A19: ..." these two sat outside it while
+    # being exactly that, and the deadlock they were part of stayed shut.
+    chk(f"probe: the aggregator's line, as {_adoc} quotes it",
         _ATT_DOC in _aflat, True)
 if _HAS_GIT:
     # evidence dated to a commit, not a promise about now: the commit that adds
