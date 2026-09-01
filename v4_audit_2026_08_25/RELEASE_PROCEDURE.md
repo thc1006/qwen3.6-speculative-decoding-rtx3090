@@ -55,12 +55,26 @@ the verifier together, at the end rather than the middle:
     # exists, and until then they are worth keeping somewhere that survives a
     # reboot. Their digests are in RELEASE_NOTES_v4.2.md and are checked
     # against the files before this runs.
+    #    NOT `--notes-file`. A release body is rendered by the same GFM as an
+    #    issue body: newlines are preserved, so the file's eighty-column
+    #    wrapping becomes `<br>`. Passing the file verbatim on 2026-09-01
+    #    published a body with 29 of them, which is the defect this repository
+    #    already has a tool and a commit about, on the one surface that had no
+    #    tool. Create the release with a placeholder body and set the real one
+    #    with `tools/publish_release_notes.py --write`, which reflows it, reads
+    #    it back and renders it through GitHub's own markdown endpoint.
     gh release create "$TAG" --target "$HEAD_SHA" --verify-tag \
-       --title "Evidence and verifier, v4.2" --notes-file RELEASE_NOTES_v4.2.md \
+       --title "Evidence and verifier, v4.2" --notes "see below" \
        "$ASSETS"/raw_logs.tar.zst "$ASSETS"/raw_logs_20260827.tar.zst \
        "$ASSETS"/raw_logs_20260828.tar.zst "$ASSETS"/raw_logs_20260831.tar.zst \
        "$ASSETS"/telemetry.tar.zst "$ASSETS"/telemetry_20260827.tar.zst \
        "$ASSETS"/telemetry_20260828.tar.zst "$ASSETS"/telemetry_20260831.tar.zst
+
+    # 5. the body, reflowed. The file keeps its wrapping because its diff is
+    #    read line by line; the body is reflowed on the way out and the tool
+    #    proves it landed: it reads the published body back and asks GitHub's
+    #    renderer how many line breaks are in it. Zero, or it exits non-zero.
+    python3 tools/publish_release_notes.py --write
 
 ## Why all eight assets, and not two
 

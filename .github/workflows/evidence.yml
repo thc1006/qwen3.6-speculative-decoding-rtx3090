@@ -215,7 +215,13 @@ jobs:
           }
           echo "$a manifest entries, none pending: $b staged, $o verified apart"
           df -h --output=source,size,used,avail,pcent / | sed 's/^/  df /'
-          python3 bench/preflight_tar.py /tmp/manifest \
+          # `_all`, not `manifest`: the manifest was split into three slices and
+          # this call kept the name of the file that used to hold all of it.
+          # `/tmp/manifest` has not existed since, and the step died on a
+          # FileNotFoundError the first time a published release made this job
+          # reachable. Every archive is passed here, so the slice to check
+          # against is the whole file.
+          python3 bench/preflight_tar.py /tmp/manifest_all \
               <(unzstd -c evidence/raw_logs.tar.zst) \
               <(unzstd -c evidence/raw_logs_20260827.tar.zst) \
               <(unzstd -c evidence/raw_logs_20260828.tar.zst) \

@@ -6006,3 +6006,116 @@ class TheBootstrapAllowanceIsExactlyAsWideAsTheDeadlock(unittest.TestCase):
         src = (ROOT / "analysis" / "verify_claims.py").read_text(encoding="utf-8")
         self.assertIn("probe: the shards agree on what was already failing", src)
         self.assertIn("probe: and nothing outside its own evidence", src)
+
+
+class AReleaseBodyIsRenderedLikeAnIssueBody(unittest.TestCase):
+    """The one published surface that had no publisher, and it wrapped.
+
+    `PULL_REQUEST.md` is wrapped at eighty columns so its diff reads line by
+    line, GitHub Flavored Markdown preserves newlines in an issue or pull
+    request body, and this repository has a tool and a commit about the 412
+    line breaks that produced. A release body is rendered by the same markdown.
+
+    On 2026-09-01 the release was created with `gh release create --notes-file
+    RELEASE_NOTES_v4.2.md`, which hands GitHub the file verbatim, and the
+    published body rendered with 29 `<br>`. The procedure document was what
+    said to do that, so fixing the body alone would have left the instruction
+    that produced it.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    def test_the_procedure_does_not_hand_the_file_to_github(self):
+        proc = (self.ROOT / "v4_audit_2026_08_25"
+                / "RELEASE_PROCEDURE.md").read_text(encoding="utf-8")
+        self.assertNotIn("--notes-file RELEASE_NOTES", proc,
+                         "the procedure tells the operator to publish the "
+                         "wrapped file as the body again")
+        self.assertIn("tools/publish_release_notes.py --write", proc,
+                      "the procedure does not name the publisher")
+
+    def test_the_publisher_exists_and_defaults_to_reading(self):
+        src = (self.ROOT / "tools" / "publish_release_notes.py") \
+            .read_text(encoding="utf-8")
+        self.assertIn('g.add_argument("--write"', src)
+        self.assertIn("if not args.write:", src,
+                      "the default path must be the read-only one")
+
+    def test_it_reuses_the_reflow_it_does_not_reimplement_it(self):
+        """Two implementations of one rule are two things to drift.
+
+        The rule is subtle: the first version of `reflow` dropped the
+        indentation off a table row inside a list item, which ends the item and
+        opens a second table, and 48 rows became 54.
+        """
+        src = (self.ROOT / "tools" / "publish_release_notes.py") \
+            .read_text(encoding="utf-8")
+        self.assertIn("from publish_pr_body import reflow", src)
+        self.assertNotIn("def reflow(", src,
+                         "the release publisher has its own copy of reflow")
+
+    def test_it_asks_github_how_many_breaks_rather_than_counting_locally(self):
+        """The question is what a reader sees, and only the renderer answers it."""
+        src = (self.ROOT / "tools" / "publish_release_notes.py") \
+            .read_text(encoding="utf-8")
+        self.assertIn("api.github.com/markdown", src)
+        self.assertIn('count("<br")', src)
+
+    def test_it_reads_the_body_back_after_writing(self):
+        src = (self.ROOT / "tools" / "publish_release_notes.py") \
+            .read_text(encoding="utf-8")
+        after = src.split('method="PATCH"', 1)[1]
+        self.assertIn("releases/tags/", after,
+                      "nothing reads the published body back")
+        self.assertIn("read back identical", after)
+
+
+class AWorkflowMustReadOnlyPathsItWrote(unittest.TestCase):
+    """`/tmp/manifest` had not existed for weeks and one step still read it.
+
+    The manifest was split into `/tmp/manifest_all`, `_oob` and `_bench` so a
+    slice could be verified apart, and the `preflight_tar.py` call kept the old
+    name. Nothing caught it: `ci_faithful.sh` does not reproduce `evidence.yml`
+    because that job needs a published release, so the first run that could
+    reach the step was the one after the release was cut, and it died on a
+    `FileNotFoundError` two steps before the comparison it exists to make.
+
+    A path a workflow reads and never writes is a defect that only the real
+    runner can find, which is the most expensive kind. This finds it here.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+    # written by the runner or the image, not by the workflow
+    EXTERNAL = {"/tmp/tmp", "/tmp/runner"}
+
+    def _scan(self, name):
+        text = (self.ROOT / ".github" / "workflows" / name).read_text(encoding="utf-8")
+        written, read = set(), []
+        for line in text.splitlines():
+            s = line.strip()
+            if s.startswith("#"):
+                continue
+            for m in re.finditer(r"(?:>\s*|-o\s+|mkdir\s+-p\s+|-C\s+)(/tmp/[\w.-]+)", s):
+                written.add(m.group(1))
+            for m in re.finditer(r"(/tmp/[\w.-]+)", s):
+                read.append((m.group(1), s))
+        return written, read
+
+    def test_every_tmp_path_read_is_one_the_workflow_writes(self):
+        bad = []
+        for name in ("evidence.yml", "audit.yml"):
+            written, read = self._scan(name)
+            for path, line in read:
+                if path in written or path in self.EXTERNAL:
+                    continue
+                bad.append(f"{name}: {path} in {line[:60]!r}")
+        self.assertEqual(bad, [],
+                         "a workflow reads a path nothing in it creates; only a "
+                         "real runner would find that, and only after a release")
+
+    def test_the_scan_sees_a_path_that_is_never_written(self):
+        """Both ends: the detector has to fail on the defect it was written for."""
+        written, _ = self._scan("evidence.yml")
+        self.assertIn("/tmp/manifest_all", written)
+        self.assertNotIn("/tmp/manifest", written,
+                         "the split slices are what the workflow writes")
