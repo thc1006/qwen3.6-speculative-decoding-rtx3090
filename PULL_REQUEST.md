@@ -385,7 +385,7 @@ adversarial pass over this branch's own commits found:
   stopped, a configuration column nobody read, the `100 %` on a total row. Each
   is compared against a value derived from the data, and the measurement says
   so: on 2026-09-01 the probe perturbed all 2 446 numbers across all 128
-  parsed tables of commit `a8174183a9bf` and caught every one, in 32 shards whose
+  parsed tables of commit `6b0c83076a13` and caught every one, in 32 shards whose
   control passed before the work and again after it on everything except the ten
   assertions that read the attestations themselves, which cannot be true before
   the run that writes them; those were declared in advance, each attestation
@@ -393,7 +393,7 @@ adversarial pass over this branch's own commits found:
   shards declared different ones. Their union is checked
   rather than assumed: `analysis/table_coverage.py --aggregate` over the 32
   attestations, which are committed under
-  `v4_audit_2026_08_25/coverage_attestations/`, reports **32 shards, one head `a8174183a9bf`, one checker `1983e050f019`, 2 446 locations covered exactly once, 0 survived**, each attestation carrying the head, the
+  `v4_audit_2026_08_25/coverage_attestations/`, reports **32 shards, one head `6b0c83076a13`, one checker `c8c9c3969bd5`, 2 446 locations covered exactly once, 0 survived**, each attestation carrying the head, the
   checker hash, the population digest, both controls and every location as a
   character span. Before 2026-08-30 nothing showed the eight had all run, or
   were disjoint, or were the same tree, and `--shard=8/8` selected nothing and
@@ -583,7 +583,7 @@ review:
 python analysis/rederive_from_logs.py bench   # raw logs -> four audit files
 python analysis/verify_claims.py          # 3844 assertions, re-derived
 python analysis/check_data_integrity.py   # structure of all 77 run directories
-python -m unittest discover tests         # 348 regressions for defects shipped here
+python -m unittest discover tests         # 353 regressions for defects shipped here
 python tests/mutate.py                    # break each fix, require its test to fail
 python tests/data_mutate.py               # perturb a measurement or a published
                                           #   figure, require the checker to fail

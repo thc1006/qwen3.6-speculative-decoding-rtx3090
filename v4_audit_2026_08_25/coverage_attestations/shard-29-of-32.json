@@ -1,7 +1,7 @@
 {
-  "head_sha": "a8174183a9bfdcc93d6926009ae11da01923db9f",
-  "checker_sha256": "1983e050f019b7c10be7f5278c669517698762f906af7464195597a3a07f1a1b",
-  "population_sha256": "e7d47c2ca5ae9a78aa1cb5f83bbbe8c121709908402337871dbfaa34da0457fb",
+  "head_sha": "6b0c83076a133f168f7e79920863c3a3f7c90a77",
+  "checker_sha256": "c8c9c3969bd5ecd60da7813564018f37e7a66c89cadd55b1f85e3295f3957988",
+  "population_sha256": "2fd85d819d220a00144da9f0da33b3207155c26e68403b684954353b6addf77c",
   "population_size": 2446,
   "shard": [
     29,
@@ -9,16 +9,7 @@
   ],
   "baseline_allowed": [
     "probe: and every place it attests is a place this tree still has",
-    "probe: and the population digest they recorded is this tree's",
-    "probe: every shard attestation is committed",
-    "probe: every shard's control passed at both ends",
-    "probe: one head, one checker and one population across the eight",
-    "probe: the aggregator accepts the committed set",
-    "probe: the aggregator's line, as ERRATA A19 quotes it",
-    "probe: the aggregator's line, as PR body quotes it",
-    "probe: the aggregator's own line, in its own format",
-    "probe: the population they attest is the one this tree holds",
-    "probe: the shards agree on what was already failing when they started"
+    "probe: and the population digest they recorded is this tree's"
   ],
   "control_before": "pass",
   "control_after": "pass",
@@ -450,192 +441,192 @@
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      2002,
-      2004,
+      2006,
+      2008,
       2,
       59,
       63
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      2002,
-      2004,
+      2006,
+      2008,
       3,
       110,
       112
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      2002,
-      2004,
+      2006,
+      2008,
       3,
       125,
       127
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      2002,
-      2004,
+      2006,
+      2008,
       3,
       151,
       152
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      2002,
-      2004,
+      2006,
+      2008,
       3,
       163,
       165
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      2002,
-      2004,
+      2006,
+      2008,
       3,
       228,
       229
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      2002,
-      2004,
+      2006,
+      2008,
       3,
       232,
       235
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      2002,
-      2005,
+      2006,
+      2009,
       2,
       51,
       55
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      2002,
-      2005,
+      2006,
+      2009,
       3,
       111,
       112
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      2002,
-      2005,
+      2006,
+      2009,
       3,
       135,
       138
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      2002,
-      2005,
+      2006,
+      2009,
       3,
       141,
       144
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      2002,
       2006,
+      2010,
       0,
       8,
       9
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      2002,
       2006,
+      2010,
       3,
       78,
       79
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      2002,
       2006,
+      2010,
       3,
       90,
       91
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      2002,
       2006,
+      2010,
       3,
       101,
       102
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      2002,
-      2007,
+      2006,
+      2011,
       3,
       54,
       55
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      2002,
-      2007,
+      2006,
+      2011,
       3,
       66,
       67
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      2002,
-      2007,
+      2006,
+      2011,
       3,
       74,
       75
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      2002,
-      2008,
+      2006,
+      2012,
       2,
       52,
       56
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      2002,
-      2008,
+      2006,
+      2012,
       2,
       59,
       63
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      2002,
-      2008,
+      2006,
+      2012,
       3,
       134,
       138
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      2002,
-      2008,
+      2006,
+      2012,
       3,
       151,
       153
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      2002,
-      2008,
+      2006,
+      2012,
       3,
       219,
       220
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      2002,
-      2008,
+      2006,
+      2012,
       3,
       224,
       226

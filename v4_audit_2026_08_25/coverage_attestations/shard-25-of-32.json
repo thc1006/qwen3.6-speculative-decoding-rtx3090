@@ -1,7 +1,7 @@
 {
-  "head_sha": "a8174183a9bfdcc93d6926009ae11da01923db9f",
-  "checker_sha256": "1983e050f019b7c10be7f5278c669517698762f906af7464195597a3a07f1a1b",
-  "population_sha256": "e7d47c2ca5ae9a78aa1cb5f83bbbe8c121709908402337871dbfaa34da0457fb",
+  "head_sha": "6b0c83076a133f168f7e79920863c3a3f7c90a77",
+  "checker_sha256": "c8c9c3969bd5ecd60da7813564018f37e7a66c89cadd55b1f85e3295f3957988",
+  "population_sha256": "2fd85d819d220a00144da9f0da33b3207155c26e68403b684954353b6addf77c",
   "population_size": 2446,
   "shard": [
     25,
@@ -9,16 +9,7 @@
   ],
   "baseline_allowed": [
     "probe: and every place it attests is a place this tree still has",
-    "probe: and the population digest they recorded is this tree's",
-    "probe: every shard attestation is committed",
-    "probe: every shard's control passed at both ends",
-    "probe: one head, one checker and one population across the eight",
-    "probe: the aggregator accepts the committed set",
-    "probe: the aggregator's line, as ERRATA A19 quotes it",
-    "probe: the aggregator's line, as PR body quotes it",
-    "probe: the aggregator's own line, in its own format",
-    "probe: the population they attest is the one this tree holds",
-    "probe: the shards agree on what was already failing when they started"
+    "probe: and the population digest they recorded is this tree's"
   ],
   "control_before": "pass",
   "control_after": "pass",
@@ -282,344 +273,344 @@
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      1385,
-      1387,
+      1389,
+      1391,
       1,
       22,
       26
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      1385,
-      1387,
+      1389,
+      1391,
       2,
       34,
       38
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      1385,
-      1387,
+      1389,
+      1391,
       3,
       48,
       51
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      1385,
-      1388,
+      1389,
+      1392,
       1,
       19,
       23
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      1385,
-      1388,
+      1389,
+      1392,
       2,
       29,
       33
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      1385,
-      1388,
+      1389,
+      1392,
       3,
       39,
       42
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      1385,
       1389,
+      1393,
       1,
       22,
       26
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      1385,
       1389,
+      1393,
       2,
       32,
       36
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      1385,
       1389,
+      1393,
       3,
       42,
       45
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      1385,
-      1390,
+      1389,
+      1394,
       1,
       19,
       23
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      1385,
-      1390,
+      1389,
+      1394,
       2,
       29,
       33
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      1385,
-      1390,
+      1389,
+      1394,
       3,
       39,
       42
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      1385,
-      1391,
+      1389,
+      1395,
       1,
       21,
       25
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      1385,
-      1391,
+      1389,
+      1395,
       2,
       31,
       35
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      1385,
-      1391,
+      1389,
+      1395,
       3,
       41,
       44
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      1385,
-      1392,
+      1389,
+      1396,
       1,
       24,
       27
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      1385,
-      1392,
+      1389,
+      1396,
       2,
       33,
       36
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      1385,
-      1392,
+      1389,
+      1396,
       3,
       42,
       45
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      1385,
-      1393,
+      1389,
+      1397,
       1,
       21,
       25
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      1385,
-      1393,
+      1389,
+      1397,
       2,
       31,
       35
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      1385,
-      1393,
+      1389,
+      1397,
       3,
       41,
       44
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      1385,
-      1394,
+      1389,
+      1398,
       1,
       21,
       25
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      1385,
-      1394,
+      1389,
+      1398,
       2,
       31,
       35
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      1385,
-      1394,
+      1389,
+      1398,
       3,
       41,
       44
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      1385,
-      1395,
+      1389,
+      1399,
       1,
       32,
       37
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      1385,
-      1395,
+      1389,
+      1399,
       2,
       42,
       47
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      1385,
-      1395,
+      1389,
+      1399,
       3,
       53,
       56
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      1704,
-      1706,
+      1708,
+      1710,
       2,
       23,
       28
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      1704,
-      1707,
+      1708,
+      1711,
       0,
       10,
       11
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      1704,
-      1707,
+      1708,
+      1711,
       0,
       21,
       25
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      1704,
-      1707,
+      1708,
+      1711,
       1,
       28,
       32
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      1704,
-      1707,
+      1708,
+      1711,
       2,
       39,
       43
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      1704,
-      1707,
+      1708,
+      1711,
       3,
       51,
       55
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      1704,
       1708,
+      1712,
       0,
       10,
       11
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      1704,
       1708,
+      1712,
       0,
       21,
       25
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      1704,
       1708,
+      1712,
       1,
       30,
       34
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      1704,
       1708,
+      1712,
       2,
       41,
       45
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      1704,
       1708,
+      1712,
       3,
       49,
       53
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      1704,
-      1709,
+      1708,
+      1713,
       0,
       10,
       11
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      1704,
-      1709,
+      1708,
+      1713,
       0,
       21,
       22
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      1704,
-      1709,
+      1708,
+      1713,
       1,
       25,
       29
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      1704,
-      1709,
+      1708,
+      1713,
       2,
       34,
       38
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      1704,
-      1709,
+      1708,
+      1713,
       3,
       42,
       46

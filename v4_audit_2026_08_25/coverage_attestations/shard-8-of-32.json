@@ -1,7 +1,7 @@
 {
-  "head_sha": "a8174183a9bfdcc93d6926009ae11da01923db9f",
-  "checker_sha256": "1983e050f019b7c10be7f5278c669517698762f906af7464195597a3a07f1a1b",
-  "population_sha256": "e7d47c2ca5ae9a78aa1cb5f83bbbe8c121709908402337871dbfaa34da0457fb",
+  "head_sha": "6b0c83076a133f168f7e79920863c3a3f7c90a77",
+  "checker_sha256": "c8c9c3969bd5ecd60da7813564018f37e7a66c89cadd55b1f85e3295f3957988",
+  "population_sha256": "2fd85d819d220a00144da9f0da33b3207155c26e68403b684954353b6addf77c",
   "population_size": 2446,
   "shard": [
     8,
@@ -9,16 +9,7 @@
   ],
   "baseline_allowed": [
     "probe: and every place it attests is a place this tree still has",
-    "probe: and the population digest they recorded is this tree's",
-    "probe: every shard attestation is committed",
-    "probe: every shard's control passed at both ends",
-    "probe: one head, one checker and one population across the eight",
-    "probe: the aggregator accepts the committed set",
-    "probe: the aggregator's line, as ERRATA A19 quotes it",
-    "probe: the aggregator's line, as PR body quotes it",
-    "probe: the aggregator's own line, in its own format",
-    "probe: the population they attest is the one this tree holds",
-    "probe: the shards agree on what was already failing when they started"
+    "probe: and the population digest they recorded is this tree's"
   ],
   "control_before": "pass",
   "control_after": "pass",
@@ -26,128 +17,128 @@
   "locations": [
     [
       "CHANGELOG.md",
-      1243,
-      1245,
+      1300,
+      1302,
       1,
       23,
       28
     ],
     [
       "CHANGELOG.md",
-      1243,
-      1246,
+      1300,
+      1303,
       0,
       22,
       24
     ],
     [
       "CHANGELOG.md",
-      1243,
-      1246,
+      1300,
+      1303,
       1,
       27,
       31
     ],
     [
       "CHANGELOG.md",
-      1243,
-      1246,
+      1300,
+      1303,
       2,
       35,
       39
     ],
     [
       "CHANGELOG.md",
-      1243,
-      1247,
+      1300,
+      1304,
       0,
       22,
       24
     ],
     [
       "CHANGELOG.md",
-      1243,
-      1247,
+      1300,
+      1304,
       1,
       27,
       31
     ],
     [
       "CHANGELOG.md",
-      1243,
-      1247,
+      1300,
+      1304,
       2,
       35,
       39
     ],
     [
       "CHANGELOG.md",
-      1243,
-      1248,
+      1300,
+      1305,
       0,
       21,
       23
     ],
     [
       "CHANGELOG.md",
-      1243,
-      1248,
+      1300,
+      1305,
       1,
       26,
       30
     ],
     [
       "CHANGELOG.md",
-      1243,
-      1248,
+      1300,
+      1305,
       2,
       34,
       38
     ],
     [
       "CHANGELOG.md",
-      1243,
-      1249,
+      1300,
+      1306,
       0,
       23,
       24
     ],
     [
       "CHANGELOG.md",
-      1243,
-      1249,
+      1300,
+      1306,
       1,
       31,
       35
     ],
     [
       "CHANGELOG.md",
-      1243,
-      1249,
+      1300,
+      1306,
       2,
       43,
       47
     ],
     [
       "CHANGELOG.md",
-      1243,
-      1250,
+      1300,
+      1307,
       0,
       21,
       22
     ],
     [
       "CHANGELOG.md",
-      1243,
-      1250,
+      1300,
+      1307,
       1,
       25,
       29
     ],
     [
       "CHANGELOG.md",
-      1243,
-      1250,
+      1300,
+      1307,
       2,
       33,
       37

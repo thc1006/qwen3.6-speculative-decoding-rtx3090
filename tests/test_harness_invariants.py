@@ -6168,3 +6168,70 @@ class AReleaseIsNamedTheWayThisRepositoryNamesReleases(unittest.TestCase):
                 / "RELEASE_PROCEDURE.md").read_text(encoding="utf-8")
         self.assertNotIn('--title "Evidence and verifier', proc,
                          "the procedure types a title that the notes file owns")
+
+
+class OneVersionNamedInFivePlacesMustBeOneVersion(unittest.TestCase):
+    """`v4.2` is in `CITATION.cff`, the publisher, the workflow and the notes.
+
+    It was `raw-evidence-2026-08-31-v4.2` until 2026-09-01, a string long enough
+    that nothing else contained it. `v4.2` is a substring of
+    `RELEASE_NOTES_v4.2.md`, so an assertion that looked for the tag by name
+    could be satisfied by a document that merely mentions the file. Four of them
+    were, the moment the tag was renamed.
+
+    So the version is read from one place, `CITATION.cff`, and every other place
+    is required to agree with it. A version bump that updates one of them fails
+    here rather than leaving four stale.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    def _version(self) -> str:
+        for line in (self.ROOT / "CITATION.cff").read_text(encoding="utf-8").splitlines():
+            if line.startswith("version:"):
+                return line.split(":", 1)[1].strip()
+        self.fail("CITATION.cff has no version")
+
+    def test_the_publisher_targets_that_tag(self):
+        v = self._version()
+        src = (self.ROOT / "tools" / "publish_release_notes.py").read_text(encoding="utf-8")
+        self.assertIn(f'TAG = "{v}"', src,
+                      f"the release publisher does not target {v}")
+
+    def test_the_workflow_defaults_to_that_tag(self):
+        v = self._version()
+        wf = (self.ROOT / ".github" / "workflows" / "evidence.yml").read_text(encoding="utf-8")
+        self.assertIn(f"default: {v}", wf,
+                      f"the workflow's dispatch input does not default to {v}")
+        self.assertIn(f"|| '{v}')", wf,
+                      f"the workflow's fallback tag is not {v}")
+
+    def test_the_notes_are_named_for_and_name_that_tag(self):
+        v = self._version()
+        notes = self.ROOT / f"RELEASE_NOTES_{v}.md"
+        self.assertTrue(notes.exists(),
+                        f"there is no RELEASE_NOTES_{v}.md for the version the "
+                        f"citation file names")
+        text = notes.read_text(encoding="utf-8")
+        self.assertTrue(text.startswith(f"# {v} "),
+                        "the notes' first heading does not lead with the version")
+        self.assertIn(f"Tag `{v}`", text,
+                      "the notes do not name the tag they are the notes for")
+
+    def test_the_procedure_cuts_that_tag(self):
+        v = self._version()
+        proc = (self.ROOT / "v4_audit_2026_08_25"
+                / "RELEASE_PROCEDURE.md").read_text(encoding="utf-8")
+        self.assertIn(f"TAG={v}", proc,
+                      f"the procedure does not cut {v}")
+
+    def test_nothing_still_names_the_old_hybrid_tag(self):
+        """A date and a version in one name, matching neither tag family here."""
+        for rel in ("CITATION.cff", "RELEASE_NOTES_v4.2.md",
+                    ".github/workflows/evidence.yml",
+                    "tools/publish_release_notes.py",
+                    "v4_audit_2026_08_25/RELEASE_PROCEDURE.md"):
+            text = (self.ROOT / rel).read_text(encoding="utf-8")
+            bad = [l for l in text.splitlines()
+                   if "raw-evidence-2026-08-31" in l and not l.lstrip().startswith("#")]
+            self.assertEqual(bad, [], f"{rel} still names the old tag: {bad[:1]}")

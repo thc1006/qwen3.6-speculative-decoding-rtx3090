@@ -1,7 +1,7 @@
 {
-  "head_sha": "a8174183a9bfdcc93d6926009ae11da01923db9f",
-  "checker_sha256": "1983e050f019b7c10be7f5278c669517698762f906af7464195597a3a07f1a1b",
-  "population_sha256": "e7d47c2ca5ae9a78aa1cb5f83bbbe8c121709908402337871dbfaa34da0457fb",
+  "head_sha": "6b0c83076a133f168f7e79920863c3a3f7c90a77",
+  "checker_sha256": "c8c9c3969bd5ecd60da7813564018f37e7a66c89cadd55b1f85e3295f3957988",
+  "population_sha256": "2fd85d819d220a00144da9f0da33b3207155c26e68403b684954353b6addf77c",
   "population_size": 2446,
   "shard": [
     7,
@@ -9,16 +9,7 @@
   ],
   "baseline_allowed": [
     "probe: and every place it attests is a place this tree still has",
-    "probe: and the population digest they recorded is this tree's",
-    "probe: every shard attestation is committed",
-    "probe: every shard's control passed at both ends",
-    "probe: one head, one checker and one population across the eight",
-    "probe: the aggregator accepts the committed set",
-    "probe: the aggregator's line, as ERRATA A19 quotes it",
-    "probe: the aggregator's line, as PR body quotes it",
-    "probe: the aggregator's own line, in its own format",
-    "probe: the population they attest is the one this tree holds",
-    "probe: the shards agree on what was already failing when they started"
+    "probe: and the population digest they recorded is this tree's"
   ],
   "control_before": "pass",
   "control_after": "pass",
@@ -562,80 +553,80 @@
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      1746,
-      1748,
+      1750,
+      1752,
       0,
       31,
       34
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      1746,
-      1748,
+      1750,
+      1752,
       1,
       38,
       43
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      1746,
-      1748,
+      1750,
+      1752,
       2,
       46,
       50
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      1746,
-      1749,
+      1750,
+      1753,
       0,
       34,
       37
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      1746,
-      1749,
+      1750,
+      1753,
       1,
       41,
       46
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      1746,
-      1749,
+      1750,
+      1753,
       2,
       49,
       53
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      1746,
       1750,
+      1754,
       1,
       25,
       30
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      1746,
       1750,
+      1754,
       2,
       33,
       37
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      1746,
-      1751,
+      1750,
+      1755,
       1,
       17,
       22
     ],
     [
       "v4_audit_2026_08_25/README.md",
-      1746,
-      1751,
+      1750,
+      1755,
       2,
       25,
       29

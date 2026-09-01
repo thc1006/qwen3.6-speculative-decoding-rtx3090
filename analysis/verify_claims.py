@@ -5982,9 +5982,14 @@ for _wdoc, _wtxt in (("the audit README", _V4TXT), ("the body", _norm(_PR))):
     chk(f"{_wdoc} dates the workflow's first run to the day it ran",
         ("first run was on 2026-08-28" in _wflat, "2026-08-29, and it passed" in _wflat),
         (True, False))
+    # `v4.2` alone is a substring of `RELEASE_NOTES_v4.2.md`, so a document
+    # that merely mentions the file would satisfy a needle of the version. The
+    # old tag was long enough that nothing else contained it; renaming it to the
+    # version made four assertions here satisfiable by a filename. Each one asks
+    # for the tag in the shape only a reference to it takes.
     chk(f"{_wdoc} says the workflow is failing now, and why",
         ("failed since 2026-08-31" in _wflat,
-         "v4.2" in _wflat), (True, True))
+         "tag it names became `v4.2`" in _wflat), (True, True))
 # The body cites five numbered reviews and the pull request's review tab is
 # empty: on 2026-09-01 the API returned zero reviews, zero review comments and
 # zero comments on the only pull request this repository has. One document
@@ -10152,10 +10157,10 @@ chk("release notes: it says the tag is not signed",
 _V4PROC = (pathlib.Path(__file__).resolve().parents[1] / "v4_audit_2026_08_25"
            / "RELEASE_PROCEDURE.md").read_text(encoding="utf-8")
 chk("release notes: they name the tag they are the notes for",
-    "v4.2" in " ".join(_RN_LINES), True)
+    "Tag `v4.2`" in " ".join(_RN_LINES), True)
 chk("release notes: and names the tag the procedure and the workflow name",
-    ("v4.2" in _V4PROC
-     and "v4.2" in _EVY), True)
+    ("TAG=v4.2" in _V4PROC
+     and "default: v4.2" in _EVY), True)
 chk("release procedure: it no longer tells you to sign a tag with no key",
     ("git tag -a " in _V4PROC and "git tag -s " not in _V4PROC), True)
 

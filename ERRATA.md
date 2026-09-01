@@ -2089,7 +2089,7 @@ perturbed **2 252** numbers across the **119** tables parsed at the time and
 grows as the coverage does, so a clean run is only clean for the tree it ran
 on: parsing the last six tables grew it, and so did run W2's three tables and
 the column it added to A17's. On 2026-09-01, at commit
-`a8174183a9bf`, all **2 446** numbers across all **128** tables were perturbed
+`6b0c83076a13`, all **2 446** numbers across all **128** tables were perturbed
 one at a time and **every one was caught**, in thirty-two shards whose control
 passed before the work and again after it on everything except the ten
 assertions that read the attestations themselves. Those cannot be true before
@@ -2119,12 +2119,20 @@ moment the opening control passes.
 
 Over the eight attestations committed under
 [`coverage_attestations/`](v4_audit_2026_08_25/coverage_attestations) it
-reports: **32 shards, one head `a8174183a9bf`, one checker `1983e050f019`, 2 446 locations covered exactly once, 0 survived** Covered *exactly once* is the part the earlier sentence
+reports: **32 shards, one head `6b0c83076a13`, one checker `c8c9c3969bd5`, 2 446 locations covered exactly once, 0 survived** Covered *exactly once* is the part the earlier sentence
 could not say: no location probed twice, none missed, and every shard on the
 same tree with the same checker. The attestations are in the repository, so
 that sentence is a reading of files rather than a memory of a run, and
 `analysis/verify_claims.py` compares it with the aggregator's own output
 character for character.
+
+The run itself is launched by `bench/run_cell_probe.sh`, which is where the
+conditions that make it mean anything live: it refuses more shards than the
+host has processors, refuses a HEAD that is not the commit the caller means to
+attest, refuses a scratch directory too small for one clone per shard, and
+collects every child's exit code rather than calling `wait` and reading
+nothing. Each of those has cost a run here. The same shape launches the data
+perturbations, in `bench/run_data_mutations.sh`.
 
 The measurement was wrong four times before it measured anything, and all
 four are recorded in the file. The first used the claim checker's exit status,
