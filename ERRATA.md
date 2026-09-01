@@ -2045,9 +2045,9 @@ review found, the merged checkpoint-cost table in two documents, and A16's own
 O2-against-O3 table. Every one was found by accident, which is not a method.
 
 `analysis/table_coverage.py` makes it a measurement. It counts the tables in
-the nine published documents, and `--probe` writes a wrong number into one cell
-of each in turn, runs the claim checker, and asks whether an assertion that was
-passing now fails. Measured on the tree this entry is committed in:
+the eleven published documents, and `--probe` writes a wrong number into one
+cell of each in turn, runs the claim checker, and asks whether an assertion
+that was passing now fails. Measured on the tree this entry is committed in:
 
 Of **142** tables, **7** carry no number at all (paths, links, prose), **7**
 are excluded by name and reason in `EXCLUDED_TABLES` -- an upstream PR tracker,

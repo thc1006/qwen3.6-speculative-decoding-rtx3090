@@ -9489,6 +9489,13 @@ print("\n=== how much of what is published is checked ===")
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import table_coverage as _tcov                                    # noqa: E402
 _cov = _tcov.census()
+# The DOCUMENT count too. A19 and the changelog said "the nine published
+# documents" while the census walked eleven: the two plan documents and the
+# release notes joined `DOCS` and nothing was comparing the sentence to the
+# list. It is the oldest shape in this file, a number in prose that no
+# assertion reads, inside the entry that exists to measure exactly that.
+chk("coverage: the documents the census walks",
+    len(_tcov.DOCS), 11)
 chk("coverage: published tables", _cov["tables"], 142)
 chk("coverage: those carrying measurements", _cov["carrying_values"], 128)
 # EXACT, not "may only rise". `parsed >= 119` and `not_parsed <= 67` were a
@@ -9757,6 +9764,9 @@ chk("CHANGELOG: eighty more are parsed, eight of them census corrections",
 chk("CHANGELOG: and that is the split it publishes",
     "Eighty-four tables are parsed that were not, eight of them census "
     "corrections and seventy-six new readers" in _CL_FLAT, True)
+for _cdoc, _ctxt in (("ERRATA A19", _A19), ("CHANGELOG", _CL_FLAT)):
+    chk(f"{_cdoc} says how many documents are counted, and it is that many",
+        "the eleven published documents" in " ".join(_ctxt.split()), True)
 chk("ERRATA A19: the census it publishes is the census",
     (_cov["tables"], _cov["no_values"], _cov["excluded_tables"],
      _cov["carrying_values"], _cov["parsed"], _cov["not_parsed"]),
