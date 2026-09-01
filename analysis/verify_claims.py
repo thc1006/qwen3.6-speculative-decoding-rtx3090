@@ -9760,6 +9760,15 @@ _ATT_DIR = (pathlib.Path(__file__).resolve().parents[1]
 _ATT = sorted(_ATT_DIR.glob("shard-*-of-*.json"))
 chk("probe: every shard attestation is committed", len(_ATT), 32)
 _ATTJ = [json.loads(_x.read_text(encoding="utf-8")) for _x in _ATT]
+# An empty directory made this an IndexError, and an IndexError is worse than a
+# failure: the checker died here and the thirty-one assertions after it never
+# ran, so a clean checkout of a tree whose attestations were not committed
+# reported a traceback instead of "no attestations, and here is everything else
+# that is still true". The count of assertions the body publishes came from a
+# run that had them and CI's would not have. A missing set fails the assertion
+# that counts them and leaves the rest of the file able to run.
+_ATT0 = _ATTJ[0] if _ATTJ else {"head_sha": "", "checker_sha256": "",
+                                "population_sha256": ""}
 chk("probe: every shard's control passed at both ends",
     sorted({(_a["control_before"], _a["control_after"]) for _a in _ATTJ}),
     [("pass", "pass")])
@@ -9809,6 +9818,14 @@ chk("probe: and every place it attests is a place this tree still has",
     (len(_ATT_LOCS - _NOW_LOCS), len(_NOW_LOCS - _ATT_LOCS)), (0, 0))
 chk("probe: the population they attest is the one this tree holds",
     {_a["population_size"] for _a in _ATTJ}, {_A19_POP})
+# SIZE is not identity. The assertion above compares how many cells the shards
+# attested against how many this tree holds, and the one before it compares
+# where they were; neither compares WHAT they were. A number edited in place,
+# leaving the count and the line alone, would keep every one of those true while
+# the evidence described a value the tree no longer carries. The digest each
+# shard recorded is compared against this tree's own.
+chk("probe: and the population digest they recorded is this tree's",
+    _ATT0["population_sha256"], _tcov._population_sha(_cov["covered"]))
 chk("probe: and their shard indices are each of 0..n-1, once",
     sorted(tuple(_a["shard"]) for _a in _ATTJ),
     [(_i, len(_ATT)) for _i in range(len(_ATT))])
@@ -9831,15 +9848,6 @@ chk("probe: the aggregator accepts the committed set",
 # `len(_ATT)`, not `8`: the shard count is part of the sentence the documents
 # quote, and running twenty-eight instead of eight changed it. A number written
 # here would have had to be found by the assertion failing.
-# An empty directory made this an IndexError, and an IndexError is worse than a
-# failure: the checker died here and the thirty-one assertions after it never
-# ran, so a clean checkout of a tree whose attestations were not committed
-# reported a traceback instead of "no attestations, and here is everything else
-# that is still true". The count of assertions the body publishes came from a
-# run that had them and CI's would not have. A missing set fails the assertion
-# that counts them and leaves the rest of the file able to run.
-_ATT0 = _ATTJ[0] if _ATTJ else {"head_sha": "", "checker_sha256": "",
-                                "population_sha256": ""}
 _AGG_RAW = (f"{len(_ATT)} shards, one head {_ATT0['head_sha'][:12]}, "
             f"one checker {_ATT0['checker_sha256'][:12]}, "
             f"{_A19_POP} locations covered exactly once, 0 survived")

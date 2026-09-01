@@ -101,16 +101,13 @@ MUTATIONS = [
      "tests.test_harness_invariants.AKilledProbeMustNotLeaveItsWorktree"),
     ("the cell probe stops re-checking its control after the work",
      "analysis/table_coverage.py",
-     "        end_fails, end_n, end_rc = _run(wt)\n"
-     '        _CTRL["after"] = bool(end_fails) or end_rc != 0 or end_n != base_n\n'
-     "        if end_fails or end_rc != 0 or end_n != base_n:\n"
-     "            raise SystemExit(\n"
-     '                f"shard {shard[0]}/{shard[1]}: the control no longer passes "',
-     "        end_fails, end_n, end_rc = (set(), base_n, 0)\n"
-     '        _CTRL["after"] = bool(end_fails) or end_rc != 0 or end_n != base_n\n'
-     "        if False:\n"
-     "            raise SystemExit(\n"
-     '                f"shard {shard[0]}/{shard[1]}: the control no longer passes "',
+     "        _after_bad = (end_fails != base_fails or end_n != base_n\n"
+     '                      or (end_rc != 0 and not _CTRL["allowed"]))\n'
+     '        _CTRL["after"] = _after_bad\n'
+     "        if _after_bad:",
+     "        _after_bad = False\n"
+     '        _CTRL["after"] = _after_bad\n'
+     "        if _after_bad:",
      "tests.test_harness_invariants.AProbeMustCheckItsControlAtBothEnds"),
     ("the publisher calls a character count a byte count again",
      "tools/publish_pr_body.py",

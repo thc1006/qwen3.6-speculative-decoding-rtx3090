@@ -2352,10 +2352,22 @@ class AProbeMustCheckItsControlAtBothEnds(unittest.TestCase):
             self.assertEqual(
                 body.count("raise SystemExit"), 2,
                 f"{name} must refuse a failing control at both ends")
-            self.assertIn("base_fails or base_rc != 0", body,
+            # `cell_probe` takes a declared baseline and `prose_probe` does
+            # not, so they spell the same rule differently. What both have to
+            # do is test the failure SET and the exit code before the work, and
+            # the set, the code and the assertion COUNT after it: an abort
+            # prints no failure and exits 1 like an ordinary red run, and the
+            # count is the signal that catches it.
+            before, after = (
+                ("_unexpected or (base_rc != 0", "end_fails != base_fails")
+                if name == "cell_probe" else
+                ("base_fails or base_rc != 0", "end_fails or end_rc != 0"))
+            self.assertIn(before, body,
                           f"{name} does not check the control before the work")
-            self.assertIn("end_fails or end_rc != 0 or end_n != base_n", body,
+            self.assertIn(after, body,
                           f"{name} does not check the control after the work")
+            self.assertIn("end_n != base_n", body,
+                          f"{name} no longer notices an aborted checker")
 
 
 class TheVerificationSuitesMustRefuseAMeasuringHost(unittest.TestCase):
@@ -3378,7 +3390,8 @@ class TheSuiteMustRunOnAStockInterpreter(unittest.TestCase):
                             "length_mode", "paired_blocks", "rr_under_test",
                             "rederive_from_logs", "past_threshold_fit",
                             "verify_claims", "extract_checkpoint_timers",
-                            "table_coverage", "mutate", "data_mutate"}
+                            "table_coverage", "mutate", "data_mutate",
+                            "figstyle"}
         offenders = []
         for f in sorted((self.ROOT / "tests").glob("*.py")):
             tree = _ast.parse(f.read_text(encoding="utf-8"))
@@ -4634,6 +4647,7 @@ class ShardAttestationsMustCoverThePopulationExactlyOnce(unittest.TestCase):
         d = {"head_sha": "h" * 40, "checker_sha256": "c" * 64,
              "population_sha256": "p" * 64, "population_size": 4,
              "shard": [i, n], "control_before": "pass", "control_after": "pass",
+             "baseline_allowed": [],
              "probed": 1, "locations": locs if locs is not None else [["d.md", 1, 2, 3, i, i + 1]],
              "survived": []}
         d.update(over)
@@ -5957,6 +5971,36 @@ class TheBootstrapAllowanceIsExactlyAsWideAsTheDeadlock(unittest.TestCase):
         # and the assertion that COUNTS them still has to be there, or an empty
         # directory would become silently acceptable rather than loudly wrong
         self.assertIn('chk("probe: every shard attestation is committed"', src)
+
+    def test_the_probe_family_is_closed(self):
+        """The allowance is decided by a name, so the names have to be a closed set.
+
+        `--bootstrap` lets any failing assertion whose label begins `probe: `
+        stand at the baseline. That is safe only while those labels mean "reads
+        the attestations". An assertion named into the family by accident, or a
+        new one added inside the block without a thought about the allowance,
+        would be allowed to be red during a run that publishes coverage.
+
+        So the count is pinned and the location is checked: adding one is a
+        deliberate act that fails here first, and a `probe: ` label outside the
+        attestation block fails here too.
+        """
+        src = (ROOT / "analysis" / "verify_claims.py").read_text(encoding="utf-8")
+        lines = src.splitlines()
+        sites = [i for i, ln in enumerate(lines, 1)
+                 if re.search(r'chk\(f?"probe: ', ln)]
+        self.assertEqual(
+            len(sites), 16,
+            "the probe family changed size; the bootstrap allowance covers "
+            "every one of these by name, so decide whether the new one belongs "
+            "in it and then update this number")
+        start = next(i for i, ln in enumerate(lines, 1) if "_ATT_DIR = (pathlib.Path" in ln)
+        end = next(i for i, ln in enumerate(lines, 1)
+                   if 'chk("ERRATA A19: the interval it publishes is Wilson\'s' in ln)
+        outside = [i for i in sites if not start < i < end]
+        self.assertEqual(outside, [],
+                         f"a probe: assertion sits outside the attestation "
+                         f"block, at line(s) {outside}")
 
     def test_the_checker_holds_the_same_rule(self):
         src = (ROOT / "analysis" / "verify_claims.py").read_text(encoding="utf-8")
