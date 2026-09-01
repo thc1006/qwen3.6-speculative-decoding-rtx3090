@@ -335,7 +335,12 @@ jobs:
         run: python analysis/rederive_from_logs.py bench
 
       - name: a release tag must publish the tree it names
-        if: startsWith(github.ref, 'refs/tags/raw-evidence-')
+        # ANY tag, not a name prefix. This read `refs/tags/raw-evidence-` and
+        # the tag was renamed to `v4.2` on 2026-09-01: the step then skipped on
+        # the `release` event it exists for, and the run reported success with
+        # the binding unchecked. A guard keyed on a name is a guard a rename
+        # turns off, and nothing says so -- a skipped step is green.
+        if: startsWith(github.ref, 'refs/tags/')
         # `raw-evidence-2026-08-27` points at this branch's base and its assets
         # kept being added to, so its source revision holds neither the current
         # verifier nor the current manifest. A tag that does not publish the

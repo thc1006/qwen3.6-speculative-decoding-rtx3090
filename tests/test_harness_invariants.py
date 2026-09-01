@@ -6235,3 +6235,43 @@ class OneVersionNamedInFivePlacesMustBeOneVersion(unittest.TestCase):
             bad = [l for l in text.splitlines()
                    if "raw-evidence-2026-08-31" in l and not l.lstrip().startswith("#")]
             self.assertEqual(bad, [], f"{rel} still names the old tag: {bad[:1]}")
+
+
+class TheBindingStepMustRunForTheTagThisRepositoryCuts(unittest.TestCase):
+    """A guard keyed on a tag NAME is a guard a rename turns off, silently.
+
+    `evidence.yml` checks that a release tag publishes the tree it names, and
+    ran that step only when the ref started `refs/tags/raw-evidence-`. The tag
+    became `v4.2` on 2026-09-01 and the step skipped on the `release` event it
+    exists for; the run reported success with the binding unchecked, because a
+    skipped step is green. The condition is any tag now, and this refuses a
+    condition the version in `CITATION.cff` would not satisfy.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    def _version(self) -> str:
+        for line in (self.ROOT / "CITATION.cff").read_text(encoding="utf-8").splitlines():
+            if line.startswith("version:"):
+                return line.split(":", 1)[1].strip()
+        self.fail("CITATION.cff has no version")
+
+    def test_the_condition_is_not_keyed_on_a_tag_name(self):
+        wf = (self.ROOT / ".github" / "workflows" / "evidence.yml").read_text(encoding="utf-8")
+        block = wf.split("a release tag must publish the tree it names", 1)[1]
+        cond = next(l for l in block.splitlines() if l.strip().startswith("if:"))
+        self.assertIn("refs/tags/'", cond,
+                      "the binding step is conditional on a tag NAME, so renaming "
+                      "the tag turns it off and the skipped step reads as green")
+
+    def test_the_tag_this_repository_cuts_would_satisfy_it(self):
+        v = self._version()
+        wf = (self.ROOT / ".github" / "workflows" / "evidence.yml").read_text(encoding="utf-8")
+        block = wf.split("a release tag must publish the tree it names", 1)[1]
+        cond = next(l for l in block.splitlines() if l.strip().startswith("if:"))
+        import re
+        m = re.search(r"startsWith\(github\.ref, '([^']+)'\)", cond)
+        self.assertIsNotNone(m, f"cannot read the condition: {cond.strip()!r}")
+        self.assertTrue(f"refs/tags/{v}".startswith(m.group(1)),
+                        f"refs/tags/{v} does not satisfy {m.group(1)!r}, so the "
+                        f"binding is never checked for the tag this repository cuts")
