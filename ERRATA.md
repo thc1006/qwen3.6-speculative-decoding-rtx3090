@@ -2089,8 +2089,14 @@ on: parsing the last six tables grew it, and so did run W2's three tables and
 the column it added to A17's. On 2026-09-01, at commit
 `8379bd1c25bd`, all **2 446** numbers across all **128** tables were perturbed
 one at a time and **every one was caught**, in thirty-two shards whose control
-passed
-before the work and again after it. The eight shard
+passed before the work and again after it on everything except the ten
+assertions that read the attestations themselves. Those cannot be true before
+the run that produces them, and a shard refuses to start against a red tree, so
+they were declared in advance and nothing else was: each attestation records
+the list it started with in `baseline_allowed`, the same list is required at
+the end rather than merely no additions, and the aggregator refuses a set whose
+shards declared different lists or a list holding anything that is not about
+the probe's own output. The eight shard
 outputs were not attested as a set until 2026-08-30: nothing showed that all
 eight ran, that their locations were disjoint, that the union was the whole
 population, or that they shared a head and a checker -- and `--shard=8/8`
@@ -2164,7 +2170,7 @@ tables happen to reach, which is the only reason the figure moved. The prose
 half of this repository is, to a first approximation, unchecked.
 
 **And that census counts decimals only.** In the same prose, on the same lines,
-sit **2 558** whole numbers, **356** of which are not a string literal in the
+sit **2 560** whole numbers, **356** of which are not a string literal in the
 checker either. They are reported beside the decimals rather than folded into
 them, because the probe below sampled the decimal population and the rate it
 publishes is about that population; widening what a measured rate refers to,

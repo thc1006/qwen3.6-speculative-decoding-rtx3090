@@ -78,7 +78,7 @@ parsing the last six grew the population again, as run W2's tables did after
 that. The complete pass on 2026-08-30 perturbed all 2 373 numbers across the
 124 tables of commit 0334c60dac82 and caught every one, in eight shards whose
 control passed before the work and again after it. The pass on 2026-09-01 perturbs all 2 446 numbers across the 128 tables of
-commit 8379bd1c25bd and catches every one, in 32 shards whose control passed at
+commit `8379bd1c25bd` and catches every one, in 32 shards whose control passed
 both ends and whose attestations are committed. That is
 what the W three-design table had done, in both documents that carry it: only
 the W column was read, so V2's `+12.03` and V3's `+12.17`, two thirds of a
@@ -734,6 +734,24 @@ archive alone:
 | `data/spec_accounting_20260826.json` | 12 | **12** | 0 |
 | `data/checkpoint_timers_20260826.json` | 12 | **12** | 0 |
 | `data/acceptance_counter_comparison.json` | 535 | **526** | 9 |
+
+**The probe would not start against a red tree and its own assertions made the
+tree red.** Ten assertions read `coverage_attestations/`, so a stale set or a
+changed shard count fails them and the run that would fix them refuses. The
+refusal is right about the hazard it was written for, which is a FLAKY failure:
+a perturbation counts as caught when the failure set grows, and a failure that
+comes and goes reads as a catch. A stable one is subtracted out and masks
+nothing. So `--bootstrap` lets failures named for the probe's own evidence
+stand and nothing else, every attestation records which, and both the
+aggregator and the checker refuse a set that declared anything wider. Two
+assertions that read the aggregator's line out of this file's siblings were
+named for the document rather than for what they read and sat outside an
+allowance decided by the name; they are named for what they read now.
+Underneath it was worse: in the worktree each shard clones there are no
+attestations at all, and reading the first of an empty list raised IndexError,
+so the checker died 31 assertions early and the probe took that truncated run
+as its baseline. A number whose only guard is one of the 31 could not have been
+caught, and would have been published as covered.
 
 **The figures met the contrast standard for their shapes and not for their
 type.** WCAG 2.2 asks 3:1 of a graphical object and 4.5:1 of text below 18 pt,

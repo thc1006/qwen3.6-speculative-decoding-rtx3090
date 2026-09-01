@@ -9775,6 +9775,21 @@ chk("probe: the shards agree on what was already failing when they started",
 chk("probe: and nothing outside its own evidence was allowed to be failing",
     sorted({_n for _s in _ATT_ALLOW for _n in _s
             if not _n.startswith("probe: ")}), [])
+# A caveat that lives only in the JSON is a caveat a reader of the documents
+# does not have. If any shard started with something standing, both documents
+# that cite this evidence have to say so; a run that started clean needs no such
+# sentence, so the requirement is conditional on the evidence rather than on
+# somebody remembering to keep the sentence.
+# The assertion always RUNS and only its requirement is conditional: a chk()
+# behind an `if` makes the published assertion count depend on the data, and the
+# count is itself published.
+_ATT_DECLARED = sorted({_n for _s in _ATT_ALLOW for _n in _s})
+for _adoc2, _atxt2 in (("ERRATA A19", _A19), ("PR body", _PR)):
+    chk(f"probe: {_adoc2} discloses that the control had a declared baseline",
+        (not _ATT_DECLARED)
+        or ("baseline_allowed" in _atxt2
+            and "cannot be true before the run" in " ".join(_atxt2.split())),
+        True)
 chk("probe: nothing survived in any of them",
     sum(len(_a.get("survived", [])) for _a in _ATTJ), 0)
 chk("probe: one head, one checker and one population across the eight",
