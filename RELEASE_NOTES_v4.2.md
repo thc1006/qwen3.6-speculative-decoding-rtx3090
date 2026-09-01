@@ -1,6 +1,6 @@
-# Evidence and verifier, v4.2
+# v4.2 · Evidence and verifier at one commit, every published number probed
 
-Tag `raw-evidence-2026-08-31-v4.2`. Named here because a release note that does
+Tag `v4.2`. Named here because a release note that does
 not say which release it belongs to leaves a reader holding the file with no
 way to tell, and this one did not.
 

@@ -5075,7 +5075,12 @@ class TheWorkflowsMustDeclareTheJobsTheySayTheyHave(unittest.TestCase):
             encoding="utf-8")
         for cmd in ("python -m unittest discover -s tests",
                     "python tests/mutate.py",
-                    "python tests/data_mutate.py",
+                    # the perturbations run sharded now, so the job names the
+                    # launcher rather than the module. What the invariant is
+                    # about is that the job still runs the thing it is named
+                    # for, and the launcher requires the shards' caught counts
+                    # to add up to the whole list.
+                    "bench/run_data_mutations.sh",
                     "python analysis/verify_claims.py",
                     "python analysis/check_data_integrity.py",
                     "python analysis/check_links.py",
@@ -6119,3 +6124,47 @@ class AWorkflowMustReadOnlyPathsItWrote(unittest.TestCase):
         self.assertIn("/tmp/manifest_all", written)
         self.assertNotIn("/tmp/manifest", written,
                          "the split slices are what the workflow writes")
+
+
+class AReleaseIsNamedTheWayThisRepositoryNamesReleases(unittest.TestCase):
+    """Six of seven releases lead with their version; the seventh was mine.
+
+    `v1.0 . Initial 19-config bench publication` through `v3.0 . DFlash on RTX
+    3090 ...`: the version first, then what the release is. The v4.2 release was
+    created with a title typed at the shell, `Evidence and verifier, v4.2`, with
+    the version at the end. A title typed at a shell is also a second copy of
+    something the notes file already says in its first heading, which is why the
+    publisher takes it from there now.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    def test_the_notes_heading_leads_with_the_version(self):
+        h1 = next(l for l in (self.ROOT / "RELEASE_NOTES_v4.2.md")
+                  .read_text(encoding="utf-8").splitlines() if l.startswith("# "))
+        self.assertRegex(h1, r"^# v\d+\.\d+\b",
+                         "the release name does not lead with its version, and "
+                         "every other release here does")
+
+    def test_the_heading_carries_no_dash_the_writing_gate_refuses(self):
+        h1 = next(l for l in (self.ROOT / "RELEASE_NOTES_v4.2.md")
+                  .read_text(encoding="utf-8").splitlines() if l.startswith("# "))
+        for ch, name in (("—", "em dash"), ("–", "en dash")):
+            self.assertNotIn(ch, h1, f"the release title carries an {name}")
+
+    def test_the_publisher_takes_the_title_from_the_file(self):
+        src = (self.ROOT / "tools" / "publish_release_notes.py") \
+            .read_text(encoding="utf-8")
+        self.assertIn('if l.startswith("# ")', src,
+                      "the title is not read from the notes file")
+        self.assertIn('"name": title', src,
+                      "the publisher does not set the release name")
+        after = src.split('method="PATCH"', 1)[1]
+        self.assertIn('got.get("name") == title', after,
+                      "the title is written and never read back")
+
+    def test_the_procedure_does_not_type_a_title_of_its_own(self):
+        proc = (self.ROOT / "v4_audit_2026_08_25"
+                / "RELEASE_PROCEDURE.md").read_text(encoding="utf-8")
+        self.assertNotIn('--title "Evidence and verifier', proc,
+                         "the procedure types a title that the notes file owns")

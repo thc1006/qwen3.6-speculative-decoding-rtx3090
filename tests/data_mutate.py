@@ -486,16 +486,45 @@ MUTATIONS = [
 ]
 
 
+def _shard_arg() -> tuple[int, int, bool]:
+    """`--shard=i/n`, or (0, 1) for the whole list.
+
+    Eighty-four perturbations, one checker each, one at a time: fifty-six
+    minutes on a thirty-two processor host using one of them. The work is
+    embarrassingly parallel and the only thing that made it sequential was
+    sharing one mirror. A shard gets a mirror of its own, so nothing it
+    perturbs can reach another shard at all -- which is a stronger separation
+    than the restore loop, not a weaker one -- and it checks its own mirror
+    clean at the end.
+    """
+    for a in sys.argv[1:]:
+        if a.startswith("--shard="):
+            i, n = a.split("=", 1)[1].split("/")
+            i, n = int(i), int(n)
+            if not (n >= 1 and 0 <= i < n):
+                sys.exit(f"--shard={i}/{n} is not a shard of a set of {n}")
+            return i, n, True
+        sys.exit(f"unrecognised option: {a}")
+    return 0, 1, False
+
+
 def main() -> None:
-    # This spawns one checker per perturbation for several minutes. On a host
-    # that is measuring, that burst invalidates the arm-pass it lands on - it
-    # did, on 2026-08-27, and the measurement had to be re-run. Refuse rather
-    # than be polite about it. See bench/host_guard.py for what actually caused
-    # the six cores, which was not this suite being parallel; it is sequential.
+    # This spawns one checker per perturbation. On a host that is measuring,
+    # that burst invalidates the arm-pass it lands on - it did, on 2026-08-27,
+    # and the measurement had to be re-run. Refuse rather than be polite about
+    # it. See bench/host_guard.py for what actually caused the six cores.
     sys.path.insert(0, str(ROOT / "bench"))
     import host_guard
     host_guard.protect("the data perturbation suite")
-    host_guard.serialise("verify")
+    shard, shards, sharded = _shard_arg()
+    if not sharded:
+        # the whole-host lock, for the whole-list run. A fan-out cannot take it
+        # once per shard -- the first would hold it and the rest would exit --
+        # so `bench/run_data_mutations.sh` takes it once around the fan-out and
+        # the shards run under it. The lock still exists and still means "one
+        # verification pipeline on this host at a time"; what changed is who
+        # holds it.
+        host_guard.serialise("verify")
 
     # Every perturbation must say which files it touched, because the restore
     # loop only puts back what is declared. One of them did not, and the mirror
@@ -506,6 +535,11 @@ def main() -> None:
     if undeclared:
         sys.exit("  perturbation(s) with no restore declaration, which would "
                  "leak into every later one: " + "; ".join(undeclared))
+    picked = [m for k, m in enumerate(MUTATIONS) if k % shards == shard]
+    tag = "" if not sharded else f"shard {shard}/{shards}: "
+    if not picked:
+        sys.exit(f"{tag}no perturbation in this slice, so it proves nothing")
+    print(f"  {tag}{len(picked)} of {len(MUTATIONS)} perturbations")
     print(f"  {'perturbation':52s} verdict")
     survived = []
     with tempfile.TemporaryDirectory() as tmp:
@@ -517,9 +551,12 @@ def main() -> None:
         if base.returncode != 0:
             sys.exit("the checker fails on an unperturbed mirror; fix that first\n"
                      + base.stdout[-2000:])
-        for name, fn in MUTATIONS:
-            # restore only what the last mutation touched. Re-copying the whole
-            # mirror each time cost about six minutes of the seven this took.
+        for name, fn in picked:
+            # restore only what the last mutation touched. Re-copying the
+            # whole mirror each time cost about six minutes of the seven the
+            # suite took THEN; the checker has since grown to 3 844 assertions
+            # and the sequential run is fifty-six minutes, which is why it is
+            # sharded. Within a shard the cheap restore still matters.
             touched = getattr(fn, "touches", None)
             if touched:
                 for rel in touched:
@@ -559,7 +596,7 @@ def main() -> None:
     print()
     if survived:
         sys.exit(f"  {len(survived)} perturbation(s) survived: " + "; ".join(survived))
-    print(f"  all {len(MUTATIONS)} perturbations detected")
+    print(f"  {tag}all {len(picked)} perturbations detected")
 
 
 if __name__ == "__main__":

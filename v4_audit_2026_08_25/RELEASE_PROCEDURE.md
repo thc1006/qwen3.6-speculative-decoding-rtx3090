@@ -23,7 +23,7 @@ say where it points and why it is left there.
 A final versioned release, cut at the exact commit that carries the dataset and
 the verifier together, at the end rather than the middle:
 
-    TAG=raw-evidence-2026-08-31-v4.2
+    TAG=v4.2
     HEAD_SHA=$(git rev-parse HEAD)
 
     # 1. the tree must be green at that commit, all four gates
@@ -63,8 +63,13 @@ the verifier together, at the end rather than the middle:
     #    tool. Create the release with a placeholder body and set the real one
     #    with `tools/publish_release_notes.py --write`, which reflows it, reads
     #    it back and renders it through GitHub's own markdown endpoint.
+    #    No `--title` either. The name is the notes file's own first heading,
+    #    set by the same tool that sets the body, so the two cannot disagree.
+    #    Typed at the shell it read "Evidence and verifier, v4.2", the only one
+    #    of this repository's seven releases that does not lead with its
+    #    version, while the other six read "v1.0 ..." through "v3.0 ...".
     gh release create "$TAG" --target "$HEAD_SHA" --verify-tag \
-       --title "Evidence and verifier, v4.2" --notes "see below" \
+       --title "$TAG" --notes "see below" \
        "$ASSETS"/raw_logs.tar.zst "$ASSETS"/raw_logs_20260827.tar.zst \
        "$ASSETS"/raw_logs_20260828.tar.zst "$ASSETS"/raw_logs_20260831.tar.zst \
        "$ASSETS"/telemetry.tar.zst "$ASSETS"/telemetry_20260827.tar.zst \

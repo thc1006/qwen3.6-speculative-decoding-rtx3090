@@ -1295,9 +1295,10 @@ publishing. It was hashed into `EVIDENCE_MANIFEST.sha256` a commit before it
 was packaged, and for that one commit the manifest carried a marker naming
 exactly what was not yet published rather than leaving the gap to be inferred
 from a count. All four tranches are prepared as assets of
-`raw-evidence-2026-08-31-v4.2`, a release this branch has not cut yet: the tag
-is created at merge so that it names the commit carrying the dataset and the
-verifier together. When it exists, one release identity verifies the whole
+`v4.2`, cut at the commit that carries the dataset and the verifier together,
+which is this branch's head and not the merge: a merge does not change the
+tree, and waiting for one would only delay the check that the tag publishes
+what it names. When it exists, one release identity verifies the whole
 manifest. Until then the manifest is verified against the three published
 tranches and the fourth out of band, which is what the evidence workflow does.
 
@@ -1331,13 +1332,16 @@ the claim there survives on the other 526.
 > committed JSON from the raw logs and ran the claim checker over the result.
 > Its **first run was on 2026-08-28**, and it did all of that: it failed on the
 > last step alone, the chart comparison, and passed in full thirty-five minutes
-> later and on five days since. **It has failed since 2026-08-31**, at the first
-> step rather than the last: the tag it names is now
-> `raw-evidence-2026-08-31-v4.2`, the release this branch has not cut, so there
-> is nothing to download and every later step is skipped. It goes green again
-> when that release exists. `workflow_dispatch`,
+> later and on five days since. **It has failed since 2026-08-31**, for two
+> reasons in turn. The tag it names became `v4.2`, which had not been cut, so
+> it stopped at the download and skipped every later step. Once the release
+> existed it got past that and stopped at the manifest check instead, on a
+> `FileNotFoundError` for `/tmp/manifest`: the manifest is split into three
+> slices and that call kept the name of the file that used to hold all of it.
+> Both are fixed here, and the run after this lands is what shows it rather
+> than this sentence. `workflow_dispatch`,
 > `release: published` and the weekly cron all read the workflow from the
-> **default branch**, and this file lives only on `audit-2026-08-25`, so
+> **default branch**, and this file lives only on `audit-2026-08-25` while this branch is open, so
 > `gh api .../workflows/evidence.yml/dispatches` returns 404 and the schedule
 > never fires. What fired was the `push` filter, which reads the workflow from
 > the ref being pushed and which lists the extractors and everything the

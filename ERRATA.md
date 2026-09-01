@@ -2151,7 +2151,7 @@ because passing once does not bound half an hour of running.
 return rows, and assert nothing about the column you changed, which is exactly
 what the W three-design table did, in two documents, until this pass.
 
-**The larger half is not tables.** **1 405** decimal numbers sit in prose,
+**The larger half is not tables.** **1 407** decimal numbers sit in prose,
 outside every table; **729** of them do not appear as a string literal anywhere
 in the checker, counting only literals that are not assertion labels; a label
 is prose about a check and not a check, and leaving them in made the count move
@@ -2172,7 +2172,7 @@ tables happen to reach, which is the only reason the figure moved. The prose
 half of this repository is, to a first approximation, unchecked.
 
 **And that census counts decimals only.** In the same prose, on the same lines,
-sit **2 588** whole numbers, **355** of which are not a string literal in the
+sit **2 591** whole numbers, **357** of which are not a string literal in the
 checker either. They are reported beside the decimals rather than folded into
 them, because the probe below sampled the decimal population and the rate it
 publishes is about that population; widening what a measured rate refers to,

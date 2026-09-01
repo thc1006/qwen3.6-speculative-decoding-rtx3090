@@ -5984,7 +5984,7 @@ for _wdoc, _wtxt in (("the audit README", _V4TXT), ("the body", _norm(_PR))):
         (True, False))
     chk(f"{_wdoc} says the workflow is failing now, and why",
         ("failed since 2026-08-31" in _wflat,
-         "raw-evidence-2026-08-31-v4.2" in _wflat), (True, True))
+         "v4.2" in _wflat), (True, True))
 # The body cites five numbered reviews and the pull request's review tab is
 # empty: on 2026-09-01 the API returned zero reviews, zero review comments and
 # zero comments on the only pull request this repository has. One document
@@ -9803,7 +9803,7 @@ chk("prose probe: records whose value repeats on its own line",
 
 _pcov = _tcov.prose_census()
 chk("coverage: decimal numbers in prose, outside every table",
-    _pcov["prose_numbers"], 1405)
+    _pcov["prose_numbers"], 1407)
 chk("coverage: those that are not a literal in this file",
     _pcov["not_a_literal"], 729)
 # The same prose holds whole numbers, and the census above never counted them.
@@ -10152,10 +10152,10 @@ chk("release notes: it says the tag is not signed",
 _V4PROC = (pathlib.Path(__file__).resolve().parents[1] / "v4_audit_2026_08_25"
            / "RELEASE_PROCEDURE.md").read_text(encoding="utf-8")
 chk("release notes: they name the tag they are the notes for",
-    "raw-evidence-2026-08-31-v4.2" in " ".join(_RN_LINES), True)
+    "v4.2" in " ".join(_RN_LINES), True)
 chk("release notes: and names the tag the procedure and the workflow name",
-    ("raw-evidence-2026-08-31-v4.2" in _V4PROC
-     and "raw-evidence-2026-08-31-v4.2" in _EVY), True)
+    ("v4.2" in _V4PROC
+     and "v4.2" in _EVY), True)
 chk("release procedure: it no longer tells you to sign a tag with no key",
     ("git tag -a " in _V4PROC and "git tag -s " not in _V4PROC), True)
 

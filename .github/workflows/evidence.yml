@@ -16,7 +16,7 @@ on:
     inputs:
       release_tag:
         description: the release holding raw_logs.tar.zst
-        default: raw-evidence-2026-08-31-v4.2
+        default: v4.2
         required: false
   release:
     types: [published]
@@ -111,7 +111,7 @@ jobs:
             ${{
               github.event_name == 'release'
                 && github.event.release.tag_name
-                || (inputs.release_tag || 'raw-evidence-2026-08-31-v4.2')
+                || (inputs.release_tag || 'v4.2')
             }}
         run: |
           set -euo pipefail

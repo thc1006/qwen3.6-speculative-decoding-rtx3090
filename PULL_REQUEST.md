@@ -518,9 +518,13 @@ changed. Nothing in it was rejected.
   ran the claim checker over the result. Its first run was on 2026-08-28 and it
   did all of that, failing on the chart comparison alone; it passed in full
   thirty-five minutes later and on five days since. It has failed since
-  2026-08-31, at the first step instead: the tag it names is now
-  `raw-evidence-2026-08-31-v4.2`, a release this branch has not cut, so there is
-  nothing to download. It goes green again when that release exists.
+  2026-08-31, for two reasons in turn. The tag it names became `v4.2`, which
+  had not been cut, so it stopped at the download. Once the release existed it
+  got past that and stopped two steps later, at the manifest check, on a
+  `FileNotFoundError` for `/tmp/manifest`: the manifest is split into three
+  slices and that call kept the name of the file that used to hold all of it.
+  Both are fixed here, and the run after this lands is what shows it rather
+  than this sentence.
   `workflow_dispatch`, `release: published` and the weekly cron
   read the workflow from the default branch and the file exists only on this
   one, so dispatching it returns 404 and the schedule never fires. What fired
@@ -579,7 +583,7 @@ review:
 python analysis/rederive_from_logs.py bench   # raw logs -> four audit files
 python analysis/verify_claims.py          # 3844 assertions, re-derived
 python analysis/check_data_integrity.py   # structure of all 77 run directories
-python -m unittest discover tests         # 344 regressions for defects shipped here
+python -m unittest discover tests         # 348 regressions for defects shipped here
 python tests/mutate.py                    # break each fix, require its test to fail
 python tests/data_mutate.py               # perturb a measurement or a published
                                           #   figure, require the checker to fail

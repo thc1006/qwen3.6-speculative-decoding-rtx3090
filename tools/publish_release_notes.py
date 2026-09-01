@@ -41,7 +41,7 @@ from publish_pr_body import reflow, strip_header, _token   # noqa: E402
 
 SOURCE = ROOT / "RELEASE_NOTES_v4.2.md"
 REPO = "thc1006/qwen3.6-speculative-decoding-rtx3090"
-TAG = "raw-evidence-2026-08-31-v4.2"
+TAG = "v4.2"
 
 
 def _api(url: str, method: str = "GET", payload: dict | None = None) -> dict:
@@ -82,15 +82,29 @@ def main() -> None:
                    help="PATCH the release body, then read it back and compare")
     args = ap.parse_args()
 
-    want = reflow(strip_header(SOURCE.read_text(encoding="utf-8")))
+    body = strip_header(SOURCE.read_text(encoding="utf-8"))
+    want = reflow(body)
+    # The TITLE comes from the file's own first heading, so the release name and
+    # the notes cannot disagree. It was passed on the `gh release create` command
+    # line and read `Evidence and verifier, v4.2`, the only one of this
+    # repository's seven releases that does not lead with its version: the other
+    # six are `v1.0 - ...` through `v3.0 - ...`. A title typed at a shell is a
+    # second copy of something the file already says.
+    title = next((l.lstrip("# ").strip() for l in body.splitlines()
+                  if l.startswith("# ")), None)
+    if not title:
+        raise SystemExit(f"{SOURCE.name} has no level-one heading to name the release")
     rel = _api(f"https://api.github.com/repos/{REPO}/releases/tags/{TAG}")
     live = (rel.get("body") or "").replace("\r\n", "\n")
 
     if not args.write:
         n = _breaks(live)
         same = live.strip() == want.strip()
+        named = rel.get("name") == title
         print(f"  live body: {len(live.splitlines())} lines, {n} <br> when rendered")
         print(f"  matches the reflowed source: {same}")
+        print(f"  title is the file's own heading: {named}  ({rel.get('name')!r})")
+        same = same and named
         if not same:
             for i, (a, b) in enumerate(zip(live, want)):
                 if a != b:
@@ -101,15 +115,17 @@ def main() -> None:
         raise SystemExit(0 if same and n == 0 else 1)
 
     _api(f"https://api.github.com/repos/{REPO}/releases/{rel['id']}",
-         method="PATCH", payload={"body": want})
-    back = (_api(f"https://api.github.com/repos/{REPO}/releases/tags/{TAG}")
-            .get("body") or "").replace("\r\n", "\n")
+         method="PATCH", payload={"body": want, "name": title})
+    got = _api(f"https://api.github.com/repos/{REPO}/releases/tags/{TAG}")
+    back = (got.get("body") or "").replace("\r\n", "\n")
     n = _breaks(back)
     ok = back.strip() == want.strip()
-    print(f"  published: {len(want.splitlines())} lines")
+    named = got.get("name") == title
+    print(f"  published: {len(want.splitlines())} lines, titled {title!r}")
     print(f"  read back identical: {ok}")
+    print(f"  title read back: {named}  ({got.get('name')!r})")
     print(f"  rendered line breaks: {n}")
-    raise SystemExit(0 if ok and n == 0 else 1)
+    raise SystemExit(0 if ok and named and n == 0 else 1)
 
 
 if __name__ == "__main__":

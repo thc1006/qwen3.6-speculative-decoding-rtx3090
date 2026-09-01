@@ -321,7 +321,7 @@ fetched the archive, verified it against the manifest, unpacked it, re-derived
 the committed JSON from the raw logs and ran the claim checker over the result,
 and failed on the chart comparison alone. It passed in full thirty-five minutes
 later and on five days since. It has failed since 2026-08-31 and for a
-different reason: the tag it names became `raw-evidence-2026-08-31-v4.2`, which
+different reason: the tag it names became `v4.2`, which
 this branch has not cut, so it stops at the download and skips the rest. The
 other three triggers still become live only on merge.
 
@@ -774,6 +774,63 @@ reserved a fixed band for a caption its legends already reached into, leaving
 an empty third down the middle of the canvas. Both are fixed, and
 `tests/test_harness_invariants.py` holds the palette, the per-cell ink and the
 rule that no label is drawn in an unlightened series colour.
+
+**The release body was published as an eighty-column file.** GitHub Flavored
+Markdown preserves newlines in a release body exactly as it does in a pull
+request body, and `gh release create --notes-file` hands the file over
+verbatim: the published body rendered with 29 `<br>`. This repository has a
+tool and a commit about the 412 that produced in the pull request body, and the
+release was the one published surface with no tool.
+`tools/publish_release_notes.py` reflows on the way out, takes the release name
+from the notes file's own first heading so the two cannot disagree, and proves
+both landed by reading them back and asking GitHub's renderer how many breaks
+are in the result.
+
+**The tag is `v4.2`.** It was `raw-evidence-2026-08-31-v4.2` for ninety
+minutes, which put a date and a version in one name and matched neither of the
+two families this repository already had: `v1.0` through `v3.0` for versions,
+`raw-evidence-2026-08-27` for an evidence drop. The cost was not only tidiness.
+`CITATION.cff` names the version `v4.2`, and the test that asks whether that
+version is a tag compares the two strings; against a tag merely CONTAINING it,
+the comparison failed and the test took its "no tag yet" branch. It passed
+while the release existed, for the wrong reason, and the citation file went on
+saying the version was not a tag, that the newest tag was v3.0, and that the
+tag is cut at merge. Cutting the release had made four of its sentences false
+and nothing noticed.
+
+**The evidence workflow read a path that had not existed for weeks.** Two of
+its three runs after the release started AFTER the assets were published,
+fetched them, and died at `FileNotFoundError: /tmp/manifest`. The manifest is
+split into `/tmp/manifest_all`, `_oob` and `_bench` so one tranche can be
+verified in a root of its own, and the `preflight_tar.py` call kept the name of
+the file that used to hold all of it. Nothing local could have caught it:
+`ci_faithful.sh` does not reproduce `evidence.yml`, and says so, because that
+job needs a published release, so the first run that could reach the step was
+the one after the tag was cut. The rule is a test now: every `/tmp` path a
+workflow reads has to be one the same workflow writes.
+
+**`unit and mutation` was four minutes from its own timeout.** It ran 21
+minutes on 2026-08-28 and 50 to 56 against a 60-minute limit on 2026-08-31,
+because the data perturbations run the claim checker once each and the checker
+has gained nine hundred assertions. The perturbations were sequential only
+because they shared one mirror. They are sharded now, one per processor, each
+shard with a mirror of its own so nothing it perturbs can reach another shard
+at all, each checking its own mirror clean at the end.
+`bench/run_data_mutations.sh` refuses more shards than the host has processors
+or than the list has entries, refuses a scratch directory too small for two
+mirrors per shard, collects every exit code, and requires the shards' caught
+counts to add up to the whole list: a shard that silently did nothing fails the
+total rather than passing quietly.
+
+**And four defects in that launcher, found by attacking it rather than reading
+it.** It counted the perturbation list before changing to the repository, so it
+failed from any other directory. With one shard the shard took the same
+whole-host lock the launcher was already holding and always exited. `grep`
+matching nothing under `pipefail` killed the script at the line that computes
+the diagnosis, so the one case those lines exist for, every shard having
+failed, produced no diagnosis at all. And it had no scratch check while the
+probe's launcher has one and records losing a set of attestations to a full
+disk: eight shards want 3.1 GB and this host has 3.5 GB free.
 
 **Four cross-references pointed at the wrong section, and two of them were
 published that way.** A reference that names a direction rather than a target

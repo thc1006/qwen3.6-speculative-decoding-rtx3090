@@ -15,8 +15,10 @@ permissions:
 
 # One run per ref and per event. Every push to a branch with an open pull
 # request starts two of these, and a second push starts two more; the older
-# pair then spends twenty minutes reaching a verdict about a commit nobody is
-# looking at any more.
+# pair then spends the better part of an hour reaching a verdict about a commit
+# nobody is looking at any more. It was twenty minutes when this was written
+# and fifty-six on 2026-08-31, which is the same growth the mutation job's own
+# limit is about.
 concurrency:
   group: audit-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
@@ -96,10 +98,20 @@ jobs:
   audit-unit:
     name: unit and mutation
     runs-on: ubuntu-latest
-    # 21 min on 2026-08-28: 0.9 unit, 4.2 code mutations, 15.9 data
-    # perturbations. The last of those runs the claim checker 84 times and the
-    # checker has since gained nine hundred assertions, so the headroom is
-    # deliberate. Without a limit at all a hang costs the default six hours.
+    # 21 min on 2026-08-28, and 50 to 56 min on 2026-08-31 against this
+    # 60-minute limit: 0.9 unit, 4.2 code mutations, and the rest is the
+    # data perturbations, which run the claim checker once per perturbation
+    # and the checker has gained nine hundred assertions since that first
+    # figure. The headroom was four minutes and every assertion added spends
+    # more of it.
+    #
+    # The perturbations are sharded now. They were sequential only because
+    # they shared one mirror, and a shard with a mirror of its own cannot
+    # reach another shard at all. `bench/run_data_mutations.sh` refuses more
+    # shards than the runner has processors, requires every shard to report,
+    # and requires the caught counts to add up to the whole list: a shard
+    # that silently did nothing fails the total rather than passing quietly.
+    # Without a limit at all a hang costs the default six hours.
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -116,7 +128,10 @@ jobs:
       - name: mutation check - the suite must fail on the broken versions
         run: python tests/mutate.py
       - name: data mutation - perturbing a measurement must fail the claim checker
-        run: python tests/data_mutate.py
+        # one shard per processor, which is the most the launcher accepts.
+        # Each shard mirrors the tracked tree, 162 MB, so four hold 1.3 GB
+        # of a runner that has an order of magnitude more.
+        run: bench/run_data_mutations.sh "$(nproc)"
 
   audit-data-integrity:
     name: data integrity
