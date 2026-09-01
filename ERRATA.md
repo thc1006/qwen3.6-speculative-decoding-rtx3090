@@ -20,6 +20,65 @@ experiment's stated treatment · **E** is a theory error · **F** is metadata.
 
 ---
 
+<!-- A contents block, because these documents are linked into by section name from each other and a reader arriving cold had no way to orient but to scroll. Generated from the headings; `analysis/check_links.py` validates every anchor here, so a heading renamed without this list fails the static job rather than rotting quietly. -->
+
+## Contents
+
+- [A — findings that change the headline conclusion](#a--findings-that-change-the-headline-conclusion)
+  - [A1. "100 % draft acceptance" is a counter artefact, not a measurement](#a1-100--draft-acceptance-is-a-counter-artefact-not-a-measurement)
+  - [A2. The draft model was not vocabulary-compatible; the run used the token-translation fallback](#a2-the-draft-model-was-not-vocabulary-compatible-the-run-used-the-token-translation-fallback)
+  - [A3. The tested build had a known-broken speculative path for this model class, and the fix was never merged](#a3-the-tested-build-had-a-known-broken-speculative-path-for-this-model-class-and-the-fix-was-never-merged)
+  - [A4. A measured cost decomposition was in the repository the whole time and was never used](#a4-a-measured-cost-decomposition-was-in-the-repository-the-whole-time-and-was-never-used)
+  - [A5. Three quarters of v1's requests returned no answer at all — only truncated thinking](#a5-three-quarters-of-v1s-requests-returned-no-answer-at-all--only-truncated-thinking)
+  - [A7. With acceptance measured properly, there is no anomaly left to explain](#a7-with-acceptance-measured-properly-there-is-no-anomaly-left-to-explain)
+  - [A8. The audit's own matrix has an uncontrolled difference from the archive: p_min](#a8-the-audits-own-matrix-has-an-uncontrolled-difference-from-the-archive-p_min)
+  - [A10. The single-regressor law is falsified out of sample, and p_min is the lever that matters](#a10-the-single-regressor-law-is-falsified-out-of-sample-and-p_min-is-the-lever-that-matters)
+  - [A9. Upstream already documents two of the mechanisms this audit "found"](#a9-upstream-already-documents-two-of-the-mechanisms-this-audit-found)
+  - [A6. llama-server plus a draft model aborts on this model at bcb5eeb64](#a6-llama-server-plus-a-draft-model-aborts-on-this-model-at-bcb5eeb64)
+  - [A11. Speculative decoding is not output-preserving on this build, and the engine is deterministic enough to prove it](#a11-speculative-decoding-is-not-output-preserving-on-this-build-and-the-engine-is-deterministic-enough-to-prove-it)
+  - [A12. What the checkpoint path costs, measured with timers in the source](#a12-what-the-checkpoint-path-costs-measured-with-timers-in-the-source)
+  - [A13. There are two acceptance counters, they disagree, and the disagreement is exactly the checkpoint path](#a13-there-are-two-acceptance-counters-they-disagree-and-the-disagreement-is-exactly-the-checkpoint-path)
+  - [A14. Within-run repeats are not an error bar](#a14-within-run-repeats-are-not-an-error-bar)
+  - [A15. The recorded server_sha256 was a launcher, not the code that ran](#a15-the-recorded-server_sha256-was-a-launcher-not-the-code-that-ran)
+  - [A16. Two runs, identical in every recorded respect and byte-identical in output, differ by 3.4 % on one arm](#a16-two-runs-identical-in-every-recorded-respect-and-byte-identical-in-output-differ-by-34--on-one-arm)
+  - [A17. The thinking-off comparisons are not comparisons of the same amount of work](#a17-the-thinking-off-comparisons-are-not-comparisons-of-the-same-amount-of-work)
+  - [A18. Run C's spread claim excluded five arms without saying so](#a18-run-cs-spread-claim-excluded-five-arms-without-saying-so)
+  - [A19. How much of what this repository publishes would notice if it were wrong](#a19-how-much-of-what-this-repository-publishes-would-notice-if-it-were-wrong)
+- [B — statistics that were reported incorrectly](#b--statistics-that-were-reported-incorrectly)
+  - [B1. mean tok/s was the request-mean only; pooled throughput is materially worse](#b1-mean-toks-was-the-request-mean-only-pooled-throughput-is-materially-worse)
+  - [B2. The ± column was across-prompt spread, not repeated-run uncertainty](#b2-the--column-was-across-prompt-spread-not-repeated-run-uncertainty)
+  - [B3. "all completions reach the cap" is false for the 1000-token variants](#b3-all-completions-reach-the-cap-is-false-for-the-1000-token-variants)
+  - [B4. "every configuration hits a bimodal tail reaching as low as 59–67 tok/s" is false](#b4-every-configuration-hits-a-bimodal-tail-reaching-as-low-as-5967-toks-is-false)
+  - [B5. "the regression is entirely bimodal by prompt class" is false for the ngram-mod family](#b5-the-regression-is-entirely-bimodal-by-prompt-class-is-false-for-the-ngram-mod-family)
+  - [B6. "19-config speculative-decoding matrix" overstates the denominator](#b6-19-config-speculative-decoding-matrix-overstates-the-denominator)
+  - [B7. The fp16-KV row is a one-sided control — now closed by measurement](#b7-the-fp16-kv-row-is-a-one-sided-control--now-closed-by-measurement)
+  - [B8. Every request-mean here counts one token fewer than it timed](#b8-every-request-mean-here-counts-one-token-fewer-than-it-timed)
+  - [B9. The checkpoint restore share was published as 30.5 %, and it is 30.4 %](#b9-the-checkpoint-restore-share-was-published-as-305--and-it-is-304-)
+- [C — artefact and scope naming](#c--artefact-and-scope-naming)
+  - [C1. The target quantisation is UD-Q4_K_XL, not Q4_K_M](#c1-the-target-quantisation-is-ud-q4_k_xl-not-q4_k_m)
+  - [C2. The zh_cn prompt is Traditional Chinese](#c2-the-zh_cn-prompt-is-traditional-chinese)
+  - [C3. multi_turn_1 / multi_turn_2 are not multi-turn](#c3-multi_turn_1--multi_turn_2-are-not-multi-turn)
+  - [C4b. "Stock clocks" was measured once, before the load](#c4b-stock-clocks-was-measured-once-before-the-load)
+  - [C4. GPU 0 was running another workload](#c4-gpu-0-was-running-another-workload)
+- [D — follow-up experiments whose stated treatment was not applied](#d--follow-up-experiments-whose-stated-treatment-was-not-applied)
+  - [D1 / D2. -no-cnv was rejected and /no_think did not disable thinking](#d1--d2--no-cnv-was-rejected-and-no_think-did-not-disable-thinking)
+  - [D3. Exp 2 cannot be audited, so it cannot refute anything](#d3-exp-2-cannot-be-audited-so-it-cannot-refute-anything)
+  - [D3b. Workload shape does matter — and Exp 2 pointed the wrong way](#d3b-workload-shape-does-matter--and-exp-2-pointed-the-wrong-way)
+  - [D4. v3 DFlash compares two different binaries](#d4-v3-dflash-compares-two-different-binaries)
+  - [D5. The committed v2 script does not produce the committed v2 directories](#d5-the-committed-v2-script-does-not-produce-the-committed-v2-directories)
+  - [D6. --spec-type is not "missing from master"; it is server-only](#d6---spec-type-is-not-missing-from-master-it-is-server-only)
+- [E — theory errors](#e--theory-errors)
+  - [E1. The coverage threshold is 95, and it is a heuristic](#e1-the-coverage-threshold-is-95-and-it-is-a-heuristic)
+  - [E2. Qwen3.5-122B-A10B has the same routing, so the same threshold](#e2-qwen35-122b-a10b-has-the-same-routing-so-the-same-threshold)
+  - [E3. PR #20075 is not "the same ngram-mod machinery", and is not srogmann's](#e3-pr-20075-is-not-the-same-ngram-mod-machinery-and-is-not-srogmanns)
+- [F — metadata](#f--metadata)
+  - [F1. Upstream statuses, checked 2026-08-25 via the GitHub API](#f1-upstream-statuses-checked-2026-08-25-via-the-github-api)
+  - [F2. "Cross-validated on current master bcb5eeb64"](#f2-cross-validated-on-current-master-bcb5eeb64)
+  - [F3. "first public benchmark / first public datapoint"](#f3-first-public-benchmark--first-public-datapoint)
+  - [F4. Licence conflict](#f4-licence-conflict)
+  - [F5. The reproduce section could not reproduce the result](#f5-the-reproduce-section-could-not-reproduce-the-result)
+- [What the audit did not change](#what-the-audit-did-not-change)
+
 ## A — findings that change the headline conclusion
 
 ### A1. "100 % draft acceptance" is a counter artefact, not a measurement
@@ -214,7 +273,7 @@ from id 5 to 248320 runs only once the special-token check passes.
 on 2026-08-25 (`llama-server` @ `bcb5eeb64`, `--draft-max 8 --draft-min 4`,
 greedy, the ten v1 prompts, ABBA-ordered, three arms interleaved):
 
-> **`request-mean` is llama.cpp's own `predicted_per_second`, averaged.** That field divides `n − 1` generated tokens by the time for `n`, in 18 300 of 18 344 committed request rows, so every request-mean here is low by `(n − 1) / n`: 0.33 % at 300 tokens and more at shorter lengths. It is uniform across arms on a run where every request hits the same cap, and it is NOT uniform where the arms stop at different lengths, so it must not carry a cross-arm comparison in the thinking-off runs. Every headline figure and every published delta is a **pooled** rate computed from `predicted_n` and `predicted_ms` directly and contains none of this. See [B8](#b8-every-request-mean-here-counts-one-token-fewer-than-it-timed).
+> **`request-mean` is llama.cpp's own `predicted_per_second`, averaged.** That field divides `n − 1` generated tokens by the time for `n`, in 30 300 of 30 344 committed request rows, so every request-mean here is low by `(n − 1) / n`: 0.33 % at 300 tokens and more at shorter lengths. It is uniform across arms on a run where every request hits the same cap, and it is NOT uniform where the arms stop at different lengths, so it must not carry a cross-arm comparison in the thinking-off runs. Every headline figure and every published delta is a **pooled** rate computed from `predicted_n` and `predicted_ms` directly and contains none of this. See [B8](#b8-every-request-mean-here-counts-one-token-fewer-than-it-timed).
 
 | binary | arm | request-mean | drafted / accepted |
 |---|---|---:|---|
@@ -1756,7 +1815,10 @@ repository has said the wrong thing about `spec-dflash-n2` twice already.
 
 **Run W is the design that can, and the predecessor is not the answer.** Five
 sessions of a 10 × 10 Williams square on 2026-08-28, row order shuffled from a
-per-session seed, 500 of 500 arm-runs. It is run V3 verbatim except for
+per-session seed, 500 of 500 arm-runs. It uses V3's treatment definitions,
+prompts, models and server build, and is not V3 verbatim: the two manifests
+record different runner hashes and the archived diff changes which arm-runs the
+runner accepts. What differs in the exported treatment variables is
 `BENCH_ORDER`; the exported treatment variables differ in three places and all
 three are the schedule. Every arm visits every position exactly once **and** is
 preceded by every other arm exactly once within a repeat; verified from the
@@ -2025,8 +2087,8 @@ perturbed **2 252** numbers across the **119** tables parsed at the time and
 grows as the coverage does, so a clean run is only clean for the tree it ran
 on: parsing the last six tables grew it, and so did run W2's three tables and
 the column it added to A17's. On 2026-09-01, at commit
-`7751a4e12f4c`, all **2 446** numbers across all **128** tables were perturbed
-one at a time and **every one was caught**, in twenty-eight shards whose control
+`8379bd1c25bd`, all **2 446** numbers across all **128** tables were perturbed
+one at a time and **every one was caught**, in thirty-two shards whose control
 passed
 before the work and again after it. The eight shard
 outputs were not attested as a set until 2026-08-30: nothing showed that all
@@ -2049,7 +2111,7 @@ moment the opening control passes.
 
 Over the eight attestations committed under
 [`coverage_attestations/`](v4_audit_2026_08_25/coverage_attestations) it
-reports: **28 shards, one head `7751a4e12f4c`, one checker `49e094e2a933`, 2 446 locations covered exactly once, 0 survived** Covered *exactly once* is the part the earlier sentence
+reports: **32 shards, one head `8379bd1c25bd`, one checker `d7e2dab16986`, 2 446 locations covered exactly once, 0 survived** Covered *exactly once* is the part the earlier sentence
 could not say: no location probed twice, none missed, and every shard on the
 same tree with the same checker. The attestations are in the repository, so
 that sentence is a reading of files rather than a memory of a run, and
@@ -2081,8 +2143,8 @@ because passing once does not bound half an hour of running.
 return rows, and assert nothing about the column you changed, which is exactly
 what the W three-design table did, in two documents, until this pass.
 
-**The larger half is not tables.** **1 398** decimal numbers sit in prose,
-outside every table; **724** of them do not appear as a string literal anywhere
+**The larger half is not tables.** **1 403** decimal numbers sit in prose,
+outside every table; **729** of them do not appear as a string literal anywhere
 in the checker, counting only literals that are not assertion labels; a label
 is prose about a check and not a check, and leaving them in made the count move
 whenever an assertion was reworded. Both figures were 57 and 25 smaller until
@@ -2092,14 +2154,27 @@ continues the item, so the body of every numbered correction below sat outside
 the population this section measures. That is the longest run of prose here,
 and it holds sentences like "-2.4 is inside [-2.61, +0.22]" and the corrected
 within-run spread. A coverage measurement that leaves prose out of its
-denominator reports better coverage than it has. That criterion is an upper bound on the gap
-rather than the gap, so a fixed sample of **40** of the 640 it then held was perturbed the
-same way, seed `20260828`: **36 of 40 accepted a wrong number**, and the 95 %
-Wilson interval puts the unguarded fraction of that population at **76 % or
-above**. The run before this one caught none of its forty; the four it catches
-now are numbers the readers written for the tables happen to reach, which is
-the only reason the figure moved. The prose half of this repository is, to a
-first approximation, unchecked.
+denominator reports better coverage than it has. That criterion is an upper
+bound on the gap rather than the gap, so a fixed sample of **40** of the 640 it
+then held was perturbed the same way, seed `20260828`: **36 of 40 accepted a
+wrong number**, and the 95 % Wilson interval puts the unguarded fraction of
+that population at **76 % or above**. The run before this one caught none of
+its forty; the four it catches now are numbers the readers written for the
+tables happen to reach, which is the only reason the figure moved. The prose
+half of this repository is, to a first approximation, unchecked.
+
+**And that census counts decimals only.** In the same prose, on the same lines,
+sit **2 558** whole numbers, **356** of which are not a string literal in the
+checker either. They are reported beside the decimals rather than folded into
+them, because the probe below sampled the decimal population and the rate it
+publishes is about that population; widening what a measured rate refers to,
+without measuring again, is the move this whole section exists to catch. But
+the omission is worth stating plainly, because counts are integers: every one
+of the five figures that went stale on 2026-09-01 was a whole number, and none
+of them could have been in the population this section measures. They were the
+published assertion total, the regression total, the spelled count of the
+corrections below, the review count in the pull request body, and the table
+count in its header.
 
 **What this pass changed.** Eighty-four tables count as parsed that did
 not: eight are the census correction above and seventy-six are new readers. They
@@ -2313,8 +2388,10 @@ number and this file exists because of unchecked numbers.
     it, and only one copy was wired to an assertion.** Twelve numbers in the
     pull request body could be changed with the claims job, 298 regressions, 88
     code mutations and 84 data perturbations all passing; the per-number probe
-    is what found them. This is item 19 in the same table, and the cause was
-    the same shape one level up: the cross-document comparison was over
+    is what found them. The cause is the shape this list keeps
+    finding one level up, a check that was right when it was written and was
+    not moved when the thing it checks grew: the cross-document comparison was
+    over
     `_row[:3]`, a PREFIX, so it stopped covering the table the moment the table
     grew. It compares whole rows now, and the column is checked against W2's
     own arm-runs.
@@ -2328,24 +2405,28 @@ number and this file exists because of unchecked numbers.
     newline inside a paragraph as a line break.** `PULL_REQUEST.md` is wrapped
     at eighty columns so its diff reads line by line; issue and pull request
     bodies are not rendered the way a README is. Measured through GitHub's own
-    markdown endpoint on 2026-09-01: **412** breaks, which is how the body had
-    looked to every reader of it since 2026-08-27. The body is reflowed on the
-    way out now. The first reflow dropped leading indentation and a table row
-    inside a list item came out flush left, ending the list and opening a
-    second table, 48 rows becoming 54; and its test for an ordered list item
-    was a leading digit with a `.` in the first four characters, so a wrapped
-    line beginning `82.079 + 19.266` or `3.3 pp` or `1.96;` was read as opening
-    a new item and the sentence was cut there. The break was the mild half of
-    that one. Both were found by rendering the result and counting, not by
-    reading the code. The body now renders **0** breaks.
+    markdown endpoint on 2026-09-01, the body as it then stood rendered **412**
+    of them. The count is that day's, not a constant: the body has been wrapped
+    this way since it was first published on 2026-08-27 and has been edited many
+    times since, so what every reader before this saw was a body broken like
+    that, in a number of places this measures only once. The body is reflowed on
+    the way out now. The first reflow dropped leading indentation and a table
+    row inside a list item came out flush left, ending the list and opening a
+    second table, 48 rows becoming 54; and its test for an ordered list item was
+    a leading digit with a `.` in the first four characters, so a wrapped line
+    beginning `82.079 + 19.266` or `3.3 pp` or `1.96;` was read as opening a new
+    item and the sentence was cut there. The break was the mild half of that
+    one. Both were found by rendering the result and counting, not by reading
+    the code. The body now renders **0** breaks.
 54. **The published assertion count was short by twelve, and the assertion that
     checks it passed.** `_pr_total` is `len(RAN) + 1`, the `+ 1` being this
     assertion itself, which is not in `RAN` when it reads the count. It was
     taken 176 lines before the end of `analysis/verify_claims.py` and twelve
     assertions were later appended past that point, so the checker ran 3804 and
     the body said 3792 and the comparison agreed with itself. A figure derived
-    once at a place the code then grows past is the same shape as the five
-    ratchets in item 50. The count is taken last now, and a regression refuses
+    once, at a place the code then grows past, is the same shape as a guard
+    written as a floor and left behind by the tree it guards, which the commit
+    before this one removed from five places. The count is taken last now, and a regression refuses
     any `chk` after it.
 55. **119 MB of derivable duplicates were committed, and the copy belonging to
     the run the headline table comes from was stale.** Each run directory

@@ -250,6 +250,75 @@ def _checker_literals(src: str | None = None) -> str:
                     and id(n) not in labels)
 
 
+def _prose_lines():
+    """Every line of every censused document that is prose, with its number.
+
+    Yields `(rel, index, raw, line)`. Shared by the decimal census and the
+    integer count so the two cannot disagree about what prose is: they did not,
+    but only because one was written by copying the other, which is how two
+    populations drift apart one edit at a time.
+    """
+    marker = re.compile(r"^(?:\d+[.)]|[-*+])\s")
+    for rel in DOCS:
+        fenced = False
+        in_item = False
+        for i, raw in enumerate((ROOT / rel).read_text(encoding="utf-8").splitlines()):
+            line = raw.strip().lstrip("> ").strip()
+            if line.startswith("```"):
+                fenced = not fenced
+                continue
+            if fenced or line.startswith("|"):
+                continue
+            indent = 8 if raw.startswith("\t") else len(raw) - len(raw.lstrip(" "))
+            if line and indent == 0:
+                in_item = bool(marker.match(line))
+            if raw.startswith(("    ", "\t")) and not (in_item and indent < 8):
+                continue
+            yield rel, i, raw, line
+
+
+def prose_integers() -> list[dict]:
+    r"""Every whole number in that same prose, which the decimal census omits.
+
+    `prose_numbers` matches `\d+\.\d+` and always has. Counts are integers, and
+    the five figures that went stale on 2026-09-01 -- the published assertion
+    total, the regression total, the spelled count of A19's own items, the
+    review count in the pull request body, and the table count in its header --
+    were every one of them an integer, so the population that section measures
+    could not have contained any of them. Reported beside the decimals rather
+    than folded into them: the probe samples the decimal population and its
+    published rate is about that population, and quietly widening what a
+    measured rate refers to is the thing this section exists to catch.
+
+    A decimal's own digits are removed before matching, so `109.945` is one
+    decimal and not two integers.
+    """
+    out = []
+    dec = re.compile(r"(?<![\w.])\d+\.\d+(?![\w])")
+    # `2 446` is ONE number written with a thousands separator, and the first
+    # version of this matched `\d+` and found two, `2` and `446`, neither of
+    # which is the literal `2446` the checker holds. Every grouped figure in
+    # these documents was therefore counted twice and reported unguarded twice,
+    # which overstates the gap rather than flattering it, and is still wrong.
+    # Grouped forms are matched first and recorded with the separators removed,
+    # which is the form a literal takes.
+    # the hyphen in the lookbehind is for `2026-08-27 618`, where the day and
+    # a following count would otherwise be joined into one grouped figure. It
+    # happens nowhere in these documents today, and a rule that is only correct
+    # for the current text is not a rule.
+    grouped = re.compile(r"(?<![\w.\-])\d{1,3}(?:[\u2009\u00a0 ]\d{3})+(?![\w.])")
+    whole = re.compile(r"(?<![\w.])\d+(?![\w.])")
+    for rel, i, raw, line in _prose_lines():
+        s = dec.sub(lambda _m: " " * len(_m.group(0)), line)
+        for m in grouped.finditer(s):
+            out.append({"doc": rel, "line": i + 1,
+                        "value": re.sub(r"[\s\u2009\u00a0]", "", m.group(0))})
+        s = grouped.sub(lambda _m: " " * len(_m.group(0)), s)
+        for m in whole.finditer(s):
+            out.append({"doc": rel, "line": i + 1, "value": m.group(0)})
+    return out
+
+
 def prose_numbers() -> list[dict]:
     """Every decimal number in prose: outside tables, fenced blocks and CODE.
 
@@ -267,22 +336,7 @@ def prose_numbers() -> list[dict]:
     """
     out = []
     dec = re.compile(r"(?<![\w.])\d+\.\d+(?![\w])")
-    marker = re.compile(r"^(?:\d+[.)]|[-*+])\s")
-    for rel in DOCS:
-        fenced = False
-        in_item = False
-        for i, raw in enumerate((ROOT / rel).read_text(encoding="utf-8").splitlines()):
-            line = raw.strip().lstrip("> ").strip()
-            if line.startswith("```"):
-                fenced = not fenced
-                continue
-            if fenced or line.startswith("|"):
-                continue
-            indent = 8 if raw.startswith("\t") else len(raw) - len(raw.lstrip(" "))
-            if line and indent == 0:
-                in_item = bool(marker.match(line))
-            if raw.startswith(("    ", "\t")) and not (in_item and indent < 8):
-                continue
+    for rel, i, raw, line in _prose_lines():
             # The SPAN, not just the value. Two identical decimals on one line
             # produced two census records, and `prose_probe` perturbed the first
             # occurrence for both -- so "40 numbers probed" could be fewer than
@@ -663,6 +717,34 @@ def _population_sha(tables_: list[dict]) -> str:
     return hashlib.sha256(key.encode()).hexdigest()
 
 
+def cell_locations(picked: list[dict], root: pathlib.Path | None = None) -> set:
+    """Every (doc, table line, row, col, start, end) the cell probe would perturb.
+
+    The probe records these in its attestation and the aggregator checks they
+    are disjoint and that there are as many as the population. Nothing compared
+    them with the tree, so an attestation kept passing after the tables it names
+    had moved: 2446 disjoint keys, the right count, and every one pointing at a
+    line that no longer held that number. Evidence that describes a tree which
+    no longer exists is the failure this repository is about.
+
+    So the enumeration lives here, and both the probe and the claim checker read
+    it. One definition, two consumers, and they cannot drift apart. It does not
+    perturb anything and needs no worktree, so the checker can call it directly.
+    """
+    base = root or ROOT
+    out = set()
+    for t in picked:
+        lines = (base / t["doc"]).read_text(encoding="utf-8").splitlines()
+        for j in range(t["line"] + 1, len(lines)):
+            if not lines[j].strip().lstrip("> ").strip().startswith("|"):
+                break
+            raw = lines[j]
+            for col, span in enumerate(_pipe_spans(raw)):
+                for a, b, _txt in _numbers_in(raw, span):
+                    out.add((t["doc"], t["line"], j + 1, col, a, b))
+    return out
+
+
 def cell_probe(tables_: list[dict], shard: tuple[int, int] = (0, 1)) -> list[dict]:
     """Perturb EVERY numeric cell of every table given, one at a time.
 
@@ -675,7 +757,22 @@ def cell_probe(tables_: list[dict], shard: tuple[int, int] = (0, 1)) -> list[dic
     processes can run at once, each in its own worktree.
     """
     out = []
-    picked = [t for k, t in enumerate(tables_) if k % shard[1] == shard[0]]
+    # Dealt out largest-first to the lightest shard, not round robin. Tables
+    # here hold between 3 and 102 numbers, so round robin gave shards between 45
+    # and 189 of them, a 4.2x spread: on 2026-09-01 twenty-six of twenty-eight
+    # shards were finished while two carried the tail for a further twelve
+    # minutes. Greedy longest-processing-time packing brings the heaviest shard
+    # down to 102, which is the largest single table and therefore the floor for
+    # any split that keeps whole tables together. Deterministic, so every shard
+    # computes the same assignment and takes its own without coordinating.
+    _order = sorted(tables_, key=lambda x: (-cell_population([x]), x["doc"], x["line"]))
+    _bins: list[list[dict]] = [[] for _ in range(shard[1])]
+    _load = [0] * shard[1]
+    for _t in _order:
+        _k = _load.index(min(_load))
+        _bins[_k].append(_t)
+        _load[_k] += cell_population([_t])
+    picked = sorted(_bins[shard[0]], key=lambda x: (x["doc"], x["line"]))
     with contextlib.ExitStack() as stack:
         wt = _worktree(stack)
         base_fails, base_n, base_rc = _run(wt)

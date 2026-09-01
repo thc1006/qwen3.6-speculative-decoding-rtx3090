@@ -42,11 +42,47 @@ The three arms differ in one thing only:
 
 ---
 
+<!-- A contents block, because these documents are linked into by section name from each other and a reader arriving cold had no way to orient but to scroll. Generated from the headings; `analysis/check_links.py` validates every anchor here, so a heading renamed without this list fails the static job rather than rotting quietly. -->
+
+## Contents
+
+- [Run A — bcb5eeb64, the binary v2 used](#run-a--bcb5eeb64-the-binary-v2-used)
+- [Run B — post-merge master 3737e4137, with speculation actually enabled](#run-b--post-merge-master-3737e4137-with-speculation-actually-enabled)
+- [Answer 1 — the vocabulary defect is real, and it is not the cause](#answer-1--the-vocabulary-defect-is-real-and-it-is-not-the-cause)
+- [Answer 2 — with acceptance measured properly, there is no anomaly](#answer-2--with-acceptance-measured-properly-there-is-no-anomaly)
+- [Runs C and D — the thirteen-arm matrix, and the workload the archive never controlled](#runs-c-and-d--the-thirteen-arm-matrix-and-the-workload-the-archive-never-controlled)
+  - [C — thinking on, thirteen arms](#c--thinking-on-thirteen-arms)
+  - [D — the same arms with thinking verifiably off](#d--the-same-arms-with-thinking-verifiably-off)
+  - [Thermals and drift](#thermals-and-drift)
+- [Run I — batching, the lever upstream names](#run-i--batching-the-lever-upstream-names)
+  - [The failure mode that did not happen](#the-failure-mode-that-did-not-happen)
+- [Run J — the first configuration that is actually faster](#run-j--the-first-configuration-that-is-actually-faster)
+  - [The configuration that produced it does not start reliably](#the-configuration-that-produced-it-does-not-start-reliably)
+  - [Every measurement of the same quantity, with its power](#every-measurement-of-the-same-quantity-with-its-power)
+- [Run K — where the optimum is, and what batching does to it](#run-k--where-the-optimum-is-and-what-batching-does-to-it)
+  - [Batching destroys it](#batching-destroys-it)
+- [Run L — the win is a property of the workload, not of the method](#run-l--the-win-is-a-property-of-the-workload-not-of-the-method)
+  - [Which prompts lose it, and why](#which-prompts-lose-it-and-why)
+  - [Acceptance sets the sign — and only the sign](#acceptance-sets-the-sign--and-only-the-sign)
+- [Thermals across the 2026-08-26 runs](#thermals-across-the-2026-08-26-runs)
+- [Run M — the method the vLLM sibling uses, now measured here too](#run-m--the-method-the-vllm-sibling-uses-now-measured-here-too)
+  - [The drafter-precision objection, tested](#the-drafter-precision-objection-tested)
+  - [Thinking off, and batching](#thinking-off-and-batching)
+- [Run N — the two methods nobody had run, and they do nothing](#run-n--the-two-methods-nobody-had-run-and-they-do-nothing)
+- [Run O2 — the same matrix as a balanced Latin square](#run-o2--the-same-matrix-as-a-balanced-latin-square)
+- [Run O — the same matrix at three repeats, superseded by O2](#run-o--the-same-matrix-at-three-repeats-superseded-by-o2)
+- [Run O — every method, one baseline, one policy](#run-o--every-method-one-baseline-one-policy)
+- [Runs P and R — is the win a property of those ten prompts?](#runs-p-and-r--is-the-win-a-property-of-those-ten-prompts)
+  - [The metric has to change, and that is not a detail](#the-metric-has-to-change-and-that-is-not-a-detail)
+- [Run Q — the anomaly this repository could not explain, resolved](#run-q--the-anomaly-this-repository-could-not-explain-resolved)
+- [What is settled, and what is not](#what-is-settled-and-what-is-not)
+- [Files](#files)
+
 ## Run A — `bcb5eeb64`, the binary v2 used
 
 `data/A_bcb5eeb64_legacy/`, 2 repeats, binary sha256 `32c16754e053da2f…`
 
-> **`request-mean` is llama.cpp's own `predicted_per_second`, averaged.** That field divides `n − 1` generated tokens by the time for `n`, in 18 300 of 18 344 committed request rows, so every request-mean here is low by `(n − 1) / n`: 0.33 % at 300 tokens and more at shorter lengths. It is uniform across arms on a run where every request hits the same cap, and it is NOT uniform where the arms stop at different lengths, so it must not carry a cross-arm comparison in the thinking-off runs. Every headline figure and every published delta is a **pooled** rate computed from `predicted_n` and `predicted_ms` directly and contains none of this. See [B8](../ERRATA.md#b8-every-request-mean-here-counts-one-token-fewer-than-it-timed).
+> **`request-mean` is llama.cpp's own `predicted_per_second`, averaged.** That field divides `n − 1` generated tokens by the time for `n`, in 30 300 of 30 344 committed request rows, so every request-mean here is low by `(n − 1) / n`: 0.33 % at 300 tokens and more at shorter lengths. It is uniform across arms on a run where every request hits the same cap, and it is NOT uniform where the arms stop at different lengths, so it must not carry a cross-arm comparison in the thinking-off runs. Every headline figure and every published delta is a **pooled** rate computed from `predicted_n` and `predicted_ms` directly and contains none of this. See [B8](../ERRATA.md#b8-every-request-mean-here-counts-one-token-fewer-than-it-timed).
 
 | arm | request-mean | pooled | min | accepted / drafted | completed |
 |---|---:|---:|---:|---:|---|
@@ -510,7 +546,8 @@ at or below 4 and says nothing about where. Run K brackets it from 1, and then
 asks of the winning arm the question run I asked of the matched-vocabulary one.
 
 Everything here is at `-c 8192` with `--fit-target 2048`, applied to every arm
-including the baseline, for the reason in the previous section: at the fitter's
+including the baseline, for the reason in [The configuration that produced it
+does not start reliably](#the-configuration-that-produced-it-does-not-start-reliably): at the fitter's
 default margin the DFlash configuration does not start reliably. Absolute rates
 are therefore not comparable with run J's; the deltas against each run's own
 baseline are.
@@ -670,7 +707,7 @@ pushed at runs J and K, which it never saw and which used a different context
 and a different fitter margin:
 
 Scored over **every** arm-run for which both an acceptance figure and a matched
-baseline exist, 44 of them, with one exclusion stated up front: seven
+baseline exist, 90 of them, with one exclusion stated up front: four
 `ngram-map` arm-runs drafted at most **45 tokens in total**, and a percentage
 computed over ten tokens is not a rate. There is a clean gap in the data at
 that point; every other (run, arm) drafted at least 132. The remaining 86:
@@ -1233,8 +1270,12 @@ logs, with `telemetry_20260831.tar.zst` at **114 587 bytes**, sha256
 publishing. It was hashed into `EVIDENCE_MANIFEST.sha256` a commit before it
 was packaged, and for that one commit the manifest carried a marker naming
 exactly what was not yet published rather than leaving the gap to be inferred
-from a count. All four tranches are assets of `raw-evidence-2026-08-31-v4.2`,
-so one release identity verifies the whole manifest.
+from a count. All four tranches are prepared as assets of
+`raw-evidence-2026-08-31-v4.2`, a release this branch has not cut yet: the tag
+is created at merge so that it names the commit carrying the dataset and the
+verifier together. When it exists, one release identity verifies the whole
+manifest. Until then the manifest is verified against the three published
+tranches and the fourth out of band, which is what the evidence workflow does.
 
 Committed hashes tie the derived JSON
 to files nobody else could see, which is a weaker claim than it sounds; the

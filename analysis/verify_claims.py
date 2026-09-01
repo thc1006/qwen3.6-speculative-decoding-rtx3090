@@ -5565,9 +5565,11 @@ import ast as _ast0
 import pathlib as _pl0
 print("\n=== the pull request body (PULL_REQUEST.md) ===")
 # The third review's P0-4 was errors in the PR body. Fixing them once fixes
-# nothing durable: the body is a published document with four numeric tables in
-# it and nothing was reading them, which is the same defect this audit has now
-# found five times. The body lives in the tree and its tables are parsed here.
+# nothing durable: the body is a published document whose tables nothing was
+# reading, which is the same defect this audit has now found five times. It
+# held four of them when this was written and holds eight; the count is
+# asserted against the census rather than written down again here. The body
+# lives in the tree and its tables are parsed here.
 # `gh pr edit 2 --body-file PULL_REQUEST.md` is what publishes it.
 _PR_LINES = (pathlib.Path(__file__).resolve().parents[1] / "PULL_REQUEST.md") \
     .read_text(encoding="utf-8").splitlines()
@@ -6471,6 +6473,49 @@ chk("each completed 2026-08-27 run is on disk with its validation",
     sorted(d.name for d in _all_runs
            if d.name in _completed and (d / "RUN_COMPLETE.json").exists()),
     sorted(_completed))
+
+# A compression rewrote "built with the CUDA 12.6 toolkit" as 12.8. It survived
+# a check that asked whether every number the edit DROPPED still exists in the
+# tree, because 12.6 does exist -- in the two files that state it correctly.
+# What no check asked was whether a number the edit ADDED is supported anywhere.
+# The toolkit version is now read from BENCHMARK_ENV.md and required to be the
+# one the README states, so the two cannot drift apart again.
+_cd_root = pathlib.Path(__file__).resolve().parents[1]
+_be_txt = (_cd_root / "BENCHMARK_ENV.md").read_text(encoding="utf-8")
+_rm_txt = (_cd_root / "README.md").read_text(encoding="utf-8")
+_cuda_be = re.search(r"v1 was built with\s+\*\*CUDA ([0-9]+\.[0-9]+)\*\*", _be_txt)
+_cuda_rm = re.search(r"built with the \*\*CUDA ([0-9]+\.[0-9]+)\*\*\s+toolkit",
+                     " ".join(_rm_txt.split()))
+chk("the README's v1 build toolkit is the one BENCHMARK_ENV records",
+    (_cuda_rm.group(1) if _cuda_rm else "README does not state it"),
+    (_cuda_be.group(1) if _cuda_be else "BENCHMARK_ENV does not state it"))
+# and the caveat that the benchmark host was not idle stays where the hardware
+# is described, because BENCHMARK_ENV lists the second card and never says what
+# it was doing. A compression pointed at that file for it and deleted it.
+chk("the README says what the second card was doing, and cites C4",
+    ("left to an Ollama instance" in " ".join(_rm_txt.split()),
+     "#c4-gpu-0-was-running-another-workload" in _rm_txt), (True, True))
+
+# A cross-section pointer that names a DIRECTION is unguarded: reorder the
+# document and it silently points at whatever landed there. An anchor link is
+# checked by check_links.py, so it cannot. Four of these were wrong at once --
+# two that a reorder here broke, and two that had been wrong in the published
+# tree -- and none of them failed anything. So the form itself is banned.
+_POSPTR = ("the next section", "the previous section", "the section above",
+           "the section below", "the preceding section", "the following section")
+_pp_root = pathlib.Path(__file__).resolve().parents[1]
+_pp = []
+for _md in sorted(_pp_root.rglob("*.md")):
+    if ".git" in _md.parts:
+        continue
+    # a phrase inside quotes or backticks is being DESCRIBED, not used to point:
+    # the entry that records this very fix quotes all four, and the first version
+    # of this guard failed on its own changelog.
+    _low = _md.read_text(encoding="utf-8").lower()
+    _low = re.sub(r'"[^"]*"|`[^`]*`|\u201c[^\u201d]*\u201d', " ", _low)
+    _pp += [f"{_md.relative_to(_pp_root)}:{_b}" for _b in _POSPTR if _b in _low]
+chk("no document points at a section by direction instead of by anchor",
+    _pp, [])
 
 print("\n=== is every request-mean column labelled for what it is? ===")
 # B8 documents that `predicted_per_second` divides n-1 tokens by the time for n,
@@ -9412,8 +9457,129 @@ chk("ERRATA A19: the spelled count is spelled, not looked up in a table",
      "Ninety-nine"])
 chk("ERRATA A19: the corrections are numbered from one, without a gap",
     [int(_x) for _x in _A19_LIST], list(range(1, len(_A19_LIST) + 1)))
+# The entries point at each other in prose, and nothing read those pointers.
+# One said "the five ratchets in item 50" and item 50 is about telemetry trace
+# counts; another said "this is item 19 in the same table" and item 19 is a
+# file map's lead-in. A list that is renumbered moves every reference into it
+# silently, so the numbers a reference names have to exist at least. What they
+# mean still cannot be checked here, which is why the two above were rewritten
+# to say what they mean instead of pointing.
+# the changelog points into this list too, by number, through an anchor link
+# that `check_links.py` resolves to the section and not to the entry
+_A19_REFS = sorted({int(_x) for _doc in (_A19, "\n".join(_CH_LINES))
+                    for _x in re.findall(r"item (\d+)", _doc)})
+chk("ERRATA A19: every item it points at by number is an item it has",
+    [_r for _r in _A19_REFS if not 1 <= _r <= len(_A19_LIST)], [])
+chk("ERRATA A19: and it does point at some, so that check is not vacuous",
+    len(_A19_REFS) > 0, True)
 chk("ERRATA A19: and the count it states is the length of that list",
     f"**{_word(len(_A19_LIST))} published statements were wrong" in _A19, True)
+
+
+# The pull request body opens by saying how many external reviews drove this
+# branch. It said three while carrying a section headed "What the fifth review
+# found", because the sentence was written when there had been three and no
+# assertion held it to the documents underneath it. Counted from the highest
+# ordinal any published document uses, so a sixth review moves it.
+_ORD = {"first": 1, "second": 2, "third": 3, "fourth": 4, "fifth": 5,
+        "sixth": 6, "seventh": 7, "eighth": 8, "ninth": 9, "tenth": 10}
+_REV_SRC = tuple((pathlib.Path(__file__).resolve().parents[1] / _f)
+                 .read_text(encoding="utf-8")
+                 for _f in ("ERRATA.md", "CHANGELOG.md")) + (_PR,)
+_REVIEWS = max([_ORD[_m.lower()] for _doc in _REV_SRC
+                for _m in re.findall(r"the (\w+) review", _doc, re.I)
+                if _m.lower() in _ORD] or [0])
+# flattened, because where the line happens to break is not the claim: an
+# assertion that reads a wrap is asserting a format, and rewrapping the
+# paragraph would then fail it for no reason
+chk("PR body: it counts the reviews the documents underneath it describe",
+    (_REVIEWS > 0
+     and f"{_word(_REVIEWS)} external reviews" in " ".join(_PR.split())), True)
+
+# The header comment tells a reader how many tables below it are parsed. It was
+# right, at eight, and nothing held it there: the same comment two lines above
+# still says "four numeric tables", which is what there were when it was
+# written. A count in prose that no assertion reads is a count that goes stale
+# the next time a table is added, which has now happened twice in this file.
+# --- a sentence restated in several documents is one sentence -------------
+# Four corrections on 2026-09-01 were applied in one document and left standing
+# in the others: run W described as "V3 verbatim" (corrected in the pull request
+# body, left in ERRATA, the changelog and the todo), the request-row footnote
+# left at a corpus two runs old in five places, run W called pre-registered in
+# the README after the plan document had withdrawn the word, and the citation
+# file frozen at the run before last. Only the first had an assertion, and only
+# the first was right. The checker can compare a number to the data; nothing
+# compared a sentence to its own copies. These do.
+_RESTATED = (
+    # (label, needle, the documents that must all agree, must_contain)
+    ("the request-row footnote is at the current corpus",
+     "30 300 of 30 344",
+     ("README.md", "ERRATA.md", "CHANGELOG.md", "PULL_REQUEST.md",
+      "v4_audit_2026_08_25/README.md"), True),
+    # NOT the substring "V3 verbatim": the corrected sentence is "is not V3
+    # verbatim", which contains it. A needle that matches the claim and its own
+    # retraction cannot tell them apart, and this assertion reported all three
+    # documents unfixed immediately after they were fixed. The claim is the
+    # phrase without a preceding negation.
+    ("no document still calls run W a verbatim rerun of V3",
+     "V3 verbatim",
+     ("ERRATA.md", "CHANGELOG.md", "RETEST_TODO.md"), False),
+    ("no document calls run W's plan a preregistration",
+     "pre-registered before its data existed",
+     ("README.md", "ERRATA.md", "CHANGELOG.md", "PULL_REQUEST.md",
+      "RETEST_TODO.md"), False),
+)
+def _unnegated(_text, _needle):
+    """Occurrences of `_needle` that are not immediately negated.
+
+    `"V3 verbatim" in text` is True both when a document says run W is V3
+    verbatim and when it says it is NOT. Only the second is correct, and a
+    needle that cannot tell them apart reported three documents unfixed in the
+    same run that fixed them.
+    """
+    # "rather than X" negates X as surely as "not X" does, and the first
+    # version of this recognised only the second, so a correction written one
+    # way passed and the same correction written the other way did not.
+    _NEG = ("not ", "rather than ", "no longer ", "never ")
+    _n, _i = 0, _text.find(_needle)
+    while _i != -1:
+        _win = _text[max(0, _i - 30):_i]
+        if not any(_w in _win for _w in _NEG):
+            _n += 1
+        _i = _text.find(_needle, _i + 1)
+    return _n
+
+
+for _lbl, _needle, _docs, _want in _RESTATED:
+    _off = []
+    for _d in _docs:
+        _txt = (pathlib.Path(__file__).resolve().parents[1] / _d).read_text(encoding="utf-8")
+        _present = (_needle in _txt) if _want else bool(_unnegated(_txt, _needle))
+        if _present != _want:
+            _off.append(_d)
+    chk(f"restated: {_lbl}", _off, [])
+
+# the citation file is the machine-readable path a reader takes, and it was a
+# run behind: it named four follow-up runs when there were five, and carried a
+# release date from before the last one finished, against its own stated rule
+_CFF = (pathlib.Path(__file__).resolve().parents[1] / "CITATION.cff").read_text(encoding="utf-8")
+# `completed_at`, not the directory name: a directory is named for when its run
+# STARTED, and run W2 started at 22:05 on the 30th and finished on the 31st. The
+# first version of this assertion took the date from the directory and would
+# have demanded the wrong day, which is the same mistake as the field it checks.
+_DATA_DIR = (pathlib.Path(__file__).resolve().parents[1]
+             / "v4_audit_2026_08_25" / "data")
+_LAST_DONE = max(json.loads(_c.read_text(encoding="utf-8"))["completed_at"]
+                 for _c in _DATA_DIR.glob("*/RUN_COMPLETE.json"))
+chk("CITATION.cff: released on the day the last run finished",
+    f"date-released: {_LAST_DONE[:10]}" in _CFF, True)
+chk("CITATION.cff: and it names the last run",
+    ("W2, 1200" in _CFF or "W2 (1200" in _CFF), True)
+
+
+chk("PR body: its header says how many tables are below it",
+    f"the {_word(len(_tcov.tables('PULL_REQUEST.md'))).lower()} tables below"
+    in " ".join(_PR.split()), True)
 
 
 # the changelog publishes the same census and had no check on it, which is
@@ -9511,9 +9677,26 @@ chk("prose probe: records whose value repeats on its own line",
 
 _pcov = _tcov.prose_census()
 chk("coverage: decimal numbers in prose, outside every table",
-    _pcov["prose_numbers"], 1398)
+    _pcov["prose_numbers"], 1403)
 chk("coverage: those that are not a literal in this file",
-    _pcov["not_a_literal"], 724)
+    _pcov["not_a_literal"], 729)
+# The same prose holds whole numbers, and the census above never counted them.
+# Every figure that went stale on 2026-09-01 was one: the assertion total, the
+# regression total, the spelled item count, the review count and the table
+# count. They are not folded into the probed population, because the rate the
+# probe publishes is about the population it sampled. They are counted, stated
+# and held here, so the sentence that admits the gap cannot itself drift.
+_PI = _tcov.prose_integers()
+_PI_LITS = _tcov._checker_literals()
+_pi_absent = sum(1 for _n in _PI if _n["value"] not in _PI_LITS)
+chk("coverage: whole numbers in the same prose, which that census omits",
+    (len(_PI) > len(_PN), _pi_absent < len(_PI)), (True, True))
+_PI_PRINTED = (f"{len(_PI) // 1000} {len(_PI) % 1000:03d}"
+               if len(_PI) >= 1000 else str(len(_PI)))
+_A19_FLAT = " " + " ".join(_A19.replace("*", " ").split()) + " "
+chk("ERRATA A19: and it states both, so the gap is published and not implied",
+    (f" {_PI_PRINTED} " in _A19_FLAT, f" {_pi_absent} " in _A19_FLAT),
+    (True, True))
 # tested on a supplied source, not by searching this file for a phrase: the
 # first version of this check searched for a label's own words, and the search
 # string was itself a literal in the argument position, so it always found it.
@@ -9566,11 +9749,99 @@ for _a19doc, _a19txt in (("ERRATA A19", _A19),
     chk(f"{_a19doc}: prints that population and the table count with it",
         (f" {_A19_PRINTED} " in _a19flat
          and f" {len(_cov['covered'])} " in _a19flat), True)
+# --- the probe's attestations, which nothing used to read ------------------
+# A19 publishes "8 shards, one head, one checker, N locations covered exactly
+# once, 0 survived". That was the strongest evidence claim in the document and
+# no assertion touched it: the eight shard outputs lived in a terminal. They
+# are committed now and the aggregator is run over them here, so the sentence
+# is a reading of files in the repository rather than a memory of a run.
+_ATT_DIR = (pathlib.Path(__file__).resolve().parents[1]
+            / "v4_audit_2026_08_25" / "coverage_attestations")
+_ATT = sorted(_ATT_DIR.glob("shard-*-of-*.json"))
+chk("probe: every shard attestation is committed", len(_ATT), 32)
+_ATTJ = [json.loads(_x.read_text(encoding="utf-8")) for _x in _ATT]
+chk("probe: every shard's control passed at both ends",
+    sorted({(_a["control_before"], _a["control_after"]) for _a in _ATTJ}),
+    [("pass", "pass")])
+chk("probe: nothing survived in any of them",
+    sum(len(_a.get("survived", [])) for _a in _ATTJ), 0)
+chk("probe: one head, one checker and one population across the eight",
+    [len({_a[_f] for _a in _ATTJ})
+     for _f in ("head_sha", "checker_sha256", "population_sha256")], [1, 1, 1])
+# The attestation records WHERE each perturbation was made, and until now
+# nothing compared those places with the tree. The aggregator checks they are
+# disjoint and that there are as many as the population, both of which stay true
+# when a document is edited and its tables move down a line: on 2026-09-01 a
+# freshly landed set passed every assertion here while 878 of its 2446 locations
+# named lines that no longer held the number they were taken from. Evidence that
+# describes a tree which no longer exists is the failure this file is about, and
+# it was the one shape the probe's own evidence was not checked for.
+_ATT_LOCS = {tuple(_l) for _a in _ATTJ for _l in _a["locations"]}
+_NOW_LOCS = _tcov.cell_locations(_cov["covered"])
+chk("probe: and every place it attests is a place this tree still has",
+    (len(_ATT_LOCS - _NOW_LOCS), len(_NOW_LOCS - _ATT_LOCS)), (0, 0))
+chk("probe: the population they attest is the one this tree holds",
+    {_a["population_size"] for _a in _ATTJ}, {_A19_POP})
+chk("probe: and their shard indices are each of 0..n-1, once",
+    sorted(tuple(_a["shard"]) for _a in _ATTJ),
+    [(_i, len(_ATT)) for _i in range(len(_ATT))])
+
+# The aggregator is what checks disjointness and completeness, and until this
+# run it had only ever been given fixtures. It refused a real set on
+# 2026-09-01, for twelve survivors and for two checker hashes, which is the
+# only reason those two defects were found.
+_AGG = _sp.run([sys.executable,
+                str(pathlib.Path(__file__).resolve().parent / "table_coverage.py"),
+                "--aggregate", *[str(_x) for _x in _ATT]],
+               capture_output=True, text=True)
+chk("probe: the aggregator accepts the committed set",
+    (_AGG.returncode, _AGG.stderr.strip()[:150]), (0, ""))
+# The tool prints `2446`; the documents group it as `2 446`, and one of them
+# quotes the hashes in backticks and the other does not. Comparing a single
+# rendering against both was two failures waiting at the end of the run, so the
+# raw line is checked against the tool's own format and the documents against
+# that line with the digits grouped, built from the same number.
+# `len(_ATT)`, not `8`: the shard count is part of the sentence the documents
+# quote, and running twenty-eight instead of eight changed it. A number written
+# here would have had to be found by the assertion failing.
+_AGG_RAW = (f"{len(_ATT)} shards, one head {_ATTJ[0]['head_sha'][:12]}, "
+            f"one checker {_ATTJ[0]['checker_sha256'][:12]}, "
+            f"{_A19_POP} locations covered exactly once, 0 survived")
+chk("probe: the aggregator's own line, in its own format",
+    _AGG.stdout.strip(), _AGG_RAW)
+_ATT_DOC = _AGG_RAW.replace(str(_A19_POP), _A19_PRINTED)
+for _adoc, _atxt in (("ERRATA A19", _A19), ("PR body", _PR)):
+    _aflat = " ".join(_atxt.replace("**", "").replace("`", "").split())
+    chk(f"{_adoc}: quotes the aggregator, with this file's digit grouping",
+        _ATT_DOC in _aflat, True)
+if _HAS_GIT:
+    # evidence dated to a commit, not a promise about now: the commit that adds
+    # these files is necessarily later than the one they were taken on
+    chk("probe: the head they were taken on is an ancestor of this one",
+        _sp2.run(["git", "-C", str(_repo), "merge-base", "--is-ancestor",
+                  _ATTJ[0]["head_sha"], "HEAD"], capture_output=True).returncode,
+        0)
+else:
+    # Ancestry needs history. What does not need it is that the thing being
+    # called a commit looks like one: the first version of this branch was
+    # `chk(..., True, True)`, an assertion that asserts nothing, and the
+    # checker's own audit of its assertions is what found it.
+    chk("probe: no git here, so only the shape of the attested head is checked",
+        (len(_ATTJ[0]["head_sha"]),
+         bool(re.fullmatch(r"[0-9a-f]{40}", _ATTJ[0]["head_sha"]))),
+        (40, True))
+
+
 chk("ERRATA A19: the interval it publishes is Wilson's, at the count measured",
     math.floor(100 * _wilson_low(36, _tcov.PROSE_SAMPLE)), 76)
+# flattened. This read `"**76 % or\nabove**"`, a phrase with the line break
+# where it happened to fall, so rewrapping the paragraph around it failed an
+# assertion about a measured rate for a reason that had nothing to do with the
+# rate. An assertion that reads a wrap is asserting a format.
+_A19_WS = " ".join(_A19.split())
 chk("ERRATA A19: and the entry states that pair",
-    ("**36 of 40 accepted a wrong number**" in _A19
-     and "**76 % or\nabove**" in _A19), True)
+    ("**36 of 40 accepted a wrong number**" in _A19_WS
+     and "**76 % or above**" in _A19_WS), True)
 # the split of what this pass parsed, which the entry and the changelog give
 # separately and which went stale in the entry at seventy-five
 chk("ERRATA A19: the newly parsed count is the census's difference too",
@@ -9706,6 +9977,8 @@ chk("release notes: it says the tag is not signed",
     "The tag is annotated and NOT signed" in " ".join(_RN_LINES), True)
 _V4PROC = (pathlib.Path(__file__).resolve().parents[1] / "v4_audit_2026_08_25"
            / "RELEASE_PROCEDURE.md").read_text(encoding="utf-8")
+chk("release notes: they name the tag they are the notes for",
+    "raw-evidence-2026-08-31-v4.2" in " ".join(_RN_LINES), True)
 chk("release notes: and names the tag the procedure and the workflow name",
     ("raw-evidence-2026-08-31-v4.2" in _V4PROC
      and "raw-evidence-2026-08-31-v4.2" in _EVY), True)
@@ -9739,7 +10012,7 @@ _MAN_HASHES = {ln.split()[0] for ln
                in (_DUP_DIR / "EVIDENCE_MANIFEST.sha256").read_text(
                    encoding="utf-8").splitlines()
                if ln.strip() and not ln.startswith("#") and len(ln.split()[0]) == 64}
-_dup_concat, _dup_hashes = [], []
+_dup_concat, _dup_hashes, _dup_unclassed = [], [], []
 
 
 def _identity(rec):
@@ -9793,9 +10066,21 @@ for _rel in sorted(_TRACKED):
             _here_f = {_k for _r in _o for _k in _r}
             _there_f = {_k for _r in _recs for _k in _r}
             _same_shape = bool(_here_f) and _here_f <= _there_f
-            if _one_to_one and _same_shape and _here == _there:
+            if not _one_to_one:
+                # A list beside the arm-runs that this cannot put in
+                # correspondence with them is not judged either way, and a
+                # check that quietly declines to look is the shape this file
+                # keeps removing. It is named instead, and the assertion below
+                # is empty on this tree, so a new one has to be looked at.
+                _dup_unclassed.append(_rel)
+            elif _same_shape and _here == _there:
                 _dup_concat.append(_rel)
-    if _f.suffix in (".txt", ".sha256"):
+    # any committed file that is not itself a run result, whatever it is
+    # called: the first version of this looked at `.txt` and `.sha256`, which a
+    # rename walks past exactly the way a name-based duplicate check does. The
+    # twenty-eight non-JSON files under `data/` are 4.3 MB in total, so there
+    # is nothing to save by guessing from the extension.
+    if _f.suffix != ".json" and _f.stat().st_size <= 8 << 20:
         _lines = [l.split() for l in _f.read_text(encoding="utf-8",
                                                   errors="replace").splitlines()
                   if l.strip()]
@@ -9806,6 +10091,23 @@ chk("data: no committed file is its directory's arm-runs concatenated",
     _dup_concat, [])
 chk("data: no committed hash list is one the evidence manifest already holds",
     _dup_hashes, [])
+chk("data: and every list beside the arm-runs could be put beside them",
+    _dup_unclassed, [])
+
+# The README's opening summary sizes the controlled tier, and nothing read it.
+# The tier is every run directory that is not a smoke run: the three `smoke_*`
+# directories are one arm-run each and are excluded from every analysis here,
+# which is exactly the three directories and three arm-runs between this pair
+# of numbers and the 77 and 3005 the rest of this file counts. A headline
+# figure in the first paragraph a reader meets is not a good place for the one
+# count nothing checks.
+_CT = [_d for _d in (_DUP_DIR / "data").iterdir()
+       if _d.is_dir() and not _d.name.startswith("smoke")]
+_CT_RUNS = sum(len(list(_d.glob("*__rep*.json"))) for _d in _CT)
+chk("README: the controlled tier it sizes is the one on the tree",
+    f"{_CT_RUNS} arm-runs in {len(_CT)} directories"
+    in " ".join((pathlib.Path(__file__).resolve().parents[1] / "README.md")
+                .read_text(encoding="utf-8").split()), True)
 chk("data: and the arm-run files themselves are still all here",
     sum(1 for _r in _TRACKED if "__rep" in _r and _r.endswith(".json")), 3005)
 

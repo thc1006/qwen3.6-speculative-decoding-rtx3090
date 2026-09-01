@@ -48,12 +48,19 @@ the verifier together, at the end rather than the middle:
     #    list every asset with its bytes and SHA-256, the manifest's own
     #    SHA-256, the verifier commit, the exact log and trace counts, and
     #    which data can only be integrity-checked rather than re-derived
+    # $ASSETS is wherever the eight archives are held on the operator's
+    # machine. They were split across two directories while the fourth tranche
+    # was being built, and one of those was on a tmpfs that filled: the
+    # archives are 1.0 GB, the release is the only durable copy of them once it
+    # exists, and until then they are worth keeping somewhere that survives a
+    # reboot. Their digests are in RELEASE_NOTES_v4.2.md and are checked
+    # against the files before this runs.
     gh release create "$TAG" --target "$HEAD_SHA" --verify-tag \
        --title "Evidence and verifier, v4.2" --notes-file RELEASE_NOTES_v4.2.md \
-       ~/tranche4/raw_logs_20260831.tar.zst ~/tranche4/telemetry_20260831.tar.zst \
-       evidence/raw_logs.tar.zst evidence/raw_logs_20260827.tar.zst \
-       evidence/raw_logs_20260828.tar.zst evidence/telemetry.tar.zst \
-       evidence/telemetry_20260827.tar.zst evidence/telemetry_20260828.tar.zst
+       "$ASSETS"/raw_logs.tar.zst "$ASSETS"/raw_logs_20260827.tar.zst \
+       "$ASSETS"/raw_logs_20260828.tar.zst "$ASSETS"/raw_logs_20260831.tar.zst \
+       "$ASSETS"/telemetry.tar.zst "$ASSETS"/telemetry_20260827.tar.zst \
+       "$ASSETS"/telemetry_20260828.tar.zst "$ASSETS"/telemetry_20260831.tar.zst
 
 ## Why all eight assets, and not two
 

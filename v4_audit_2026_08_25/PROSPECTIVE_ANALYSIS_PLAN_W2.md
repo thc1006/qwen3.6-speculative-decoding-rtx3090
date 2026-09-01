@@ -21,7 +21,7 @@ interval, so run W cannot exclude it.
 
 ## Design, unchanged from W
 
-The same 10x10 Williams square, randomised row order, one request at a time,
+The same 10 × 10 Williams square, randomised row order, one request at a time,
 thinking off, 300-token cap, the same ten arms, `BENCH_EXPECT_COMMIT`
 `3737e4137`, on the same card. Only the number of sessions changes.
 

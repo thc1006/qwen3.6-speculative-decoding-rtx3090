@@ -5610,5 +5610,271 @@ class TheProseCensusMustCountProseInsideAList(unittest.TestCase):
         mod, nums = self._census()
         errata = (self.ROOT / "ERRATA.md").read_text(encoding="utf-8")
         n = len(nums)
-        self.assertIn(f"{n // 1000} {n % 1000:03d}", errata,
+        # the same grouping the checker uses, thin space or plain: a population
+        # under a thousand is not written with a separator, and hard-coding the
+        # four-digit form would make this test assert a format rather than the
+        # number it is supposed to be about
+        want = f"{n // 1000} {n % 1000:03d}" if n >= 1000 else str(n)
+        flat = " ".join(errata.replace("*", " ").split())
+        self.assertIn(want, flat,
                       f"A19 does not publish the population it has ({n})")
+
+
+class AMutationMirrorMustBeTheCommittedTree(unittest.TestCase):
+    """The control has to be the thing CI checks out, not this working copy.
+
+    Both harnesses built their mirror with `copytree`, which copies the working
+    tree. The difference was `__pycache__` and so it never mattered, until
+    2026-09-01, when 119 MB of derivable duplicates were untracked and ignored
+    rather than deleted: a checker assertion reading `git ls-files` cannot see
+    them, and a mirror built by `copytree` still held every one. A control that
+    carries files the subject does not is measuring something else.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    def test_the_mirror_holds_exactly_what_git_tracks(self):
+        import importlib.util
+        import subprocess
+        import tempfile
+        import shutil
+        spec = importlib.util.spec_from_file_location(
+            "dm_mirror", self.ROOT / "tests" / "data_mutate.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        want = set(subprocess.run(
+            ["git", "ls-files", "-z", *mod.COPY], cwd=self.ROOT,
+            capture_output=True, text=True, timeout=300).stdout.split("\0")) - {""}
+        self.assertTrue(want, "git listed nothing; this test proves nothing")
+        d = Path(tempfile.mkdtemp(prefix="mirror-invariant-"))
+        try:
+            mod.mirror(d)
+            got = {str(p.relative_to(d)) for p in d.rglob("*") if p.is_file()}
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+        extra = sorted(got - want)[:5]
+        missing = sorted(want - got)[:5]
+        self.assertFalse(extra, f"the mirror carries untracked files: {extra}")
+        self.assertFalse(missing, f"the mirror is missing tracked files: {missing}")
+
+    def test_both_harnesses_build_it_the_same_way(self):
+        """So testing one of them is testing both."""
+        import ast
+
+        def src(rel):
+            tree = ast.parse((self.ROOT / rel).read_text(encoding="utf-8"))
+            out = {}
+            for n in tree.body:
+                if isinstance(n, ast.FunctionDef) and n.name in ("mirror",
+                                                                 "_ignored_by_git"):
+                    out[n.name] = ast.unparse(n)
+            return out
+
+        a, b = src("tests/mutate.py"), src("tests/data_mutate.py")
+        self.assertEqual(sorted(a), ["_ignored_by_git", "mirror"])
+        self.assertEqual(a, b, "the two harnesses build their mirror differently")
+
+
+class AGroupedThousandIsOneNumber(unittest.TestCase):
+    """`2 446` is one figure, and the checker holds it as `2446`.
+
+    The integer census matched `\\d+` and found two numbers in it, `2` and
+    `446`, neither of which is any literal the checker has, so every grouped
+    figure in these documents was counted twice and reported unguarded twice.
+    That overstates the gap rather than flattering it, and is still a
+    measurement reporting something other than what it names.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    def _mod(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "tcov_ints", self.ROOT / "analysis" / "table_coverage.py")
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        return m
+
+    def test_a_grouped_figure_is_counted_once_and_without_its_separator(self):
+        mod = self._mod()
+        ints = mod.prose_integers()
+        errata = [n for n in ints if n["doc"] == "ERRATA.md"]
+        vals = {n["value"] for n in errata}
+        # A19 publishes the table population as `2 446`
+        self.assertIn("2446", vals,
+                      "a grouped figure is not recorded as the number it is")
+        line = next(n["line"] for n in errata if n["value"] == "2446")
+        same = [n["value"] for n in errata if n["line"] == line]
+        self.assertNotIn("446", same, "the grouped figure was also counted in halves")
+
+    def test_a_date_is_not_joined_to_the_count_after_it(self):
+        """`2026-08-27 618` is a date and a count, not one grouped figure."""
+        import re
+        src = (self.ROOT / "analysis" / "table_coverage.py").read_text(encoding="utf-8")
+        pat = re.search(r"grouped = re\.compile\(r\"(.+?)\"\)", src)
+        self.assertTrue(pat, "the grouping pattern moved")
+        rx = re.compile(pat.group(1))
+        self.assertFalse(rx.search("on 2026-08-27 618 logs were written"),
+                         "a day and the count after it were joined")
+        self.assertTrue(rx.search("all 2 446 numbers"),
+                        "a real grouped figure stopped matching")
+
+
+class TheProbeLauncherMustRefuseAHostThatCannotRunIt(unittest.TestCase):
+    """The launcher was a file in a home directory, outside every gate here.
+
+    On 2026-09-01 it asked for twenty-eight shards on an eight-processor host.
+    That is not an error anywhere: the run simply takes four times as long,
+    every process sitting at thirty per cent of a core, and it took thirty
+    minutes to notice. Every gate was green at the time and every one of them
+    was telling the truth, because `shellcheck` runs over `find . -name '*.sh'`
+    and the file was not in the repository. It is in `bench/` now, and these
+    drive each refusal rather than reading the source for it.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+    SH = ROOT / "bench" / "run_cell_probe.sh"
+
+    def _run(self, *args):
+        import subprocess
+        return subprocess.run(["bash", str(self.SH), "--check-only", *args],
+                              cwd=self.ROOT, capture_output=True, text=True,
+                              timeout=300)
+
+    def _head(self):
+        import subprocess
+        return subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.ROOT,
+                              capture_output=True, text=True).stdout.strip()
+
+    def setUp(self):
+        if not self.SH.exists():
+            self.skipTest("the launcher is not in the tree")
+
+    def test_it_refuses_more_shards_than_processors(self):
+        import os, tempfile
+        n = (os.cpu_count() or 1) + 1
+        with tempfile.TemporaryDirectory() as d:
+            r = self._run(str(n), self._head(), d, d)
+        self.assertNotEqual(r.returncode, 0,
+                            f"{n} shards accepted on {os.cpu_count()} processors")
+        self.assertIn("processor host", r.stderr)
+
+    def test_it_accepts_a_shard_count_the_host_can_run(self):
+        """The known negative: a refusal that refuses everything proves nothing."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            r = self._run("1", self._head(), d, d)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("nothing launched", r.stdout)
+
+    def test_it_refuses_a_head_it_was_not_asked_to_attest(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            r = self._run("1", "deadbeefdeadbeefdeadbeef", d, d)
+        self.assertNotEqual(r.returncode, 0, "it attested a tree nobody asked for")
+        self.assertIn("meant to attest", r.stderr)
+
+    def test_it_collects_every_exit_code_and_not_just_the_last(self):
+        """`wait` with no argument returns 0 whatever the children did.
+
+        A crashed shard and a finished one printed the same closing line, so a
+        run that lost a shard read as a run that did not.
+        """
+        src = self.SH.read_text(encoding="utf-8")
+        self.assertIn('wait "$p"', src,
+                      "the launcher waits without collecting exit codes again")
+        self.assertNotIn("\nwait\n", src, "a bare wait discards every code")
+        self.assertIn("-s \"$OUT_DIR/shard_$i.json\"", src,
+                      "nothing checks that each shard actually wrote something")
+
+
+class TypeOverAFillIsStillText(unittest.TestCase):
+    """WCAG 2.2 asks more of a label than of the shape it labels.
+
+    1.4.11 wants 3:1 between a graphical object and what is next to it; 1.4.3
+    wants 4.5:1 for type below 18 pt. The Okabe and Ito palette was chosen for
+    FILLS and clears the first everywhere it is used, but three of its hues do
+    not clear the second: vermilion measures 3.87:1 against white, green 3.42 and
+    reddish purple 3.06. Every figure here prints its values as text in the
+    series colour, so those labels were failing a criterion the lines beside them
+    passed. `figstyle.TEXT` holds a darkened twin per hue for type only, and this
+    is what keeps the twins honest: a hue added to the palette without one, or a
+    twin lightened until it no longer clears AA, fails here rather than in a
+    published figure.
+    """
+
+    @staticmethod
+    def _contrast(hex_colour):
+        r, g, b = (int(hex_colour[i:i + 2], 16) / 255 for i in (1, 3, 5))
+
+        def lin(c):
+            return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+
+        lum = 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b)
+        return 1.05 / (lum + 0.05)
+
+    def setUp(self):
+        sys.path.insert(0, str(ROOT / "analysis"))
+        import figstyle
+        self.fs = figstyle
+
+    def test_every_text_twin_clears_aa(self):
+        for fill, twin in self.fs.TEXT.items():
+            with self.subTest(fill=fill):
+                self.assertGreaterEqual(
+                    round(self._contrast(twin), 2), 4.5,
+                    f"{twin}, the type colour for {fill}, is "
+                    f"{self._contrast(twin):.2f}:1 against white")
+
+    def test_every_fill_clears_non_text_contrast_or_carries_the_edge(self):
+        # sky is 2.31:1 and is used only with figstyle.EDGE around it, which is
+        # the remedy the criterion's own understanding document names.
+        for name in ("BLUE", "VERMILION", "GREEN", "GREY", "PURPLE"):
+            fill = getattr(self.fs, name)
+            with self.subTest(fill=name):
+                self.assertGreaterEqual(round(self._contrast(fill), 2), 3.0)
+        self.assertGreaterEqual(round(self._contrast(self.fs.EDGE), 2), 3.0)
+
+    def test_the_twins_are_the_same_hue_and_darker(self):
+        """A twin that is not the same colour is a second palette, not a twin."""
+        for fill, twin in self.fs.TEXT.items():
+            if fill == twin:
+                continue
+            with self.subTest(fill=fill):
+                self.assertGreater(self._contrast(twin), self._contrast(fill))
+                f = [int(fill[i:i + 2], 16) for i in (1, 3, 5)]
+                t = [int(twin[i:i + 2], 16) for i in (1, 3, 5)]
+                self.assertEqual(sorted(range(3), key=lambda k: -f[k]),
+                                 sorted(range(3), key=lambda k: -t[k]),
+                                 f"{twin} orders its channels differently from {fill}")
+
+    def test_cell_ink_is_chosen_from_the_cell_and_both_ends_are_covered(self):
+        """A detector needs a known positive and a known negative.
+
+        The heatmap chose its ink from the VALUE (`"black" if v > 62`) while the
+        scale puts its high end in deep blue, so the darkest cells on the figure
+        carried the darkest ink.
+        """
+        self.assertEqual(self.fs.on_fill((1.0, 1.0, 1.0, 1.0)), self.fs.BLACK)
+        self.assertEqual(self.fs.on_fill((0.0, 0.0, 0.0, 1.0)), "#FFFFFF")
+        # RdBu's own ends, which is where the defect actually lived
+        self.assertEqual(self.fs.on_fill((0.019, 0.188, 0.380, 1.0)), "#FFFFFF")
+        self.assertEqual(self.fs.on_fill((0.404, 0.0, 0.121, 1.0)), "#FFFFFF")
+        self.assertEqual(self.fs.on_fill((0.968, 0.968, 0.968, 1.0)), self.fs.BLACK)
+
+    def test_no_plotting_script_prints_a_label_in_a_bare_series_colour(self):
+        """The rule has to hold in the scripts, not only in the palette."""
+        bad = []
+        for name in ("plot.py", "plot_v4_runs.py"):
+            src = (ROOT / "analysis" / name).read_text(encoding="utf-8")
+            for i, line in enumerate(src.splitlines(), 1):
+                if re.search(r"color=(C_REF|C_ACTIVE|colour|figstyle\.(VERMILION"
+                             r"|GREEN|PURPLE|SKY))\b", line) and re.search(
+                                 r"\.(text|annotate)\(", line):
+                    bad.append(f"{name}:{i}")
+                # a label whose colour argument is on its own continuation line
+                if re.match(r"\s*color=(C_REF|C_ACTIVE|colour)\s*,?\s*$", line):
+                    ctx = "\n".join(src.splitlines()[max(0, i - 4):i])
+                    if re.search(r"\.(text|annotate)\(", ctx):
+                        bad.append(f"{name}:{i}")
+        self.assertEqual(bad, [], f"labels drawn in an unlightened series colour: {bad}")

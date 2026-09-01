@@ -16,11 +16,12 @@
 -->
 
 This branch audits what this repository had published, measures what it had never
-run, and then corrects the things the audit itself got wrong. Three external
+run, and then corrects the things the audit itself got wrong. Five external
 reviews drove the last part; every specific accusation in each was verified
 against the code and the data before anything was changed, and every one that
-could be checked was right. The third review's findings are listed under
-**What the third review found**, below.
+could be checked was right. The third and the fifth have sections of their own
+below; what the other three found is recorded in ERRATA and the changelog beside
+the figures it corrected.
 
 ## The result
 
@@ -227,7 +228,7 @@ but the harness, and V3's own two sessions are 0.06 pp apart. The fourth does
 not, and both schedules are cyclic rotations that balance treatment position
 and leave the predecessor fixed, so neither could say why.
 
-**Run W is the design that can.** Five sessions of a 10 x 10 Williams square,
+**Run W is the design that can.** Five sessions of a 10 × 10 Williams square,
 row order shuffled from a per-session seed, 500 of 500 arm-runs. It uses V3's
 treatment definitions, prompts, models and server build, with a Williams
 schedule and a later harness revision, **not V3 verbatim**, which this section
@@ -338,8 +339,8 @@ requests ran to the cap.
 >
 > *(That was written before run W. W is that experiment: five sessions of a
 > 10 x 10 Williams square, 500 of 500 arm-runs, complete. The quoted block is
-> left as it was written; what it asked for exists, and the section above
-> reports it.)*
+> left as it was written; what it asked for exists, and this section reports
+> it above.)*
 
 ## What the audit got wrong about itself
 
@@ -384,11 +385,11 @@ adversarial pass over this branch's own commits found:
   stopped, a configuration column nobody read, the `100 %` on a total row. Each
   is compared against a value derived from the data, and the measurement says
   so: on 2026-09-01 the probe perturbed all 2 446 numbers across all 128
-  parsed tables of commit `7751a4e12f4c` and caught every one, in 28 shards whose
+  parsed tables of commit `8379bd1c25bd` and caught every one, in 32 shards whose
   control passed before the work and again after it. Their union is checked
-  rather than assumed: `analysis/table_coverage.py --aggregate` over the 28
+  rather than assumed: `analysis/table_coverage.py --aggregate` over the 32
   attestations, which are committed under
-  `v4_audit_2026_08_25/coverage_attestations/`, reports **28 shards, one head 7751a4e12f4c, one checker 49e094e2a933, 2 446 locations covered exactly once, 0 survived**, each attestation carrying the head, the
+  `v4_audit_2026_08_25/coverage_attestations/`, reports **32 shards, one head `8379bd1c25bd`, one checker `d7e2dab16986`, 2 446 locations covered exactly once, 0 survived**, each attestation carrying the head, the
   checker hash, the population digest, both controls and every location as a
   character span. Before 2026-08-30 nothing showed the eight had all run, or
   were disjoint, or were the same tree, and `--shard=8/8` selected nothing and
@@ -413,7 +414,7 @@ adversarial pass over this branch's own commits found:
   the checker inside a clean checkout of HEAD, and there it died 373 assertions
   early, so the probe's own baseline was broken and it was measuring nothing.
   The logs are committed now and a test refuses any path the checker opens that
-  a fresh clone would not have. A clean checkout runs all 3805 assertions and
+  a fresh clone would not have. A clean checkout runs all 3834 assertions and
   exits 0, which it did not before.
 
   Figures in those tables that are not re-derivable here say so rather than
@@ -561,9 +562,9 @@ review:
 
 ```
 python analysis/rederive_from_logs.py bench   # raw logs -> four audit files
-python analysis/verify_claims.py          # 3805 assertions, re-derived
+python analysis/verify_claims.py          # 3834 assertions, re-derived
 python analysis/check_data_integrity.py   # structure of all 77 run directories
-python -m unittest discover tests         # 316 regressions for defects shipped here
+python -m unittest discover tests         # 329 regressions for defects shipped here
 python tests/mutate.py                    # break each fix, require its test to fail
 python tests/data_mutate.py               # perturb a measurement or a published
                                           #   figure, require the checker to fail
@@ -595,13 +596,15 @@ literals. Six of them did, and were rewritten.
 - **A randomised-order run at a power that could resolve the predecessor.**
   V2 and V3 balance position and fix the predecessor, so neither can test
   whether `spec-dflash-n2` is sensitive to what ran before it. Run W is that
-  experiment and it is complete (500 of 500 arm-runs) and it returns no
+  experiment and it is complete (500 of 500 arm-runs). It returned no
   detectable predecessor-mode association, with the widest matched interval
-  spanning [−2.97, +0.86] %. That is a bound, not an answer: an effect of the
-  size that would matter sits inside it. What is still missing is the power to
-  exclude one, which is more sessions rather than a different design.
+  spanning [−2.97, +0.86] %, which is a bound rather than an answer: an effect
+  of the size that would matter sits inside it. Run W2 is the twelve-session
+  version that narrows it, reported above, and its matched contrast for
+  `spec-dflash-n2` is −0.14 % [−0.68, +0.41]. What is still open is not this
+  question but A16, the between-invocation regime.
 - **The request-mean columns.** `predicted_per_second` is llama.cpp's own field
-  and it divides `n − 1` tokens by the time for `n`, in 18 300 of 18 344
+  and it divides `n − 1` tokens by the time for `n`, in 30 300 of 30 344
   committed request rows, exactly. Every **request-mean** column in this
   repository inherits that, understating by `(n − 1) / n`: 0.33 % at 300 tokens.
   No headline figure or published delta contains it, because those are pooled

@@ -43,6 +43,12 @@ from pathlib import Path
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+
+# `analysis/` is not on the path when these run from the repository root
+import sys as _sys, pathlib as _pl
+_sys.path.insert(0, str(_pl.Path(__file__).resolve().parent))
+import figstyle                                                    # noqa: E402
+figstyle.apply(plt)
 import numpy as np
 from matplotlib.patches import Rectangle
 
@@ -73,14 +79,14 @@ SPREAD_NOTE = (
     "not repeated-run uncertainty."
 )
 
-C_REF = "#3f6d9e"      # no-speculation reference
-C_INACTIVE = "#8d9aa8"  # no draft round recorded
-C_ACTIVE = "#c0504d"    # draft rounds recorded
+C_REF = figstyle.BLUE      # no-speculation reference
+C_INACTIVE = figstyle.GREY  # no draft round recorded
+C_ACTIVE = figstyle.VERMILION    # draft rounds recorded
 
 
 def _footer(fig, extra: str = ""):
-    fig.text(0.5, 0.004, FOOTER + extra, ha="center", va="bottom",
-             fontsize=7.2, color="#5a5a5a", style="italic", wrap=True)
+    """Same reserved, wrapped, standard-size caption as every other figure."""
+    figstyle.footer(fig, (FOOTER if not extra else FOOTER + extra))
 
 
 # ---------------------------------------------------------------- load ----
@@ -219,10 +225,10 @@ def plot_mean_by_config(agg: dict[str, dict]) -> None:
         a = agg[c]
         color = (C_REF if c == "baseline"
                  else C_ACTIVE if a["requests_with_draft_rounds"] else C_INACTIVE)
-        ax.barh(y[i] + h / 2, a["request_mean_tok_s"], height=h,
-                color=color, alpha=0.95, edgecolor="white", linewidth=0.6)
-        ax.barh(y[i] - h / 2, a["pooled_tok_s"], height=h,
-                color=color, alpha=0.55, edgecolor="white", linewidth=0.6,
+        ax.barh(y[i] + h / 2, a["request_mean_tok_s"], height=h, edgecolor=figstyle.EDGE, linewidth=figstyle.EDGE_LW,
+                color=color, alpha=0.95)
+        ax.barh(y[i] - h / 2, a["pooled_tok_s"], height=h, edgecolor=figstyle.EDGE, linewidth=figstyle.EDGE_LW,
+                color=color, alpha=0.55,
                 hatch="///")
         ax.plot([a["min_tok_s"], a["max_tok_s"]], [y[i] + h / 2] * 2,
                 color="#2f2f2f", lw=0.9, alpha=0.8, solid_capstyle="butt")
@@ -234,10 +240,10 @@ def plot_mean_by_config(agg: dict[str, dict]) -> None:
         dp = 100 * (a["pooled_tok_s"] / base["pooled_tok_s"] - 1)
         ax.text(a["max_tok_s"] + 2.0, y[i] + h / 2,
                 f"mean {a['request_mean_tok_s']:.1f} ({dm:+.1f} %)",
-                va="center", ha="left", fontsize=8.4, color="#1f1f24")
+                va="center", ha="left", color="#1f1f24")
         ax.text(a["max_tok_s"] + 2.0, y[i] - h / 2,
                 f"pooled {a['pooled_tok_s']:.1f} ({dp:+.1f} %)",
-                va="center", ha="left", fontsize=8.4, color="#4a4a52")
+                va="center", ha="left", color="#4a4a52")
 
     labels = []
     for c in cfgs:
@@ -246,16 +252,15 @@ def plot_mean_by_config(agg: dict[str, dict]) -> None:
         labels.append(f"{c}\n{n}/{a['requests']} req. with a counted draft round"
                       if n else f"{c}\nno counted draft round")
     ax.set_yticks(y)
-    ax.set_yticklabels(labels, fontsize=8.6)
+    ax.set_yticklabels(labels)
     ax.set_ylim(-0.8, len(cfgs) - 0.2)
 
-    ax.axvline(base["request_mean_tok_s"], color="#3f6d9e", ls="--", lw=1.1,
+    ax.axvline(base["request_mean_tok_s"], color=figstyle.BLUE, ls="--", lw=1.1,
                label=f"no-speculation baseline, {base['request_mean_tok_s']:.1f} tok/s")
     ax.set_xlim(0, max(a["max_tok_s"] for a in agg.values()) + 44)
     ax.set_xlabel("decode rate (tokens / second)  -  higher is faster")
     ax.set_title("v1 300-token matrix: request-mean (solid) vs pooled throughput (hatched)\n"
-                 "Qwen3.6-35B-A3B UD-Q4_K_XL, one RTX 3090, single request, greedy",
-                 fontsize=11.5)
+                 "Qwen3.6-35B-A3B UD-Q4_K_XL, one RTX 3090, single request, greedy")
 
     handles = [
         plt.Rectangle((0, 0), 1, 1, color=C_REF, label="no-speculation reference"),
@@ -265,12 +270,12 @@ def plot_mean_by_config(agg: dict[str, dict]) -> None:
                    label="min-max across the ten prompts (1 run each)"),
     ]
     ax.legend(handles=handles, loc="upper center", bbox_to_anchor=(0.5, -0.055),
-              ncol=4, fontsize=8.2, frameon=False)
+              ncol=4, frameon=False)
     ax.grid(axis="x", color="#dcdcdc", lw=0.6)
     ax.set_axisbelow(True)
     plt.tight_layout(rect=[0, 0.055, 1, 1])
     _footer(fig, SPREAD_NOTE)
-    plt.savefig(OUT_DIR / "plot_mean_by_config.png", dpi=150, bbox_inches="tight")
+    plt.savefig(OUT_DIR / "plot_mean_by_config.png", dpi=figstyle.DPI, bbox_inches="tight")
     plt.close()
     print(f"  wrote {(OUT_DIR / 'plot_mean_by_config.png').relative_to(ROOT)}")
 
@@ -306,32 +311,40 @@ def plot_per_prompt(rows: list[dict], agg: dict[str, dict]) -> None:
                 if r and b and b["tok_s"]:
                     mat[i, j] = 100 * r["tok_s"] / b["tok_s"]
 
-        im = ax.imshow(mat, cmap="RdYlGn", vmin=40, vmax=105, aspect="auto")
+        im = ax.imshow(mat, cmap=figstyle.DIVERGING, vmin=40, vmax=105, aspect="auto")
         ax.set_xticks(range(len(prompts)))
         ax.set_xticklabels([display_tag(t) for t in prompts],
-                           rotation=30, ha="right", fontsize=8.4)
+                           rotation=30, ha="right")
         ax.set_yticks(range(len(cfgs)))
-        ax.set_yticklabels(cfgs, fontsize=8.4)
-        ax.set_title(title, fontsize=10, pad=6)
+        ax.set_yticklabels(cfgs)
+        ax.set_title(title, pad=6)
 
         for i, c in enumerate(cfgs):
             for j, p in enumerate(prompts):
                 v = mat[i, j]
                 if np.isnan(v):
                     continue
-                ax.text(j, i, f"{v:.0f}", ha="center", va="center", fontsize=7.6,
-                        color="black" if v > 62 else "white")
+                # the ink is chosen from what the cell actually RENDERS as,
+                # not from the value: this read `"black" if v > 62`, and RdBu
+                # puts the high end in deep blue, so every 100 and the single
+                # 104 -- the darkest cells on the figure -- were printed in
+                # black. The scale is exempt from 1.4.11 as essential; the
+                # number over it is text and 1.4.3 applies to it.
+                ax.text(j, i, f"{v:.0f}", ha="center", va="center",
+                        color=figstyle.on_fill(im.cmap(im.norm(v))))
                 if (cell.get((c, p)) or {}).get("draft_n", 0) > 0:
                     ax.add_patch(Rectangle((j - 0.5, i - 0.5), 1, 1, fill=False,
                                            edgecolor="#101010", lw=1.7))
 
+    # `aspect` is what sets the bar's LENGTH once `fraction` has set its width,
+    # and at the default 20 a bar this thin came out 55 % of the panels' height,
+    # floating beside the upper heatmap instead of describing both of them.
     fig.colorbar(im, ax=axes, label="% of the matched no-speculation baseline",
-                 fraction=0.026, pad=0.015)
+                 fraction=0.026, pad=0.015, aspect=34)
     fig.suptitle("v1 per-prompt decode rate, normalised to the matched baseline\n"
-                 "black outline = this request recorded at least one fully accepted draft round",
-                 fontsize=11.5, y=1.0)
+                 "black outline = this request recorded at least one fully accepted draft round", y=1.0)
     _footer(fig)
-    plt.savefig(OUT_DIR / "plot_per_prompt.png", dpi=150, bbox_inches="tight")
+    plt.savefig(OUT_DIR / "plot_per_prompt.png", dpi=figstyle.DPI, bbox_inches="tight")
     plt.close()
     print(f"  wrote {(OUT_DIR / 'plot_per_prompt.png').relative_to(ROOT)}")
 
@@ -345,65 +358,85 @@ def plot_acceptance_accounting(agg: dict[str, dict]) -> None:
     rep = json.loads(src.read_text(encoding="utf-8"))[0]
     d, r, s = rep["drafter_own_counters"], rep["reported"], rep["state_management"]
 
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12.2, 4.7))
+    # 12.2 x 4.7 was too small once the type came up to the standard's floor:
+    # the three two-line category labels ran into each other and both legends
+    # landed on top of the labels below them. Angling the labels made it worse,
+    # because rotated two-line text is taller still and the panel had nowhere to
+    # go. The canvas is the thing that was wrong, so the canvas is what changed.
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15.0, 6.4))
 
     bars = [
-        ("server counter\n(what v1/v2 published)", r["accepted"], r["generated"], "#c0504d"),
+        ("server counter\n(what v1/v2 published)", r["accepted"], r["generated"], figstyle.VERMILION),
         ("drafter token counter\n(same log, next line)", d["draft_tokens_accepted"],
-         d["draft_tokens_generated"], "#3f6d9e"),
+         d["draft_tokens_generated"], figstyle.BLUE),
         ("drafter sequence counter\n(same log, next line)", d["drafts_accepted"],
-         d["drafts_generated"], "#6c8c3f"),
+         d["drafts_generated"], figstyle.GREEN),
     ]
     x = np.arange(len(bars))
-    ax1.bar(x, [b[2] for b in bars], color="#d9d9d9", edgecolor="#9a9a9a",
+    # #d9d9d9 is 1.3:1 against white and its #9a9a9a border 2.8:1, so neither
+    # the bar nor its edge met the 3:1 that 1.4.11 asks of a graphic a reader
+    # needs. The palette grey is 4.54:1 and the shared edge 12.63:1.
+    ax1.bar(x, [b[2] for b in bars], color="#d9d9d9",
+            edgecolor=figstyle.EDGE, linewidth=figstyle.EDGE_LW,
             width=0.56, label="proposed / denominator")
-    ax1.bar(x, [b[1] for b in bars], color=[b[3] for b in bars],
+    # ONE colour, because the legend claims one. This drew each bar's accepted
+    # portion in its own hue while the single legend swatch showed the first of
+    # them, so a reader was told "accepted = vermilion" beside a blue accepted
+    # bar and a green one. The three counters are already named on the x axis;
+    # the colour was carrying nothing the labels did not, and was contradicting
+    # the key.
+    ax1.bar(x, [b[1] for b in bars], color=figstyle.VERMILION,
+            edgecolor=figstyle.EDGE, linewidth=figstyle.EDGE_LW,
             width=0.56, label="accepted / numerator")
     for i, (_, num, den, _c) in enumerate(bars):
         ax1.text(i, den + 4, f"{num}/{den} = {100 * num / den:.1f} %",
-                 ha="center", va="bottom", fontsize=9.4, fontweight="bold")
+                 ha="center", va="bottom", fontweight="bold")
     ax1.set_xticks(x)
-    ax1.set_xticklabels([b[0] for b in bars], fontsize=8.4)
+    ax1.set_xticklabels([b[0] for b in bars])
     ax1.set_ylabel("draft units")
     ax1.set_ylim(0, max(b[2] for b in bars) * 1.32)
     ax1.set_title("Three acceptance numbers from one run\n"
-                  "v2 verbose log, --draft-min 2 --draft-max 32, prompt 1", fontsize=10.5)
-    ax1.legend(fontsize=8.2, loc="upper center", bbox_to_anchor=(0.5, -0.21),
+                  "v2 verbose log, --draft-min 2 --draft-max 32, prompt 1")
+    ax1.legend(loc="upper center", bbox_to_anchor=(0.5, -0.46),
                ncol=2, frameon=False)
     ax1.grid(axis="y", color="#e4e4e4", lw=0.6)
     ax1.set_axisbelow(True)
 
     full = rep["attempts_fully_accepted"]
     part = rep["attempts_partially_accepted"]
-    ax2.barh([1], [full], color="#6c8c3f", height=0.5,
+    ax2.barh([1], [full], color=figstyle.GREEN, height=0.5, edgecolor=figstyle.EDGE, linewidth=figstyle.EDGE_LW,
              label=f"fully accepted -> reaches the counter ({full})")
-    ax2.barh([0], [part], color="#c0504d", height=0.5,
+    ax2.barh([0], [part], color=figstyle.VERMILION, height=0.5, edgecolor=figstyle.EDGE, linewidth=figstyle.EDGE_LW,
              label=f"partly accepted -> `continue`, discarded, re-verified ({part})")
     ax2.set_yticks([0, 1])
-    ax2.set_yticklabels(["partial\naccept", "full\naccept"], fontsize=9)
+    ax2.set_yticklabels(["partial\naccept", "full\naccept"])
     ax2.set_xlabel("verification rounds")
     ax2.set_xlim(0, max(full, part) * 1.18)
     ax2.set_title("Why the server ratio can only be 1.0\n"
-                  "target reports COMMON_CONTEXT_SEQ_RM_TYPE_FULL", fontsize=10.5)
-    ax2.legend(fontsize=8.2, loc="upper center", bbox_to_anchor=(0.5, -0.21),
+                  "target reports COMMON_CONTEXT_SEQ_RM_TYPE_FULL")
+    ax2.legend(loc="upper center", bbox_to_anchor=(0.5, -0.30),
                ncol=1, frameon=False)
     ax2.grid(axis="x", color="#e4e4e4", lw=0.6)
     ax2.set_axisbelow(True)
-    fig.suptitle("The published \"100 % draft acceptance\" is a counter artefact, not a measurement",
-                 fontsize=12.5, y=0.99)
-    plt.tight_layout(rect=[0, 0.135, 1, 0.94])
-    fig.text(0.5, 0.058,
-             f"Cost of the {part} discarded rounds: {s['checkpoints_created']} state checkpoints "
-             f"@ {s['checkpoint_mib_each']} MiB ({s['checkpoint_gib_written']} GiB written, "
-             f"{s['checkpoint_gib_read_back']} GiB restored). "
-             f"Drafter generate() alone = {rep['drafter_share_of_generation_pct']} % of the "
-             f"{rep['generation_wall_ms']} ms generation wall-clock.",
-             ha="center", va="bottom", fontsize=8.6, color="#222222")
-    fig.text(0.5, 0.005,
-             "Source: v2_3090_followup/v2_oleg_suggestions/verbose.log, build b8863-97895129e. "
-             "Reconstruct with analysis/verbose_accounting.py. Mechanism: ERRATA.md item A1.",
-             ha="center", va="bottom", fontsize=7.4, color="#5a5a5a", style="italic")
-    plt.savefig(OUT_DIR / "plot_acceptance_accounting.png", dpi=150, bbox_inches="tight")
+    fig.suptitle("The published \"100 % draft acceptance\" is a counter artefact, not a measurement", y=0.99)
+    # No bottom band is reserved any more. Reserving 13.5 % of the height and
+    # then writing the caption at a fixed y=0.058 left the legends, which hang
+    # below the axes, ending a third of the canvas above it: the figure was
+    # published with an empty band down its middle. `figstyle.footer` measures
+    # where the lowest artist actually is, which is the whole reason it exists.
+    plt.tight_layout(rect=[0, 0.0, 1, 0.94])
+    figstyle.footer(
+        fig,
+        f"Cost of the {part} discarded rounds: {s['checkpoints_created']} state "
+        f"checkpoints @ {s['checkpoint_mib_each']} MiB "
+        f"({s['checkpoint_gib_written']} GiB written, "
+        f"{s['checkpoint_gib_read_back']} GiB restored). Drafter generate() alone "
+        f"= {rep['drafter_share_of_generation_pct']} % of the "
+        f"{rep['generation_wall_ms']} ms generation wall-clock. Source: "
+        f"v2_3090_followup/v2_oleg_suggestions/verbose.log, build "
+        f"b8863-97895129e. Reconstruct with analysis/verbose_accounting.py. "
+        f"Mechanism: ERRATA.md item A1.")
+    plt.savefig(OUT_DIR / "plot_acceptance_accounting.png", dpi=figstyle.DPI, bbox_inches="tight")
     plt.close()
     print(f"  wrote {(OUT_DIR / 'plot_acceptance_accounting.png').relative_to(ROOT)}")
 

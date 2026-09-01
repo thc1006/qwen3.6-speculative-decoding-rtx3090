@@ -198,8 +198,9 @@ requests. Any master comparison must pass `--spec-type` explicitly.
   numbers land inside the eight-session intervals
   ([A17](ERRATA.md#a17-the-thinking-off-comparisons-are-not-comparisons-of-the-same-amount-of-work)).
 - ~~**A carryover-balanced version of that design.**~~ **Done 2026-08-28.**
-  Run W: five sessions of a 10 x 10 Williams square, row order shuffled from a
-  per-session seed, 500 of 500 arm-runs, run V3 verbatim except for the
+  Run W: five sessions of a 10 × 10 Williams square, row order shuffled from a
+  per-session seed, 500 of 500 arm-runs, V3's treatment definitions under a
+  later harness revision rather than V3 verbatim, differing only in the
   schedule, and run W2: the same square again for twelve sessions and 1200
   arm-runs. Every arm preceded by every other exactly once within a repeat,
   verified from the data in every session of both. The mode effect survives:

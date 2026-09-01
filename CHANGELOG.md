@@ -6,6 +6,56 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning is not strictly semver; each numbered release is a public
 publication point with its own data set.
 
+<!-- A contents block, because these documents are linked into by section name from each other and a reader arriving cold had no way to orient but to scroll. Generated from the headings; `analysis/check_links.py` validates every anchor here, so a heading renamed without this list fails the static job rather than rotting quietly. -->
+
+## Contents
+
+- [[Unreleased] — the review pass, and an adversarial pass over it](#unreleased--the-review-pass-and-an-adversarial-pass-over-it)
+  - [Run W, and the question it removes](#run-w-and-the-question-it-removes)
+  - [The three runs the third review asked for](#the-three-runs-the-third-review-asked-for)
+  - [The third review](#the-third-review)
+  - [The harness fail-open paths the same review found](#the-harness-fail-open-paths-the-same-review-found)
+  - [What the adversarial pass over this round found](#what-the-adversarial-pass-over-this-round-found)
+  - [The raw evidence is published](#the-raw-evidence-is-published)
+  - [Measured](#measured)
+  - [What the adversarial pass found in this branch's own work](#what-the-adversarial-pass-found-in-this-branchs-own-work)
+  - [Added](#added)
+  - [Fixed](#fixed)
+- [[v4.1] — 2026-08-26 · the controlled tier, and a reversal](#v41--2026-08-26--the-controlled-tier-and-a-reversal)
+  - [Added](#added)
+  - [Changed](#changed)
+  - [Retracted](#retracted)
+  - [Fixed](#fixed)
+- [[v4.0] — 2026-08-25 · audit and retraction](#v40--2026-08-25--audit-and-retraction)
+  - [Retracted](#retracted)
+  - [Corrected](#corrected)
+  - [Found during the audit](#found-during-the-audit)
+  - [Added](#added)
+  - [What survives](#what-survives)
+- [Sibling-repo notice — vllm-2x3090 v5.0 (2026-05-17)](#sibling-repo-notice--vllm-2x3090-v50-2026-05-17)
+- [[v3.0] — 2026-05-07](#v30--2026-05-07)
+  - [Added](#added)
+  - [Cross-method ranking (single 3090, Qwen3.6-35B-A3B Q4_K_XL target)](#cross-method-ranking-single-3090-qwen36-35b-a3b-q4_k_xl-target)
+  - [Mechanism note](#mechanism-note)
+- [[v2.3] — 2026-04-26 (afternoon)](#v23--2026-04-26-afternoon)
+  - [Added](#added)
+  - [Changed](#changed)
+- [[v2.2] — 2026-04-26 · documented, never tagged](#v22--2026-04-26--documented-never-tagged)
+  - [Changed](#changed)
+  - [Added](#added)
+- [[v2.1] — 2026-04-25](#v21--2026-04-25)
+  - [Added](#added)
+  - [Changed](#changed)
+  - [Older Unreleased entries (carried over from earlier in 2026-04-22 → 2026-04-25)](#older-unreleased-entries-carried-over-from-earlier-in-2026-04-22--2026-04-25)
+- [[v2.0] — 2026-04-22](#v20--2026-04-22)
+  - [Added](#added)
+  - [Changed](#changed)
+  - [Key findings](#key-findings)
+  - [Conclusion of v1 stands](#conclusion-of-v1-stands)
+- [[v1.0] — 2026-04-21](#v10--2026-04-21)
+  - [Added](#added)
+  - [Key finding](#key-finding)
+
 ## [Unreleased] — the review pass, and an adversarial pass over it
 
 **A published number is only checked if changing it breaks something, and that
@@ -28,7 +78,7 @@ parsing the last six grew the population again, as run W2's tables did after
 that. The complete pass on 2026-08-30 perturbed all 2 373 numbers across the
 124 tables of commit 0334c60dac82 and caught every one, in eight shards whose
 control passed before the work and again after it. The pass on 2026-09-01 perturbs all 2 446 numbers across the 128 tables of
-commit 7751a4e12f4c and catches every one, in 28 shards whose control passed at
+commit 8379bd1c25bd and catches every one, in 32 shards whose control passed at
 both ends and whose attestations are committed. That is
 what the W three-design table had done, in both documents that carry it: only
 the W column was read, so V2's `+12.03` and V3's `+12.17`, two thirds of a
@@ -273,8 +323,9 @@ and it passed. The other three triggers still become live only on merge.
 
 ### Run W, and the question it removes
 
-Five sessions of a 10 x 10 Williams square on 2026-08-28, 500 of 500 arm-runs,
-none failed. Run V3 verbatim except for `BENCH_ORDER`: the exported treatment
+Five sessions of a 10 × 10 Williams square on 2026-08-28, 500 of 500 arm-runs,
+none failed. V3's treatment definitions, prompts, models and server build,
+under a later harness revision, so not V3 verbatim: the exported treatment
 variables were diffed and differ in three places, all of them the schedule.
 Every arm visits every position exactly once **and** is preceded by every other
 arm exactly once within a repeat, verified from the arm-runs' own `t_start`
@@ -311,7 +362,7 @@ two are different estimands besides. Run W2 below is what removes the
 candidate; this entry claimed it two days early ([A19](ERRATA.md#a19-how-much-of-what-this-repository-publishes-would-notice-if-it-were-wrong) item 46).
 
 **Run W2 answers it: twelve sessions, and the plan committed before the driver
-ran.** 2026-08-30 to 2026-08-31, the same 10 x 10 Williams square, 1200 of 1200
+ran.** 2026-08-30 to 2026-08-31, the same 10 × 10 Williams square, 1200 of 1200
 arm-runs, none failed, 17.07 h of continuous telemetry, a separate invocation
 under its own `BENCH_RUN_LABEL` so nothing pools it with W. The thermal
 slowdown flags appear on 13 and 10 of its 10 271 loaded samples, the same order
@@ -639,7 +690,7 @@ relying on, and which matter more than any of the above:
 
 - **And a third, from chasing the second.** `predicted_per_second`: llama.cpp's
   own field, and the one every **request-mean** column in this repository is
-  the mean of: reports `1000 × (n − 1) / predicted_ms` in **18 300 of 18 344**
+  the mean of: reports `1000 × (n − 1) / predicted_ms` in **30 300 of 30 344**
   rows. It is a rate over `n − 1` tokens divided by the time for `n`. The 44
   exceptions are the legacy `bcb5eeb64` runs, so the definition also changed
   between the two tiers. Every headline figure and every delta is a pooled rate
@@ -683,6 +734,38 @@ archive alone:
 | `data/spec_accounting_20260826.json` | 12 | **12** | 0 |
 | `data/checkpoint_timers_20260826.json` | 12 | **12** | 0 |
 | `data/acceptance_counter_comparison.json` | 535 | **526** | 9 |
+
+**The figures met the contrast standard for their shapes and not for their
+type.** WCAG 2.2 asks 3:1 of a graphical object and 4.5:1 of text below 18 pt,
+and the Okabe and Ito palette, which was adopted here for its behaviour under
+colour vision deficiency, was designed for fills: against white its vermilion
+measures 3.87:1, its green 3.42 and its reddish purple 3.06. Every chart prints
+its values as text in the series colour, so those labels failed a criterion the
+lines beside them passed. Each hue now carries a darkened twin used for type
+only, at 5.34, 5.48, 5.58 and 5.85:1, and the series keep the hues they were
+chosen for. The per-prompt heatmap chose its ink from the value rather than
+from the cell, and the scale puts its high end in deep blue, so every 100 and
+the single 104 were printed in black on the darkest cells on the figure; the
+ink is now chosen per cell. The acceptance accounting figure drew each bar's
+accepted portion in a different colour under a legend that named one, and
+reserved a fixed band for a caption its legends already reached into, leaving
+an empty third down the middle of the canvas. Both are fixed, and
+`tests/test_harness_invariants.py` holds the palette, the per-cell ink and the
+rule that no label is drawn in an unlightened series colour.
+
+**Four cross-references pointed at the wrong section, and two of them were
+published that way.** A reference that names a direction rather than a target
+is not checked by anything: reorder the document and it points at whatever
+landed there. The README sent a reader looking for the definition of `draft_n`
+to "the next section", which after the reorder was three sections short, and a
+sentence about where this section used to live pointed at its neighbour
+instead. In the published tree, `PULL_REQUEST.md` placed run W "in the section
+above" when it is reported in the same one, and `v4_audit_2026_08_25/README.md`
+attributed the `--fit-target 2048` reason to "the previous section" rather than
+to the one that gives it. All four are anchor links now, which
+`analysis/check_links.py` resolves, and the directional form is refused
+outright: the checker allows it quoted, as this entry quotes it, and never
+used.
 
 **Zero records differ.** The nine that cannot be regenerated belong to
 `matrix_G_dflash_20260826_000124`, `matrix_I_conc1_20260826_012917` and
@@ -1308,18 +1391,24 @@ on the HF-discussion thread for `unsloth/Qwen3.6-35B-A3B-GGUF`.
   recipe at 85.6 tok/s (−39 %): counter-intuitively, the "wasteful"
   large-window config amortises verify + KV-management overhead better than
   tight windows.
-- 100 % draft acceptance is genuine: source read of
+- ~~100 % draft acceptance is genuine: source read of
   `common/speculative.cpp` (`impl->n_acc_tokens += n_accepted;` in
   `common_speculative_accept()`) + `--verbose` run emitting
-  `draft acceptance rate = 1.00000 (115 accepted / 115 generated)`.
+  `draft acceptance rate = 1.00000 (115 accepted / 115 generated)`.~~
+  **Corrected 2026-08-25:** ERRATA A1 quotes this sentence as the claim it
+  refutes. The ratio is 1.0 by construction on this model; the server counter
+  counts accepted against accepted.
 - Master cross-check gives identical numbers within ±0.3 % noise, so
   the regression is architectural rather than a stale-commit artefact.
 
 ### Conclusion of v1 stands
-On a consumer RTX 3090 with Qwen3.6-35B-A3B at Q4_K_M, **no speculative
+~~On a consumer RTX 3090 with Qwen3.6-35B-A3B at Q4_K_M, **no speculative
 decoding configuration is a net win** — regardless of commit, regardless of
 draft-min / draft-max, regardless of which measurement regime. H100 / H200 or
-NVLinked pairs may flip the sign.
+NVLinked pairs may flip the sign.~~ **Corrected 2026-08-26:** the v4 audit
+falsifies this on the same card and model. DFlash and the target's own
+multi-token-prediction head are net wins; v1 measured three methods and none of
+them was either.
 
 ## [v1.0] — 2026-04-21
 
@@ -1349,12 +1438,16 @@ No speculative-decode configuration achieves a net speedup over the
 non-speculative baseline of 135.7 tok/s. Mean decode drops 3–12 %
 across ngram-cache, ngram-mod, and classic draft-model variants, with
 a bimodal tail reaching 59–67 tok/s on reasoning / code prompts
-despite 100 % draft acceptance. Interpretation aligned with
+~~despite 100 % draft acceptance. Interpretation aligned with
 MoESD (arXiv 2505.19645) and Utility-Driven SD (arXiv 2506.20675):
 for a 3B-active MoE, draft batch K stays below the expert-saturation
 threshold (~94 tokens for this sparsity), so each drafted token pulls
 new experts through the memory hierarchy and verification pays for
-the union.
+the union.~~ **Corrected 2026-08-25:** the 100 % figure is a counter
+artefact and not a measurement (ERRATA A1), and the expert-union
+mechanism built on it was never supported by evidence collected here
+(ERRATA A7, A9). The slowdown is accounted for without any
+MoE-specific pathology.
 
 [v4.1]: https://github.com/thc1006/qwen3.6-speculative-decoding-rtx3090/releases/tag/v4.1
 [v4.0]: https://github.com/thc1006/qwen3.6-speculative-decoding-rtx3090/releases/tag/v4.1

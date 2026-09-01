@@ -1,5 +1,9 @@
 # Evidence and verifier, v4.2
 
+Tag `raw-evidence-2026-08-31-v4.2`. Named here because a release note that does
+not say which release it belongs to leaves a reader holding the file with no
+way to tell, and this one did not.
+
 The v4 audit's dataset and the code that checks it, published together at one
 commit. `raw-evidence-2026-08-27` is left exactly where it points, which is this
 branch's base: retargeting a tag people may already have fetched destroys the
@@ -57,7 +61,11 @@ is expected to cover, held apart from the outputs being checked.
 The primary per-request benchmark JSON is **not** regenerated. The server logs
 carry no per-request timing rows, so those files can only be integrity-checked
 against the manifest. That distinction is in the registry rather than in prose
-alone, and `.github/workflows/evidence.yml` runs the whole chain in CI.
+alone. `.github/workflows/evidence.yml` performs that whole chain when it
+runs. It has run once, on 2026-08-29, through a scoped `push` trigger, and
+passed. Its `release: published` trigger reads the workflow from the default
+branch, where this file does not yet exist, so publishing this release does not
+by itself re-run the check; that begins working when this branch merges.
 
 ## The verifier
 

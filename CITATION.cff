@@ -16,7 +16,7 @@ type: dataset
 # `v4_audit_2026_08_25/RELEASE_PROCEDURE.md`. Cite v3.0 or earlier by tag; cite
 # this work by commit until the tag exists.
 version: v4.2
-date-released: 2026-08-28
+date-released: 2026-08-31
 authors:
   - family-names: Tsai
     given-names: Hsiu-Chi
@@ -48,11 +48,12 @@ abstract: >-
   2026-08-25/26 at commit 3737e4137 adds repeated arm-runs with matched
   no-speculation baselines, verified thinking suppression, recorded concurrent
   client-request windows, per-request text and token ids, and continuous GPU
-  telemetry. Four further runs on 2026-08-27 and 2026-08-28 at the same commit
-  add a between-invocation crossover (V2, 400 arm-runs), a within-invocation
-  Latin square (V3, 200), a checkpoint split-timer probe (T4, 18) and a
-  within-invocation 10x10 Williams square with randomised row order (W, 500),
-  which together revise the archival tier's headline: under this controlled
+  telemetry. Five further runs between 2026-08-27 and 2026-08-31 at the same
+  commit add a between-invocation crossover (V2, 400 arm-runs), a
+  within-invocation Latin square (V3, 200), a checkpoint split-timer probe
+  (T4, 18), a within-invocation 10 x 10 Williams square with randomised row
+  order (W, 500) and the same square over twelve sessions (W2, 1200), which
+  together revise the archival tier's headline: under this controlled
   design DFlash n-max 2 and MTP n-max 2 exceed the no-speculation baseline on
   this card, while an external Qwen3.5-0.8B draft model falls well below it. The harness records how many client requests were outstanding at
   once, which is not the same as the number of sequences sharing a server

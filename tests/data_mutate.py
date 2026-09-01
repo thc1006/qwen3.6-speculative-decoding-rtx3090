@@ -71,8 +71,12 @@ def _ignored_by_git() -> set:
     built by `copytree` still holds every one. A mirror that carries files the
     tree does not is a control measuring something other than the subject.
     """
+    # `--directory` collapses a wholly ignored directory into one entry, so
+    # `__pycache__` is skipped as a directory instead of leaving an empty one
+    # behind; a directory only partly ignored still lists its files one by one,
+    # which is what `v4_audit_2026_08_25/data/*` needs.
     r = subprocess.run(["git", "ls-files", "--others", "--ignored",
-                        "--exclude-standard", "-z", *COPY],
+                        "--exclude-standard", "--directory", "-z", *COPY],
                        cwd=ROOT, capture_output=True, text=True, timeout=300)
     if r.returncode != 0:
         return set()
