@@ -9816,8 +9816,17 @@ chk("probe: the aggregator accepts the committed set",
 # `len(_ATT)`, not `8`: the shard count is part of the sentence the documents
 # quote, and running twenty-eight instead of eight changed it. A number written
 # here would have had to be found by the assertion failing.
-_AGG_RAW = (f"{len(_ATT)} shards, one head {_ATTJ[0]['head_sha'][:12]}, "
-            f"one checker {_ATTJ[0]['checker_sha256'][:12]}, "
+# An empty directory made this an IndexError, and an IndexError is worse than a
+# failure: the checker died here and the thirty-one assertions after it never
+# ran, so a clean checkout of a tree whose attestations were not committed
+# reported a traceback instead of "no attestations, and here is everything else
+# that is still true". The count of assertions the body publishes came from a
+# run that had them and CI's would not have. A missing set fails the assertion
+# that counts them and leaves the rest of the file able to run.
+_ATT0 = _ATTJ[0] if _ATTJ else {"head_sha": "", "checker_sha256": "",
+                                "population_sha256": ""}
+_AGG_RAW = (f"{len(_ATT)} shards, one head {_ATT0['head_sha'][:12]}, "
+            f"one checker {_ATT0['checker_sha256'][:12]}, "
             f"{_A19_POP} locations covered exactly once, 0 survived")
 chk("probe: the aggregator's own line, in its own format",
     _AGG.stdout.strip(), _AGG_RAW)
@@ -9835,7 +9844,7 @@ if _HAS_GIT:
     # these files is necessarily later than the one they were taken on
     chk("probe: the head they were taken on is an ancestor of this one",
         _sp2.run(["git", "-C", str(_repo), "merge-base", "--is-ancestor",
-                  _ATTJ[0]["head_sha"], "HEAD"], capture_output=True).returncode,
+                  _ATT0["head_sha"] or "HEAD", "HEAD"], capture_output=True).returncode,
         0)
 else:
     # Ancestry needs history. What does not need it is that the thing being
@@ -9843,8 +9852,8 @@ else:
     # `chk(..., True, True)`, an assertion that asserts nothing, and the
     # checker's own audit of its assertions is what found it.
     chk("probe: no git here, so only the shape of the attested head is checked",
-        (len(_ATTJ[0]["head_sha"]),
-         bool(re.fullmatch(r"[0-9a-f]{40}", _ATTJ[0]["head_sha"]))),
+        (len(_ATT0["head_sha"]),
+         bool(re.fullmatch(r"[0-9a-f]{40}", _ATT0["head_sha"]))),
         (40, True))
 
 

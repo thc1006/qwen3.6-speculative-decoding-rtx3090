@@ -5939,6 +5939,25 @@ class TheBootstrapAllowanceIsExactlyAsWideAsTheDeadlock(unittest.TestCase):
         self.assertIn("the shards declare different standing failures", src)
         self.assertIn("was allowed to be failing and is not ", src)
 
+    def test_the_checker_survives_an_empty_attestation_directory(self):
+        """A crash is worse than a failure, because of what does not run after it.
+
+        Every shard clones the commit under test, and until an attestation set
+        is committed that clone has none, so `_ATTJ[0]` raised IndexError and the
+        checker died 31 assertions before the end. The probe read that truncated
+        run as its baseline: `base_n` was 3805, and a perturbation to any number
+        whose only guard is one of the 31 could not be caught, because the guard
+        never ran. It would have been published as coverage.
+        """
+        src = (ROOT / "analysis" / "verify_claims.py").read_text(encoding="utf-8")
+        self.assertEqual(
+            src.count("_ATTJ[0]"), 1,
+            "an attestation field is read without the empty-set guard again")
+        self.assertIn('_ATT0 = _ATTJ[0] if _ATTJ else', src)
+        # and the assertion that COUNTS them still has to be there, or an empty
+        # directory would become silently acceptable rather than loudly wrong
+        self.assertIn('chk("probe: every shard attestation is committed"', src)
+
     def test_the_checker_holds_the_same_rule(self):
         src = (ROOT / "analysis" / "verify_claims.py").read_text(encoding="utf-8")
         self.assertIn("probe: the shards agree on what was already failing", src)
