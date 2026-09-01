@@ -1304,8 +1304,14 @@ the claim there survives on the other 526.
 > **That table was produced by running the script. CI has now reproduced it.**
 > [`.github/workflows/evidence.yml`](../.github/workflows/evidence.yml) fetched
 > the archive, checked it against the manifest, unpacked it, re-derived the
-> committed JSON from the raw logs and ran the claim checker over the result,
-> on 2026-08-29, and it passed. That was its first run: `workflow_dispatch`,
+> committed JSON from the raw logs and ran the claim checker over the result.
+> Its **first run was on 2026-08-28**, and it did all of that: it failed on the
+> last step alone, the chart comparison, and passed in full thirty-five minutes
+> later and on five days since. **It has failed since 2026-08-31**, at the first
+> step rather than the last: the tag it names is now
+> `raw-evidence-2026-08-31-v4.2`, the release this branch has not cut, so there
+> is nothing to download and every later step is skipped. It goes green again
+> when that release exists. `workflow_dispatch`,
 > `release: published` and the weekly cron all read the workflow from the
 > **default branch**, and this file lives only on `audit-2026-08-25`, so
 > `gh api .../workflows/evidence.yml/dispatches` returns 404 and the schedule

@@ -2170,7 +2170,7 @@ tables happen to reach, which is the only reason the figure moved. The prose
 half of this repository is, to a first approximation, unchecked.
 
 **And that census counts decimals only.** In the same prose, on the same lines,
-sit **2 560** whole numbers, **356** of which are not a string literal in the
+sit **2 578** whole numbers, **356** of which are not a string literal in the
 checker either. They are reported beside the decimals rather than folded into
 them, because the probe below sampled the decimal population and the rate it
 publishes is about that population; widening what a measured rate refers to,

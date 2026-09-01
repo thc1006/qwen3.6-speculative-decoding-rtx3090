@@ -418,7 +418,7 @@ adversarial pass over this branch's own commits found:
   the checker inside a clean checkout of HEAD, and there it died 373 assertions
   early, so the probe's own baseline was broken and it was measuring nothing.
   The logs are committed now and a test refuses any path the checker opens that
-  a fresh clone would not have. A clean checkout runs all 3839 assertions and
+  a fresh clone would not have. A clean checkout runs all 3844 assertions and
   exits 0, which it did not before.
 
   Figures in those tables that are not re-derivable here say so rather than
@@ -432,6 +432,12 @@ adversarial pass over this branch's own commits found:
   left carry a dagger.
 
 ## What the third review found
+
+The reviews numbered in this body are adversarial reviews of this branch, each
+taken at a named head. **They are not on this pull request's review tab and
+their text is not published here**, so what each one asked is quoted at the
+point where it is answered rather than referred to. A reader who opens the
+review tab finds it empty, and that is why.
 
 Every item below was verified against the code or the data before it was
 changed. Nothing in it was rejected.
@@ -509,8 +515,13 @@ changed. Nothing in it was rejected.
   **That was the script's output, and CI has now reproduced it.**
   `.github/workflows/evidence.yml` fetched the archive, checked it against the
   manifest, unpacked it, re-derived the committed JSON from the raw logs and
-  ran the claim checker over the result, on 2026-08-29, and it passed. That was
-  its first run: `workflow_dispatch`, `release: published` and the weekly cron
+  ran the claim checker over the result. Its first run was on 2026-08-28 and it
+  did all of that, failing on the chart comparison alone; it passed in full
+  thirty-five minutes later and on five days since. It has failed since
+  2026-08-31, at the first step instead: the tag it names is now
+  `raw-evidence-2026-08-31-v4.2`, a release this branch has not cut, so there is
+  nothing to download. It goes green again when that release exists.
+  `workflow_dispatch`, `release: published` and the weekly cron
   read the workflow from the default branch and the file exists only on this
   one, so dispatching it returns 404 and the schedule never fires. What fired
   was the `push` filter, which reads the workflow from the ref being pushed.
@@ -566,7 +577,7 @@ review:
 
 ```
 python analysis/rederive_from_logs.py bench   # raw logs -> four audit files
-python analysis/verify_claims.py          # 3839 assertions, re-derived
+python analysis/verify_claims.py          # 3844 assertions, re-derived
 python analysis/check_data_integrity.py   # structure of all 77 run directories
 python -m unittest discover tests         # 337 regressions for defects shipped here
 python tests/mutate.py                    # break each fix, require its test to fail

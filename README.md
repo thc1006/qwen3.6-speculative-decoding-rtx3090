@@ -24,7 +24,7 @@
 > and workload recorded below, not for current master, which has moved and
 > which carries open work on recurrent rollback, output row ordering and
 > hybrid checkpoint invalidation that touches these paths directly
-> ([the upstream table](#upstream-status-checked-2026-08-25-open-items-re-checked-2026-08-27)). Two limits
+> ([the upstream table](#upstream-status-checked-2026-08-25-open-items-re-checked-2026-09-01)). Two limits
 > are stated up front rather than
 > buried: the same configuration measured **twelve times in one day spans
 > 9.4 pp**, clustered by run rather than scattered, on byte-identical output
@@ -89,7 +89,7 @@
 - [Experiment registry](#experiment-registry)
 - [v1 hardware, software, and artefacts](#v1-hardware-software-and-artefacts)
 - [Follow-up experiment caveats](#follow-up-experiment-caveats)
-- [Upstream status: checked 2026-08-25, open items re-checked 2026-08-27](#upstream-status-checked-2026-08-25-open-items-re-checked-2026-08-27)
+- [Upstream status: checked 2026-08-25, open items re-checked 2026-09-01](#upstream-status-checked-2026-08-25-open-items-re-checked-2026-09-01)
 - [Related reading](#related-reading)
   - [Open upstream issues in the same territory](#open-upstream-issues-in-the-same-territory)
 - [Licence](#licence)
@@ -1083,7 +1083,7 @@ flags, is in [`BENCHMARK_ENV.md`](BENCHMARK_ENV.md) and in the dated entries of
 here is what exists nowhere else, which was checked by diffing the numbers out
 of the old section against the whole repository rather than by assuming.
 
-## Upstream status: checked 2026-08-25, open items re-checked 2026-08-27
+## Upstream status: checked 2026-08-25, open items re-checked 2026-09-01
 
 Checked against the GitHub API on 2026-08-25.
 
@@ -1100,12 +1100,12 @@ not as "current master". Future edits should keep using exact tested SHAs.
 **And `3737e4137` is one too.** Master has moved, and four open items touch the
 paths measured here. None is a code dependency of this repository; every one is
 a reason its findings are bounded to the tested snapshot. Statuses re-checked
-against the GitHub API on 2026-08-27.
+against the GitHub API on 2026-09-01.
 
 | Open upstream | Status | What it would change here |
 |---|---|---|
 | [#25004](https://github.com/ggml-org/llama.cpp/pull/25004) recurrent: equal splits for recurrent-state rollback | open, last touched 2026-08-08 | Changes concurrent recurrent-rollback batching. The discussion also reports a single-stream regression and proposes a smaller one-slot design, so the upstream answer has not converged. The batching results in run I/I2/M2 are the ones at risk |
-| [#27705](https://github.com/ggml-org/llama.cpp/pull/27705) fix: output reorder index space | open, last touched 2026-08-26 | Token-row versus output-row permutation and a post-decode layout mode flip, with regression tests. It does not claim to fix #27572. If it lands, [A11](ERRATA.md#a11-speculative-decoding-is-not-output-preserving-on-this-build-and-the-engine-is-deterministic-enough-to-prove-it) and the DFlash and MTP output and throughput figures all need a minimal replication |
+| [#27705](https://github.com/ggml-org/llama.cpp/pull/27705) fix: output reorder index space | open, last touched 2026-08-28 | Token-row versus output-row permutation and a post-decode layout mode flip, with regression tests. It does not claim to fix #27572. If it lands, [A11](ERRATA.md#a11-speculative-decoding-is-not-output-preserving-on-this-build-and-the-engine-is-deterministic-enough-to-prove-it) and the DFlash and MTP output and throughput figures all need a minimal replication |
 | [#27572](https://github.com/ggml-org/llama.cpp/issues/27572) `draft-mtp` acceptance collapses to 0.0 under `-np N` | open | Backend- and workload-dependent, on HIP with long prompts. The discussion has retracted its own first two explanations, so the issue title is not a settled mechanism. The CUDA control on this RTX 3090 does not reproduce the zero acceptance |
 | [#24055](https://github.com/ggml-org/llama.cpp/issues/24055) context checkpoints always invalidated on hybrid/recurrent models | open | The checkpoint machinery [A12](ERRATA.md#a12-what-the-checkpoint-path-costs-measured-with-timers-in-the-source) times |
 

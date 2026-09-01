@@ -316,10 +316,14 @@ branch**, and that file exists only on `audit-2026-08-25`. Dispatching it
 returns 404. Every re-derivation figure this repository published was therefore
 produced by running the script, and the documents said "CI does it" in three
 places. A `push` filter was added so the chain could be demonstrated rather
-than asserted, and on 2026-08-29 it fired for the first time: the workflow
+than asserted, and it fired for the first time on 2026-08-28: the workflow
 fetched the archive, verified it against the manifest, unpacked it, re-derived
 the committed JSON from the raw logs and ran the claim checker over the result,
-and it passed. The other three triggers still become live only on merge.
+and failed on the chart comparison alone. It passed in full thirty-five minutes
+later and on five days since. It has failed since 2026-08-31 and for a
+different reason: the tag it names became `raw-evidence-2026-08-31-v4.2`, which
+this branch has not cut, so it stops at the download and skips the rest. The
+other three triggers still become live only on merge.
 
 ### Run W, and the question it removes
 
@@ -525,7 +529,7 @@ than a literal.
 
 ### The third review
 
-A third REQUEST_CHANGES, on head `8954411`. Every accusation in it was checked
+A third review asking for changes, at head `8954411`. Every accusation in it was checked
 against the code and the data before anything moved, and every one that could be
 checked was right.
 

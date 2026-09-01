@@ -794,13 +794,6 @@ def cell_probe(tables_: list[dict], shard: tuple[int, int] = (0, 1),
     with contextlib.ExitStack() as stack:
         wt = _worktree(stack)
         base_fails, base_n, base_rc = _run(wt)
-        # RECORDED, not assumed. `_CTRL` was written by `prose_probe` alone, so
-        # a cell-probe attestation carried `control_before: pass` whichever way
-        # the control had gone: `"pass" if not _CTRL["before"]` reads `None` as
-        # passing. The refusal below is what actually protected the run, and a
-        # field that is true whatever happens is the shape this repository
-        # spends its time removing.
-        _CTRL["before"] = bool(base_fails) or base_rc != 0
         _CTRL["checker_sha"] = _sha_file(wt / "analysis" / "verify_claims.py")
         _CTRL["head"] = _head_sha(wt)
         # Computed IN the worktree, by the worktree's own copy of this module,
@@ -830,6 +823,16 @@ def cell_probe(tables_: list[dict], shard: tuple[int, int] = (0, 1),
                        if not (allow_probe_evidence
                                and f.startswith(_ALLOW_PREFIX))}
         _CTRL["allowed"] = sorted(base_fails - _unexpected)
+        # RECORDED, not assumed, and recorded ONCE. `_CTRL` was written by
+        # `prose_probe` alone, so a cell-probe attestation carried
+        # `control_before: pass` whichever way the control had gone:
+        # `"pass" if not _CTRL["before"]` reads `None` as passing. A field that
+        # is true whatever happens is the shape this repository spends its time
+        # removing. The declared baseline then added a SECOND assignment here
+        # and left the first one above standing, where it was overwritten a few
+        # lines later: deleting it changed nothing, which the mutation suite
+        # reported as a survivor. What it means is not "unguarded" but "dead",
+        # and dead code beside a guard is how a guard stops being read.
         _CTRL["before"] = bool(_unexpected) or (base_rc != 0
                                                 and not _CTRL["allowed"])
         if _CTRL["allowed"]:

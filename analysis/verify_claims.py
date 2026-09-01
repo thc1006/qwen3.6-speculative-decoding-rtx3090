@@ -5884,11 +5884,15 @@ for _f, _row in sorted(_V4R.items()):
 # and both must say the workflow has not run, because it has not
 _V4TXT = re.sub(r"\s+", " ", _norm((pathlib.Path(__file__).resolve().parents[1]
                 / "v4_audit_2026_08_25" / "README.md").read_text(encoding="utf-8")))
-# The workflow ran for the first time on 2026-08-29, from the `push` filter,
-# and passed: it fetched the archive, checked it against the manifest, unpacked
-# it, re-derived the committed JSON from the raw logs and ran this checker over
-# the result. The three documents said it never had, which was true until that
-# push, and they say what happened now.
+# The workflow ran for the first time on 2026-08-28, from the `push` filter,
+# and did everything: fetched the archive, checked it against the manifest,
+# unpacked it, re-derived the committed JSON from the raw logs and ran this
+# checker over the result. It failed on the chart comparison alone and passed in
+# full thirty-five minutes later. This comment said 2026-08-29, which is the day
+# of its third, fourth and fifth passes and not its first; the run history is
+# what says so. It has failed since 2026-08-31 at the download, because the tag
+# it names is a release this branch has not cut, and the documents say that too:
+# a reader who opens the Actions tab sees red and is owed the reason.
 chk("the audit README says the script produced the table and CI reproduced it",
     "produced by running the script. CI has now reproduced it" in _V4TXT, True)
 chk("and it no longer says the workflow has never run",
@@ -5896,6 +5900,32 @@ chk("and it no longer says the workflow has never run",
 chk("and it still says why the other three triggers cannot fire",
     "**default branch**, and this file lives only on `audit-2026-08-25`"
     in _V4TXT, True)
+# The date and the current state are checkable facts about the run history, and
+# both were wrong or missing: the documents named 2026-08-29 as the first run
+# when the first was on 2026-08-28 and failed, and none of them said the workflow
+# is red today. A reader who opens the Actions tab sees three consecutive
+# failures, and a document that says "CI has reproduced it" without saying that
+# is inviting the reader to think the two are in conflict.
+for _wdoc, _wtxt in (("the audit README", _V4TXT), ("the body", _norm(_PR))):
+    _wflat = " ".join(_wtxt.replace("*", " ").split())
+    chk(f"{_wdoc} dates the workflow's first run to the day it ran",
+        ("first run was on 2026-08-28" in _wflat, "2026-08-29, and it passed" in _wflat),
+        (True, False))
+    chk(f"{_wdoc} says the workflow is failing now, and why",
+        ("failed since 2026-08-31" in _wflat,
+         "raw-evidence-2026-08-31-v4.2" in _wflat), (True, True))
+# The body cites five numbered reviews and the pull request's review tab is
+# empty: on 2026-09-01 the API returned zero reviews, zero review comments and
+# zero comments on the only pull request this repository has. One document
+# called the third of them a `REQUEST_CHANGES`, which is GitHub's own name for a
+# state GitHub does not hold here. Neither the count nor the tab is something
+# this file can check, so what it holds is the sentence that stops a reader
+# hunting for them.
+_cl_txt = (pathlib.Path(__file__).resolve().parents[1]
+           / "CHANGELOG.md").read_text(encoding="utf-8")
+chk("the body says the numbered reviews are not on the pull request",
+    ("not on this pull request's review tab" in _norm(_PR),
+     "REQUEST_CHANGES" in _cl_txt), (True, False))
 chk("the body says the same", "CI has now reproduced it" in _PR, True)
 chk("and the body no longer says it has never run",
     "it has **never run**" in _PR, False)

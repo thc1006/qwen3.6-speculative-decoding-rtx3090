@@ -566,9 +566,10 @@ MUTATIONS = [
     # --- the attestation's own fields -------------------------------------
     ("the cell probe stops recording its opening control",
      "analysis/table_coverage.py",
-     '        _CTRL["before"] = bool(base_fails) or base_rc != 0\n'
-     '        _CTRL["checker_sha"] = _sha_file(wt / "analysis" / "verify_claims.py")',
-     '        _CTRL["checker_sha"] = _sha_file(wt / "analysis" / "verify_claims.py")',
+     '        _CTRL["before"] = bool(_unexpected) or (base_rc != 0\n'
+     '                                                and not _CTRL["allowed"])\n'
+     '        if _CTRL["allowed"]:',
+     '        if _CTRL["allowed"]:',
      "tests.test_harness_invariants.AnAttestationMustDescribeTheTreeThatMeasured"),
     ("the digest goes back to the tree the shard was launched from",
      "analysis/table_coverage.py",
