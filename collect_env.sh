@@ -1,9 +1,31 @@
 #!/usr/bin/env bash
 # Snapshot exact machine + software state for reproducibility.
 # Writes BENCHMARK_ENV.md with everything a reviewer needs to reproduce.
+#
+# Audited 2026-08-25 (see ERRATA.md). Two things this script does NOT capture,
+# both of which cost this repository real claims:
+#   * the CUDA *toolkit* version, if nvcc is not on PATH - `nvidia-smi`'s
+#     "CUDA Version" is the driver's maximum supported runtime, not the build
+#     toolkit (ERRATA F5)
+#   * the binary's sha256 - `--version` can report a fork-point commit rather
+#     than the build that ran, which is exactly how v3 ended up comparing two
+#     different binaries while believing it had one (ERRATA D4)
+# bench/retest_runner.py records both in its per-run manifest.
 set -u
 
-OUT="$(dirname "$0")/BENCHMARK_ENV.md"
+OUT="${OUT:-$(dirname "$0")/BENCHMARK_ENV.md}"
+
+# BENCHMARK_ENV.md carries audit corrections added on 2026-08-25 (the -no-cnv
+# description, the CUDA-version distinction, and the v3 --version-vs-build
+# warning). This script rewrites the file wholesale, so refuse to clobber those
+# unless the caller is explicit. Same failure mode as extract_exp2.py had.
+if [ -f "$OUT" ] && grep -q "Audit addendum\|Corrected 2026-08-25" "$OUT" 2>/dev/null; then
+    if [ "${FORCE_OVERWRITE:-0}" != "1" ]; then
+        echo "refusing to overwrite $OUT: it contains audit corrections." >&2
+        echo "write elsewhere with OUT=/path/to/new.md, or set FORCE_OVERWRITE=1" >&2
+        exit 1
+    fi
+fi
 LLAMA_REPO="${LLAMA_REPO:-$HOME/benchmarks/llama.cpp}"
 MODEL_DIR="${MODEL_DIR:-$HOME/benchmarks/models}"
 
@@ -27,7 +49,7 @@ MODEL_DIR="${MODEL_DIR:-$HOME/benchmarks/models}"
     echo '```'
     uname -a
     if command -v lsb_release >/dev/null 2>&1; then lsb_release -a 2>&1; fi
-    cat /etc/os-release 2>/dev/null | head -5
+    head -5 /etc/os-release 2>/dev/null
     echo '```'
     echo ""
     echo "## CUDA / driver"
@@ -51,7 +73,12 @@ MODEL_DIR="${MODEL_DIR:-$HOME/benchmarks/models}"
     echo ""
     echo "## Models"
     echo '```'
-    ls -lhS "$MODEL_DIR"/*/*.gguf 2>/dev/null | awk '{print $5, $9}'
+    # `find -printf` piped through `numfmt`, not `ls -lhS | awk`: a model path
+    # containing a space split into two columns and lined the size up against
+    # the wrong file. `--to=iec` reproduces what `ls -lh` printed, so the
+    # section keeps the form it was published in.
+    find "$MODEL_DIR" -mindepth 2 -maxdepth 2 -name '*.gguf' -printf '%s %p\n' \
+        2>/dev/null | sort -rn | numfmt --to=iec --field=1
     for f in "$MODEL_DIR"/*/*.gguf; do
         [ -f "$f" ] || continue
         echo "$(sha256sum "$f" | awk '{print $1"  "}')$(basename "$f")"
@@ -59,7 +86,7 @@ MODEL_DIR="${MODEL_DIR:-$HOME/benchmarks/models}"
     echo '```'
     echo ""
     echo "## Python packages (venv)"
-    VENV_PY="${VENV_PY:-$HOME/dev/reachy-agent/robot/.venv/bin/python}"
+    VENV_PY="${VENV_PY:-$(command -v python3)}"   # was a host-specific venv path
     if [ -x "$VENV_PY" ]; then
         echo '```'
         "$VENV_PY" --version

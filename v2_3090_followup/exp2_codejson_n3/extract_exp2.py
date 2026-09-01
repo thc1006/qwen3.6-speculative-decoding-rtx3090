@@ -1,3 +1,11 @@
+# ---------------------------------------------------------------------------
+# Audited 2026-08-25. The interpretation string this script emits used to end
+# "Workload-shape hypothesis ... is REFUTED for this hardware/engine". That
+# conclusion is withdrawn and the string below is the rescoped replacement, so
+# re-running this extractor no longer overwrites results.json with a retracted
+# claim. The numbers it computes are unchanged and were reproduced exactly
+# during the audit. See ../../ERRATA.md items D1, D2, D3.
+# ---------------------------------------------------------------------------
 """Extract Exp 2 (code/JSON workload, N=3, standalone 3090, llama.cpp) bench
 results from master.log into a clean per-prompt JSON for repo inclusion."""
 import json, os, re, statistics, sys
@@ -61,7 +69,7 @@ OUT = {
     "gpu": "1x RTX 3090 24GB, no power limit",
     "engine": "llama.cpp build 8889 (bcb5eeb64), post PR #22227 speculative-simple checkpoint support",
     "main_model": "Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf (~21 GB)",
-    "draft_model": "Qwen3.5-0.8B-Q4_K_M.gguf (~508 MB, vocab-matched)",
+    "draft_model": "Qwen3.5-0.8B-Q4_K_M.gguf (~508 MB, vocab-SIZE-matched only; llama.cpp's compatibility gate REJECTS the pair and falls back to token translation - see ERRATA A2)",
     "common_args": "-ngl 999 -c 16384 -fa on -ctk q8_0 -ctv q8_0 -n 200 --temp 0.5 --seed 42 -no-cnv -st",
     "prompts": PROMPTS_LABEL,
     "n_trials": 3,
@@ -77,13 +85,28 @@ OUT = {
         f"srogmann --draft-min 48 --draft-max 64 "
         f"{agg['03_srogmann_draft_48_64']['mean_tok_s']:.1f} tok/s "
         f"({agg['03_srogmann_draft_48_64']['delta_vs_baseline_pct']:+.1f}%). "
-        "All structured prompts collapse spec-decode to ~46-65% of baseline, "
-        "the same regime as v2's diverse prompts. Workload-shape hypothesis "
-        "(joshua Spark NVFP4 idea) is REFUTED for this hardware/engine."
+        "EXPLORATORY (rescoped 2026-08-25): the intended treatment - direct, "
+        "thinking-disabled, low-entropy code/JSON output - was NOT verified. "
+        "-no-cnv is rejected by llama-cli on this build, /no_think did not "
+        "disable thinking, and per-request outputs were not committed. This "
+        "does not refute the low-entropy workload hypothesis; it is a "
+        "command-level replication of the negative direction. See "
+        "../../ERRATA.md items D1, D2, D3."
     ),
 }
 
 OUT_PATH = os.path.join(HERE, "exp2_codejson_results.json")
+# Preserve any audit/errata block already present. Re-running the extractor
+# must not silently drop the 2026-08-25 rescoping (ERRATA D3).
+try:
+    with open(OUT_PATH, encoding="utf-8") as f:
+        _prev = json.load(f)
+    for _k in ("audit_2026_08_25",):
+        if _k in _prev:
+            OUT[_k] = _prev[_k]
+except (FileNotFoundError, ValueError):
+    pass
+
 with open(OUT_PATH, "w") as f:
     json.dump(OUT, f, indent=2)
 print(f"Written: {OUT_PATH}")

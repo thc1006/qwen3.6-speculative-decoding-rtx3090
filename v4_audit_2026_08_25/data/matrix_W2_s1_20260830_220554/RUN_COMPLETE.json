@@ -1,0 +1,22 @@
+{
+  "completed_at": "2026-08-30T23:31:50+0800",
+  "arms": [
+    "baseline",
+    "baseline-cap",
+    "spec-dflash-n2",
+    "spec-dflash-n2-cap",
+    "spec-dflash-n4",
+    "spec-dflash-n4-cap",
+    "spec-mtp-n2",
+    "spec-mtp-n2-cap",
+    "spec-draft-n8",
+    "spec-draft-n8-cap"
+  ],
+  "repeats": 10,
+  "prompt_set": "v1",
+  "n_prompts": 10,
+  "expected_arm_runs": 100,
+  "observed_arm_runs": 100,
+  "order_mode": "williams",
+  "schedule_is_position_balanced": true
+}

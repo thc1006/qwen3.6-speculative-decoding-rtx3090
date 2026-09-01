@@ -1,0 +1,32 @@
+########## draft-max8-translate rep0 : abort context ##########
+43237:slot update_slots: id  0 | task 2031 | restoring speculative checkpoint (pos_min = 54, pos_max = 54, size = 65864420)
+43247:srv  update_slots: decoding batch, n_tokens = 4
+43251:slot update_slots: id  0 | task 2031 | update_slots: n_draft=3, accepted=4
+43252:slot update_slots: id  0 | task 2031 | add accepted tokens: sampled=471, ids.size=4, n_draft=3
+43300:srv  update_slots: decoding batch, n_tokens = 1
+43366:srv  update_slots: decoding batch, n_tokens = 7
+43370:slot update_slots: id  0 | task 2031 | update_slots: n_draft=6, accepted=6
+43371:slot update_slots: id  0 | task 2031 | restoring speculative checkpoint (pos_min = 59, pos_max = 59, size = 65864420)
+43381:srv  update_slots: decoding batch, n_tokens = 7
+43387:/home/thc1006/bench/llama.cpp/ggml/src/ggml-cuda/ggml-cuda.cu:97: CUDA error
+43388:CUDA error: an unsupported value or parameter was passed to the function
+43390:  cublasSgemm_v2(ctx.cublas_handle(id), CUBLAS_OP_T, CUBLAS_OP_N, row_diff, src1_ncols, ne10, &alpha, src0_ddf_i, ne00, src1_ddf1_i, ne10, &beta, dst_dd_i, ldc)
+43435:#3  0x00007f0662dc1197 in ggml_cuda_error(char const*, char const*, char const*, int, char const*) () from /home/thc1006/bench/llama.cpp/build/bin/libggml-cuda.so.0
+43446:#14 0x00005b2d31f3ba40 in server_context_impl::update_slots() ()
+
+########## draft-max8-matched rep0 : abort context ##########
+38574:slot update_slots: id  0 | task 2031 | restoring speculative checkpoint (pos_min = 54, pos_max = 54, size = 65864420)
+38584:srv  update_slots: decoding batch, n_tokens = 4
+38588:slot update_slots: id  0 | task 2031 | update_slots: n_draft=3, accepted=4
+38589:slot update_slots: id  0 | task 2031 | add accepted tokens: sampled=471, ids.size=4, n_draft=3
+38625:srv  update_slots: decoding batch, n_tokens = 1
+38679:srv  update_slots: decoding batch, n_tokens = 7
+38683:slot update_slots: id  0 | task 2031 | update_slots: n_draft=6, accepted=6
+38684:slot update_slots: id  0 | task 2031 | restoring speculative checkpoint (pos_min = 59, pos_max = 59, size = 65864420)
+38694:srv  update_slots: decoding batch, n_tokens = 7
+38700:/home/thc1006/bench/llama.cpp/ggml/src/ggml-cuda/ggml-cuda.cu:97: CUDA error
+38701:CUDA error: an unsupported value or parameter was passed to the function
+38703:  cublasSgemm_v2(ctx.cublas_handle(id), CUBLAS_OP_T, CUBLAS_OP_N, row_diff, src1_ncols, ne10, &alpha, src0_ddf_i, ne00, src1_ddf1_i, ne10, &beta, dst_dd_i, ldc)
+38748:#3  0x000076840d1c1197 in ggml_cuda_error(char const*, char const*, char const*, int, char const*) () from /home/thc1006/bench/llama.cpp/build/bin/libggml-cuda.so.0
+38759:#14 0x0000563244bcaa40 in server_context_impl::update_slots() ()
+

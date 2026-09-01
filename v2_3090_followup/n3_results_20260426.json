@@ -6,7 +6,7 @@
   "gpu": "1x RTX 3090 24GB, no power limit, no overclock",
   "llama_cpp": "build 8889 (bcb5eeb64), post PR #22227 speculative-simple checkpoint support",
   "main_model": "Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf (~21 GB)",
-  "draft_model": "Qwen3.5-0.8B-Q4_K_M.gguf (~508 MB, vocab-matched)",
+  "draft_model": "Qwen3.5-0.8B-Q4_K_M.gguf (~508 MB, vocab-SIZE-matched, but NOT accepted by llama.cpp's compatibility gate - see audit_2026_08_25)",
   "common_args": "-ngl 999 -c 16384 -fa on -ctk q8_0 -ctv q8_0 -n 200 --temp 0.5 --seed 42 -no-cnv -st",
   "timestamp": "2026-04-25T22:52:20.877669Z",
   "configs": {
@@ -297,5 +297,15 @@
     "n3_srogmann": 85.5,
     "srogmann_delta_v2": -39,
     "srogmann_delta_n3": -38.6
+  },
+  "audit_2026_08_25": {
+    "status": "corrected metadata; measurements unchanged",
+    "corrections": [
+      "draft_model was described as 'vocab-matched'. It is not. llama.cpp's common_speculative_are_compatible fails on the special-token gate and falls back to token translation, because Qwen/Qwen3.5-0.8B has no generation_config.json upstream, so its GGUF carries no tokenizer.ggml.bos_token_id and llama.cpp substitutes the hard-coded GPT-2 legacy default 11 against the target's 248044. Both models set add_bos_token = false, so the gate compares a field neither uses. Re-measured 2026-08-25: fixing it is worth about +0.3 %. See ERRATA A2.",
+      "common_args contains -no-cnv, which llama-cli REJECTS on this build ('--no-conversation is not supported by llama-cli'), and the prompts append /no_think, which did not disable thinking. The measured workload is long chain-of-thought output, not direct answers. The switches that do work here are -rea off / --reasoning-budget 0, or the request-level chat_template_kwargs {'enable_thinking': false}. See ERRATA D1, D2.",
+      "GPU state was captured once, before load. 'no overclock' is supported (power.limit == power.default_limit), but nothing in this run constrains clocks or temperature DURING benchmarking. See ERRATA C4b.",
+      "The target is Qwen3.6-35B-A3B-UD-Q4_K_XL. Q4_K_M is the draft model."
+    ],
+    "see": "../ERRATA.md"
   }
 }

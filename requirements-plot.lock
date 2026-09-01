@@ -1,0 +1,32 @@
+# Hash-pinned dependencies for `analysis/plot_v4_runs.py`, used by the `charts`
+# CI job. `requirements.txt` gives ranges, which means the job that checks the
+# charts against the data could itself change without anyone changing this
+# repository. These are the exact artefacts that produced the committed charts.
+#
+# The wheels are cp313/manylinux_x86_64, so the charts job pins Python 3.13 on
+# ubuntu-latest. Regenerate with:
+#   python -m venv .v && .v/bin/pip install 'matplotlib>=3.10,<4' 'numpy>=2.0,<3'
+#   .v/bin/pip download -d wheels matplotlib numpy
+#   for w in wheels/*; do .v/bin/pip hash "$w"; done
+contourpy==1.3.3 \
+    --hash=sha256:4debd64f124ca62069f313a9cb86656ff087786016d76927ae2cf37846b006c9
+cycler==0.12.1 \
+    --hash=sha256:85cef7cff222d8644161529808465972e51340599459b8ac3ccbac5a854e0d30
+fonttools==4.63.0 \
+    --hash=sha256:22135da48a348785c5e2d5d2d9d6bec5ed44adacbaeb9db12d9493bf6c6bfa68
+kiwisolver==1.5.0 \
+    --hash=sha256:332b4f0145c30b5f5ad9374881133e5aa64320428a57c2c2b61e9d891a51c2f3
+matplotlib==3.11.1 \
+    --hash=sha256:b0a19dcf73406d3746d25a5ed42d713604c9a3e024d129b102852b0d941cb9f3
+numpy==2.5.2 \
+    --hash=sha256:29b86ff8a6cc556b47ec6b64b194815cc80e6bf5eedcc6cddfd65318cb0b4eee
+packaging==26.3 \
+    --hash=sha256:d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c
+pillow==12.3.0 \
+    --hash=sha256:0847a763afefb695bc912d7c131e7e0632d4edc1d8698f58ddabec8e46b8b6d3
+pyparsing==3.3.2 \
+    --hash=sha256:850ba148bd908d7e2411587e247a1e4f0327839c40e2e5e6d05a007ecc69911d
+python-dateutil==2.9.0.post0 \
+    --hash=sha256:a8b2bc7bffae282281c8140a97d3aa9c14da0b136dfe83f850eea9a5f7470427
+six==1.17.0 \
+    --hash=sha256:4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274

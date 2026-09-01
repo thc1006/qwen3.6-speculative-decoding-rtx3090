@@ -1,0 +1,109 @@
+{
+  "_comment": [
+    "Which runs and which artifacts the re-derivation is EXPECTED to cover, held",
+    "independently of the outputs being checked.",
+    "",
+    "rederive_from_logs.py took its comparison scope from the published files: the",
+    "acceptance run set came from the published dump, the checkpoint run set from",
+    "the published rows, and the spec-accounting log names from the published JSON.",
+    "So a run omitted from an output entirely fell OUTSIDE the comparison instead",
+    "of being reported as missing -- the one failure the re-derivation exists to",
+    "catch is the one its scope selection could not see.",
+    "",
+    "Editing this file is how the covered set changes, and a mismatch between it",
+    "and an artifact is a failure rather than a silent narrowing."
+  ],
+  "artifacts": {
+    "acceptance_counter_comparison.json": {
+      "extractor": "compare_acceptance_counters.py",
+      "key": [
+        "run",
+        "arm",
+        "repeat"
+      ],
+      "expected_runs": [
+        "matrix_C_20260825_204529",
+        "matrix_D_20260825_204529",
+        "matrix_E_threshold_20260825_224802",
+        "matrix_G_dflash_20260826_000124",
+        "matrix_H_pmin_20260826_005716",
+        "matrix_I2_conc1_20260826_014750",
+        "matrix_I2_conc4_20260826_014750",
+        "matrix_I2_conc8_20260826_014750",
+        "matrix_I_conc1_20260826_012917",
+        "matrix_J2_20260826_014750",
+        "matrix_J_dflash_fit_20260826_014308",
+        "matrix_K1_sweep_20260826_025615",
+        "matrix_K_conc4_20260826_025615",
+        "matrix_K_conc8_20260826_025615",
+        "matrix_L_thinkoff_20260826_032652",
+        "matrix_L_thinkon_20260826_032652",
+        "matrix_M1_20260826_075816",
+        "matrix_M2_conc4_20260826_081806",
+        "matrix_M2_conc8_20260826_081806",
+        "matrix_M3_thinkoff_20260826_081806",
+        "matrix_M4_q4km_20260826_081806",
+        "matrix_N_ngrammap_20260826_081806",
+        "matrix_O2_latin_20260826_153711",
+        "matrix_O3_latin_20260826_203251",
+        "matrix_O_headtohead_20260826_081806",
+        "matrix_P_extended_20260826_110747",
+        "matrix_Q_q4km_20260826_110747",
+        "matrix_Q_q8_20260826_110747",
+        "matrix_R_ext_thinkoff_20260826_110747",
+        "matrix_T3_timers_20260826_203251",
+        "matrix_T_timers_20260826_182639",
+        "matrix_U1_dflashvar_20260826_210153",
+        "matrix_U2_dflashvar_20260826_210153",
+        "matrix_U3_dflashvar_20260826_210153",
+        "matrix_U4_dflashvar_20260826_210153",
+        "matrix_U5_dflashvar_20260826_210153",
+        "matrix_U6_dflashvar_20260826_210153",
+        "matrix_V_freerun_20260826_210956",
+        "matrix_V_hardcap_20260826_210956"
+      ]
+    },
+    "checkpoint_timers_20260826.json": {
+      "extractor": "extract_checkpoint_timers.py",
+      "key": [
+        "arm",
+        "repeat"
+      ],
+      "expected_runs": [
+        "matrix_T_timers_20260826_182639"
+      ]
+    },
+    "checkpoint_timers_20260827_split.json": {
+      "extractor": "extract_checkpoint_timers.py",
+      "key": [
+        "arm",
+        "repeat"
+      ],
+      "expected_runs": [
+        "matrix_T4_split_20260827_175051"
+      ]
+    },
+    "spec_accounting_20260826.json": {
+      "extractor": "extract_spec_accounting.py",
+      "key": [
+        "run",
+        "arm"
+      ],
+      "expected_runs": [
+        "matrix_J2_20260826_014750",
+        "matrix_K1_sweep_20260826_025615",
+        "matrix_M1_20260826_075816"
+      ]
+    }
+  },
+  "not_rederived": {
+    "_comment": [
+      "What the evidence workflow does NOT do, said here so the workflow's own",
+      "name cannot imply it. The primary per-request benchmark JSON is not",
+      "regenerated from server logs: the logs do not carry per-request timing rows.",
+      "Those files are integrity-checked against EVIDENCE_MANIFEST.sha256 and",
+      "nothing more."
+    ],
+    "primary_benchmark_json": "integrity-checked against the manifest; not re-derived from logs"
+  }
+}

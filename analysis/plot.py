@@ -1,200 +1,473 @@
-"""Plot spec-decode bench results.
+"""Aggregate and plot the v1 speculative-decoding matrix.
 
-Reads every *.json under results/ and results/verify/ produced by bench_runner.py,
+Reads every *.json under results/ and results/verify/ produced by bench_runner.py
 and emits:
-    analysis/plot_mean_by_config.png    — mean tok/s per config (sorted)
-    analysis/plot_per_prompt.png        — per-prompt heatmap
-    analysis/plot_accept_vs_speed.png   — draft accept rate vs decode rate scatter
-    analysis/summary.csv                — all numbers, for the repo
+
+    analysis/summary.csv                    - one row per measured request
+    analysis/summary_by_config.csv          - per-config aggregate, all four summaries
+    analysis/plot_mean_by_config.png        - request-mean vs pooled decode throughput
+    analysis/plot_per_prompt.png            - per-prompt heatmap, % of matched baseline
+    analysis/plot_acceptance_accounting.png - what the "100 % acceptance" number means
+
+Metric definitions (see README "Metric definitions"):
+
+  request-mean   arithmetic mean of the per-request `predicted_per_second`;
+                 every prompt gets equal weight.
+  pooled         1000 * sum(predicted_n) / sum(predicted_ms); every generated
+                 token gets equal weight. Equals the harmonic mean of the
+                 per-request rates when all outputs have the same length.
+  spread         min-max across the ten prompts. One measurement per
+                 prompt/config, so this is workload heterogeneity - NOT
+                 repeated-run uncertainty, standard error, or a CI.
+
+Counter semantics (2026-08-25 audit): `draft_n` / `draft_n_accepted` as
+reported by llama-server at commit 97895129e count only draft tokens from
+verification rounds that were accepted in full. On this hybrid Gated-DeltaNet
+target the context reports COMMON_CONTEXT_SEQ_RM_TYPE_FULL, so partially
+accepted rounds take an early `continue` and never reach either counter. The
+ratio is therefore 1.0 by construction and `draft_n = 0` means "no fully
+accepted round was recorded", not "speculation did not run". See
+analysis/verbose_accounting.py and ERRATA.md item A1.
 
 Run: python analysis/plot.py  (from repo root)
 """
 from __future__ import annotations
 
+import csv
 import json
+import statistics as st
 import sys
+from collections import defaultdict
 from pathlib import Path
-from typing import Any
 
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+
+# `analysis/` is not on the path when these run from the repository root
+import sys as _sys, pathlib as _pl
+_sys.path.insert(0, str(_pl.Path(__file__).resolve().parent))
+import figstyle                                                    # noqa: E402
+figstyle.apply(plt)
 import numpy as np
-import pandas as pd
+from matplotlib.patches import Rectangle
 
 ROOT = Path(__file__).resolve().parents[1]
 RESULT_DIRS = [ROOT / "results", ROOT / "results/verify"]
 OUT_DIR = ROOT / "analysis"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-# 2026-05-08 update annotation — applied to all v1 charts as a small footer.
-# Originally (2026-04-26) said "hardware-class-independent" based on the
-# A100 NVLink Δ −11.4 % datapoint. The v3 clean A/B retest in the sibling
-# repo (cache-OFF) flipped the vLLM 2× RTX 3090 sign to +27.5 %, and the
-# v3.0 README correction (commit 3eef116) reframes the negative finding
-# as **engine + spec-method specific to llama.cpp draft-spec on consumer
-# Ampere with Q4 target**, not hardware-class-independent. The v3 DFlash
-# bench (2026-05-07) confirms the same direction for DFlash specifically.
-V22_FOOTER = (
-    "Updated 2026-05-08 · negative finding is engine+spec-method specific "
-    "to llama.cpp draft-spec / DFlash on consumer Ampere + Q4 target; vLLM "
-    "MTP on 2× RTX 3090 PCIe is +27.5 % (sibling repo qwen3.6-vllm-2x3090 "
-    "v3/v4). DFlash on 3090: NET LOSS −44.6 % (v3_dflash_2026_05_07/)."
+PROMPT_ORDER = ["short_greet", "short_q", "medium_chat", "medium_rec",
+                "reasoning", "long_explain", "code_small",
+                "multi_turn_1", "multi_turn_2", "zh_cn"]
+
+# `zh_cn` is the tag emitted by bench_runner.py; the prompt itself is
+# Traditional Chinese (ERRATA C2). The data export keeps the historical tag so
+# summary.csv still joins against the raw JSON; only the charts relabel it.
+TAG_RENAME = {"zh_cn": "zh_hant"}
+
+
+def display_tag(tag: str) -> str:
+    return TAG_RENAME.get(tag, tag)
+
+FOOTER = (
+    "v1 matrix, 2026-04-21, llama.cpp 97895129e, one RTX 3090, Qwen3.6-35B-A3B-UD-Q4_K_XL, "
+    "greedy, one measured request per prompt/config. Scope and known confounds: ERRATA.md."
+)
+SPREAD_NOTE = (
+    " Spread bars are min-max across the ten prompts (workload heterogeneity), "
+    "not repeated-run uncertainty."
 )
 
-
-def _v22_footer(fig):
-    fig.text(
-        0.5, 0.005, V22_FOOTER,
-        ha="center", va="bottom",
-        fontsize=7.6, color="#666666", style="italic",
-    )
+C_REF = figstyle.BLUE      # no-speculation reference
+C_INACTIVE = figstyle.GREY  # no draft round recorded
+C_ACTIVE = figstyle.VERMILION    # draft rounds recorded
 
 
-def load_all() -> pd.DataFrame:
-    rows = []
+def _footer(fig, extra: str = ""):
+    """Same reserved, wrapped, standard-size caption as every other figure."""
+    figstyle.footer(fig, (FOOTER if not extra else FOOTER + extra))
+
+
+# ---------------------------------------------------------------- load ----
+
+def load_all() -> list[dict]:
+    rows: list[dict] = []
     for d in RESULT_DIRS:
         if not d.exists():
             continue
         for f in sorted(d.glob("*.json")):
             try:
                 obj = json.loads(f.read_text(encoding="utf-8"))
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - keep going over a bad file
                 print(f"  skip {f}: {e}", file=sys.stderr)
                 continue
-            config = obj.get("config", f.stem)
             meta = obj.get("meta", {}) or {}
             for r in obj.get("rows", []):
+                tag = r.get("tag")
                 rows.append({
-                    "config":        config,
-                    "source_file":   f.name,
-                    "prompt":        r.get("tag"),
-                    "tok_s":         r.get("predicted_per_second", 0),
-                    "wall_ms":       r.get("wall_ms", 0),
-                    "predicted_ms":  r.get("predicted_ms", 0),
-                    "predicted_n":   r.get("predicted_n", 0),
-                    "prompt_n":      r.get("prompt_tokens", 0),
-                    "draft_n":       r.get("draft_n", 0),
-                    "draft_acc":     r.get("draft_n_accepted", 0),
-                    "max_tokens":    meta.get("max_tokens", 300),
-                    "fa":            meta.get("fa", True),
-                    "kv_q8":         meta.get("kv_q8", True),
-                    "commit":        obj.get("llama_cpp_commit", "?"),
+                    "config":       obj.get("config", f.stem),
+                    "source_file":  f.name,
+                    "prompt":       tag,
+                    "tok_s":        float(r.get("predicted_per_second", 0) or 0),
+                    "wall_ms":      float(r.get("wall_ms", 0) or 0),
+                    "predicted_ms": float(r.get("predicted_ms", 0) or 0),
+                    "predicted_n":  int(r.get("predicted_n", 0) or 0),
+                    "prompt_n":     int(r.get("prompt_tokens", 0) or 0),
+                    "draft_n":      int(r.get("draft_n", 0) or 0),
+                    "draft_acc":    int(r.get("draft_n_accepted", 0) or 0),
+                    "max_tokens":   int(meta.get("max_tokens", 300)),
+                    "fa":           meta.get("fa", True),
+                    "kv_q8":        meta.get("kv_q8", True),
+                    "commit":       obj.get("llama_cpp_commit", "?"),
                 })
-    return pd.DataFrame(rows)
+    return rows
 
 
-def plot_mean_by_config(df: pd.DataFrame):
-    if df.empty: return
-    agg = (df.groupby("config")["tok_s"]
-             .agg(["mean", "min", "max", "std", "count"])
-             .sort_values("mean", ascending=True))
-    fig, ax = plt.subplots(figsize=(11, max(4, 0.4 * len(agg))))
-    colors = ["#d62728" if m < 130 else "#ff7f0e" if m < 140 else "#2ca02c"
-              for m in agg["mean"]]
-    ax.barh(
-        agg.index, agg["mean"],
-        xerr=agg["std"], color=colors, alpha=0.85,
-        error_kw=dict(ecolor="#404040", lw=0.9, alpha=0.85, capsize=2.5),
-    )
-    # Place number labels past the error-bar max so they never overlap the
-    # whisker/cap (high-stdev red configs had labels struck through before).
-    max_x = max(row["mean"] + (row["std"] if row["std"] == row["std"] else 0) for _, row in agg.iterrows())
-    label_pad = 3.0
-    for i, (cfg, row) in enumerate(agg.iterrows()):
-        std = row["std"] if row["std"] == row["std"] else 0  # NaN-safe
-        xpos = row["mean"] + std + label_pad
-        ax.text(xpos, i, f"{row['mean']:.1f} (±{std:.1f})",
-                va="center", ha="left", fontsize=9, color="#1f1f24")
-    ax.set_xlim(0, max_x + 25)
-    ax.axvline(x=107, color="gray", linestyle="--", linewidth=1, label="Ollama Q4_K_M (107 tok/s)")
-    ax.set_xlabel("Decode speed (tokens / second)")
-    ax.set_title("Qwen3.6-35B-A3B UD-Q4_K_XL on RTX 3090 (single GPU, batch=1)")
-    ax.legend(loc="lower right")
-    plt.tight_layout(rect=[0, 0.04, 1, 1])
-    _v22_footer(fig)
-    plt.savefig(OUT_DIR / "plot_mean_by_config.png", dpi=140, bbox_inches="tight")
-    plt.close()
-    print(f"  wrote {OUT_DIR / 'plot_mean_by_config.png'}")
+def by_config(rows: list[dict]) -> dict[str, list[dict]]:
+    out: dict[str, list[dict]] = defaultdict(list)
+    for r in rows:
+        out[r["config"]].append(r)
+    return out
 
 
-def plot_per_prompt_heatmap(df: pd.DataFrame):
-    if df.empty: return
-    pivot = df.pivot_table(index="config", columns="prompt", values="tok_s", aggfunc="mean")
-    # order prompts consistently
-    preferred = ["short_greet", "short_q", "medium_chat", "medium_rec",
-                 "reasoning", "long_explain", "code_small",
-                 "multi_turn_1", "multi_turn_2", "zh_cn"]
-    cols = [c for c in preferred if c in pivot.columns] + \
-           [c for c in pivot.columns if c not in preferred]
-    pivot = pivot[cols]
-    fig, ax = plt.subplots(figsize=(max(8, 0.8 * len(cols)), max(4, 0.3 * len(pivot))))
-    im = ax.imshow(pivot.values, cmap="RdYlGn", vmin=60, vmax=145, aspect="auto")
-    ax.set_xticks(range(len(cols))); ax.set_xticklabels(cols, rotation=30, ha="right")
-    ax.set_yticks(range(len(pivot.index))); ax.set_yticklabels(pivot.index)
-    for i in range(len(pivot.index)):
-        for j in range(len(cols)):
-            v = pivot.values[i, j]
-            if np.isnan(v): continue
-            ax.text(j, i, f"{v:.0f}", ha="center", va="center",
-                    color="black" if v > 100 else "white", fontsize=8)
-    plt.colorbar(im, ax=ax, label="tok / s")
-    ax.set_title("Decode speed per prompt × config")
-    plt.tight_layout(rect=[0, 0.05, 1, 1])
-    _v22_footer(fig)
-    plt.savefig(OUT_DIR / "plot_per_prompt.png", dpi=140, bbox_inches="tight")
-    plt.close()
-    print(f"  wrote {OUT_DIR / 'plot_per_prompt.png'}")
+def aggregate(rows: list[dict]) -> dict[str, dict]:
+    agg: dict[str, dict] = {}
+    for cfg, v in by_config(rows).items():
+        rates = [r["tok_s"] for r in v]
+        tot_n = sum(r["predicted_n"] for r in v)
+        tot_ms = sum(r["predicted_ms"] for r in v)
+        agg[cfg] = {
+            "config": cfg,
+            "max_tokens": v[0]["max_tokens"],
+            "requests": len(v),
+            "request_mean_tok_s": st.mean(rates),
+            "pooled_tok_s": 1000 * tot_n / tot_ms if tot_ms else float("nan"),
+            "median_tok_s": st.median(rates),
+            "min_tok_s": min(rates),
+            "max_tok_s": max(rates),
+            "across_prompt_sd": st.stdev(rates) if len(rates) > 1 else 0.0,
+            "requests_with_draft_rounds": sum(1 for r in v if r["draft_n"] > 0),
+            "counted_draft_tokens": sum(r["draft_n"] for r in v),
+            "counted_draft_accepted": sum(r["draft_acc"] for r in v),
+            "generated_tokens": tot_n,
+            "decode_ms": tot_ms,
+        }
+    return agg
 
 
-def plot_accept_vs_speed(df: pd.DataFrame):
-    with_draft = df[df["draft_n"] > 0].copy()
-    if with_draft.empty:
-        print("  no draft stats, skip accept-vs-speed plot")
+def reference_for(cfg: str, agg: dict[str, dict]) -> str | None:
+    """Long-output runs must be compared against the long-output baseline.
+
+    Returns None when that reference is not in the data, so a partial results
+    directory produces blank deltas rather than a KeyError.
+    """
+    ref = "baseline-1000tok" if agg[cfg]["max_tokens"] == 1000 else "baseline"
+    return ref if ref in agg else None
+
+
+# ------------------------------------------------------------ csv out ----
+
+def write_csvs(rows: list[dict], agg: dict[str, dict]) -> None:
+    fields = ["config", "source_file", "prompt", "tok_s", "wall_ms", "predicted_ms",
+              "predicted_n", "prompt_n", "draft_n", "draft_acc", "max_tokens",
+              "fa", "kv_q8", "commit"]
+    with (OUT_DIR / "summary.csv").open("w", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=fields)
+        w.writeheader()
+        w.writerows(rows)
+    print(f"  wrote {(OUT_DIR / 'summary.csv').relative_to(ROOT)}")
+
+    cols = ["config", "max_tokens", "requests", "reference",
+            "request_mean_tok_s", "request_mean_delta_pct",
+            "pooled_tok_s", "pooled_delta_pct",
+            "median_tok_s", "min_tok_s", "max_tok_s", "across_prompt_sd",
+            "requests_with_draft_rounds", "counted_draft_tokens",
+            "counted_draft_accepted", "generated_tokens", "decode_ms"]
+    order = sorted(agg, key=lambda c: -agg[c]["request_mean_tok_s"])
+    with (OUT_DIR / "summary_by_config.csv").open("w", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=cols)
+        w.writeheader()
+        for cfg in order:
+            a = dict(agg[cfg])
+            ref = reference_for(cfg, agg)
+            a["reference"] = ref or ""
+            if ref:
+                a["request_mean_delta_pct"] = round(
+                    100 * (a["request_mean_tok_s"] / agg[ref]["request_mean_tok_s"] - 1), 2)
+                a["pooled_delta_pct"] = round(
+                    100 * (a["pooled_tok_s"] / agg[ref]["pooled_tok_s"] - 1), 2)
+            else:
+                a["request_mean_delta_pct"] = ""
+                a["pooled_delta_pct"] = ""
+            for k in ("request_mean_tok_s", "pooled_tok_s", "median_tok_s",
+                      "min_tok_s", "max_tok_s", "across_prompt_sd", "decode_ms"):
+                a[k] = round(a[k], 3)
+            w.writerow({k: a[k] for k in cols})
+    print(f"  wrote {(OUT_DIR / 'summary_by_config.csv').relative_to(ROOT)}")
+
+
+# --------------------------------------------------------------- plots ----
+
+def plot_mean_by_config(agg: dict[str, dict]) -> None:
+    cfgs = [c for c in agg if agg[c]["max_tokens"] == 300]
+    if not cfgs or "baseline" not in agg:
+        print("  no 300-token group with a `baseline` reference - skipping bar chart")
         return
-    with_draft["accept_rate"] = with_draft["draft_acc"] / with_draft["draft_n"].clip(lower=1)
-    fig, ax = plt.subplots(figsize=(8, 6))
-    for cfg, sub in with_draft.groupby("config"):
-        ax.scatter(sub["accept_rate"] * 100, sub["tok_s"], label=cfg, s=60, alpha=0.7)
-    ax.axhline(y=135.7, color="gray", linestyle="--", label="baseline 135.7 tok/s")
-    ax.set_xlabel("Draft acceptance rate (%)")
-    ax.set_ylabel("Decode speed (tok / s)")
-    ax.set_title("Anomaly: 100% acceptance does not imply speedup on MoE")
-    ax.legend(fontsize=8, loc="lower left")
-    plt.tight_layout(rect=[0, 0.05, 1, 1])
-    _v22_footer(fig)
-    plt.savefig(OUT_DIR / "plot_accept_vs_speed.png", dpi=140, bbox_inches="tight")
+    cfgs.sort(key=lambda c: agg[c]["pooled_tok_s"])
+    base = agg["baseline"]
+
+    y = np.arange(len(cfgs))
+    h = 0.38
+    fig, ax = plt.subplots(figsize=(12.4, max(5.0, 0.62 * len(cfgs))))
+
+    for i, c in enumerate(cfgs):
+        a = agg[c]
+        color = (C_REF if c == "baseline"
+                 else C_ACTIVE if a["requests_with_draft_rounds"] else C_INACTIVE)
+        ax.barh(y[i] + h / 2, a["request_mean_tok_s"], height=h, edgecolor=figstyle.EDGE, linewidth=figstyle.EDGE_LW,
+                color=color, alpha=0.95)
+        ax.barh(y[i] - h / 2, a["pooled_tok_s"], height=h, edgecolor=figstyle.EDGE, linewidth=figstyle.EDGE_LW,
+                color=color, alpha=0.55,
+                hatch="///")
+        ax.plot([a["min_tok_s"], a["max_tok_s"]], [y[i] + h / 2] * 2,
+                color="#2f2f2f", lw=0.9, alpha=0.8, solid_capstyle="butt")
+        for x in (a["min_tok_s"], a["max_tok_s"]):
+            ax.plot([x, x], [y[i] + h / 2 - 0.09, y[i] + h / 2 + 0.09],
+                    color="#2f2f2f", lw=0.9, alpha=0.8)
+
+        dm = 100 * (a["request_mean_tok_s"] / base["request_mean_tok_s"] - 1)
+        dp = 100 * (a["pooled_tok_s"] / base["pooled_tok_s"] - 1)
+        ax.text(a["max_tok_s"] + 2.0, y[i] + h / 2,
+                f"mean {a['request_mean_tok_s']:.1f} ({dm:+.1f} %)",
+                va="center", ha="left", color="#1f1f24")
+        ax.text(a["max_tok_s"] + 2.0, y[i] - h / 2,
+                f"pooled {a['pooled_tok_s']:.1f} ({dp:+.1f} %)",
+                va="center", ha="left", color="#4a4a52")
+
+    labels = []
+    for c in cfgs:
+        a = agg[c]
+        n = a["requests_with_draft_rounds"]
+        labels.append(f"{c}\n{n}/{a['requests']} req. with a counted draft round"
+                      if n else f"{c}\nno counted draft round")
+    ax.set_yticks(y)
+    ax.set_yticklabels(labels)
+    ax.set_ylim(-0.8, len(cfgs) - 0.2)
+
+    ax.axvline(base["request_mean_tok_s"], color=figstyle.BLUE, ls="--", lw=1.1,
+               label=f"no-speculation baseline, {base['request_mean_tok_s']:.1f} tok/s")
+    ax.set_xlim(0, max(a["max_tok_s"] for a in agg.values()) + 44)
+    ax.set_xlabel("decode rate (tokens / second)  -  higher is faster")
+    ax.set_title("v1 300-token matrix: request-mean (solid) vs pooled throughput (hatched)\n"
+                 "Qwen3.6-35B-A3B UD-Q4_K_XL, one RTX 3090, single request, greedy")
+
+    handles = [
+        plt.Rectangle((0, 0), 1, 1, color=C_REF, label="no-speculation reference"),
+        plt.Rectangle((0, 0), 1, 1, color=C_INACTIVE, label="no counted draft round"),
+        plt.Rectangle((0, 0), 1, 1, color=C_ACTIVE, label="counted draft rounds present"),
+        plt.Line2D([0], [0], color="#2f2f2f", lw=0.9,
+                   label="min-max across the ten prompts (1 run each)"),
+    ]
+    ax.legend(handles=handles, loc="upper center", bbox_to_anchor=(0.5, -0.055),
+              ncol=4, frameon=False)
+    ax.grid(axis="x", color="#dcdcdc", lw=0.6)
+    ax.set_axisbelow(True)
+    plt.tight_layout(rect=[0, 0.055, 1, 1])
+    _footer(fig, SPREAD_NOTE)
+    plt.savefig(OUT_DIR / "plot_mean_by_config.png", dpi=figstyle.DPI, bbox_inches="tight")
     plt.close()
-    print(f"  wrote {OUT_DIR / 'plot_accept_vs_speed.png'}")
+    print(f"  wrote {(OUT_DIR / 'plot_mean_by_config.png').relative_to(ROOT)}")
 
 
-def write_summary_csv(df: pd.DataFrame):
-    if df.empty: return
-    df.to_csv(OUT_DIR / "summary.csv", index=False)
-    print(f"  wrote {OUT_DIR / 'summary.csv'}")
-    # Aggregated
-    agg = (df.groupby("config")
-             .agg(mean_tok_s=("tok_s", "mean"),
-                  min_tok_s=("tok_s", "min"),
-                  max_tok_s=("tok_s", "max"),
-                  std_tok_s=("tok_s", "std"),
-                  runs=("tok_s", "count"),
-                  total_draft=("draft_n", "sum"),
-                  total_accept=("draft_acc", "sum"))
-             .sort_values("mean_tok_s", ascending=False))
-    agg["accept_rate_pct"] = np.where(agg["total_draft"] > 0,
-                                       100 * agg["total_accept"] / agg["total_draft"].clip(lower=1),
-                                       np.nan)
-    agg.to_csv(OUT_DIR / "summary_by_config.csv")
-    print(f"  wrote {OUT_DIR / 'summary_by_config.csv'}")
+def plot_per_prompt(rows: list[dict], agg: dict[str, dict]) -> None:
+    groups = [(cap, title) for cap, title in
+              [(300, "300-token cap, vs `baseline`"),
+               (1000, "1000-token cap, vs `baseline-1000tok`")]
+              if any(agg[c]["max_tokens"] == cap for c in agg)
+              and ("baseline" if cap == 300 else "baseline-1000tok") in agg]
+    if not groups:
+        print("  no group has its matched baseline - skipping heatmap")
+        return
+    heights = [len([c for c in agg if agg[c]["max_tokens"] == cap]) for cap, _ in groups]
+    fig, axes = plt.subplots(
+        len(groups), 1, figsize=(11.6, 0.42 * sum(heights) + 3.0),
+        gridspec_kw={"height_ratios": heights, "hspace": 0.55},
+        constrained_layout=False, squeeze=False)
+    axes = [a[0] for a in axes]
+
+    cell = {(r["config"], r["prompt"]): r for r in rows}
+    im = None
+    for ax, (cap, title) in zip(axes, groups):
+        cfgs = [c for c in agg if agg[c]["max_tokens"] == cap]
+        cfgs.sort(key=lambda c: -agg[c]["pooled_tok_s"])
+        ref_cfg = "baseline-1000tok" if cap == 1000 else "baseline"
+        prompts = [p for p in PROMPT_ORDER if (ref_cfg, p) in cell]
+
+        mat = np.full((len(cfgs), len(prompts)), np.nan)
+        for i, c in enumerate(cfgs):
+            for j, p in enumerate(prompts):
+                r, b = cell.get((c, p)), cell.get((ref_cfg, p))
+                if r and b and b["tok_s"]:
+                    mat[i, j] = 100 * r["tok_s"] / b["tok_s"]
+
+        im = ax.imshow(mat, cmap=figstyle.DIVERGING, vmin=40, vmax=105, aspect="auto")
+        ax.set_xticks(range(len(prompts)))
+        ax.set_xticklabels([display_tag(t) for t in prompts],
+                           rotation=30, ha="right")
+        ax.set_yticks(range(len(cfgs)))
+        ax.set_yticklabels(cfgs)
+        ax.set_title(title, pad=6)
+
+        for i, c in enumerate(cfgs):
+            for j, p in enumerate(prompts):
+                v = mat[i, j]
+                if np.isnan(v):
+                    continue
+                # the ink is chosen from what the cell actually RENDERS as,
+                # not from the value: this read `"black" if v > 62`, and RdBu
+                # puts the high end in deep blue, so every 100 and the single
+                # 104 -- the darkest cells on the figure -- were printed in
+                # black. The scale is exempt from 1.4.11 as essential; the
+                # number over it is text and 1.4.3 applies to it.
+                ax.text(j, i, f"{v:.0f}", ha="center", va="center",
+                        color=figstyle.on_fill(im.cmap(im.norm(v))))
+                if (cell.get((c, p)) or {}).get("draft_n", 0) > 0:
+                    ax.add_patch(Rectangle((j - 0.5, i - 0.5), 1, 1, fill=False,
+                                           edgecolor="#101010", lw=1.7))
+
+    # `aspect` is what sets the bar's LENGTH once `fraction` has set its width,
+    # and at the default 20 a bar this thin came out 55 % of the panels' height,
+    # floating beside the upper heatmap instead of describing both of them.
+    fig.colorbar(im, ax=axes, label="% of the matched no-speculation baseline",
+                 fraction=0.026, pad=0.015, aspect=34)
+    fig.suptitle("v1 per-prompt decode rate, normalised to the matched baseline\n"
+                 "black outline = this request recorded at least one fully accepted draft round", y=1.0)
+    _footer(fig)
+    plt.savefig(OUT_DIR / "plot_per_prompt.png", dpi=figstyle.DPI, bbox_inches="tight")
+    plt.close()
+    print(f"  wrote {(OUT_DIR / 'plot_per_prompt.png').relative_to(ROOT)}")
+
+
+def plot_acceptance_accounting(agg: dict[str, dict]) -> None:
+    """Replaces the retracted plot_accept_vs_speed.png (see ERRATA.md item A1)."""
+    src = OUT_DIR / "verbose_accounting.json"
+    if not src.exists():
+        print("  no analysis/verbose_accounting.json - run analysis/verbose_accounting.py first")
+        return
+    rep = json.loads(src.read_text(encoding="utf-8"))[0]
+    d, r, s = rep["drafter_own_counters"], rep["reported"], rep["state_management"]
+
+    # 12.2 x 4.7 was too small once the type came up to the standard's floor:
+    # the three two-line category labels ran into each other and both legends
+    # landed on top of the labels below them. Angling the labels made it worse,
+    # because rotated two-line text is taller still and the panel had nowhere to
+    # go. The canvas is the thing that was wrong, so the canvas is what changed.
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15.0, 6.4))
+
+    bars = [
+        ("server counter\n(what v1/v2 published)", r["accepted"], r["generated"], figstyle.VERMILION),
+        ("drafter token counter\n(same log, next line)", d["draft_tokens_accepted"],
+         d["draft_tokens_generated"], figstyle.BLUE),
+        ("drafter sequence counter\n(same log, next line)", d["drafts_accepted"],
+         d["drafts_generated"], figstyle.GREEN),
+    ]
+    x = np.arange(len(bars))
+    # #d9d9d9 is 1.3:1 against white and its #9a9a9a border 2.8:1, so neither
+    # the bar nor its edge met the 3:1 that 1.4.11 asks of a graphic a reader
+    # needs. The palette grey is 4.54:1 and the shared edge 12.63:1.
+    ax1.bar(x, [b[2] for b in bars], color="#d9d9d9",
+            edgecolor=figstyle.EDGE, linewidth=figstyle.EDGE_LW,
+            width=0.56, label="proposed / denominator")
+    # ONE colour, because the legend claims one. This drew each bar's accepted
+    # portion in its own hue while the single legend swatch showed the first of
+    # them, so a reader was told "accepted = vermilion" beside a blue accepted
+    # bar and a green one. The three counters are already named on the x axis;
+    # the colour was carrying nothing the labels did not, and was contradicting
+    # the key.
+    ax1.bar(x, [b[1] for b in bars], color=figstyle.VERMILION,
+            edgecolor=figstyle.EDGE, linewidth=figstyle.EDGE_LW,
+            width=0.56, label="accepted / numerator")
+    for i, (_, num, den, _c) in enumerate(bars):
+        ax1.text(i, den + 4, f"{num}/{den} = {100 * num / den:.1f} %",
+                 ha="center", va="bottom", fontweight="bold")
+    ax1.set_xticks(x)
+    ax1.set_xticklabels([b[0] for b in bars])
+    ax1.set_ylabel("draft units")
+    ax1.set_ylim(0, max(b[2] for b in bars) * 1.32)
+    ax1.set_title("Three acceptance numbers from one run\n"
+                  "v2 verbose log, --draft-min 2 --draft-max 32, prompt 1")
+    ax1.legend(loc="upper center", bbox_to_anchor=(0.5, -0.46),
+               ncol=2, frameon=False)
+    ax1.grid(axis="y", color="#e4e4e4", lw=0.6)
+    ax1.set_axisbelow(True)
+
+    full = rep["attempts_fully_accepted"]
+    part = rep["attempts_partially_accepted"]
+    ax2.barh([1], [full], color=figstyle.GREEN, height=0.5, edgecolor=figstyle.EDGE, linewidth=figstyle.EDGE_LW,
+             label=f"fully accepted -> reaches the counter ({full})")
+    ax2.barh([0], [part], color=figstyle.VERMILION, height=0.5, edgecolor=figstyle.EDGE, linewidth=figstyle.EDGE_LW,
+             label=f"partly accepted -> `continue`, discarded, re-verified ({part})")
+    ax2.set_yticks([0, 1])
+    ax2.set_yticklabels(["partial\naccept", "full\naccept"])
+    ax2.set_xlabel("verification rounds")
+    ax2.set_xlim(0, max(full, part) * 1.18)
+    ax2.set_title("Why the server ratio can only be 1.0\n"
+                  "target reports COMMON_CONTEXT_SEQ_RM_TYPE_FULL")
+    ax2.legend(loc="upper center", bbox_to_anchor=(0.5, -0.30),
+               ncol=1, frameon=False)
+    ax2.grid(axis="x", color="#e4e4e4", lw=0.6)
+    ax2.set_axisbelow(True)
+    fig.suptitle("The published \"100 % draft acceptance\" is a counter artefact, not a measurement", y=0.99)
+    # No bottom band is reserved any more. Reserving 13.5 % of the height and
+    # then writing the caption at a fixed y=0.058 left the legends, which hang
+    # below the axes, ending a third of the canvas above it: the figure was
+    # published with an empty band down its middle. `figstyle.footer` measures
+    # where the lowest artist actually is, which is the whole reason it exists.
+    plt.tight_layout(rect=[0, 0.0, 1, 0.94])
+    figstyle.footer(
+        fig,
+        f"Cost of the {part} discarded rounds: {s['checkpoints_created']} state "
+        f"checkpoints @ {s['checkpoint_mib_each']} MiB "
+        f"({s['checkpoint_gib_written']} GiB written, "
+        f"{s['checkpoint_gib_read_back']} GiB restored). Drafter generate() alone "
+        f"= {rep['drafter_share_of_generation_pct']} % of the "
+        f"{rep['generation_wall_ms']} ms generation wall-clock. Source: "
+        f"v2_3090_followup/v2_oleg_suggestions/verbose.log, build "
+        f"b8863-97895129e. Reconstruct with analysis/verbose_accounting.py. "
+        f"Mechanism: ERRATA.md item A1.")
+    plt.savefig(OUT_DIR / "plot_acceptance_accounting.png", dpi=figstyle.DPI, bbox_inches="tight")
+    plt.close()
+    print(f"  wrote {(OUT_DIR / 'plot_acceptance_accounting.png').relative_to(ROOT)}")
+
+
+# ---------------------------------------------------------------- main ----
+
+def main() -> None:
+    rows = load_all()
+    agg = aggregate(rows)
+    print(f"loaded {len(rows)} requests from {len(agg)} run labels")
+    active = [c for c in agg if agg[c]["counted_draft_tokens"] > 0]
+    print(f"  {len(active)} labels recorded at least one fully accepted draft round")
+    print(f"  {len(agg) - len(active)} labels recorded none "
+          "(baseline, control, or no surviving round)")
+    write_csvs(rows, agg)
+    plot_mean_by_config(agg)
+    plot_per_prompt(rows, agg)
+    plot_acceptance_accounting(agg)
+
     print("\n=== SUMMARY BY CONFIG ===")
-    print(agg.to_string(float_format=lambda x: f"{x:.1f}" if not np.isnan(x) else "-"))
+    hdr = (f"{'config':24s} {'cap':>5s} {'req-mean':>9s} {'pooled':>8s} "
+           f"{'median':>7s} {'min':>7s} {'max':>7s} {'draft-req':>9s} {'draft-tok':>9s}")
+    print(hdr)
+    print("-" * len(hdr))
+    for c in sorted(agg, key=lambda c: -agg[c]["request_mean_tok_s"]):
+        a = agg[c]
+        print(f"{c:24s} {a['max_tokens']:5d} {a['request_mean_tok_s']:9.1f} "
+              f"{a['pooled_tok_s']:8.1f} {a['median_tok_s']:7.1f} {a['min_tok_s']:7.1f} "
+              f"{a['max_tok_s']:7.1f} {a['requests_with_draft_rounds']:6d}/{a['requests']:<2d} "
+              f"{a['counted_draft_tokens']:9d}")
 
 
 if __name__ == "__main__":
-    df = load_all()
-    print(f"loaded {len(df)} rows from {df['config'].nunique()} configs")
-    plot_mean_by_config(df)
-    plot_per_prompt_heatmap(df)
-    plot_accept_vs_speed(df)
-    write_summary_csv(df)
+    main()

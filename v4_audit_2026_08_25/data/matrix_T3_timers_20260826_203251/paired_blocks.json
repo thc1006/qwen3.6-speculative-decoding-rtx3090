@@ -1,0 +1,37 @@
+{
+  "baseline": "baseline",
+  "blocks": 3,
+  "bootstrap_iters": 20000,
+  "schedule_position_balanced": true,
+  "unbalanced_override": false,
+  "t_critical_975": 4.3027,
+  "interval_scope": "blocks within one invocation of the driver; it does not cover invocation-to-invocation variation (ERRATA A16)",
+  "arms": [
+    {
+      "arm": "spec-dflash-n2",
+      "point_pct": 20.68,
+      "ci95_boot_pct": [
+        20.4,
+        21.16
+      ],
+      "ci95_t_pct": [
+        19.65,
+        21.72
+      ],
+      "blocks": 3
+    },
+    {
+      "arm": "spec-draft-n8",
+      "point_pct": -73.72,
+      "ci95_boot_pct": [
+        -73.85,
+        -73.6
+      ],
+      "ci95_t_pct": [
+        -74.02,
+        -73.41
+      ],
+      "blocks": 3
+    }
+  ]
+}

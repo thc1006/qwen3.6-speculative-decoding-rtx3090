@@ -1,0 +1,41 @@
+[
+  {
+    "log": "v2_3090_followup/v2_oleg_suggestions/verbose.log",
+    "build": "b8863-97895129e",
+    "hybrid_seq_rm_full": true,
+    "vocab_translation_fallback": true,
+    "verification_attempts": 53,
+    "attempts_fully_accepted": 33,
+    "attempts_partially_accepted": 20,
+    "rounds_reaching_counters": 33,
+    "reported": {
+      "ratio": 1.0,
+      "accepted": 115,
+      "generated": 115,
+      "meaning": "tokens re-verified after truncation to the accepted prefix; ratio is 1.0 by construction on a SEQ_RM_TYPE_FULL context"
+    },
+    "drafter_own_counters": {
+      "drafts_generated": 81,
+      "drafts_accepted": 33,
+      "draft_sequence_acceptance_pct": 40.7,
+      "draft_tokens_generated": 214,
+      "draft_tokens_accepted": 115,
+      "draft_token_acceptance_pct": 53.7,
+      "duration_begin_ms": 0.001,
+      "duration_generate_ms": 999.634,
+      "duration_accept_ms": 0.005
+    },
+    "state_management": {
+      "checkpoints_created": 33,
+      "checkpoint_mib_each": 62.8,
+      "checkpoint_gib_written": 2.02,
+      "checkpoints_restored": 20,
+      "checkpoint_gib_read_back": 1.23
+    },
+    "reported_generation_tok_s": 63.2,
+    "n_generated_tokens_source": "n_decoded + n_remaining, read from the log",
+    "n_generated_tokens": 200,
+    "generation_wall_ms": 3165,
+    "drafter_share_of_generation_pct": 31.6
+  }
+]

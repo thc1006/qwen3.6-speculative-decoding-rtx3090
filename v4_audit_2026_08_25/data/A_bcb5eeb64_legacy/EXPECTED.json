@@ -1,0 +1,10 @@
+{
+  "crashes": [
+    "draft-max8-matched__rep0.json",
+    "draft-max8-matched__rep1.json",
+    "draft-max8-translate__rep0.json",
+    "draft-max8-translate__rep1.json"
+  ],
+  "why": "This run exists to capture the crash. `llama-server` plus a draft model aborts on this model at bcb5eeb64 with a CUDA error; the abort is the finding, not a harness failure. See ERRATA A6 and data/abort_evidence_bcb5eeb64.txt. Every entry here must actually have crashed, or the integrity check fails: the list cannot rot into a blanket exemption.",
+  "errata": "A6"
+}

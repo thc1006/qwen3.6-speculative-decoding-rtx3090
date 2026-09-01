@@ -1,0 +1,56 @@
+{
+  "_comment": [
+    "One place that says what has been run and what evidence exists, because the",
+    "PR body said both. It presented run W as complete at 500 of 500 and, four",
+    "screens down, said the randomised-order experiment had not been run; it said",
+    "the evidence workflow had passed and, later, that it was not green; and its",
+    "evidence section described two tranches, 1320 logs and 21 traces while the",
+    "manifest held 1820 and 22 and the release carried six assets.",
+    "",
+    "Prose in several documents cannot be kept in step by hand. These numbers are",
+    "checked against the data directories and EVIDENCE_MANIFEST.sha256 by",
+    "analysis/verify_claims.py, and the documents are checked against them."
+  ],
+  "dataset_version": "v4.2",
+  "runs": {
+    "V2": {
+      "status": "complete",
+      "sessions": 16,
+      "arm_runs": 400,
+      "design": "between-invocation crossover"
+    },
+    "V3": {
+      "status": "complete",
+      "sessions": 2,
+      "arm_runs": 200,
+      "design": "within-invocation latin square, position-balanced only"
+    },
+    "T4": {
+      "status": "complete",
+      "sessions": 1,
+      "arm_runs": 18,
+      "design": "checkpoint split-timer probe"
+    },
+    "W": {
+      "status": "complete",
+      "sessions": 5,
+      "arm_runs": 500,
+      "design": "within-invocation 10x10 Williams square, randomised row order"
+    },
+    "W2": {
+      "status": "complete",
+      "sessions": 12,
+      "arm_runs": 1200,
+      "design": "within-invocation 10x10 Williams square, randomised row order, twelve sessions fixed in advance by PROSPECTIVE_ANALYSIS_PLAN_W2.md"
+    }
+  },
+  "raw_evidence": {
+    "tranches": 4,
+    "tranches_published": 4,
+    "tranches_pending": 0,
+    "_pending": "None. Run W2's 1200 server logs and its telemetry trace were pending between 2026-08-31 and the v4.2 release and are the fourth tranche, published with the other three under one tag so that a reader needs one release identity to verify the whole manifest.",
+    "server_logs": 3020,
+    "telemetry_traces": 23,
+    "release_assets": 8
+  }
+}

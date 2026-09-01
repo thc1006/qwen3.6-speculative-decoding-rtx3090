@@ -1,0 +1,115 @@
+{
+  "baseline": "baseline",
+  "blocks": 9,
+  "bootstrap_iters": 20000,
+  "schedule_position_balanced": true,
+  "unbalanced_override": false,
+  "t_critical_975": 2.306,
+  "interval_scope": "blocks within one invocation of the driver; it does not cover invocation-to-invocation variation (ERRATA A16)",
+  "arms": [
+    {
+      "arm": "spec-dflash-n2",
+      "point_pct": 26.3,
+      "ci95_boot_pct": [
+        25.62,
+        26.89
+      ],
+      "ci95_t_pct": [
+        25.51,
+        27.1
+      ],
+      "blocks": 9
+    },
+    {
+      "arm": "spec-mtp-n2",
+      "point_pct": 22.66,
+      "ci95_boot_pct": [
+        22.17,
+        23.16
+      ],
+      "ci95_t_pct": [
+        22.05,
+        23.28
+      ],
+      "blocks": 9
+    },
+    {
+      "arm": "spec-dflash-n4",
+      "point_pct": 19.18,
+      "ci95_boot_pct": [
+        18.63,
+        19.7
+      ],
+      "ci95_t_pct": [
+        18.5,
+        19.86
+      ],
+      "blocks": 9
+    },
+    {
+      "arm": "ngram-map-k4v-m8",
+      "point_pct": -0.29,
+      "ci95_boot_pct": [
+        -0.56,
+        -0.04
+      ],
+      "ci95_t_pct": [
+        -0.62,
+        0.04
+      ],
+      "blocks": 9
+    },
+    {
+      "arm": "ngram-mod-n24",
+      "point_pct": -10.94,
+      "ci95_boot_pct": [
+        -11.3,
+        -10.61
+      ],
+      "ci95_t_pct": [
+        -11.38,
+        -10.51
+      ],
+      "blocks": 9
+    },
+    {
+      "arm": "ngram-cache",
+      "point_pct": -19.0,
+      "ci95_boot_pct": [
+        -19.37,
+        -18.64
+      ],
+      "ci95_t_pct": [
+        -19.45,
+        -18.55
+      ],
+      "blocks": 9
+    },
+    {
+      "arm": "spec-draft-n8",
+      "point_pct": -73.34,
+      "ci95_boot_pct": [
+        -73.45,
+        -73.24
+      ],
+      "ci95_t_pct": [
+        -73.47,
+        -73.21
+      ],
+      "blocks": 9
+    },
+    {
+      "arm": "spec-draft-n1",
+      "point_pct": -74.81,
+      "ci95_boot_pct": [
+        -74.9,
+        -74.71
+      ],
+      "ci95_t_pct": [
+        -74.92,
+        -74.69
+      ],
+      "blocks": 9
+    }
+  ]
+}

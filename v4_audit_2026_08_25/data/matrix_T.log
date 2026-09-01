@@ -1,0 +1,215 @@
+=== run T start 2026-08-26 18:26:39 CST ===
+instrumented binary: b6a5c490bb932ffa9bf8a0d887f15eb0aade1d00a5e29b177a27249a2c539903  /home/thc1006/bench/llama-retest/build/bin/llama-server
+{
+  "created": "2026-08-26T18:26:39+0800",
+  "host": "3090",
+  "gpu_env": "0",
+  "server_bin": "/home/thc1006/bench/llama-retest/build/bin/llama-server",
+  "server_sha256": "b6a5c490bb932ffa9bf8a0d887f15eb0aade1d00a5e29b177a27249a2c539903",
+  "server_lib_sha256": {
+    "libggml-base.so": "de87fc58909ef188da49b98c42bebf6656c86a84f2fc107772480bcff01dc8ac",
+    "libggml-cpu.so": "29d928150c8cbb29c8e68cfc1c064abfa036842dbc822da051d5609f6878a09f",
+    "libggml-cuda.so": "b58566b1709b8aa198ab750b2168a40dda844d39fca631a401a39287910258ea",
+    "libggml.so": "1b45665eb85d0b644f34780e57fadcab06ac728319810c034bb14a2cbd106a44",
+    "libllama-cli-impl.so": "708107e7d80690fd7c7148678a217cc51fe580c2aa16f49619b6418b8797dc22",
+    "libllama-common.so": "a7c0d7a37945019e3cb4bedcdce659270bf6dfb4503e1852708c645678e133ae",
+    "libllama-completion-impl.so": "05c0e780325d4dcb88ced1fb48363cdc553716502bebb07bc9aaac87d11e3203",
+    "libllama-quantize-impl.so": "65abe89963f27252441f933ecaf24b82324087d4adc0921a271be4f5fb00d922",
+    "libllama-server-impl.so": "ce94855f4f2d82ba4d93abc3e909ca45085133798e29c6f54d2a55c6afbcbc9e",
+    "libllama.so": "e4e598fa59141c6d2b32e33dbf400b0fb7ec9de8d7e6d90ae8424c9246c01f67",
+    "libmtmd.so": "bec42859b18763db20cb4ff68b293369da3c413cc245b77e5a446125ce357f57"
+  },
+  "target": "/home/thc1006/models/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf",
+  "target_sha256": "707a55a8a4397ecde44de0c499d3e68c1ad1d240d1da65826b4949d1043f4450",
+  "draft": "/home/thc1006/models/Qwen3.5-0.8B-Q4_K_M.gguf",
+  "draft_sha256": "bd258782e35f7f458f8aced1adc053e6e92e89bc735ba3be89d38a06121dc517",
+  "dflash": "/home/thc1006/models/qwen36-dflash-master.gguf",
+  "mtp": null,
+  "dflash_sha256": "0e6d95c6a2ef7a3aaa4f7d54c6307d8bea50b86621823ea90f5bf8b5d8446e30",
+  "mtp_sha256": null,
+  "common_args": [
+    "-c",
+    "8192",
+    "--jinja",
+    "-fa",
+    "on",
+    "-ctk",
+    "q8_0",
+    "-ctv",
+    "q8_0",
+    "--no-webui",
+    "-v"
+  ],
+  "flavor": "master",
+  "repeats": 4,
+  "max_tokens": 300,
+  "temperature": 0.0,
+  "seed": 42,
+  "think": "on",
+  "think_env": "on",
+  "concurrency": 1,
+  "fit": true,
+  "ctx": "8192",
+  "order_mode": "latin",
+  "prompt_set": "v1",
+  "n_prompts": 10,
+  "prompt_tags": [
+    "short_greet",
+    "short_q",
+    "medium_chat",
+    "medium_rec",
+    "reasoning",
+    "long_explain",
+    "code_small",
+    "multi_turn_1",
+    "multi_turn_2",
+    "zh_hant"
+  ],
+  "fit_target": "3072",
+  "ordering": "latin: arm order rotated by repeat index, step N/repeats",
+  "gpu_fields": "index,name,memory.used,utilization.gpu,clocks.current.graphics,clocks.max.graphics,clocks.current.sm,clocks.current.memory,clocks.max.memory,power.draw,power.limit,power.default_limit,power.max_limit,temperature.gpu,pstate,clocks_throttle_reasons.active",
+  "nvidia_smi": "0, NVIDIA GeForce RTX 3090, 82 MiB, 0 %, 210 MHz, 2100 MHz, 210 MHz, 405 MHz, 9751 MHz, 25.46 W, 350.00 W, 350.00 W, 350.00 W, 34, P8, 0x0000000000000001"
+}
+
+=== repeat 0  order: baseline -> spec-draft-n8 -> spec-dflash-n2 ===
+    [baseline rep0 short_greet  ]  300tok @  117.6 tok/s  THINKING
+    [baseline rep0 short_q      ]  300tok @  117.2 tok/s  THINKING
+    [baseline rep0 medium_chat  ]  300tok @  116.8 tok/s  THINKING
+    [baseline rep0 medium_rec   ]  300tok @  117.0 tok/s  THINKING
+    [baseline rep0 reasoning    ]  300tok @  117.6 tok/s  THINKING
+    [baseline rep0 long_explain ]  300tok @  117.6 tok/s  THINKING
+    [baseline rep0 code_small   ]  300tok @  116.7 tok/s  THINKING
+    [baseline rep0 multi_turn_1 ]  300tok @  115.4 tok/s  THINKING
+    [baseline rep0 multi_turn_2 ]  300tok @  118.0 tok/s  THINKING
+    [baseline rep0 zh_hant      ]  300tok @  117.9 tok/s  THINKING
+    [baseline rep0 AGGREGATE    ] 3000tok in   28.7s =  104.7 tok/s aggregate  (c=1, peak client requests in flight 1)
+    [spec-draft-n8 rep0 short_greet  ]  300tok @   30.5 tok/s  counted-draft 163/560  THINKING
+    [spec-draft-n8 rep0 short_q      ]  300tok @   26.2 tok/s  counted-draft 138/654  THINKING
+    [spec-draft-n8 rep0 medium_chat  ]  300tok @   29.2 tok/s  counted-draft 155/579  THINKING
+    [spec-draft-n8 rep0 medium_rec   ]  300tok @   32.7 tok/s  counted-draft 174/524  THINKING
+    [spec-draft-n8 rep0 reasoning    ]  300tok @   40.9 tok/s  counted-draft 201/422  THINKING
+    [spec-draft-n8 rep0 long_explain ]  300tok @   30.3 tok/s  counted-draft 162/554  THINKING
+    [spec-draft-n8 rep0 code_small   ]  300tok @   40.5 tok/s  counted-draft 200/448  THINKING
+    [spec-draft-n8 rep0 multi_turn_1 ]  300tok @   26.4 tok/s  counted-draft 141/655  THINKING
+    [spec-draft-n8 rep0 multi_turn_2 ]  300tok @   25.3 tok/s  counted-draft 132/668  THINKING
+    [spec-draft-n8 rep0 zh_hant      ]  300tok @   33.3 tok/s  counted-draft 179/504  THINKING
+    [spec-draft-n8 rep0 AGGREGATE    ] 3000tok in  100.7s =   29.8 tok/s aggregate  (c=1, peak client requests in flight 1)
+    [spec-dflash-n2 rep0 short_greet  ]  300tok @  142.5 tok/s  counted-draft 172/253  THINKING
+    [spec-dflash-n2 rep0 short_q      ]  300tok @  144.0 tok/s  counted-draft 174/250  THINKING
+    [spec-dflash-n2 rep0 medium_chat  ]  300tok @  137.9 tok/s  counted-draft 168/260  THINKING
+    [spec-dflash-n2 rep0 medium_rec   ]  300tok @  156.8 tok/s  counted-draft 186/226  THINKING
+    [spec-dflash-n2 rep0 reasoning    ]  300tok @  157.6 tok/s  counted-draft 186/226  THINKING
+    [spec-dflash-n2 rep0 long_explain ]  300tok @  144.1 tok/s  counted-draft 175/248  THINKING
+    [spec-dflash-n2 rep0 code_small   ]  300tok @  169.9 tok/s  counted-draft 194/210  THINKING
+    [spec-dflash-n2 rep0 multi_turn_1 ]  300tok @  147.7 tok/s  counted-draft 178/242  THINKING
+    [spec-dflash-n2 rep0 multi_turn_2 ]  300tok @  131.0 tok/s  counted-draft 163/269  THINKING
+    [spec-dflash-n2 rep0 zh_hant      ]  300tok @  138.5 tok/s  counted-draft 170/257  THINKING
+    [spec-dflash-n2 rep0 AGGREGATE    ] 3000tok in   23.6s =  127.4 tok/s aggregate  (c=1, peak client requests in flight 1)
+
+=== repeat 1  order: spec-draft-n8 -> spec-dflash-n2 -> baseline ===
+    [spec-draft-n8 rep1 short_greet  ]  300tok @   30.5 tok/s  counted-draft 163/560  THINKING
+    [spec-draft-n8 rep1 short_q      ]  300tok @   26.1 tok/s  counted-draft 138/654  THINKING
+    [spec-draft-n8 rep1 medium_chat  ]  300tok @   29.1 tok/s  counted-draft 155/579  THINKING
+    [spec-draft-n8 rep1 medium_rec   ]  300tok @   32.6 tok/s  counted-draft 174/524  THINKING
+    [spec-draft-n8 rep1 reasoning    ]  300tok @   41.1 tok/s  counted-draft 201/422  THINKING
+    [spec-draft-n8 rep1 long_explain ]  300tok @   30.3 tok/s  counted-draft 162/554  THINKING
+    [spec-draft-n8 rep1 code_small   ]  300tok @   40.6 tok/s  counted-draft 200/448  THINKING
+    [spec-draft-n8 rep1 multi_turn_1 ]  300tok @   26.5 tok/s  counted-draft 141/655  THINKING
+    [spec-draft-n8 rep1 multi_turn_2 ]  300tok @   25.2 tok/s  counted-draft 132/668  THINKING
+    [spec-draft-n8 rep1 zh_hant      ]  300tok @   33.6 tok/s  counted-draft 179/504  THINKING
+    [spec-draft-n8 rep1 AGGREGATE    ] 3000tok in  100.6s =   29.8 tok/s aggregate  (c=1, peak client requests in flight 1)
+    [spec-dflash-n2 rep1 short_greet  ]  300tok @  138.8 tok/s  counted-draft 172/253  THINKING
+    [spec-dflash-n2 rep1 short_q      ]  300tok @  142.0 tok/s  counted-draft 174/250  THINKING
+    [spec-dflash-n2 rep1 medium_chat  ]  300tok @  138.7 tok/s  counted-draft 168/260  THINKING
+    [spec-dflash-n2 rep1 medium_rec   ]  300tok @  158.1 tok/s  counted-draft 186/226  THINKING
+    [spec-dflash-n2 rep1 reasoning    ]  300tok @  154.8 tok/s  counted-draft 186/226  THINKING
+    [spec-dflash-n2 rep1 long_explain ]  300tok @  145.8 tok/s  counted-draft 175/248  THINKING
+    [spec-dflash-n2 rep1 code_small   ]  300tok @  167.9 tok/s  counted-draft 194/210  THINKING
+    [spec-dflash-n2 rep1 multi_turn_1 ]  300tok @  149.0 tok/s  counted-draft 178/242  THINKING
+    [spec-dflash-n2 rep1 multi_turn_2 ]  300tok @  133.0 tok/s  counted-draft 163/269  THINKING
+    [spec-dflash-n2 rep1 zh_hant      ]  300tok @  137.8 tok/s  counted-draft 170/257  THINKING
+    [spec-dflash-n2 rep1 AGGREGATE    ] 3000tok in   23.6s =  127.3 tok/s aggregate  (c=1, peak client requests in flight 1)
+    [baseline rep1 short_greet  ]  300tok @  116.6 tok/s  THINKING
+    [baseline rep1 short_q      ]  300tok @  116.7 tok/s  THINKING
+    [baseline rep1 medium_chat  ]  300tok @  116.0 tok/s  THINKING
+    [baseline rep1 medium_rec   ]  300tok @  115.1 tok/s  THINKING
+    [baseline rep1 reasoning    ]  300tok @  115.4 tok/s  THINKING
+    [baseline rep1 long_explain ]  300tok @  115.6 tok/s  THINKING
+    [baseline rep1 code_small   ]  300tok @  116.4 tok/s  THINKING
+    [baseline rep1 multi_turn_1 ]  300tok @  113.9 tok/s  THINKING
+    [baseline rep1 multi_turn_2 ]  300tok @  114.5 tok/s  THINKING
+    [baseline rep1 zh_hant      ]  300tok @  113.3 tok/s  THINKING
+    [baseline rep1 AGGREGATE    ] 3000tok in   29.0s =  103.4 tok/s aggregate  (c=1, peak client requests in flight 1)
+
+=== repeat 2  order: spec-dflash-n2 -> baseline -> spec-draft-n8 ===
+    [spec-dflash-n2 rep2 short_greet  ]  300tok @  141.3 tok/s  counted-draft 172/253  THINKING
+    [spec-dflash-n2 rep2 short_q      ]  300tok @  144.8 tok/s  counted-draft 174/250  THINKING
+    [spec-dflash-n2 rep2 medium_chat  ]  300tok @  138.1 tok/s  counted-draft 168/260  THINKING
+    [spec-dflash-n2 rep2 medium_rec   ]  300tok @  159.7 tok/s  counted-draft 186/226  THINKING
+    [spec-dflash-n2 rep2 reasoning    ]  300tok @  155.8 tok/s  counted-draft 186/226  THINKING
+    [spec-dflash-n2 rep2 long_explain ]  300tok @  144.8 tok/s  counted-draft 175/248  THINKING
+    [spec-dflash-n2 rep2 code_small   ]  300tok @  169.6 tok/s  counted-draft 194/210  THINKING
+    [spec-dflash-n2 rep2 multi_turn_1 ]  300tok @  148.7 tok/s  counted-draft 178/242  THINKING
+    [spec-dflash-n2 rep2 multi_turn_2 ]  300tok @  130.9 tok/s  counted-draft 163/269  THINKING
+    [spec-dflash-n2 rep2 zh_hant      ]  300tok @  133.5 tok/s  counted-draft 170/257  THINKING
+    [spec-dflash-n2 rep2 AGGREGATE    ] 3000tok in   23.6s =  126.9 tok/s aggregate  (c=1, peak client requests in flight 1)
+    [baseline rep2 short_greet  ]  300tok @  116.4 tok/s  THINKING
+    [baseline rep2 short_q      ]  300tok @  114.8 tok/s  THINKING
+    [baseline rep2 medium_chat  ]  300tok @  116.4 tok/s  THINKING
+    [baseline rep2 medium_rec   ]  300tok @  116.5 tok/s  THINKING
+    [baseline rep2 reasoning    ]  300tok @  115.5 tok/s  THINKING
+    [baseline rep2 long_explain ]  300tok @  116.5 tok/s  THINKING
+    [baseline rep2 code_small   ]  300tok @  114.8 tok/s  THINKING
+    [baseline rep2 multi_turn_1 ]  300tok @  114.9 tok/s  THINKING
+    [baseline rep2 multi_turn_2 ]  300tok @  114.2 tok/s  THINKING
+    [baseline rep2 zh_hant      ]  300tok @  113.4 tok/s  THINKING
+    [baseline rep2 AGGREGATE    ] 3000tok in   29.0s =  103.4 tok/s aggregate  (c=1, peak client requests in flight 1)
+    [spec-draft-n8 rep2 short_greet  ]  300tok @   30.5 tok/s  counted-draft 163/560  THINKING
+    [spec-draft-n8 rep2 short_q      ]  300tok @   26.1 tok/s  counted-draft 138/654  THINKING
+    [spec-draft-n8 rep2 medium_chat  ]  300tok @   29.1 tok/s  counted-draft 155/579  THINKING
+    [spec-draft-n8 rep2 medium_rec   ]  300tok @   32.4 tok/s  counted-draft 174/524  THINKING
+    [spec-draft-n8 rep2 reasoning    ]  300tok @   40.9 tok/s  counted-draft 201/422  THINKING
+    [spec-draft-n8 rep2 long_explain ]  300tok @   30.4 tok/s  counted-draft 162/554  THINKING
+    [spec-draft-n8 rep2 code_small   ]  300tok @   40.6 tok/s  counted-draft 200/448  THINKING
+    [spec-draft-n8 rep2 multi_turn_1 ]  300tok @   26.7 tok/s  counted-draft 141/655  THINKING
+    [spec-draft-n8 rep2 multi_turn_2 ]  300tok @   25.3 tok/s  counted-draft 132/668  THINKING
+    [spec-draft-n8 rep2 zh_hant      ]  300tok @   33.6 tok/s  counted-draft 179/504  THINKING
+    [spec-draft-n8 rep2 AGGREGATE    ] 3000tok in  100.5s =   29.9 tok/s aggregate  (c=1, peak client requests in flight 1)
+
+=== repeat 3  order: baseline -> spec-draft-n8 -> spec-dflash-n2 ===
+    [baseline rep3 short_greet  ]  300tok @  116.4 tok/s  THINKING
+    [baseline rep3 short_q      ]  300tok @  115.9 tok/s  THINKING
+    [baseline rep3 medium_chat  ]  300tok @  116.4 tok/s  THINKING
+    [baseline rep3 medium_rec   ]  300tok @  116.4 tok/s  THINKING
+    [baseline rep3 reasoning    ]  300tok @  116.2 tok/s  THINKING
+    [baseline rep3 long_explain ]  300tok @  115.4 tok/s  THINKING
+    [baseline rep3 code_small   ]  300tok @  116.4 tok/s  THINKING
+    [baseline rep3 multi_turn_1 ]  300tok @  115.0 tok/s  THINKING
+    [baseline rep3 multi_turn_2 ]  300tok @  115.8 tok/s  THINKING
+    [baseline rep3 zh_hant      ]  300tok @  116.0 tok/s  THINKING
+    [baseline rep3 AGGREGATE    ] 3000tok in   28.8s =  104.1 tok/s aggregate  (c=1, peak client requests in flight 1)
+    [spec-draft-n8 rep3 short_greet  ]  300tok @   30.5 tok/s  counted-draft 163/560  THINKING
+    [spec-draft-n8 rep3 short_q      ]  300tok @   26.1 tok/s  counted-draft 138/654  THINKING
+    [spec-draft-n8 rep3 medium_chat  ]  300tok @   29.2 tok/s  counted-draft 155/579  THINKING
+    [spec-draft-n8 rep3 medium_rec   ]  300tok @   32.6 tok/s  counted-draft 174/524  THINKING
+    [spec-draft-n8 rep3 reasoning    ]  300tok @   41.0 tok/s  counted-draft 201/422  THINKING
+    [spec-draft-n8 rep3 long_explain ]  300tok @   30.4 tok/s  counted-draft 162/554  THINKING
+    [spec-draft-n8 rep3 code_small   ]  300tok @   40.6 tok/s  counted-draft 200/448  THINKING
+    [spec-draft-n8 rep3 multi_turn_1 ]  300tok @   26.5 tok/s  counted-draft 141/655  THINKING
+    [spec-draft-n8 rep3 multi_turn_2 ]  300tok @   25.3 tok/s  counted-draft 132/668  THINKING
+    [spec-draft-n8 rep3 zh_hant      ]  300tok @   33.5 tok/s  counted-draft 179/504  THINKING
+    [spec-draft-n8 rep3 AGGREGATE    ] 3000tok in  100.5s =   29.9 tok/s aggregate  (c=1, peak client requests in flight 1)
+    [spec-dflash-n2 rep3 short_greet  ]  300tok @  143.1 tok/s  counted-draft 172/253  THINKING
+    [spec-dflash-n2 rep3 short_q      ]  300tok @  143.4 tok/s  counted-draft 174/250  THINKING
+    [spec-dflash-n2 rep3 medium_chat  ]  300tok @  137.5 tok/s  counted-draft 168/260  THINKING
+    [spec-dflash-n2 rep3 medium_rec   ]  300tok @  157.4 tok/s  counted-draft 186/226  THINKING
+    [spec-dflash-n2 rep3 reasoning    ]  300tok @  153.5 tok/s  counted-draft 186/226  THINKING
+    [spec-dflash-n2 rep3 long_explain ]  300tok @  143.7 tok/s  counted-draft 175/248  THINKING
+    [spec-dflash-n2 rep3 code_small   ]  300tok @  168.2 tok/s  counted-draft 194/210  THINKING
+    [spec-dflash-n2 rep3 multi_turn_1 ]  300tok @  147.2 tok/s  counted-draft 178/242  THINKING
+    [spec-dflash-n2 rep3 multi_turn_2 ]  300tok @  132.9 tok/s  counted-draft 163/269  THINKING
+    [spec-dflash-n2 rep3 zh_hant      ]  300tok @  139.5 tok/s  counted-draft 170/257  THINKING
+    [spec-dflash-n2 rep3 AGGREGATE    ] 3000tok in   23.5s =  127.8 tok/s aggregate  (c=1, peak client requests in flight 1)
+
+=== wrote /home/thc1006/bench/matrix_T_timers_20260826_182639/ (12 arm-runs) ===
+=== run T DONE 2026-08-26 18:40:46 CST ===

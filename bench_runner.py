@@ -1,4 +1,24 @@
-"""Spec-decode bench runner for Qwen3.6-35B-A3B on RTX 3090.
+"""Spec-decode bench runner for Qwen3.6-35B-A3B on RTX 3090 (v1, HISTORICAL).
+
+HISTORICAL SCRIPT - kept as evidence. Audited 2026-08-25, see ERRATA.md.
+Known defects, left in place so this file still documents what v1 ran:
+
+  * `content_head` keeps only the first 120 characters of `message.content`
+    and discards `message.reasoning_content` entirely. 144 of the 190 v1
+    requests (75.8 %) have an EMPTY content field, meaning the 300-token cap
+    was hit inside the thinking block - v1 measured truncated chain-of-thought
+    output, not answers. `reasoning`, `code_small`: 19/19. (ERRATA A5)
+  * token IDs, stop reason, and the full `timings` block are not stored.
+  * `draft_n` / `draft_n_accepted` count only fully accepted verification
+    rounds, so their ratio is 1.0 by construction on this model. `draft_n = 0`
+    means "no fully accepted round", not "speculation did not run". (ERRATA A1)
+  * the warm-up is a single 8-token completion, not a full-shape warm-up.
+  * `--gpu 1` was chosen because GPU 0 ran an Ollama instance. (ERRATA C4)
+  * the `zh_cn` prompt is Traditional Chinese. (ERRATA C2)
+  * `multi_turn_1` / `multi_turn_2` are two independent single-turn requests,
+    and `medium_rec` refers to a turn that never happened. (ERRATA C3)
+
+Use bench/retest_runner.py for new measurements.
 
 Spawns a llama-server subprocess with given spec-decode config, sends a fixed
 prompt set through OpenAI-compat /v1/chat/completions, records timings.
@@ -27,9 +47,14 @@ from pathlib import Path
 from typing import Any
 
 HERE = Path(__file__).resolve().parent
-LLAMA_SERVER = Path.home() / "benchmarks/llama.cpp/build/bin/llama-server"
-MODEL_PATH   = Path.home() / "benchmarks/models/qwen3.6-ud-q4kxl/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf"
-DEFAULT_PORT = 18123
+LLAMA_SERVER = Path(os.environ.get(
+    "LLAMA_SERVER_BIN", Path.home() / "benchmarks/llama.cpp/build/bin/llama-server"))
+MODEL_PATH = Path(os.environ.get(
+    "MODEL_TARGET",
+    Path.home() / "benchmarks/models/qwen3.6-ud-q4kxl/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf"))
+LLAMA_CPP_REPO = Path(os.environ.get(
+    "LLAMA_CPP_REPO", Path.home() / "benchmarks/llama.cpp"))
+DEFAULT_PORT = int(os.environ.get("BENCH_PORT", "18123"))
 
 
 PROMPTS = [
@@ -175,7 +200,8 @@ def main():
     ap.add_argument("--server-args", type=str, default="",
                     help="Extra llama-server flags as a single quoted string.")
     ap.add_argument("--port", type=int, default=DEFAULT_PORT)
-    ap.add_argument("--gpu", type=int, default=1, help="CUDA_VISIBLE_DEVICES; use 1 to avoid GPU0 shared with Ollama")
+    ap.add_argument("--gpu", type=int, default=int(os.environ.get("BENCH_GPU", "1")),
+                    help="CUDA_VISIBLE_DEVICES. v1 used 1 because GPU0 ran Ollama (ERRATA C4)")
     ap.add_argument("--warmup", type=int, default=1)
     ap.add_argument("--max-tokens", type=int, default=300, help="max_tokens per completion")
     ap.add_argument("--no-fa", action="store_true", help="disable flash-attn (-fa off)")
@@ -187,7 +213,7 @@ def main():
 
     # Collect env metadata for reproducibility
     try:
-        commit = subprocess.check_output(["git", "-C", str(Path.home() / "benchmarks/llama.cpp"),
+        commit = subprocess.check_output(["git", "-C", str(LLAMA_CPP_REPO),
                                           "rev-parse", "--short", "HEAD"], text=True).strip()
     except Exception:
         commit = "unknown"

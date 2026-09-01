@@ -1,126 +1,138 @@
-# qwen3.6-speculative-decoding-rtx3090 v3.0 — May 2026 update
+# v3 — DFlash exploratory run, 2026-05-07
 
-## What's new vs v2.3
+> [!WARNING]
+> **Retracted and rescoped by the 2026-08-25 audit.** This directory's numbers
+> stand as archived measurements. Its original conclusions do not.
+>
+> The comparison here **changed the binary and the speculation method at the
+> same time**: the baseline and Oleg arms report build `b8889-bcb5eeb64`, the
+> DFlash arms report `b8942-67cb0d507`. With one run per prompt/config and a
+> thinking control that did not work, this is an exploratory historical
+> datapoint, not a DFlash effect estimate. The mechanism claims below have been
+> removed. See [`../ERRATA.md`](../ERRATA.md) items D4, D6, F1, F3, F4.
+>
+> **The A/B was run properly on 2026-08-26, and the sign reverses.** On one
+> binary, one placement policy and three repeats per arm, DFlash at
+> `--spec-draft-n-max 4` is **+18.7 % faster** than no speculation, not slower.
+> The archived direction reappears only at longer draft windows — −14.8 % at
+> `n_max 8`, −47.4 % at 16 — and the `06_dflash_max8` row below is `n_max 8`.
+> What this directory measured at short windows was the binary change. Details
+> and controls:
+> [`../v4_audit_2026_08_25/README.md`](../v4_audit_2026_08_25/README.md#run-j--the-first-configuration-that-is-actually-faster).
 
-v2.3 (2026-04-26) established **llama.cpp draft-spec is NET LOSS** on RTX 3090 with Qwen3.6-35B-A3B Q4_K_XL target + Qwen3.5-0.8B Q4_K_M draft (Oleg-style). Specific configs:
-- 02 srogmann ngram-mod (n=24): not in master, fail-fast
-- 03 oleg draft-spec (max=32): NET LOSS
-- 04 oleg draft-spec (max=16): NET LOSS
+## What this directory is
 
-v3.0 adds **DFlash** (block-diffusion drafter, llama.cpp PR #22105) — the newest spec-decoding family with z-lab's published claims of 1.98×−2.9× speedup on B200. **First public RTX 3090 + DFlash + Q4 datapoint.**
+Five prompts run against `Qwen3.6-35B-A3B-UD-Q4_K_XL` on one RTX 3090 with the
+DFlash drafter from llama.cpp PR #22105, on 2026-05-07, one run per
+prompt/config. It is archival evidence. It is not a controlled experiment.
 
-## TL;DR
+## Confounds, stated up front
 
-**DFlash on RTX 3090 + Q4_K_XL target via llama.cpp PR #22105 = NET LOSS −44.6 %** vs no-spec baseline. Best DFlash config (max=8) gets 77 tok/s vs 138 tok/s baseline. Slightly less bad than Oleg draft-spec's −52 % NET LOSS, but still net negative. Confirms: **no llama.cpp speculative-decoding method tested gives a positive yield on consumer Ampere with Q4 quantized target.**
+| # | Confound | Evidence |
+|---|---|---|
+| 1 | **Baseline and treatment are different binaries.** `01_baseline`, `03_oleg_draft_2_32`, `04_oleg_draft_2_16` report `build : b8889-bcb5eeb64`; `05/06/07_dflash_*` report `build : b8942-67cb0d507`. | the `build :` banner in every `data/out_*/*/p*.log` |
+| 2 | **N = 1 per prompt/config.** No repeats, so no run-to-run uncertainty can be estimated. | 5 logs per config |
+| 3 | **The thinking control did not work.** Every script passes `-no-cnv` and appends `/no_think`. `llama-cli` prints `--no-conversation is not supported by llama-cli / please use llama-completion instead`, and the logs then contain `[Start thinking]` and a full reasoning trace. 30 of 33 v3 logs show both. | `data/out_*/*/p*.log` |
+| 4 | **Outputs were not token-identical** between conditions, so the arms did not generate the same work. | no output comparison was performed |
+| 5 | **No isolating control.** No target-precision, draft-precision, dense-model, profiler, second-GPU, or expert-routing measurement was collected. | — |
+| 6 | `--temp 0.5` with a fixed seed, so the arms are not greedy-deterministic. | `bench/bench_dflash.sh` |
 
-## Setup
+## Archived results
 
-Same hardware/model as v2.3:
-- 1× RTX 3090 24 GB, driver 580.126.09, CUDA 12.0, 350 W stock
-- Target: `Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf` (21 GB, from unsloth/Qwen3.6-35B-A3B-GGUF)
-- llama.cpp PR #22105 checked out (`git fetch origin pull/22105/head`), incremental rebuild on master baseline
-- Drafter: `z-lab/Qwen3.6-35B-A3B-DFlash` HF safetensors → GGUF via the PR's modified `convert_hf_to_gguf.py` with `--target-model-dir` flag (needs target's tokenizer + config files, ~22 MB total)
-- 5 prompts × 1 trial × 3 draft-max configs (4, 8, 16). Same prompts as v2.3.
-- Args: `-ngl 999 -c 4096 -fa on -ctk q8_0 -ctv q8_0 -n 200 --temp 0.5 --seed 42 -no-cnv -st`
+Generation tok/s as reported by `llama-cli`, one run per cell. Re-derived from
+the raw logs during the audit and reproduced exactly.
 
-## Results
+| config | build | p1 | p2 | p3 | p4 | p5 | mean | sd |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| `01_baseline` (no spec) | `b8889-bcb5eeb64` | 136.3 | 139.3 | 140.0 | 139.4 | 139.4 | **138.9** | 1.47 |
+| `03_oleg_draft_2_32` | `b8889-bcb5eeb64` | 63.6 | 76.0 | 63.5 | 62.3 | 62.2 | 65.5 | 5.89 |
+| `04_oleg_draft_2_16` | `b8889-bcb5eeb64` | 66.0 | 75.9 | 63.5 | 65.5 | 61.9 | 66.6 | 5.47 |
+| `05_dflash_max16` | `b8942-67cb0d507` | 60.1 | 78.8 | 62.4 | 69.6 | 57.9 | 65.8 | 8.51 |
+| `06_dflash_max8` | `b8942-67cb0d507` | 71.3 | 90.8 | 78.2 | 75.2 | 69.5 | **77.0** | 8.42 |
+| `07_dflash_max4` | `b8942-67cb0d507` | 72.1 | 79.4 | 74.1 | 78.2 | 70.8 | 74.9 | 3.76 |
 
-### Per-config Generation tok/s
+The `sd` column is spread across five different prompts, not repeated-run
+uncertainty — each cell was measured once.
 
-| config | p1 | p2 | p3 | p4 | p5 | mean | stdev |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| **01_baseline** (no spec, master) | 136.3 | 139.3 | 140.0 | 139.4 | 139.4 | **138.9** | 1.47 |
-| 03_oleg_draft_2_32 (Q4 draft) | 63.6 | 76.0 | 63.5 | 62.3 | 62.2 | 65.5 | 5.89 |
-| 04_oleg_draft_2_16 (Q4 draft) | 66.0 | 75.9 | 63.5 | 65.5 | 61.9 | 66.6 | 5.47 |
-| 05_dflash_max16 (PR #22105) | 60.1 | 78.8 | 62.4 | 69.6 | 57.9 | 65.8 | 8.51 |
-| **06_dflash_max8** (PR #22105) | 71.3 | 90.8 | 78.2 | 75.2 | 69.5 | **77.0 ⭐** | 8.42 |
-| 07_dflash_max4 (PR #22105) | 72.1 | 79.4 | 74.1 | 78.2 | 70.8 | 74.9 | 3.76 |
+`02_srogmann_ngmod_n24` produced no timing data. Its log contains only:
 
-### Cross-method comparison
-
-| method | mean tok/s | vs baseline |
-|---|---:|---:|
-| no spec (baseline) | 138.9 | reference |
-| Oleg draft-spec max=32 | 65.5 | **−52.8 %** ❌ |
-| Oleg draft-spec max=16 | 66.6 | **−52.1 %** ❌ |
-| DFlash max=16 | 65.8 | **−52.6 %** ❌ |
-| **DFlash max=8** ⭐ | **77.0** | **−44.6 %** ❌ (best) |
-| DFlash max=4 | 74.9 | −46.1 % ❌ |
-
-## Key takeaways
-
-### 1. DFlash NET LOSS direction is consistent with the underlying pathology
-
-The DFlash architecture conditions a small block-diffusion drafter on **multiple target hidden-states**. The drafter we used (z-lab/Qwen3.6-35B-A3B-DFlash, BF16) was trained against target hidden states in **FP16**. Our test target is **Q4_K_XL** quantized — the hidden-state distribution shifts subtly under aggressive 4-bit quantization, and the drafter is no longer cleanly aligned with the verifier.
-
-Per llama.cpp PR #22105 author's own note: *"for Qwen3.5/3.6 MoE, performance is currently not optimal due to MoE + hybrid structure not well supported."* Our number (−44.6 %) sits inside that envelope.
-
-### 2. The wider mechanism — MoE expert routing × consumer-Ampere bandwidth
-
-Independently of the Q4 mismatch, the Qwen3.6-35B-A3B model routes **8-of-256 experts per token**. The expert-saturation threshold for hiding spec verification cost behind expert load is around ~94 tokens (per llama.cpp #21569 community discussion + our own measurements). At single-stream batch=1 with `--draft-max ≤ 32`, drafted tokens stay below saturation, so verification still has to load the union of expert slices — exceeding what was saved.
-
-This is **not Q4-specific and not consumer-GPU-specific in isolation** — it's the joint effect of:
-- MoE routing pulling fresh expert slices for each verified token
-- Ampere SM 8.6 memory bandwidth not hiding verification cost
-- Q4 quantization further shrinking the math/bandwidth ratio in spec's favor — but not enough to flip sign
-
-### 3. Is this just a llama.cpp problem?
-
-Cross-reference v3 sister publication `qwen3.6-vllm-2x3090`: **vLLM MTP on the same hardware (dual 3090) is +27.5 % NET WIN at k=1** and **+8 % tok/s additional at k=3**. So the llama.cpp NET LOSS is **not "speculative decoding is bad on consumer Ampere"** — it is "llama.cpp's speculative-decoding implementations (draft-model and DFlash) cannot beat vLLM MTP for Qwen3.6 MoE on consumer Ampere".
-
-Possible reasons vLLM MTP wins:
-- MTP head is **co-trained** with the base model (DeepSeek MTP technique adopted by Qwen3.6) — naturally aligned with verifier
-- Single-stream verification of MTP-drafted tokens reuses the same forward as the verifier — no separate expert routing pass
-- vLLM's CUDA-graph capture and FlashInfer MoE backend reduce per-step kernel-launch overhead
-
-llama.cpp draft-model speculative decoding has none of these alignments.
-
-## Recommendations
-
-1. **For voice agents on consumer Ampere with Qwen3.6-35B-A3B**: run vLLM MTP, not llama.cpp speculative decoding. `qwen3.6-vllm-2x3090 v4.0` for full MTP recipe.
-2. **For DFlash users on consumer Ampere**: wait for FP16 (or BF16) target benchmarks before drawing conclusions about DFlash itself. Q4 target collapses the technique.
-3. **For the llama.cpp PR #22105 maintainers**: the Qwen3.5/3.6 MoE notebook entry is consistent with a MoE-routing mismatch problem rather than a quant problem. Q4 is contributing but not the dominant cause.
-
-## Reproduction
-
-```bash
-# 1. Get llama.cpp + PR #22105
-cd ~/bench/llama.cpp
-git fetch origin pull/22105/head:pr-22105
-git checkout pr-22105
-cd build && cmake --build . --config Release -j$(nproc)
-
-# 2. Get DFlash drafter (HF safetensors)
-~/.local/bin/hf download z-lab/Qwen3.6-35B-A3B-DFlash --local-dir ~/models/qwen36-dflash
-
-# 3. Get target model tokenizer + config (small files only)
-~/.local/bin/hf download Qwen/Qwen3.6-35B-A3B \
-    config.json tokenizer.json tokenizer_config.json vocab.json merges.txt \
-    --local-dir ~/models/qwen36-target-meta
-
-# 4. Convert drafter HF → GGUF (needs CPU-only torch, ~1-2 min)
-python -m venv ~/dflash_convert_venv
-~/dflash_convert_venv/bin/pip install -r ~/bench/llama.cpp/requirements/requirements-convert_hf_to_gguf.txt
-~/dflash_convert_venv/bin/python ~/bench/llama.cpp/convert_hf_to_gguf.py \
-    ~/models/qwen36-dflash --outtype bf16 \
-    --target-model-dir ~/models/qwen36-target-meta \
-    --outfile ~/models/qwen36-dflash.gguf
-
-# 5. Run bench (replaces v2.3 bench_3090_oleg.sh; do not use set -euo pipefail
-#    + grep|tail combo, since failed configs leave grep with no matches)
-bash bench_dflash.sh
+```
+error: invalid argument: --spec-type
 ```
 
-Bench script (`bench_dflash.sh`) provided in `bench/` directory.
+The original note said `--spec-type` is "not in master". That is wrong. The
+argument exists at both `97895129e` and `bcb5eeb64`, registered in
+`common/arg.cpp` as `.set_examples({LLAMA_EXAMPLE_SERVER})` — it is accepted by
+`llama-server` and rejected by `llama-cli`. v1 used `llama-server` and
+exercised it successfully. See [`../ERRATA.md`](../ERRATA.md) item D6.
 
-## License
+## What this run supports
 
-Apache 2.0. Cite freely.
+Under the commands actually executed on 2026-05-07, every DFlash and
+draft-model configuration produced a lower generation rate than the run
+recorded as its baseline.
 
-## Cross-references
+## What this run does not support
 
-- v2.3: original Oleg-style draft-spec NET LOSS finding
-- Sister repo `qwen3.6-vllm-2x3090` v4.0: vLLM MTP positive yield on same hardware
-- llama.cpp PR #22105 (open draft, 2026-05): DFlash implementation under review
-- z-lab/dflash GitHub: original DFlash paper (B200 results)
-- HF discussion `unsloth/Qwen3.6-35B-A3B-GGUF/discussions/14`: community thread covering speculative-decoding NET LOSS on RTX 3090
+- **A DFlash effect estimate.** Confound 1 alone prevents it.
+- **That Q4 target quantisation "collapses the technique".** No FP16 or BF16
+  target was ever run. The earlier recommendation to that effect has been
+  removed; it was a hypothesis presented as a finding.
+- **That MoE expert routing or Ampere bandwidth explains the result.** Nothing
+  in this directory measures expert routing, HBM traffic, or kernel time.
+- **That the mechanism "generalises to DFlash".** Two configurations being slow
+  is not evidence that they are slow for the same reason.
+- **That co-trained speculative heads are "the only positive yield path on this
+  hardware".** Only a handful of methods were tested, and the vLLM comparison
+  cited for that claim uses a different engine, two GPUs, tensor parallelism, a
+  different quantisation stack, and a different protocol. The defensible
+  statement is that a separately tested vLLM MTP configuration was positive on
+  different hardware topology.
+- **Any "first public datapoint" claim.** No novelty search was performed, and
+  none is recorded. Removed.
+
+## Setup as recorded
+
+- 1 × RTX 3090 24 GiB, driver 580.126.09, stock 350 W.
+- Target `Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf`, sha256 `707a55a8…f4450`.
+- Draft (Oleg arms) `Qwen3.5-0.8B-Q4_K_M.gguf`, sha256 `bd258782…dc517`.
+- DFlash drafter: `z-lab/Qwen3.6-35B-A3B-DFlash` converted to BF16 GGUF with
+  PR #22105's `convert_hf_to_gguf.py --target-model-dir`.
+- Args: `-ngl 999 -c 4096 -fa on -ctk q8_0 -ctv q8_0 -n 200 --temp 0.5 --seed 42 -no-cnv -st`
+  (note `-no-cnv` was rejected, see confound 3).
+- `BENCHMARK_ENV.md` records `llama-cli --version` as
+  `8889 (bcb5eeb64) -- inherited from master at fork point`, while the run logs
+  report `b8942-67cb0d507`. **The logs are authoritative**; the `--version`
+  string was captured before the DFlash rebuild. This is why a run manifest
+  must hash the binary rather than trust `--version`.
+
+## Upstream status, checked 2026-08-25
+
+llama.cpp PR #22105 (DFlash) was **merged on 2026-06-28**. Earlier text in this
+directory described it as an open draft. The archived measurements come from
+the **pre-merge** branch `67cb0d507` and are not measurements of the
+implementation now in master.
+
+## What a valid DFlash result would need
+
+One pinned post-merge binary, DFlash disabled and enabled, ABBA-ordered, at
+least five repeats per cell, a thinking control verified in the output, full
+per-request capture, and the binary's sha256 in the manifest. That work is
+queued as P2 in [`../RETEST_TODO.md`](../RETEST_TODO.md).
+
+## Files
+
+| Path | Contents |
+|---|---|
+| `data/out_20260507_183341/` | raw per-prompt logs, seven configs |
+| `data/out_20260507_183341/manifest.txt` | GPU state and model file listing at run start |
+| `data/run_dflash_2026_05_07.log`, `data/run_03_04_2026_05_07.log` | driver logs |
+| `bench/bench_dflash.sh` | the script, kept as-is with an errata header |
+
+## Licence
+
+Same as the repository root: code and documentation MIT
+([`../LICENSE`](../LICENSE)), benchmark data CC0-1.0
+([`../DATA_LICENSE`](../DATA_LICENSE)). An earlier version of this file
+claimed Apache 2.0; that was never correct for this repository and has been
+removed.

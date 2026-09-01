@@ -1,0 +1,87 @@
+{
+  "created": "2026-08-26T08:44:53+0800",
+  "host": "3090",
+  "gpu_env": "0",
+  "server_bin": "/home/thc1006/bench/llama-retest/build/bin/llama-server",
+  "server_sha256": "b6a5c490bb932ffa9bf8a0d887f15eb0aade1d00a5e29b177a27249a2c539903",
+  "target": "/home/thc1006/models/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf",
+  "target_sha256": "707a55a8a4397ecde44de0c499d3e68c1ad1d240d1da65826b4949d1043f4450",
+  "draft": "/home/thc1006/models/Qwen3.5-0.8B-Q4_K_M.gguf",
+  "draft_sha256": "bd258782e35f7f458f8aced1adc053e6e92e89bc735ba3be89d38a06121dc517",
+  "dflash": "/home/thc1006/models/qwen36-dflash-master.gguf",
+  "mtp": "/home/thc1006/models/qwen36-mtp-q8_0.gguf",
+  "dflash_sha256": "0e6d95c6a2ef7a3aaa4f7d54c6307d8bea50b86621823ea90f5bf8b5d8446e30",
+  "mtp_sha256": "5b1e493748267c522cfdcd54eab51fa846693c1aea63b0d3a41e5bb98f728e55",
+  "common_args": [
+    "-ngl",
+    "999",
+    "-c",
+    "16384",
+    "--jinja",
+    "-fa",
+    "on",
+    "-ctk",
+    "q8_0",
+    "-ctv",
+    "q8_0",
+    "--no-webui",
+    "-v"
+  ],
+  "flavor": "master",
+  "arms": {
+    "baseline": [],
+    "ngram-map-k": [
+      "--spec-type",
+      "ngram-map-k"
+    ],
+    "ngram-map-k-m8": [
+      "--spec-type",
+      "ngram-map-k",
+      "--spec-ngram-map-k-size-n",
+      "12",
+      "--spec-ngram-map-k-size-m",
+      "8"
+    ],
+    "ngram-map-k-m4": [
+      "--spec-type",
+      "ngram-map-k",
+      "--spec-ngram-map-k-size-n",
+      "12",
+      "--spec-ngram-map-k-size-m",
+      "4"
+    ],
+    "ngram-map-k4v": [
+      "--spec-type",
+      "ngram-map-k4v"
+    ],
+    "ngram-map-k4v-m8": [
+      "--spec-type",
+      "ngram-map-k4v",
+      "--spec-ngram-map-k4v-size-n",
+      "12",
+      "--spec-ngram-map-k4v-size-m",
+      "8"
+    ],
+    "ngram-map-k4v-m4": [
+      "--spec-type",
+      "ngram-map-k4v",
+      "--spec-ngram-map-k4v-size-n",
+      "12",
+      "--spec-ngram-map-k4v-size-m",
+      "4"
+    ]
+  },
+  "repeats": 3,
+  "max_tokens": 300,
+  "temperature": 0.0,
+  "seed": 42,
+  "think": "on",
+  "think_env": "on",
+  "concurrency": 1,
+  "fit": false,
+  "ctx": "16384",
+  "fit_target": null,
+  "ordering": "ABBA: arm order is reversed on odd repeats",
+  "gpu_fields": "index,name,memory.used,utilization.gpu,clocks.current.graphics,clocks.max.graphics,clocks.current.sm,clocks.current.memory,clocks.max.memory,power.draw,power.limit,power.default_limit,power.max_limit,temperature.gpu,pstate,clocks_throttle_reasons.active",
+  "nvidia_smi": "0, NVIDIA GeForce RTX 3090, 82 MiB, 0 %, 210 MHz, 2100 MHz, 210 MHz, 405 MHz, 9751 MHz, 30.44 W, 350.00 W, 350.00 W, 350.00 W, 51, P8, 0x0000000000000001"
+}

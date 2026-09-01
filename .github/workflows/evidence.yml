@@ -1,0 +1,351 @@
+name: evidence
+
+# Re-derives the committed JSON from the published raw logs. The audit workflow
+# proves the derived files and the documents agree with each other; this proves
+# they came from the logs. Separate because it downloads 259 MiB and unpacks
+# 4 GB, which has no business running on every push.
+#
+# `workflow_dispatch` and `schedule` are declared below and NEITHER CAN FIRE
+# today: both read the workflow from the default branch, and master carries no
+# `.github/` at all. They start working the moment this branch merges. Until
+# then the `push` filter below is the only thing that runs this job, which is
+# why that filter has to be complete.
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: the release holding raw_logs.tar.zst
+        default: v4.2
+        required: false
+  release:
+    types: [published]
+  schedule:
+    - cron: "37 5 * * 1"
+  # `schedule` and `workflow_dispatch` only fire from the DEFAULT branch, so on
+  # a branch this workflow could not run at all and its evidence chain was
+  # never demonstrated - only asserted. `push` reads the workflow from the ref
+  # being pushed, so this makes it runnable here. Scoped to the files that
+  # decide what the extraction does, which is when the chain needs re-proving.
+  push:
+    paths:
+      - analysis/rederive_from_logs.py
+      - analysis/extract_checkpoint_timers.py
+      - analysis/extract_spec_accounting.py
+      - analysis/compare_acceptance_counters.py
+      # the member preflight the unpack step runs before extracting, and
+      # the registry that says what the re-derivation is supposed to cover
+      - bench/preflight_tar.py
+      - bench/check_release_binding.py
+      - v4_audit_2026_08_25/EVIDENCE_REGISTRY.json
+      # the last step of this job runs the claim checker, so a change to it can
+      # break this workflow without touching an extractor - which is how the
+      # shallow-clone failure reached a green audit and a red evidence run
+      - analysis/verify_claims.py
+      # and everything it imports: the filter listed the entry script only, so
+      # a change to the mode contrast or the carryover analysis - which the
+      # checker asserts against - would not re-run this chain. Held to the
+      # import closure by a test, because a list maintained by hand is how the
+      # two omissions above got here.
+      - analysis/carryover.py
+      - analysis/length_mode.py
+      - analysis/paired_blocks.py
+      - analysis/past_threshold_fit.py
+      - analysis/table_coverage.py
+      - analysis/thermal_report.py
+      - .github/workflows/evidence.yml
+      - v4_audit_2026_08_25/EVIDENCE_MANIFEST.sha256
+      # the archive step greps each digest in the audit README as well as the
+      # manifest, so a change to it can fail this job with nothing else
+      # touched - which is how a truncated digest reached CI
+      - v4_audit_2026_08_25/README.md
+
+permissions:
+  contents: read
+
+# One run per ref. This job downloads 680 MB and unpacks 4 GB; two pushes a
+# minute apart used to mean two of them, and the older one's verdict was
+# already stale when it landed.
+concurrency:
+  group: evidence-${{ github.ref }}
+  cancel-in-progress: true
+
+# See the same block in audit.yml: the default `bash -e {0}` has no pipefail,
+# so a piped checker can print a failure into a green job. Every step here
+# already sets `-euo pipefail` itself; this makes it the default so a step
+# added later does not have to remember.
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  rederive:
+    # NOT "raw logs to committed JSON", which is what this said and is more than
+    # it does. Four server-log-derived audit files are independently regenerated
+    # and compared: the acceptance counters, two sets of checkpoint timers and
+    # the speculative accounting. The primary per-request benchmark JSON is NOT
+    # regenerated -- the logs carry no per-request timing rows -- and is only
+    # integrity-checked against EVIDENCE_MANIFEST.sha256.
+    # v4_audit_2026_08_25/EVIDENCE_REGISTRY.json says which is which, and holds
+    # the expected run set independently of the outputs being checked.
+    name: four log-derived audit files, re-derived and compared
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        # full history, for the same reason audit.yml gives: the last step here
+        # runs the claim checker, whose provenance assertions resolve run
+        # manifests against every version of the runner this repository has
+        # held. The first real run of this workflow failed on exactly that.
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with: { python-version: "3.12" }
+
+      - name: fetch the archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # `github.event.inputs` does not exist on a release event, so this
+          # used to fall through to the hard-coded tag and validate LAST
+          # release's archive against a new release. Route on the event.
+          TAG: >-
+            ${{
+              github.event_name == 'release'
+                && github.event.release.tag_name
+                || (inputs.release_tag || 'v4.2')
+            }}
+        run: |
+          set -euo pipefail
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" \
+             --pattern '*.tar.zst' --dir evidence
+          ls -l evidence
+
+      - name: the archive is the one the repository names
+        run: |
+          set -euo pipefail
+          check() {
+            local file="$1" want="$2"
+            [ -f "$file" ] || { echo "missing $file" >&2; return 1; }
+            local got; got=$(sha256sum "$file" | cut -d' ' -f1)
+            echo "$(basename "$file") want $want got $got"
+            [ "$want" = "$got" ]
+            # and the same digest is what the manifest and the audit README record
+            grep -q "$want" v4_audit_2026_08_25/EVIDENCE_MANIFEST.sha256
+            grep -q "$want" v4_audit_2026_08_25/README.md
+          }
+          check evidence/raw_logs.tar.zst \
+            29c2401f100390268bbd52e43b5c2da9a61440bad3dabe502ca1684478771fd6
+          check evidence/raw_logs_20260827.tar.zst \
+            d56a7f88a099550bdab229ccb2bd36840f167550cea7689f575fd6d0f11da8ff
+          check evidence/raw_logs_20260828.tar.zst \
+            5af671bf3cf47a20fa2ca78504c089642b9bb2ea249b8997577b4852caa7a5c2
+          # the telemetry archives were recorded in the manifest and never
+          # verified here, so a trace could have been replaced without the
+          # digest check noticing; only the per-file sums would have caught it
+          check evidence/telemetry.tar.zst \
+            8a29cc875e30bc66c6e83913b1bf40b075295218a37eef37897317805b47d03c
+          check evidence/telemetry_20260827.tar.zst \
+            db833395470aeaf842225a33fb544e933f1c0a3047cac161524aca1ac1aef061
+          check evidence/telemetry_20260828.tar.zst \
+            72e331bf0cbfaaee73619acf320523598cab4a46b7a7daa51fabbd6e2c455bf3
+          # fourth tranche: run W2's 1200 logs and its trace. Hashed into the
+          # manifest on 2026-08-31 and packaged for the v4.2 release, which is
+          # why the manifest carried a pending marker for one commit and does
+          # not now.
+          check evidence/raw_logs_20260831.tar.zst \
+            524ce5db75d494028b7b596f45e98b2384d8234726a924135775cce4f85b4cda
+          check evidence/telemetry_20260831.tar.zst \
+            4abdb6d701171bf0178ae36dad86f3190801cc047e88220d16f5442b7189949b
+          # and nothing was downloaded that no `check` above covers: the
+          # pattern is a glob, so a ninth asset added to the release would be
+          # unpacked with its archive digest unverified. Counted against this
+          # file rather than a literal, so adding a check is the only way to
+          # raise the number.
+          checked=$(grep -c '^          check evidence/' \
+                      .github/workflows/evidence.yml)
+          got=$(find evidence -maxdepth 1 -name '*.tar.zst' | wc -l)
+          [ "$checked" -eq "$got" ] || {
+            echo "FAIL: $got archives downloaded, $checked have a digest here" >&2
+            exit 1
+          }
+          echo "$got archives, each against a digest this file records"
+
+      - name: unpack, and check every file against the manifest
+        run: |
+          set -euo pipefail
+          sudo apt-get -qq update && sudo apt-get -qq install -y zstd
+          mkdir -p bench
+          # PREFLIGHT, before a byte is written. `sha256sum -c` afterwards proves
+          # every file the manifest NAMES is intact and says nothing about what
+          # the archive carries and the manifest does not: an absolute path, a
+          # `..`, a symlink out of the tree, a duplicated member that overwrites
+          # its first copy, or simply an extra file. The pinned digests make that
+          # unlikely for these archives; the verifier was still not closed-world.
+          # Every entry is published now. While run W2's logs were hashed
+          # and not packaged the manifest carried a marker and this step
+          # verified the half above it; the marker must be gone, or the job
+          # would check a subset of the file and say nothing about the rest.
+          M=v4_audit_2026_08_25/EVIDENCE_MANIFEST.sha256
+          ! grep -q '^# --- PENDING TRANCHE' "$M" || {
+            echo "FAIL: the manifest still marks a pending tranche" >&2; exit 1; }
+          grep -v '^#' "$M" | grep -v '^$' > /tmp/manifest_all
+          # Four tranches unpacked at once is 15.2 GB of logs, and the run that
+          # last passed here held 9.4 GB. Rather than find out on a release
+          # commit whether a hosted runner has the difference, run W2's tranche
+          # is verified in a root of its own and removed before the other three
+          # are unpacked. Peak is then 6.8 GB and 10.1 GB in turn, and the
+          # second is the footprint that already succeeded.
+          #
+          # `sha256sum -c` over a SLICE is only as good as the slice, so the two
+          # are proved to partition the file: every line in exactly one, and the
+          # counts adding up. A slice that silently lost lines would verify
+          # fewer files and say nothing.
+          OOB=20260830_220554
+          # `|| true`: under `set -e` a grep that matches nothing aborts the
+          # step with no message, and the emptiness check below is exactly the
+          # one that should report it.
+          grep    "$OOB" /tmp/manifest_all > /tmp/manifest_oob   || true
+          grep -v "$OOB" /tmp/manifest_all > /tmp/manifest_bench || true
+          a=$(wc -l < /tmp/manifest_all); o=$(wc -l < /tmp/manifest_oob)
+          b=$(wc -l < /tmp/manifest_bench)
+          [ $((o + b)) -eq "$a" ] || {
+            echo "FAIL: the manifest slices are $o + $b, not $a" >&2; exit 1; }
+          [ "$o" -gt 0 ] && [ "$b" -gt 0 ] || {
+            echo "FAIL: a slice is empty, so one of them verifies nothing" >&2
+            exit 1
+          }
+          echo "$a manifest entries, none pending: $b staged, $o verified apart"
+          df -h --output=source,size,used,avail,pcent / | sed 's/^/  df /'
+          # `_all`, not `manifest`: the manifest was split into three slices and
+          # this call kept the name of the file that used to hold all of it.
+          # `/tmp/manifest` has not existed since, and the step died on a
+          # FileNotFoundError the first time a published release made this job
+          # reachable. Every archive is passed here, so the slice to check
+          # against is the whole file.
+          python3 bench/preflight_tar.py /tmp/manifest_all \
+              <(unzstd -c evidence/raw_logs.tar.zst) \
+              <(unzstd -c evidence/raw_logs_20260827.tar.zst) \
+              <(unzstd -c evidence/raw_logs_20260828.tar.zst) \
+              <(unzstd -c evidence/telemetry.tar.zst) \
+              <(unzstd -c evidence/telemetry_20260827.tar.zst) \
+              <(unzstd -c evidence/telemetry_20260828.tar.zst) \
+              <(unzstd -c evidence/raw_logs_20260831.tar.zst) \
+              <(unzstd -c evidence/telemetry_20260831.tar.zst)
+          # The fourth tranche, in a root of its own. Verified in full and
+          # then deleted with its archives, so the three that the
+          # re-derivation actually reads are unpacked into a runner that is
+          # holding nothing else.
+          mkdir -p /tmp/oob
+          tar --use-compress-program=unzstd -xf evidence/raw_logs_20260831.tar.zst -C /tmp/oob
+          tar --use-compress-program=unzstd -xf evidence/telemetry_20260831.tar.zst -C /tmp/oob
+          ( cd /tmp/oob && sha256sum -c /tmp/manifest_oob > /dev/null )
+          got=$(find /tmp/oob -name '*.log' | wc -l)
+          want=$(grep -c '\.log$' /tmp/manifest_oob)
+          [ "$got" -eq "$want" ] || {
+            echo "FAIL: $got logs in the fourth tranche, $want in its slice" >&2
+            exit 1
+          }
+          echo "$got logs verified out of band, and no log its slice does not name"
+          rm -rf /tmp/oob evidence/raw_logs_20260831.tar.zst \
+                 evidence/telemetry_20260831.tar.zst
+          df -h --output=avail / | tail -1 | sed 's/^/  df avail after the fourth tranche: /'
+          # Three tranches, and no `if [ -f ]` around any of them: the step
+          # above fails when one of the six archives is absent, so the guards
+          # that used to be here could never be false, and they read as though
+          # a missing tranche were tolerated. That is the shape this repository
+          # keeps finding in its own checks.
+          tar --use-compress-program=unzstd -xf evidence/raw_logs.tar.zst -C bench
+          tar --use-compress-program=unzstd -xf evidence/raw_logs_20260827.tar.zst -C bench
+          tar --use-compress-program=unzstd -xf evidence/telemetry.tar.zst -C bench \
+              --strip-components=1
+          tar --use-compress-program=unzstd -xf evidence/telemetry_20260827.tar.zst -C bench
+          # third tranche: run W's 500 logs and its telemetry trace
+          tar --use-compress-program=unzstd -xf evidence/raw_logs_20260828.tar.zst -C bench
+          tar --use-compress-program=unzstd -xf evidence/telemetry_20260828.tar.zst -C bench
+          df -h --output=avail / | tail -1 | sed 's/^/  df avail after unpacking: /'
+          cd bench && sha256sum -c /tmp/manifest_bench
+          # `sha256sum -c` proves every file the manifest names is intact. It
+          # says nothing about a file the archive carries and the manifest does
+          # not, so the count is compared rather than printed.
+          want=$(grep -c '\.log$' /tmp/manifest_bench)
+          got=$(find . -name '*.log' | wc -l)
+          [ "$want" -eq "$got" ] || {
+            echo "FAIL: $got logs unpacked, $want in the manifest" >&2
+            exit 1
+          }
+          echo "$got logs, and no log the manifest does not name"
+
+      - name: put the committed arm-run JSON beside the logs
+        run: |
+          set -euo pipefail
+          # four runs are archived under their bench-host names
+          declare -A as=(
+            [C_master_matrix_think_on]=matrix_C_20260825_204529
+            [D_master_matrix_think_off]=matrix_D_20260825_204529
+            [E_past_threshold]=matrix_E_threshold_20260825_224802
+            [H_pmin_sweep]=matrix_H_pmin_20260826_005716
+          )
+          # `|| true` hid a failed copy, so the re-derivation could run against
+          # a directory that never received the committed JSON and report a gap
+          # as though the extractor had produced one.
+          staged=0
+          skipped=()
+          for d in v4_audit_2026_08_25/data/*/; do
+            n=$(basename "$d")
+            t="bench/${as[$n]:-$n}"
+            if [ ! -d "$t" ]; then skipped+=("$n"); continue; fi
+            found=0
+            for f in "$d"*.json; do
+              [ -e "$f" ] || continue
+              cp "$f" "$t"/ || { echo "FAIL: cannot stage $f" >&2; exit 1; }
+              found=1
+            done
+            [ "$found" -eq 1 ] || { echo "FAIL: no JSON to stage from $d" >&2; exit 1; }
+            staged=$((staged + 1))
+          done
+          echo "staged JSON into $staged run directories"
+          [ "$staged" -gt 0 ] || { echo "FAIL: staged nothing" >&2; exit 1; }
+          # Two committed runs predate the archive and have no logs in it, and
+          # a run whose tranche is still pending has none either. That is the
+          # whole list, and it is compared rather than counted: a broken alias
+          # in `as` would drop a run out of the re-derivation silently, and the
+          # only trace would have been a smaller number in the line above,
+          # which nothing read.
+          #
+          # Two, plus whatever the out-of-band slice named: those logs are
+          # verified against the manifest and then deleted, because the
+          # re-derivation does not read them and a runner cannot hold all four
+          # tranches at once. Read out of the slice rather than written here,
+          # so changing which tranche is handled that way changes one line.
+          got=$(printf '%s\n' "${skipped[@]:-}" | sort | tr '\n' ' ')
+          oob=$(cut -d' ' -f3- /tmp/manifest_oob | cut -d/ -f1 \
+                | grep -v '\.csv$' | sort -u | tr '\n' ' ')
+          want=$(printf '%s\n' A_bcb5eeb64_legacy B_master_3737e4137 $oob \
+                 | sort | tr '\n' ' ')
+          [ "$got" = "$want" ] || {
+            echo "FAIL: runs with no archived logs are now [$got], not [$want]" >&2
+            exit 1
+          }
+          echo "not staged, as expected: $got"
+
+      - name: re-derive, and require the result to be what is committed
+        env:
+          # the point of this job is that the archive regenerates those four
+          # files; a missing run T4 must fail it, not be reported
+          REDERIVE_REQUIRE_T4: "1"
+        run: python analysis/rederive_from_logs.py bench
+
+      - name: a release tag must publish the tree it names
+        # ANY tag, not a name prefix. This read `refs/tags/raw-evidence-` and
+        # the tag was renamed to `v4.2` on 2026-09-01: the step then skipped on
+        # the `release` event it exists for, and the run reported success with
+        # the binding unchecked. A guard keyed on a name is a guard a rename
+        # turns off, and nothing says so -- a skipped step is green.
+        if: startsWith(github.ref, 'refs/tags/')
+        # `raw-evidence-2026-08-27` points at this branch's base and its assets
+        # kept being added to, so its source revision holds neither the current
+        # verifier nor the current manifest. A tag that does not publish the
+        # tree it names breaks source <-> verifier <-> manifest <-> assets.
+        run: python3 bench/check_release_binding.py "${GITHUB_REF_NAME}"
+
+      - name: every quoted figure still matches the re-derived data
+        run: python analysis/verify_claims.py

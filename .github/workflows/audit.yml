@@ -1,0 +1,212 @@
+name: audit
+
+# Five required jobs. This repository publishes numbers, and every one of them
+# has to be re-derivable from the committed data by a machine that was not the
+# one that produced it. Several of the checks below exist because the claim they
+# guard was published wrong first.
+on:
+  pull_request:
+  push:
+    branches: [master, "audit-*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One run per ref and per event. Every push to a branch with an open pull
+# request starts two of these, and a second push starts two more; the older
+# pair then spends the better part of an hour reaching a verdict about a commit
+# nobody is looking at any more. It was twenty minutes when this was written
+# and fifty-six on 2026-08-31, which is the same growth the mutation job's own
+# limit is about.
+concurrency:
+  group: audit-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# A `run:` step with no `shell:` gets `bash -e {0}`, which has `-e` and NOT
+# `-o pipefail`. Under that default a step like `python check.py | tail -1`
+# reports the exit status of `tail`, so a checker can print FAIL and the job
+# still goes green - the failure mode a sibling repository shipped for months.
+# No step here pipes today; naming the shell is what keeps that true when one
+# does. It also means an intentionally-empty `grep` now needs `|| true`, which
+# is the trade this repository already learned in v3's bench script.
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  audit-static:
+    name: static
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with: { python-version: "3.12" }
+      - name: the linters, pinned by hash
+        # The charts job says it about its own lock and it is just as true
+        # here: a job that checks this repository must not be able to change
+        # without a change in this repository. `pip install pyflakes==3.4.0`
+        # was version-pinned and not hash-pinned, and shellcheck came from
+        # `apt-get install`, which is whatever Ubuntu ships that week - a
+        # release that adds a check turns the build red with nothing here
+        # having moved, and one that drops a check turns it green the same way.
+        run: pip install --require-hashes -r requirements-lint.lock
+      - name: byte-compile and pyflakes every live python file
+        # Not a hand-written directory list: `tools/` was added on 2026-08-28
+        # and the old `analysis bench tests` covered neither it nor anything
+        # else added later. Everything is checked except the archived trees,
+        # which are the artefacts earlier versions published and which ERRATA
+        # quotes the behaviour of - `bench_runner.py` down to `content[:120]`
+        # and the text of its --gpu help. Removing an unused import from those
+        # would not change behaviour and would still change a published file.
+        run: |
+          set -euo pipefail
+          files=$(find . -name '*.py' \
+                    -not -path './.git/*' \
+                    -not -path './v2_3090_followup/*' \
+                    -not -path './v3_dflash_2026_05_07/*' \
+                    -not -path './results/*' \
+                    -not -path './bench_runner.py' | sort)
+          echo "$files" | sed 's|^|  |'
+          [ -n "$files" ] || { echo "no python found" >&2; exit 1; }
+          # shellcheck disable=SC2086
+          python -m compileall -q $files
+          # shellcheck disable=SC2086
+          pyflakes $files
+      - name: relative links and heading anchors
+        run: python analysis/check_links.py
+      - name: shellcheck every live shell script
+        # `bench/*.sh` was a hand-written glob and it missed four scripts at the
+        # repository root, one of them `collect_env.sh`, which is what writes
+        # BENCHMARK_ENV.md. Exactly the defect the step above was widened for a
+        # commit earlier, left standing in the step beside it. The exclusions
+        # are the same archived trees, for the same reason: they are what
+        # earlier versions published and ERRATA quotes their behaviour.
+        run: |
+          set -euo pipefail
+          files=$(find . -name '*.sh' \
+                    -not -path './.git/*' \
+                    -not -path './v2_3090_followup/*' \
+                    -not -path './v3_dflash_2026_05_07/*' \
+                    -not -path './results/*' | sort)
+          echo "$files" | sed 's|^|  |'
+          [ -n "$files" ] || { echo "no shell scripts found" >&2; exit 1; }
+          # shellcheck disable=SC2086
+          shellcheck --severity=style $files
+
+  audit-unit:
+    name: unit and mutation
+    runs-on: ubuntu-latest
+    # 21 min on 2026-08-28, and 50 to 56 min on 2026-08-31 against this
+    # 60-minute limit: 0.9 unit, 4.2 code mutations, and the rest is the
+    # data perturbations, which run the claim checker once per perturbation
+    # and the checker has gained nine hundred assertions since that first
+    # figure. The headroom was four minutes and every assertion added spends
+    # more of it.
+    #
+    # The perturbations are sharded now. They were sequential only because
+    # they shared one mirror, and a shard with a mirror of its own cannot
+    # reach another shard at all. `bench/run_data_mutations.sh` refuses more
+    # shards than the runner has processors, requires every shard to report,
+    # and requires the caught counts to add up to the whole list: a shard
+    # that silently did nothing fails the total rather than passing quietly.
+    # Without a limit at all a hang costs the default six hours.
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        # full history, like the claims job: some of these tests run the claim
+        # checker, whose provenance assertions need every version of the runner
+        # this repository has held. A depth-1 clone makes the checker refuse,
+        # and a test that measures how many assertions it skips then measures
+        # a truncated run instead.
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with: { python-version: "3.12" }
+      - name: regression tests for defects this repository shipped
+        run: python -m unittest discover -s tests -v
+      - name: mutation check - the suite must fail on the broken versions
+        run: python tests/mutate.py
+      - name: data mutation - perturbing a measurement must fail the claim checker
+        # one shard per processor, which is the most the launcher accepts.
+        # Each shard mirrors the tracked tree, 162 MB, so four hold 1.3 GB
+        # of a runner that has an order of magnitude more.
+        run: bench/run_data_mutations.sh "$(nproc)"
+
+  audit-data-integrity:
+    name: data integrity
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with: { python-version: "3.12" }
+      - name: structure of every committed run directory
+        run: python analysis/check_data_integrity.py
+
+  audit-claims:
+    name: claims
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        # full history: the claim checker resolves each run's `runner_sha256`
+        # against every version of bench/retest_runner.py this repository has
+        # held, which a depth-1 clone cannot do
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with: { python-version: "3.12" }
+      - name: re-derive every quoted figure and grep the documents for it
+        run: python analysis/verify_claims.py
+      - name: how much of what is published is checked cell by cell
+        # printed, not gated, here: the gate is in verify_claims.py, which
+        # holds the census to an exact table count and a floor on the parsed
+        # ones. This step exists so the number is visible in the log rather
+        # than only failing when it moves.
+        run: python analysis/table_coverage.py
+      - name: the past-threshold fit reports and serialises
+        run: |
+          set -e
+          python analysis/past_threshold_fit.py
+          python analysis/past_threshold_fit.py --json > /dev/null
+      - name: every attested run aggregates without a completeness failure
+        run: |
+          set -euo pipefail
+          n=0
+          for d in v4_audit_2026_08_25/data/*/; do
+            if [ -f "$d/RUN_COMPLETE.json" ]; then
+              echo "--- $d"
+              python analysis/matrix_report.py --strict "$d"
+              n=$((n + 1))
+            fi
+          done
+          # A loop over a set that turned out to be empty passes, and reads as
+          # though every attested run were clean. `-ge 36` was written when
+          # there were 36 and stood while 48 acquired the marker, so twelve
+          # could have lost it silently: a floor is a ratchet, and this
+          # repository has removed the same shape from its census twice.
+          # Counted against the tree, not against a number written here.
+          want=$(find v4_audit_2026_08_25/data -maxdepth 2 -name RUN_COMPLETE.json | wc -l)
+          echo "$n attested runs aggregated, $want carry the marker"
+          [ "$n" -eq "$want" ] || {
+            echo "FAIL: aggregated $n of $want attested runs" >&2; exit 1; }
+          [ "$n" -ge 36 ] || {
+            echo "FAIL: only $n attested runs; the audit had 36 in 2026-08-28" >&2
+            exit 1
+          }
+
+  audit-charts:
+    name: charts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        # 3.13, not 3.12: requirements-plot.lock pins cp313 wheels by hash
+        with: { python-version: "3.13" }
+      - name: install the plotting dependencies
+        # hash-pinned: the job that checks the charts must not be able to change
+        # without a change in this repository
+        run: pip install --require-hashes -r requirements-plot.lock
+      - name: the committed charts must still match the committed data
+        run: python analysis/plot_v4_runs.py --check

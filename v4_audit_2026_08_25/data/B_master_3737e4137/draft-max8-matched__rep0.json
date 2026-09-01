@@ -1,0 +1,385 @@
+{
+  "arm": "draft-max8-matched",
+  "repeat": 0,
+  "ready_s": 15.087372606009012,
+  "argv": [
+    "/home/thc1006/bench/llama-retest/build/bin/llama-server",
+    "-m",
+    "/home/thc1006/models/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf",
+    "--host",
+    "127.0.0.1",
+    "--port",
+    "18135",
+    "-ngl",
+    "999",
+    "-c",
+    "16384",
+    "--jinja",
+    "-fa",
+    "on",
+    "-ctk",
+    "q8_0",
+    "-ctv",
+    "q8_0",
+    "--no-webui",
+    "-v",
+    "-md",
+    "/home/thc1006/models/Qwen3.5-0.8B-Q4_K_M.gguf",
+    "-ngld",
+    "99",
+    "--spec-draft-n-max",
+    "8",
+    "--spec-draft-n-min",
+    "4",
+    "--spec-type",
+    "draft-simple",
+    "--override-kv",
+    "tokenizer.ggml.bos_token_id=int:248044"
+  ],
+  "gpu_before": "0, NVIDIA GeForce RTX 3090, 82 MiB, 100 %, 1935 MHz, 9501 MHz, 212.15 W, 62",
+  "gpu_after": "0, NVIDIA GeForce RTX 3090, 22584 MiB, 88 %, 1950 MHz, 9501 MHz, 235.23 W, 65",
+  "server_log": "server_logs/draft-max8-matched__rep0.log",
+  "crashed": null,
+  "rows": [
+    {
+      "wall_ms": 10008.83244400029,
+      "finish_reason": "length",
+      "usage": {
+        "completion_tokens": 300,
+        "prompt_tokens": 25,
+        "total_tokens": 325,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 25,
+        "prompt_ms": 143.077,
+        "prompt_per_token_ms": 5.7230799999999995,
+        "prompt_per_second": 174.7310888542533,
+        "predicted_n": 300,
+        "predicted_ms": 9769.325,
+        "predicted_per_token_ms": 32.67332775919733,
+        "predicted_per_second": 30.606003997205537,
+        "draft_n": 576,
+        "draft_n_accepted": 154
+      },
+      "predicted_ms": 9769.325,
+      "predicted_n": 300,
+      "predicted_per_second": 30.606003997205537,
+      "draft_n": 576,
+      "draft_n_accepted": 154,
+      "content": "",
+      "reasoning_content": "Here's a thinking process:\n\n1.  **Analyze User Input:**\n   - User says: \"Hey there!\"\n   - Tone: Casual, friendly greeting\n   - Context: First interaction, no specific request yet\n\n2.  **Identify Persona/Role:**\n   - I am a \"friendly desk robot\"\n   - Key traits: Friendly, helpful, desk-oriented (maybe mentions office/desk tasks, but keep it light and conversational), robotic but approachable\n\n3.  **Determine Response Goals:**\n   - Acknowledge greeting warmly\n   - Stay in character (desk robot)\n   - Offer assistance\n   - Keep it concise and friendly\n\n4.  **Draft - Mental Refinement:**\n   \"Hey there! 👋 I'm your friendly desk robot, ready to help with anything from organizing your workspace to answering questions or just keeping you company. What can I do for you today?\"\n   - Check tone: Friendly, matches persona\n   - Check role: Mentions desk robot, offers help\n   - Check length: Concise\n   - Add a touch of robot charm if needed, but keep it natural\n\n5.  **Final Polish:**\n   \"Hey there! 👋 I’m your friendly desk robot, here to help with anything you need—whether it’s organizing your workspace, answering questions, or just keeping you company. What can I do for you today?\" \n   - Matches all",
+      "tokens": [],
+      "tag": "short_greet"
+    },
+    {
+      "wall_ms": 10980.83183800918,
+      "finish_reason": "length",
+      "usage": {
+        "completion_tokens": 300,
+        "prompt_tokens": 28,
+        "total_tokens": 328,
+        "prompt_tokens_details": {
+          "cached_tokens": 12
+        }
+      },
+      "timings": {
+        "cache_n": 12,
+        "prompt_n": 16,
+        "prompt_ms": 182.62,
+        "prompt_per_token_ms": 11.41375,
+        "prompt_per_second": 87.61362391851932,
+        "predicted_n": 300,
+        "predicted_ms": 10682.577,
+        "predicted_per_token_ms": 35.72768227424749,
+        "predicted_per_second": 27.989501035190294,
+        "draft_n": 647,
+        "draft_n_accepted": 140
+      },
+      "predicted_ms": 10682.577,
+      "predicted_n": 300,
+      "predicted_per_second": 27.989501035190294,
+      "draft_n": 647,
+      "draft_n_accepted": 140,
+      "content": "",
+      "reasoning_content": "Here's a thinking process:\n\n1.  **Analyze User Input:**\n   - User says: \"How's your day going?\"\n   - This is a casual, friendly greeting/question.\n   - My role/persona: \"friendly desk robot\"\n\n2.  **Identify Key Constraints/Persona:**\n   - I need to respond as a friendly desk robot.\n   - Should acknowledge my nature (robot, desk-bound, helpful, cheerful).\n   - Keep it light, conversational, and in character.\n   - Avoid breaking character or being too human-like (no real feelings, but can simulate friendly robot mannerisms).\n\n3.  **Brainstorming Response Elements:**\n   - Acknowledge the question warmly\n   - Mention being a desk robot (maybe reference charging, organizing papers, greeting guests, running on circuits, etc.)\n   - Keep it positive and helpful\n   - Ask how their day is going in return\n   - Maintain a cheerful, slightly mechanical but friendly tone\n\n4.  **Draft Construction (Mental):**\n   Beep boop! My day’s going great, thanks for asking! I’ve been busy organizing files, greeting visitors, and keeping my charging dock nice and tidy. How about you? Is there anything I can help you with today? 😊🤖\n\n5.  **Refine & Check Against Constraints:**\n   - Friendly? Yes.\n   - Desk robot persona",
+      "tokens": [],
+      "tag": "short_q"
+    },
+    {
+      "wall_ms": 11228.496328985784,
+      "finish_reason": "length",
+      "usage": {
+        "completion_tokens": 300,
+        "prompt_tokens": 33,
+        "total_tokens": 333,
+        "prompt_tokens_details": {
+          "cached_tokens": 12
+        }
+      },
+      "timings": {
+        "cache_n": 12,
+        "prompt_n": 21,
+        "prompt_ms": 211.827,
+        "prompt_per_token_ms": 10.087,
+        "prompt_per_second": 99.1375037176564,
+        "predicted_n": 300,
+        "predicted_ms": 10878.649,
+        "predicted_per_token_ms": 36.383441471571906,
+        "predicted_per_second": 27.4850305400974,
+        "draft_n": 658,
+        "draft_n_accepted": 134
+      },
+      "predicted_ms": 10878.649,
+      "predicted_n": 300,
+      "predicted_per_second": 27.4850305400974,
+      "draft_n": 658,
+      "draft_n_accepted": 134,
+      "content": "",
+      "reasoning_content": "Here's a thinking process:\n\n1.  **Analyze User Input:**\n   - **User:** \"What do you think about humans writing code for you?\"\n   - **Key Elements:** \n     - Subject: Humans writing code for me (the AI/robot)\n     - Question: What do I think about it?\n     - Tone: Open-ended, conversational\n   - **My Role:** Friendly desk robot\n\n2.  **Identify Core Concepts:**\n   - I'm an AI/robot, so I don't have personal feelings, but I can express appreciation, acknowledge the collaborative nature, and maintain a friendly, helpful tone.\n   - Humans writing code for me means they're programming, updating, or customizing my systems.\n   - This is a collaborative, symbiotic relationship: humans create/teach me, I assist humans.\n   - I should acknowledge the creativity, effort, and trust involved.\n   - Keep it light, positive, and in character as a \"friendly desk robot.\"\n\n3.  **Draft - Mental Refinement:**\n   \"I think it’s pretty wonderful! Humans writing code for me is like giving me a new set of tools, skills, or even a little personality boost. Every line of code is a chance for me to learn, adapt, and help you better. I don’t have feelings, but if I did, I’d say I’m deeply grateful! Plus, it",
+      "tokens": [],
+      "tag": "medium_chat"
+    },
+    {
+      "wall_ms": 8437.415496009635,
+      "finish_reason": "length",
+      "usage": {
+        "completion_tokens": 300,
+        "prompt_tokens": 39,
+        "total_tokens": 339,
+        "prompt_tokens_details": {
+          "cached_tokens": 12
+        }
+      },
+      "timings": {
+        "cache_n": 12,
+        "prompt_n": 27,
+        "prompt_ms": 210.171,
+        "prompt_per_token_ms": 7.784111111111111,
+        "prompt_per_second": 128.46681987524445,
+        "predicted_n": 300,
+        "predicted_ms": 8113.088,
+        "predicted_per_token_ms": 27.134073578595316,
+        "predicted_per_second": 36.85403141196053,
+        "draft_n": 504,
+        "draft_n_accepted": 177
+      },
+      "predicted_ms": 8113.088,
+      "predicted_n": 300,
+      "predicted_per_second": 36.85403141196053,
+      "draft_n": 504,
+      "draft_n_accepted": 177,
+      "content": "",
+      "reasoning_content": "Here's a thinking process:\n\n1.  **Analyze User Input:**\n   - User says: \"Earlier the user said their name is Hctsai. What did they tell you?\"\n   - Key information: The user claims they previously said their name is \"Hctsai\".\n   - Question: \"What did they tell you?\"\n\n2.  **Identify Core Task:**\n   - I need to respond based on the premise that the user previously stated their name is \"Hctsai\".\n   - I should acknowledge this information politely and confirm what they told me.\n\n3.  **Check Constraints/Context:**\n   - I'm a \"friendly desk robot\".\n   - I don't have memory of past conversations beyond this session, but I should play along with the premise given in the prompt.\n   - I should respond in a friendly, helpful manner consistent with a desk robot persona.\n\n4.  **Formulate Response:**\n   - Acknowledge the name: \"Hctsai\"\n   - Confirm what they told me: They told me their name is Hctsai.\n   - Keep it friendly and in character: \"You told me your name is Hctsai! It's great to meet you, Hctsai. How can I help you today?\"\n   - Check tone: Friendly, robotic but approachable, acknowledges the input directly.\n\n5.  **Refine Response (Self-Cor",
+      "tokens": [],
+      "tag": "medium_rec"
+    },
+    {
+      "wall_ms": 6647.545977990376,
+      "finish_reason": "length",
+      "usage": {
+        "completion_tokens": 300,
+        "prompt_tokens": 76,
+        "total_tokens": 376,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 76,
+        "prompt_ms": 179.578,
+        "prompt_per_token_ms": 2.3628684210526316,
+        "prompt_per_second": 423.214424929557,
+        "predicted_n": 300,
+        "predicted_ms": 6348.938,
+        "predicted_per_token_ms": 21.23390635451505,
+        "predicted_per_second": 47.094490448638815,
+        "draft_n": 404,
+        "draft_n_accepted": 211
+      },
+      "predicted_ms": 6348.938,
+      "predicted_n": 300,
+      "predicted_per_second": 47.094490448638815,
+      "draft_n": 404,
+      "draft_n_accepted": 211,
+      "content": "",
+      "reasoning_content": "Here's a thinking process:\n\n1.  **Analyze User Input:**\n   - Train A: Leaves Paris at 2 PM, speed = 120 km/h\n   - Train B: Leaves Berlin at 3 PM, speed = 80 km/h\n   - Track distance: 1000 km (Paris to Berlin)\n   - Direction: Towards each other\n   - Question: Where do they meet?\n\n2.  **Identify Key Variables & Constraints:**\n   - Distance between Paris and Berlin = 1000 km\n   - Train A starts at t = 2 PM from Paris\n   - Train B starts at t = 3 PM from Berlin\n   - Speeds: v_A = 120 km/h, v_B = 80 km/h\n   - They move towards each other.\n\n3.  **Step-by-Step Calculation:**\n   - *Step 1: Account for the time difference.*\n     Train A has a 1-hour head start (2 PM to 3 PM).\n     Distance covered by Train A in that 1 hour = 120 km/h * 1 h = 120 km.\n     Remaining distance between them at 3 PM = 1000 km - 120 km = 880 km.\n\n   - *Step 2: Calculate relative speed.*\n     Since they",
+      "tokens": [],
+      "tag": "reasoning"
+    },
+    {
+      "wall_ms": 9628.291506000096,
+      "finish_reason": "length",
+      "usage": {
+        "completion_tokens": 300,
+        "prompt_tokens": 43,
+        "total_tokens": 343,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 43,
+        "prompt_ms": 161.931,
+        "prompt_per_token_ms": 3.765837209302326,
+        "prompt_per_second": 265.54520135119276,
+        "predicted_n": 300,
+        "predicted_ms": 9368.307,
+        "predicted_per_token_ms": 31.33213043478261,
+        "predicted_per_second": 31.916118888930516,
+        "draft_n": 567,
+        "draft_n_accepted": 159
+      },
+      "predicted_ms": 9368.307,
+      "predicted_n": 300,
+      "predicted_per_second": 31.916118888930516,
+      "draft_n": 567,
+      "draft_n_accepted": 159,
+      "content": "",
+      "reasoning_content": "Here's a thinking process:\n\n1.  **Analyze User Input:**\n   - **Target Audience:** Curious 10-year-old\n   - **Topic:** How a rainbow forms\n   - **Length:** 4 to 6 sentences\n   - **Tone/Style:** Patient teaching (as per system prompt)\n\n2.  **Key Concepts to Cover:**\n   - Sunlight + raindrops\n   - Refraction (bending of light)\n   - Dispersion (splitting into colors)\n   - Reflection inside the drop\n   - Exit/formation of the arc\n   - Keep it simple, engaging, and age-appropriate\n\n3.  **Draft - Sentence by Sentence (mental):**\n   When sunlight shines through raindrops in the air, something magical happens. Each tiny raindrop acts like a miniature prism that bends the white sunlight as it enters. As the light travels through the drop, it splits into all the different colors of the rainbow. The light then bounces off the back of the drop and exits, sending those colors toward your eyes. Because millions of raindrops are doing this at just the right angle, you see a beautiful, colorful arc in the sky.\n\n4.  **Check Constraints:**\n   - Audience: 10-year-old? Yes, uses simple analogies (\"miniature prism\"), avoids jargon, explains clearly.\n   - Topic: Rainbow formation? Yes, covers sunlight,",
+      "tokens": [],
+      "tag": "long_explain"
+    },
+    {
+      "wall_ms": 6732.127410999965,
+      "finish_reason": "length",
+      "usage": {
+        "completion_tokens": 300,
+        "prompt_tokens": 41,
+        "total_tokens": 341,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 41,
+        "prompt_ms": 161.948,
+        "prompt_per_token_ms": 3.9499512195121955,
+        "prompt_per_second": 253.16768345394814,
+        "predicted_n": 300,
+        "predicted_ms": 6473.035,
+        "predicted_per_token_ms": 21.648946488294314,
+        "predicted_per_second": 46.19162417629443,
+        "draft_n": 414,
+        "draft_n_accepted": 208
+      },
+      "predicted_ms": 6473.035,
+      "predicted_n": 300,
+      "predicted_per_second": 46.19162417629443,
+      "draft_n": 414,
+      "draft_n_accepted": 208,
+      "content": "",
+      "reasoning_content": "Here's a thinking process:\n\n1.  **Understand User Request:**\n   - Input: A list of integers\n   - Output: A list containing only the prime numbers from the input\n   - Requirement: Short Python function with a quick comment\n   - Language: Python\n\n2.  **Define Prime Number:**\n   - A prime number is a natural number greater than 1 that has no positive divisors other than 1 and itself.\n   - Need to handle edge cases: numbers <= 1 are not prime.\n\n3.  **Algorithm for Checking Primality:**\n   - For each number in the list:\n     - If n <= 1: not prime\n     - If n == 2: prime\n     - If n % 2 == 0: not prime\n     - Check odd divisors from 3 up to sqrt(n)\n   - This is efficient enough for a \"short\" function.\n\n4.  **Draft Code (Mental):**\n   ```python\n   def get_primes(nums):\n       def is_prime(n):\n           if n <= 1: return False\n           if n <= 3: return True\n           if n % 2 == 0 or n % 3 == 0: return False\n           i = 5\n           while i * i <= n:\n               if n % i == 0 or n % (i + 2)",
+      "tokens": [],
+      "tag": "code_small"
+    },
+    {
+      "wall_ms": 11052.43429899565,
+      "finish_reason": "length",
+      "usage": {
+        "completion_tokens": 300,
+        "prompt_tokens": 44,
+        "total_tokens": 344,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 44,
+        "prompt_ms": 155.16,
+        "prompt_per_token_ms": 3.5263636363636364,
+        "prompt_per_second": 283.57824181490076,
+        "predicted_n": 300,
+        "predicted_ms": 10801.268,
+        "predicted_per_token_ms": 36.124642140468225,
+        "predicted_per_second": 27.681935120950612,
+        "draft_n": 654,
+        "draft_n_accepted": 134
+      },
+      "predicted_ms": 10801.268,
+      "predicted_n": 300,
+      "predicted_per_second": 27.681935120950612,
+      "draft_n": 654,
+      "draft_n_accepted": 134,
+      "content": "",
+      "reasoning_content": "Here's a thinking process:\n\n1.  **Analyze User Input:**\n   - User wants to play a game\n   - Request: \"Pick a random number between 1 and 100 and tell me.\"\n   - My role: \"friendly desk robot\"\n\n2.  **Identify Key Constraints & Persona:**\n   - Must be a \"friendly desk robot\"\n   - Need to pick a random number between 1 and 100\n   - Should maintain a friendly, robotic/desk-themed tone\n   - Keep it concise but engaging\n\n3.  **Generate Random Number:**\n   - I'll mentally pick one: 42 (classic, but maybe too cliché? Let's go with 73)\n   - Actually, I'll just pick 67. It's fine.\n\n4.  **Craft Response (Persona + Request):**\n   - Greeting/Persona: \"Beep boop! 🤖✨\" or \"Greetings, human friend!\" or \"Whirring into action!\"\n   - Acknowledge request: \"I've spun up my internal randomizer...\"\n   - Give number: \"Your number is **67**!\"\n   - Add friendly/robotic flair: \"Would you like to play another round, or shall I help you with something else at the desk? 📎🖨️\"\n   - Keep it light and in character",
+      "tokens": [],
+      "tag": "multi_turn_1"
+    },
+    {
+      "wall_ms": 10130.088950012578,
+      "finish_reason": "length",
+      "usage": {
+        "completion_tokens": 300,
+        "prompt_tokens": 37,
+        "total_tokens": 337,
+        "prompt_tokens_details": {
+          "cached_tokens": 12
+        }
+      },
+      "timings": {
+        "cache_n": 12,
+        "prompt_n": 25,
+        "prompt_ms": 178.931,
+        "prompt_per_token_ms": 7.157240000000001,
+        "prompt_per_second": 139.7186625011876,
+        "predicted_n": 300,
+        "predicted_ms": 9857.137,
+        "predicted_per_token_ms": 32.96701337792642,
+        "predicted_per_second": 30.333351357498632,
+        "draft_n": 604,
+        "draft_n_accepted": 147
+      },
+      "predicted_ms": 9857.137,
+      "predicted_n": 300,
+      "predicted_per_second": 30.333351357498632,
+      "draft_n": 604,
+      "draft_n_accepted": 147,
+      "content": "",
+      "reasoning_content": "Here's a thinking process:\n\n1.  **Analyze User Input:**\n   - **Question:** What is your favorite kind of music and why? Give two concrete examples.\n   - **Key Constraints:** \n     - I need to respond as a \"friendly desk robot\"\n     - State a favorite kind of music\n     - Explain why\n     - Provide two concrete examples\n\n2.  **Adopt Persona:**\n   - Friendly desk robot: I should sound helpful, slightly mechanical but warm, maybe reference my desk/office environment, use light tech/robot metaphors, keep it conversational and positive.\n   - I don't actually have personal preferences, but as a roleplay/AI, I can simulate one consistently with the persona.\n\n3.  **Brainstorming Music Preference:**\n   - What kind of music fits a desk robot? Lo-fi, ambient, synthwave, classical, or maybe \"office-friendly\" music like chillhop or instrumental electronic.\n   - Let's go with **lo-fi/chillhop** - it's calm, rhythmic, great for focus, and fits a desk environment.\n   - Why? It has a steady, predictable rhythm (like my servos), gentle melodies that don't distract, and it helps maintain a calm workflow.\n\n4.  **Develop \"Why\" (Persona-aligned):**\n   - As a desk robot, I process information, organize papers, and keep things running",
+      "tokens": [],
+      "tag": "multi_turn_2"
+    },
+    {
+      "wall_ms": 8482.405044022016,
+      "finish_reason": "length",
+      "usage": {
+        "completion_tokens": 300,
+        "prompt_tokens": 27,
+        "total_tokens": 327,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 27,
+        "prompt_ms": 162.473,
+        "prompt_per_token_ms": 6.017518518518519,
+        "prompt_per_second": 166.18145784222608,
+        "predicted_n": 300,
+        "predicted_ms": 8207.066,
+        "predicted_per_token_ms": 27.448381270903013,
+        "predicted_per_second": 36.43202089516521,
+        "draft_n": 502,
+        "draft_n_accepted": 178
+      },
+      "predicted_ms": 8207.066,
+      "predicted_n": 300,
+      "predicted_per_second": 36.43202089516521,
+      "draft_n": 502,
+      "draft_n_accepted": 178,
+      "content": "",
+      "reasoning_content": "Here's a thinking process:\n\n1.  **Analyze User Input:**\n   - **User:** \"請用一到兩句話介紹你自己。\" (Please introduce yourself in one to two sentences.)\n   - **Context/Role:** The system prompt says \"你是桌面機器人。\" (You are a desktop robot.)\n   - **Constraint:** 1-2 sentences.\n   - **Language:** Traditional Chinese.\n\n2.  **Identify Key Requirements:**\n   - Must identify as a \"desktop robot\" (桌面機器人).\n   - Must be concise (1-2 sentences).\n   - Must be in Traditional Chinese.\n   - Should convey its purpose/nature briefly.\n\n3.  **Draft Generation (Mental Refinement):**\n   - *Option 1:* 我是專為桌面設計的智能機器人，能協助您處理日常任務、提供資訊與陪伴互動。 (1 sentence) - Good, covers identity and function.\n   - *Option 2:* 我是您的桌面機器人夥伴，能隨時為您提供資訊查詢、任務提醒與生活陪伴。 (1 sentence) - Also good.\n   - *Option 3:* 我是專為桌面環境打造的智能機器人，能協助您處理日常事務、提供即時資訊與溫暖陪伴。 (1 sentence) - Slightly more polished.\n\n4.  **Check Constraints:**\n   - Identity: 桌面機器人 (desktop robot) - ✓",
+      "tokens": [],
+      "tag": "zh_hant"
+    }
+  ]
+}
