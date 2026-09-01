@@ -2089,7 +2089,7 @@ perturbed **2 252** numbers across the **119** tables parsed at the time and
 grows as the coverage does, so a clean run is only clean for the tree it ran
 on: parsing the last six tables grew it, and so did run W2's three tables and
 the column it added to A17's. On 2026-09-01, at commit
-`6b0c83076a13`, all **2 446** numbers across all **128** tables were perturbed
+`0ee748017143`, all **2 446** numbers across all **128** tables were perturbed
 one at a time and **every one was caught**, in thirty-two shards whose control
 passed before the work and again after it on everything except the ten
 assertions that read the attestations themselves. Those cannot be true before
@@ -2119,7 +2119,7 @@ moment the opening control passes.
 
 Over the eight attestations committed under
 [`coverage_attestations/`](v4_audit_2026_08_25/coverage_attestations) it
-reports: **32 shards, one head `6b0c83076a13`, one checker `c8c9c3969bd5`, 2 446 locations covered exactly once, 0 survived** Covered *exactly once* is the part the earlier sentence
+reports: **32 shards, one head `0ee748017143`, one checker `d5193848d7a0`, 2 446 locations covered exactly once, 0 survived** Covered *exactly once* is the part the earlier sentence
 could not say: no location probed twice, none missed, and every shard on the
 same tree with the same checker. The attestations are in the repository, so
 that sentence is a reading of files rather than a memory of a run, and

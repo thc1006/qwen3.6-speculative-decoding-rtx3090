@@ -78,7 +78,7 @@ parsing the last six grew the population again, as run W2's tables did after
 that. The complete pass on 2026-08-30 perturbed all 2 373 numbers across the
 124 tables of commit 0334c60dac82 and caught every one, in eight shards whose
 control passed before the work and again after it. The pass on 2026-09-01 perturbs all 2 446 numbers across the 128 tables of
-commit `6b0c83076a13` and catches every one, in 32 shards whose control passed
+commit `0ee748017143` and catches every one, in 32 shards whose control passed
 both ends and whose attestations are committed. That is
 what the W three-design table had done, in both documents that carry it: only
 the W column was read, so V2's `+12.03` and V3's `+12.17`, two thirds of a
