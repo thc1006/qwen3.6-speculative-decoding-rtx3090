@@ -51,6 +51,7 @@ keywords:
   - mixture-of-experts
   - inference-benchmark
   - RTX-3090
+  - reproducible-research
 abstract: >-
   Decode microbenchmarks of llama.cpp speculative decoding for
   Qwen3.6-35B-A3B-UD-Q4_K_XL on one RTX 3090. The archival tier was collected
