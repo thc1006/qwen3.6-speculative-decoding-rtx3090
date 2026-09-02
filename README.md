@@ -101,6 +101,8 @@ is ordinary speculative-decoding economics. The "100 % acceptance yet slower,
 therefore an MoE pathology" anomaly this repository was built around does not
 exist.
 
+![Ten prompts, one point each: the share of draft tokens accepted against the decode rate, measured on the binary that counts acceptance correctly. They fall on a line, and every one of them is far below the no-speculation reference](analysis/plot_acceptance_correlation.png)
+
 **And the direction is not universal.** On 2026-08-26, eight speculative
 configurations and a no-speculation baseline were measured on this card in one
 matrix under one memory policy, as a **Latin square balanced for position**:
@@ -171,7 +173,7 @@ are the opposite: they draft on a sixth to a fifth of tokens, 0.17 and 0.19 per
 token generated, and have almost all of it rejected, which is what a 10–19 %
 loss is made of.
 
-![One row per configuration, sorted by throughput: pooled tokens per second, the change against no speculation drawn as a point and interval on one scale, draft tokens proposed per token generated, and acceptance. The purpose-built draft heads are above the baseline and the general-purpose draft model is far below it](analysis/plot_head_to_head.png)
+![One row per configuration, ordered by throughput: the change against no speculation drawn as an interval with a tick at the estimate, all on one scale, and the drafter named beside each row. The purpose-built draft heads sit above the baseline and the general-purpose draft model far below it. The ticks above the top row are the same arm measured again and again across one day](analysis/plot_head_to_head.png)
 
 ## Reproduction
 

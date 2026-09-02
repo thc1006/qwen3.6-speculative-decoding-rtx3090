@@ -82,14 +82,17 @@ def record(chart: str, **series) -> None:
     SERIES[chart] = _clean(series)
 
 
-def _footer(fig, extra="", base=None):
+def _footer(fig, extra="", base=None, width=150):
     """Reserved space, wrapped text, at the standard's minimum size.
 
     This drew at y=0.004 with `wrap=True`, and the figure was saved with
     `bbox_inches="tight"`, so the caption was written on top of the x axis label
     and then clipped at both edges. Two of the five figures shipped that way.
     """
-    figstyle.footer(fig, (FOOTER if base is None else base) + extra)
+    # `width` because the wrap column decides the figure's width under
+    # `bbox_inches="tight"`, and the width decides the type size where the figure
+    # is read. 150 was chosen for a 13 inch canvas; a 9 inch one needs less.
+    figstyle.footer(fig, (FOOTER if base is None else base) + extra, width=width)
 
 
 _FIGSP = "\u2007"   # FIGURE SPACE. Measured: in DejaVu Sans its advance is one
@@ -205,7 +208,13 @@ def _view_guard(ax, name: str, eps: float = 1e-9) -> None:
         if isinstance(c, mcoll.PathCollection):
             pts += [(q[0], q[1]) for q in c.get_offsets()]
     for ln in ax.lines:
-        if ln.get_marker() not in ("", " ", "None", None):
+        # `ln.get_transform() is ax.transData` and nothing else: an axhline or an
+        # axvline is BLENDED, one axis data and the other the axes fraction 0 to 1,
+        # so its xydata compared against a data limit is a comparison of two
+        # different things. `_ink_guard` had exactly this bug and it made that
+        # guard blind to the fault it was written for.
+        if (ln.get_marker() not in ("", " ", "None", None)
+                and ln.get_transform() is ax.transData):
             pts += [(x, y) for x, y in ln.get_xydata()]
     out = [(x, y) for x, y in pts
            if x != x or y != y                      # NaN is not "inside"
@@ -239,7 +248,8 @@ def _cover_guard(ax, name: str) -> None:
         if isinstance(c, mcoll.PathCollection):
             pts += [(q[0], q[1]) for q in c.get_offsets()]
     for ln in ax.lines:
-        if ln.get_marker() not in ("", " ", "None", None):
+        if (ln.get_marker() not in ("", " ", "None", None)
+                and ln.get_transform() is ax.transData):
             pts += [(x, y) for x, y in ln.get_xydata()]
     hidden = [d for d, sxy in zip(pts, ax.transData.transform(pts).tolist())
               if box.contains(*sxy)] if pts else []
@@ -278,23 +288,53 @@ def _ink_guard(ax, name: str) -> None:
     for ln in ax.lines:
         if ln.get_linestyle() in ("None", " ", "") or ln.get_linewidth() <= 0:
             continue
-        xy = ax.transData.transform(ln.get_xydata())
+        # the LINE's own transform, not ax.transData. `axhline` and `axvline` are
+        # blended: one axis is data and the other is the axes fraction 0 to 1, so
+        # transforming their xydata as data put the reference rule at x = 0 to 1
+        # on an axis spanning 16 to 58, which is off the chart. This guard could
+        # not see a collision with a reference line at all, and the fault it was
+        # written to catch was a three line annotation with the baseline rule
+        # through its middle.
+        xy = ln.get_transform().transform(ln.get_xydata())
         for i in range(len(xy) - 1):
             (x0, y0), (x1, y1) = xy[i], xy[i + 1]
             n = max(2, int(max(abs(x1 - x0), abs(y1 - y0)) / 4) + 1)
             pts += [(x0 + (x1 - x0) * k / n, y0 + (y1 - y0) * k / n)
                     for k in range(n + 1)]
+    # Both halves. The first form of this checked only text WITH an opaque
+    # background, on the theory that the defect is a box painting over a stroke.
+    # The other half is a line drawn THROUGH text that has no background, which is
+    # not a lost stroke but a struck-through sentence, and it is the harder of the
+    # two to read. A three line annotation had the baseline rule through its
+    # middle and nothing said so.
+    #
+    # Inset vertically before testing, because a label anchored ON a line is a
+    # convention, not a fault: `no speculation, 133 tok/s` sits at va="bottom" with
+    # the rule at its lower edge and must not fire.
     bad = []
     for t in ax.texts:
-        bb = t.get_bbox_patch()
-        if bb is None or (bb.get_alpha() or 1.0) < 0.35:
+        if not t.get_text().strip() or not t.get_visible():
             continue
-        box = bb.get_window_extent(r)
-        hit = sum(1 for q in pts if box.contains(*q))
+        bb = t.get_bbox_patch()
+        opaque = bb is not None and (bb.get_alpha() or 1.0) >= 0.35
+        box = (bb if opaque else t).get_window_extent(r)
+        if box.height <= 2 or box.width <= 2:
+            continue
+        # The inset applies to the UNBACKGROUNDED case only. An opaque box erases
+        # whatever is under it anywhere inside it, so insetting that one weakened
+        # the half this guard was written for: the dflash labels stopped being
+        # caught, and the both-ways sweep is what said so. Text with no background
+        # is struck through only when a line crosses its middle, and a label
+        # anchored ON a rule by convention must not fire.
+        test = box if opaque else mtransforms.Bbox.from_extents(
+            box.x0, box.y0 + 0.22 * box.height, box.x1, box.y1 - 0.22 * box.height)
+        hit = sum(1 for q in pts if test.contains(*q))
         if hit:
-            bad.append(f"{t.get_text()!r} covers {hit} sampled points of a line")
+            what = ("covers" if opaque else "is struck through by")
+            bad.append(f"{t.get_text().splitlines()[0]!r} {what} a line "
+                       f"({hit} sampled points)")
     if bad:
-        raise SystemExit(f"  {name}: a label's background erases a line\n    "
+        raise SystemExit(f"  {name}: a label and a line are drawn over each other\n    "
                          + "\n    ".join(sorted(set(bad))))
 
 
@@ -521,9 +561,13 @@ def plot_dflash_sweep() -> None:
     # ...and at the LEFT end of that line it then sat on run K's n_max 1 label,
     # which is the leftmost point on the chart. The right end of the zero line is
     # empty on this data: the largest n_max is the deepest point of the cliff.
-    ax.text(0.988, 0.0, "no speculation ", transform=ax.get_yaxis_transform(),
-            ha="right", va="bottom", color=figstyle.text_colour(C_REF),
-            bbox=dict(boxstyle="round,pad=0.15", fc="white", ec="none", alpha=0.9))
+    # No white box. Anchored va="bottom" on the rule, the box's own padding put it
+    # OVER the rule and erased ninety-one sampled points of the line's right end.
+    # It sits in empty paper there and never needed one.
+    ax.annotate("no speculation ", (0.988, 0.0),
+                xycoords=ax.get_yaxis_transform(), textcoords="offset points",
+                xytext=(0, 4), ha="right", va="bottom",
+                color=figstyle.text_colour(C_REF))
     ys = [d for _, pp, _, _ in series for _, d, _a, _s in pp] + [0.0]
     pad = max(6.0, 0.12 * (max(ys) - min(ys)))
     # 1.9 and 1.6 reserved 29.6 % of the vertical range for labels thrown that far
@@ -761,6 +805,130 @@ def plot_acceptance_threshold() -> None:
         print(f"  wrote {(OUT / 'plot_acceptance_threshold.png').relative_to(ROOT)}")
 
 
+# ------------------------------------------------------------- runs A, B ----
+def plot_acceptance_correlation() -> None:
+    """The retraction, as a figure. This repository was built around an anomaly.
+
+    v1 published "100 % draft acceptance and still slower, therefore an MoE
+    pathology". The legacy binary counted 194 draft tokens across the whole
+    workload and reported all 194 accepted; the corrected one counts 16 590 and
+    finds 29.7 % accepted. With numbers that mean what they say, decode rate
+    tracks acceptance at r = +0.998 across the ten prompts and there is nothing
+    left to explain. ERRATA A7.
+
+    The README states this in one sentence and had no figure for it, while the
+    finding it retracts had one. That asymmetry is what this exists to remove.
+
+    Run A is NOT plotted. It is a different binary that drafted 85 times less, so
+    a point from it on these axes would be read as comparable and is not; its two
+    counts are in the annotation instead.
+    """
+    def _load(d):
+        a: dict = defaultdict(list)
+        for f in sorted(glob.glob(str(DATA / d / "*__rep*.json"))):
+            a[json.load(open(f, encoding="utf-8"))["arm"]].append(
+                json.load(open(f, encoding="utf-8")))
+        return a
+    A, B = _load("A_bcb5eeb64_legacy"), _load("B_master_3737e4137")
+    if "draft-max8-matched" not in B or "baseline" not in B:
+        print("  no run B data - skipping the correlation chart")
+        return
+    def _counts(arms, arm):
+        return (sum(x["draft_n"] for r in arms[arm] for x in r["rows"]),
+                sum(x["draft_n_accepted"] for r in arms[arm] for x in r["rows"]))
+    a_dn, a_da = _counts(A, "draft-max8-matched")
+    b_dn, b_da = _counts(B, "draft-max8-matched")
+
+    per: dict = defaultdict(lambda: defaultdict(list))
+    acc: dict = {}
+    for arm, runs in B.items():
+        for r in runs:
+            for x in r["rows"]:
+                per[x["tag"]][arm].append(x["predicted_per_second"])
+                if x["draft_n"] and arm == "draft-max8-matched":
+                    acc[x["tag"]] = (x["draft_n_accepted"], x["draft_n"])
+    pts = sorted((100 * acc[t][0] / acc[t][1],
+                  st.mean(per[t]["draft-max8-matched"]), t) for t in per)
+    base = st.mean([v for t in per for v in per[t]["baseline"]])
+    xs = [q[0] for q in pts]
+    ys = [q[1] for q in pts]
+    mx, my = st.mean(xs), st.mean(ys)
+    slope = (sum((a - mx) * (b - my) for a, b in zip(xs, ys))
+             / sum((a - mx) ** 2 for a in xs))
+    inter = my - slope * mx
+    r = (sum((a - mx) * (b - my) for a, b in zip(xs, ys))
+         / ((sum((a - mx) ** 2 for a in xs)
+             * sum((b - my) ** 2 for b in ys)) ** 0.5))
+    record("acceptance_correlation",
+           points=[{"prompt": t, "accepted_pct": x, "tok_s": y} for x, y, t in pts],
+           baseline_tok_s=base, r=r, slope=slope, intercept=inter,
+           legacy_drafted=a_dn, legacy_accepted=a_da,
+           corrected_drafted=b_dn, corrected_accepted=b_da)
+
+    fig, ax = plt.subplots(figsize=(9.0, 5.0))
+    fig.subplots_adjust(left=0.095, right=0.985, top=0.735, bottom=0.145)
+    ax.plot([min(xs), max(xs)],
+            [slope * min(xs) + inter, slope * max(xs) + inter],
+            color="#7a7a82", lw=1.4, zorder=2)
+    ax.scatter(xs, ys, s=64, color=C_ACTIVE, edgecolors=figstyle.EDGE,
+               linewidths=figstyle.EDGE_LW, zorder=4)
+    # code_small and reasoning land on each other, two points apart in acceptance
+    # and equal in rate, so they go to opposite sides. Naming both is the point:
+    # the two prompts that accept most are the two that are hardest.
+    LAB = {"medium_chat": (0, -18, "center"), "code_small": (-9, -18, "right"),
+           "reasoning": (9, -18, "left")}
+    for x, y, t in pts:
+        if t in LAB:
+            dx, dy, ha = LAB[t]
+            ax.annotate(t, (x, y), textcoords="offset points", xytext=(dx, dy),
+                        ha=ha, size=10, color="#3f3f46")
+    ax.axhline(base, color=C_REF, ls="--", lw=1.3, zorder=1)
+    ax.text(0.985, base, f"no speculation, {base:.0f} tok/s ",
+            transform=ax.get_yaxis_transform(), ha="right", va="bottom",
+            size=11, color=figstyle.text_colour(C_REF))
+    # below the rule, not across it: the rule spans the axes and any text that
+    # crosses it is struck through, which `_ink_guard` now refuses.
+    ax.annotate(
+        f"The legacy binary counted {a_dn} draft tokens in this workload and\n"
+        f"called all {a_da} accepted. The corrected one counts "
+        + f"{b_dn:,}".replace(",", " ")
+        + f" and finds\n{100 * b_da / b_dn:.1f} % accepted. With real numbers the "
+        f"speed follows the\nacceptance: r = {r:+.3f}.",
+        (0.03, 0.80), xycoords="axes fraction", ha="left", va="top", size=11,
+        color="#1f1f24")
+    ax.set_xlim(min(xs) - 4, max(xs) + 6)
+    ax.set_ylim(0, base * 1.14)
+    ax.set_xlabel("draft tokens accepted (%)", size=11)
+    ax.set_ylabel("decode rate (tokens / second)", size=11)
+    ax.tick_params(labelsize=11)
+    ax.grid(color="#dcdcdc", lw=0.6)
+    ax.set_axisbelow(True)
+    for s_ in ("right", "top"):
+        ax.spines[s_].set_visible(False)
+    fig.text(0.008, 0.975,
+             "The anomaly this repository was built around was a counter",
+             ha="left", va="top", size=14)
+    fig.text(0.008, 0.912,
+             "one point per prompt, run B on llama.cpp 3737e4137, three repeats "
+             "each", ha="left", va="top", size=11, color="#3f3f46")
+    _footer(fig,
+            base="2026-04-21 workload re-run on llama.cpp 3737e4137. Run A is the "
+                 "archived legacy binary bcb5eeb64, whose acceptance counter is "
+                 "the subject of ERRATA A7 and which is not plotted here because "
+                 "it drafted eighty-five times less. Speculation is slower than "
+                 "no speculation at every acceptance rate reached, and the reason "
+                 "is ordinary: the best prompt accepts about half its draft "
+                 "tokens and pays the draft path for all of them.",
+            extra="", width=96)
+    _guards(fig, "acceptance_correlation")
+    if not CHECK:  # --check verifies the numbers, it must not dirty the tree
+        plt.savefig(OUT / "plot_acceptance_correlation.png", dpi=figstyle.DPI,
+                    bbox_inches="tight")
+    plt.close()
+    if not CHECK:
+        print(f"  wrote {(OUT / 'plot_acceptance_correlation.png').relative_to(ROOT)}")
+
+
 # ----------------------------------------------------------------- run O ----
 def plot_head_to_head() -> None:
     """Every method against one baseline, in one matrix, under one policy.
@@ -830,6 +998,18 @@ def plot_head_to_head() -> None:
         "ngram":       ("n-gram",       C_INACTIVE),
         "baseline":    ("none",         C_REF),
     }
+    # The spread this arm shows ACROSS invocations, which is the caveat the
+    # documents put on the headline and which the figure used to leave out
+    # entirely: it drew a 1.6 point interval around a value that is the second
+    # highest of twelve, and its caption called every interval narrow. ERRATA A16.
+    _tl = SERIES.get("two_levels") or {}
+    _by: dict = defaultdict(list)
+    for _t, _v in zip(_tl.get("tags", []), _tl.get("values", [])):
+        _by[_t].append(_v)
+    _SP_ARM = "spec-dflash-n2"
+    _SP_MEANS = {_t: sum(_v) / len(_v) for _t, _v in _by.items()}
+    _SP_LO = min(_SP_MEANS.values()) if _SP_MEANS else 0.0
+    _SP_HI = max(_SP_MEANS.values()) if _SP_MEANS else 0.0
     def fam(a):
         for k in FAMILY:
             if a.startswith(k):
@@ -852,126 +1032,113 @@ def plot_head_to_head() -> None:
     rows.sort(key=lambda r: r[1])
 
     # ---- the layout ------------------------------------------------------
-    # This is a forest plot: a table of rows, with one column in which the
-    # interval is drawn. It replaced a bar chart of the absolute rate that
-    # carried FIVE quantities per bar in one run-on string anchored to the bar's
-    # tip, so no quantity formed a column and none could be compared down the
-    # rows: the labels' left edges staggered across 118 tok/s, 55 % of the axis
-    # width, and three of them ended up to 95 tok/s past the right end of the
-    # axis, visible only because `bbox_inches="tight"` grew the canvas around
-    # them. `set_xlim(0, max * 1.46)` reserved 31 % of the range for that text
-    # and it was still not enough.
+    # A forest plot, sized for the only place it is read: embedded in README.md,
+    # where GitHub's content column is about 864 CSS pixels. The previous version
+    # was authored 13.2 inches wide, so at that column its 10.4 point labels
+    # rendered at 9.7 CSS pixels. DejaVu Sans has an x height of about 0.55, which
+    # puts those labels at 0.161 degrees at fifty centimetres and 0.114 at arm's
+    # length, against the 0.15 to 0.3 degree critical print size Legge and Bigelow
+    # review in Journal of Vision 11(5):8. Below that band reading slows. The
+    # canvas is 9.0 inches now and the labels are 11 point, which is 15 pixels at
+    # that column. DPI does not enter into it.
     #
-    # Two further things follow from the change of subject. The quantity plotted
-    # is now the CHANGE against the baseline, which has a meaningful origin at
-    # zero, rather than the absolute rate, whose origin is not a rate anyone
-    # measured; and the interval is drawn on a percentage scale, where the widest
-    # of them is 1.6 points rather than 1.2 tok/s inside a 214 tok/s axis.
-    # Position on a common scale is the encoding read most accurately, so it is
-    # spent on the estimate the document's claim is about.
-    X_ARM, X_DRAFT, X_TOKS = 0.010, 0.140, 0.250
-    X_CHG, X_CI, X_DPG, X_ACC = 0.745, 0.860, 0.918, 0.995
-    AX_L, AX_R = 0.282, 0.655
-    DASH = "\u2014"   # the glyph the README table already uses for an absent cell
+    # Two things paid for the width. The figure carried seven text columns and six
+    # of them repeat the table eleven lines above it in the same document, which
+    # the ICMJE recommendations of January 2026 forbid in terms: "do not duplicate
+    # data in graphs and tables". Only `drafter` is not in that table, and by this
+    # docstring it is the finding. And the estimate was a 7.5 point filled dot,
+    # which on the old panel was 2.47 percentage points wide in data units while
+    # the widest interval in the set is 1.59 and the narrowest 0.23: NONE of the
+    # eight intervals was visible, at any DPI, and SUGI 31 paper 139-31 names the
+    # harm exactly, that a reader takes the width of the symbol for the width of
+    # the interval. A vertical tick cannot do that. The panel went from 37 % of
+    # the figure to 61 %, and six of the eight intervals are now drawn wider than
+    # the mark that sits in them.
+    #
+    # No axis break and no log scale. Correll, Bertini and Franconeri (CHI 2020)
+    # measured that marking a break does not de-bias a reader, and a log scale
+    # would compress the six informative arms from 44.8 % of the axis to 27.6 %,
+    # because the outliers here are on the side where the ratio approaches zero.
+    FIG_W = 9.0
+    X_ARM, X_DRAFT = 0.008, 0.246
+    AX_L, AX_R = 0.380, 0.985
+    XLO, XHI = -80.0, 32.0
+    TICK_LW = 1.1
 
-    fig, ax = plt.subplots(figsize=(13.2, 6.4))
-    fig.subplots_adjust(left=AX_L, right=AX_R, top=0.84, bottom=0.24)
-    # x in FIGURE fractions, y in DATA: one x per column, shared by the header
-    # and every cell, which is what makes a column a column. The old labels were
-    # drawn in data coordinates, so "draft/gen 0.81" sat at x = 180 tok/s and
-    # read as a position on the throughput axis.
+    fig, ax = plt.subplots(figsize=(FIG_W, 5.0))
+    fig.subplots_adjust(left=AX_L, right=AX_R, top=0.715, bottom=0.265)
     tr = mtransforms.blended_transform_factory(fig.transFigure, ax.transData)
-    def cell(x, y, s, ha="right", gid=None, **kw):
-        t = ax.text(x, y, s, transform=tr, ha=ha, va="center",
-                    clip_on=False, **kw)
-        t.set_gid(gid)
-        return t
 
     for i, (a, p_, acc, f, dpg) in enumerate(rows):
         label, colour = FAMILY[f]
         c = ci.get(a)
+        if a == _SP_ARM:
+            # the twelve invocation means as MARKS, not a band: the README says in
+            # terms that this range is "a bound on what was observed, not a
+            # confidence interval", and a band with hard edges reads as a
+            # distribution. Drawn above the row so they cannot be taken for the
+            # interval that belongs to it.
+            for _m in sorted(_SP_MEANS.values()):
+                ax.plot([_m, _m], [i + 0.22, i + 0.40], color=colour, lw=1.1,
+                        alpha=0.9, solid_capstyle="butt", zorder=3)
+            ax.plot([_SP_LO, _SP_HI], [i + 0.31, i + 0.31], color=colour, lw=0.8,
+                    zorder=2)
         if c:
             lo, hi = c["ci95_t_pct"]
-            pt = c["point_pct"]
-            # Solid, not the alpha 0.5 this was drawn at first: a stem carries
-            # the magnitude, so WCAG 1.4.11 asks 3:1 of it, and all five of these
-            # colours measured 1.7 to 2.1 at half opacity. Solid they are 3.1 to
-            # 5.2.
-            ax.plot([0, pt], [i, i], color=colour, lw=2.2,
-                    solid_capstyle="butt", zorder=2)
-            ax.plot([lo, hi], [i, i], color="#2f2f2f", lw=1.3, zorder=4)
-            for x in (lo, hi):
-                ax.plot([x, x], [i - 0.17, i + 0.17], color="#2f2f2f",
-                        lw=1.3, zorder=4)
-            ax.plot([pt], [i], "o", ms=7.5, color=colour, mec=figstyle.EDGE,
-                    mew=figstyle.EDGE_LW, zorder=5)
-            chg = _fig_num(pt, 5, 1, True)
-            cit = f"[{_fig_num(lo, 5, 1, True)}, {_fig_num(hi, 5, 1, True)}]"
+            # no end caps: at one to four pixels the two caps merge back into the
+            # blob the tick was chosen to avoid
+            ax.plot([lo, hi], [i, i], color=colour, lw=3.0,
+                    solid_capstyle="butt", zorder=3)
+            ax.plot([c["point_pct"]] * 2, [i - 0.20, i + 0.20], color="#1f1f24",
+                    lw=TICK_LW, solid_capstyle="butt", zorder=5)
         else:
-            ax.plot([0], [i], "D", ms=7.2, color="white", mec=colour,
-                    mew=1.7, zorder=5)
-            chg = cit = DASH
-        ink = {"color": "#1f1f24" if c else "#5a5a62"}
-        cell(X_ARM, i, a, ha="left", family="DejaVu Sans Mono", size=10.4)
-        cell(X_DRAFT, i, label, ha="left", color="#3a3a42", size=10.4)
-        cell(X_TOKS, i, _fig_num(p_, 5, 1, False), size=10.4, gid="num:tok/s")
-        cell(X_CHG, i, chg, size=10.4, gid="num:change", **ink)
-        cell(X_CI, i, cit, size=10.4, gid="num:ci", **ink)
-        cell(X_DPG, i, DASH if dpg is None else _fig_num(dpg, 4, 2, False),
-             size=10.4, gid="num:draft-per-gen")
-        cell(X_ACC, i, DASH if acc is None else _fig_num(acc, 4, 1, False),
-             size=10.4, gid="num:acceptance")
-
-    # The column names are drawn as the header, which is what tells a reader the
-    # right-hand block is a table and not a caption. The unit lives in the header
-    # rather than in every cell: repeating "%" eighteen times also breaks the
-    # alignment, because the field before it is not a fixed width.
-    hy = len(rows) - 0.28
-    hdr = dict(size=10.0, color="#3a3a42", weight="bold")
-    for x, s, ha in ((X_ARM, "arm", "left"), (X_DRAFT, "drafter", "left"),
-                     (X_TOKS, "pooled\ntok/s", "right"),
-                     (X_CHG, "change\n(%)", "right"),
-                     (X_CI, "95 % CI\n(t, blocks)", "right"),
-                     (X_DPG, "draft\nper gen", "right"),
-                     (X_ACC, "acceptance\n(%)", "right")):
-        ax.text(x, hy, s, transform=tr, ha=ha, va="bottom", clip_on=False,
-                linespacing=1.25, **hdr)
+            ax.plot([0], [i], "D", ms=6.5, color="white", mec=colour, mew=1.6,
+                    zorder=5)
+        ax.text(X_ARM, i, a, transform=tr, ha="left", va="center", clip_on=False,
+                family="DejaVu Sans Mono", size=11,
+                color=figstyle.text_colour(colour))
+        ax.text(X_DRAFT, i, label, transform=tr, ha="left", va="center",
+                clip_on=False, size=11, color="#3a3a42")
 
     ax.axvline(0, color=C_REF, ls="--", lw=1.2, zorder=1)
-    ax.set_ylim(-0.7, len(rows) - 0.05)
+    ax.set_ylim(-0.9, len(rows) - 0.05 + 0.5)
     ax.set_yticks([])
-    ax.set_xlim(-80, 32)
-    for s in ("left", "right", "top"):
-        ax.spines[s].set_visible(False)
+    ax.set_xlim(XLO, XHI)
+    for s_ in ("left", "right", "top"):
+        ax.spines[s_].set_visible(False)
     ax.grid(axis="x", color="#dcdcdc", lw=0.6)
     ax.set_axisbelow(True)
-    ax.set_xlabel("change against no speculation (%)")
-    # The title goes at the top of the FIGURE. `ax.set_title` put it above the
-    # axes, which is the middle of this layout, and it landed on the header of
-    # the `pooled tok/s` column.
-    fig.text(0.010, 0.975,
-             f"Eight speculative configurations against one baseline, "
-             f"balanced Latin square, {n_blocks or '?'} blocks",
+    ax.tick_params(labelsize=11)
+    # one row under the ticks: direction at the two ends, the quantity in the
+    # middle. Cochrane's technical supplement on graphs of statistical data asks
+    # for the direction of effect below the plot (3.9); the middle label already
+    # names the quantity, so the ends only have to say which way is which.
+    for _fx, _s, _ha, _sz, _c in (
+            (0.0, "slower", "left", 10, "#3f3f46"),
+            (0.5, "change against no speculation (%)", "center", 11, "#1f1f24"),
+            (1.0, "faster", "right", 10, "#3f3f46")):
+        ax.text(_fx, -0.16, _s, transform=ax.transAxes, ha=_ha, va="top",
+                size=_sz, color=_c)
+    fig.text(0.008, 0.975,
+             "Eight speculative configurations against one baseline",
              ha="left", va="top", size=14)
+    _wci = ci[_SP_ARM]["ci95_t_pct"][1] - ci[_SP_ARM]["ci95_t_pct"][0]
+    fig.text(0.008, 0.925,
+             f"bar: the 95 % t interval over run {tag}'s {n_blocks} blocks. Tick: "
+             f"the point estimate.\nTicks above the top row: {len(_SP_MEANS)} "
+             f"invocations of {_SP_ARM} in one day. They span\n"
+             f"{_SP_HI - _SP_LO:.1f} points against that arm's {_wci:.1f}, and it "
+             f"is the only arm measured repeatedly.",
+             ha="left", va="top", size=11, color="#3f3f46")
+    _w = [c["ci95_t_pct"][1] - c["ci95_t_pct"][0] for c in ci.values()]
     _footer(fig,
             base=f"2026-08-26, llama.cpp 3737e4137, one RTX 3090, "
-                 f"Qwen3.6-35B-A3B-UD-Q4_K_XL, greedy, thinking on, ten prompts. "
-                 f"Run {tag} ({run.name}): {n_blocks} blocks, "
-                 f"{'position-balanced - every arm at every position an equal number of times' if balanced else 'NOT position-balanced, so arm position is confounded with time'}, "
-                 f"verified from the arm-runs' own timestamps. Controls and caveats: ERRATA.md, "
-                 f"v4_audit_2026_08_25/README.md.",
-            extra=" An observational ranking: these arms differ in several ways at "
-                  "once, so no single cause is isolated. The dot is the point "
-                  "estimate and the bracket the 95 % paired block interval against "
-                  "the baseline measured in the same block; every interval here is "
-                  "under 1.6 percentage points wide, so most are no wider than the "
-                  "dot, and ngram-map-k4v-m8 is the one arm whose interval crosses "
-                  "zero. Acceptance is the server-side counter, which under-reports "
-                  "on the checkpointing rows (ERRATA A13): spec-draft-n1 reads 69.7 "
-                  "here and 100.0 from the drafter, and is 74.8 % slower either way. "
-                  "draft per gen is proposals per generated token, and is what makes "
-                  "acceptance readable: ngram-map-k4v-m8's 50.0 is 108 of 216 "
-                  "proposals over 27 000 tokens.")
+                 f"Qwen3.6-35B-A3B-UD-Q4_K_XL, greedy, thinking on, ten prompts, "
+                 f"run {tag}. Intervals are {min(_w):.2f} to {max(_w):.2f} points "
+                 f"wide; the two 0.8 B arms' are at the tick's width. Values and "
+                 f"caveats: the table and the note above this figure, and "
+                 f"ERRATA.md.",
+            extra="", width=96)
     _guards(fig, "head_to_head")
     if not CHECK:  # --check verifies the numbers, it must not dirty the tree
         plt.savefig(OUT / "plot_head_to_head.png", dpi=figstyle.DPI, bbox_inches="tight")
@@ -1166,8 +1333,12 @@ def main() -> None:
     plot_batching()
     plot_dflash_sweep()
     plot_acceptance_threshold()
-    plot_head_to_head()
+    plot_acceptance_correlation()
+    # before the head to head, which reads its recorded values: the caveat on the
+    # headline is the spread this run measures, and a figure that draws the
+    # narrow interval without it is the false precision ERRATA A16 exists about.
     plot_two_levels()
+    plot_head_to_head()
     ref = ROOT / "analysis" / "plot_data.json"
     if check:
         if not ref.exists():
