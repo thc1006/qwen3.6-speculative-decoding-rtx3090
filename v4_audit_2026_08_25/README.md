@@ -1339,13 +1339,19 @@ the claim there survives on the other 526.
 > `FileNotFoundError` for `/tmp/manifest`: the manifest is split into three
 > slices and that call kept the name of the file that used to hold all of it.
 > Both are fixed here, and the run after this lands is what shows it rather
-> than this sentence. `workflow_dispatch`,
-> `release: published` and the weekly cron all read the workflow from the
-> **default branch**, and this file lives only on `audit-2026-08-25` while this branch is open, so
-> `gh api .../workflows/evidence.yml/dispatches` returns 404 and the schedule
-> never fires. What fired was the `push` filter, which reads the workflow from
-> the ref being pushed and which lists the extractors and everything the
-> checker imports. Those three become live when the branch merges. The figures
+> than this sentence. `workflow_dispatch`, `release: published` and the weekly
+> cron all read the workflow from the
+> **default branch**, and this file lives only on `audit-2026-08-25` until it
+> merges: dispatching it returned 404 and the schedule never fired. What fired
+> was the `push` filter, which reads the workflow from the ref being pushed and
+> which lists the extractors and everything the checker imports.
+>
+> **All three are live since the merge on 2026-09-01, and the first
+> `workflow_dispatch` has run.** It fetched the archives, checked every file
+> against the manifest, unpacked them, re-derived the four log-derived files,
+> required the result to be what is committed, and ran the claim checker over
+> it: `success`. The binding step skipped in that run and was right to, because
+> a manual dispatch runs from a branch and that step is for a tag. The figures
 > above are also what `python analysis/rederive_from_logs.py <bench-root>`
 > prints after unpacking both published tranches into one directory, which is a
 > command anyone with the release can run.

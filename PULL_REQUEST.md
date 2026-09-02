@@ -525,11 +525,12 @@ changed. Nothing in it was rejected.
   slices and that call kept the name of the file that used to hold all of it.
   Both are fixed here, and the run after this lands is what shows it rather
   than this sentence.
-  `workflow_dispatch`, `release: published` and the weekly cron
-  read the workflow from the default branch and the file exists only on this
-  one, so dispatching it returns 404 and the schedule never fires. What fired
-  was the `push` filter, which reads the workflow from the ref being pushed.
-  Those three become live when this merges.
+  `workflow_dispatch`, `release: published` and the weekly cron read the
+  workflow from the default branch and the file existed only on this one until
+  it merged, so dispatching it returned 404 and the schedule never fired. What
+  fired was the `push` filter, which reads the workflow from the ref being
+  pushed. All three are live since the merge on 2026-09-01, and the first
+  `workflow_dispatch` ran the whole chain and passed.
 
   Zero records differ. The nine belong to three exploratory runs whose logs are
   in the archive and whose arm-run JSON is not committed, because they never

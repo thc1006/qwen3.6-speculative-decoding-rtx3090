@@ -309,11 +309,11 @@ status and a checker can print FAIL into a green job. No step here pipes today;
 naming the shell is what keeps that true when one does.
 
 **And the workflow that would do that in CI had never run, until it did.**
-`.github/workflows/evidence.yml` is wired to `workflow_dispatch`, to
-`release: published` and to a weekly cron, and none of those three can fire:
-GitHub registers workflows, schedules and dispatch targets from the **default
-branch**, and that file exists only on `audit-2026-08-25`. Dispatching it
-returns 404. Every re-derivation figure this repository published was therefore
+`.github/workflows/evidence.yml` is wired to `workflow_dispatch`, to `release:
+published` and to a weekly cron, and while this branch was open none of those
+three could fire: GitHub registers workflows, schedules and dispatch targets
+from the **default branch**, and that file existed only on `audit-2026-08-25`.
+Dispatching it returned 404. Every re-derivation figure this repository published was therefore
 produced by running the script, and the documents said "CI does it" in three
 places. A `push` filter was added so the chain could be demonstrated rather
 than asserted, and it fired for the first time on 2026-08-28: the workflow
@@ -774,6 +774,24 @@ reserved a fixed band for a caption its legends already reached into, leaving
 an empty third down the middle of the canvas. Both are fixed, and
 `tests/test_harness_invariants.py` holds the palette, the per-cell ink and the
 rule that no label is drawn in an unlightened series colour.
+
+**The three triggers are live, and the first one has run.**
+`workflow_dispatch`, `release: published` and the weekly cron read
+`evidence.yml` from the default branch, and until 2026-09-01 that file was only
+on `audit-2026-08-25`: dispatching it returned 404 and the schedule never
+fired, which is why every re-derivation figure this repository published had
+been produced by running the script. The merge put the workflow on the default
+branch, and the dispatch endpoint answers 204 now rather than 404. The first
+`workflow_dispatch` ran the whole chain against release `v4.2` and passed: it
+fetched the eight archives, checked every file against the manifest, unpacked
+them, re-derived the four log-derived audit files from the raw logs, required
+the result to be what is committed, and ran the claim checker over it. Its
+binding step skipped, correctly: a manual dispatch runs from a branch and that
+step is for a tag.
+
+The `release: published` trigger had already run once, on the release itself,
+and passed. The weekly cron has not fired yet; the first is Monday at 05:37
+UTC, and it is the one trigger of the four whose first run is still ahead.
 
 **The release body was published as an eighty-column file.** GitHub Flavored
 Markdown preserves newlines in a release body exactly as it does in a pull
