@@ -210,3 +210,34 @@ jobs:
         run: pip install --require-hashes -r requirements-plot.lock
       - name: the committed charts must still match the committed data
         run: python analysis/plot_v4_runs.py --check
+      - name: the same for the v1 charts, which nothing checked at all
+        # This step is the second half of a defect: the job was named `charts`
+        # and ran one of the two chart scripts, so the three figures
+        # `analysis/plot.py` publishes - the bar chart, the per-prompt heatmap
+        # and the acceptance accounting - were committed with nothing verifying
+        # that they still matched the data they were drawn from. A green
+        # `charts` job said otherwise. `--check` re-derives every series and
+        # runs the figures' own layout guards without writing a file, so a
+        # collision or a column that stopped lining up fails here rather than
+        # when somebody happens to open the PNG.
+        run: |
+          set -euo pipefail
+          # and it must not have dirtied the tree while doing it: a --check
+          # that rewrites the thing it is checking always passes. Hashed
+          # before and after rather than `git diff`ed, so the answer is "did
+          # THIS command write" and not "is the tree clean" - the second is
+          # the same answer on a clean CI checkout and the wrong one anywhere
+          # a human would run it.
+          out="analysis/summary.csv analysis/summary_by_config.csv
+               analysis/plot_v1_data.json analysis/plot_mean_by_config.png
+               analysis/plot_per_prompt.png analysis/plot_acceptance_accounting.png"
+          # shellcheck disable=SC2086
+          before=$(sha256sum $out)
+          python analysis/plot.py --check
+          # shellcheck disable=SC2086
+          after=$(sha256sum $out)
+          [ "$before" = "$after" ] || {
+            echo "FAIL: analysis/plot.py --check wrote to the tree" >&2
+            diff <(echo "$before") <(echo "$after") >&2 || true
+            exit 1
+          }

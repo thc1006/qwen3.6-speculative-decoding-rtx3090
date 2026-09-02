@@ -31,6 +31,9 @@ from pathlib import Path
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import matplotlib.collections as mcoll
+import matplotlib.text as mtext
+import matplotlib.transforms as mtransforms
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / "v4_audit_2026_08_25" / "data"
@@ -89,6 +92,227 @@ def _footer(fig, extra="", base=None):
     figstyle.footer(fig, (FOOTER if base is None else base) + extra)
 
 
+_FIGSP = "\u2007"   # FIGURE SPACE. Measured: in DejaVu Sans its advance is one
+                    # digit wide, and the digits are themselves tabular, so a
+                    # padded number sits in the same column as an unpadded one.
+                    # An ordinary space is half a digit and silently breaks the
+                    # column, which is the whole point of the padding.
+_MINUS = "\u2212"  # the axis ticks and the README tables use it, and it is the
+                    # same advance as "+", so the sign occupies a column too;
+                    # ASCII hyphen-minus is 43 % of that width.
+
+
+def _fig_num(v: float, width: int, dp: int, signed: bool) -> str:
+    """A number that lines up under the one above it."""
+    s = f"{v:+.{dp}f}" if signed else f"{v:.{dp}f}"
+    return s.replace("-", _MINUS).rjust(width, _FIGSP)
+
+
+def _table_guard(fig, name: str, gap: float = 5.0) -> None:
+    """Refuse to publish a figure whose text collides or whose columns are ragged.
+
+    Two collisions shipped in the first version of the head-to-head table and
+    neither was caught by the check written alongside it, because that check
+    walked a list of cells maintained by hand and the title was never added to
+    it. So this walks every Text the figure actually contains. It also demands a
+    GAP rather than mere non-overlap: `draft/gen` and `acceptance` cleared each
+    other by a pixel and still read as one word.
+
+    The column half of this check was vacuous in its first form. It compared the
+    anchor edge of each cell, taking x0 for a left-aligned one and x1 for a
+    right-aligned one; those are the same point by construction, so a cell whose
+    alignment had been changed reported flush. A fault injected on purpose -- one
+    numeric cell left-aligned in a right-aligned column -- was not caught. What
+    actually has to hold is that the numbers in a column are the SAME RENDERED
+    WIDTH, which is what the figure-space padding is for: equal width against a
+    shared anchor is what puts every digit in its own column. Cells are found by
+    the gid `_cell` gives them rather than by position.
+
+    Tested in both directions on each half: the collision half reports four pairs
+    when a column is moved onto its neighbour and none otherwise; the width half
+    reports the column when one cell's padding is dropped and none otherwise.
+    """
+    fig.canvas.draw()
+    r = fig.canvas.get_renderer()
+    # Two kinds of Text report a box they never paint, and both produced false
+    # reports here before they were excluded. A tick LOCATOR routinely puts one
+    # tick past the view limit -- this figure's y ticks run to 300 against a limit
+    # of 255.6 -- and its label object still answers with a position above the
+    # axes, where it duly "collided" with the title. And every tick carries a
+    # second, hidden label object whose extent is a one pixel box at the origin,
+    # which overlaps anything else near the origin. A guard that reports either is
+    # a guard nobody believes the third time.
+    skip = set()
+    for a in fig.axes:
+        for axis, lim in ((a.xaxis, sorted(a.get_xlim())),
+                          (a.yaxis, sorted(a.get_ylim()))):
+            for loc, lab in zip(axis.get_ticklocs(), axis.get_ticklabels()):
+                if not lim[0] <= loc <= lim[1]:
+                    skip.add(id(lab))
+    texts = [t for t in fig.findobj(mtext.Text)
+             if t.get_text().strip() and t.get_visible() and id(t) not in skip
+             and t.get_window_extent(r).width > 1
+             and t.get_window_extent(r).height > 1]
+    boxes = [(t.get_text().replace("\n", "|")[:44], t.get_window_extent(r))
+             for t in texts]
+    bad = [f"{a!r} and {b!r} are closer than {gap} px"
+           for i, (a, x) in enumerate(boxes) for b, y in boxes[i + 1:]
+           if mtransforms.Bbox.from_extents(x.x0 - gap, x.y0 - gap,
+                                            x.x1 + gap, x.y1 + gap).overlaps(y)]
+    cols: dict = defaultdict(list)
+    for t in texts:
+        gid = t.get_gid() or ""
+        if gid.startswith("num:"):
+            cols[gid].append((t.get_text(),
+                              round(t.get_window_extent(r).width, 1),
+                              t.get_ha()))
+    for gid, cs in sorted(cols.items()):
+        widths = {w for txt, w, _ in cs if any(ch.isdigit() for ch in txt)}
+        aligns = {a for _, _, a in cs}
+        if len(widths) != 1:
+            bad.append(f"{gid} is ragged: the numbers render at widths "
+                       f"{sorted(widths)}, so their digits cannot line up")
+        if len(aligns) != 1:
+            bad.append(f"{gid} mixes alignments {sorted(aligns)}")
+    if bad:
+        raise SystemExit(f"  {name}: the figure is not readable\n    "
+                         + "\n    ".join(bad))
+
+
+def _view_guard(ax, name: str, eps: float = 1e-9) -> None:
+    """Refuse to publish an axes that does not show a point it drew.
+
+    `plot_acceptance_threshold` set its x limits from the two numbers it also used
+    to draw the fit line over, and two of its sixty fitted points sat left of
+    them, at 9.5 % and 13.6 % accepted. They were scattered, clipped, and never
+    mentioned: the legend went on saying thirty points and thirty points while
+    the figure showed fifty-eight, and the two it dropped were the
+    lowest-acceptance pair, which carry the most leverage on the slope the whole
+    figure is about.
+
+    Only marks are checked. A fit line, a grid line, an axhline and an axvline are
+    all drawn to the edge on purpose, so a Line2D with no marker is not data here.
+    """
+    xlo, xhi = sorted(ax.get_xlim())
+    ylo, yhi = sorted(ax.get_ylim())
+    # PathCollection only. `errorbar` leaves a LineCollection per series, and a
+    # LineCollection's `get_offsets()` returns its default [[0, 0]] rather than
+    # anything it drew, so an earlier version of this reported two phantom points
+    # at the origin on every figure with error bars. A guard that cries wolf is a
+    # guard somebody switches off.
+    pts = []
+    for c in ax.collections:
+        if isinstance(c, mcoll.PathCollection):
+            pts += [(q[0], q[1]) for q in c.get_offsets()]
+    for ln in ax.lines:
+        if ln.get_marker() not in ("", " ", "None", None):
+            pts += [(x, y) for x, y in ln.get_xydata()]
+    out = [(x, y) for x, y in pts
+           if x != x or y != y                      # NaN is not "inside"
+           or not (xlo - eps <= x <= xhi + eps and ylo - eps <= y <= yhi + eps)]
+    if out:
+        raise SystemExit(
+            f"  {name}: {len(out)} of {len(pts)} plotted points fall outside "
+            f"x[{xlo:.4g}, {xhi:.4g}] y[{ylo:.4g}, {yhi:.4g}] and are not drawn:\n    "
+            + "\n    ".join(f"({x:.4g}, {y:.4g})" for x, y in out[:8]))
+
+
+def _cover_guard(ax, name: str) -> None:
+    """Refuse to publish an axes whose legend sits on top of a point it drew.
+
+    `_view_guard` asks whether a point is inside the axes. A point can be inside
+    the axes and still invisible, because something opaque was put over it. Giving
+    `plot_two_levels`'s right panel a white legend background -- to stop its two
+    dashed swatches reading as two more dashed marks in the data -- put that
+    background over blocks 4 and 5 of the arm the panel is about, at -4.45 and
+    -4.66, which are the lowest two points on it and the transition the panel
+    exists to show. The legend was moved; this is what would have caught it.
+    """
+    leg = ax.get_legend()
+    if leg is None:
+        return
+    fig = ax.get_figure()
+    fig.canvas.draw()
+    box = leg.get_window_extent(fig.canvas.get_renderer())
+    pts = []
+    for c in ax.collections:
+        if isinstance(c, mcoll.PathCollection):
+            pts += [(q[0], q[1]) for q in c.get_offsets()]
+    for ln in ax.lines:
+        if ln.get_marker() not in ("", " ", "None", None):
+            pts += [(x, y) for x, y in ln.get_xydata()]
+    hidden = [d for d, sxy in zip(pts, ax.transData.transform(pts).tolist())
+              if box.contains(*sxy)] if pts else []
+    if hidden:
+        raise SystemExit(
+            f"  {name}: the legend covers {len(hidden)} of {len(pts)} plotted "
+            f"points. Move it.\n    "
+            + "\n    ".join(f"({x:.4g}, {y:.4g})" for x, y in hidden[:8]))
+
+
+def _ink_guard(ax, name: str) -> None:
+    """Refuse to publish an axes where a label's background erases a line.
+
+    The three guards above all pass on a figure where an opaque label box is laid
+    across the curve the figure is about. `plot_dflash_sweep` had two: the box
+    behind "-14.8%" took a segment out of the green line and the box behind
+    "+17.3%" took one out of the orange, and at 300 DPI it is visible as a pale
+    break in the stroke. No text collides, no point is outside the axes, and no
+    legend covers a point, so nothing else here would have said a word.
+
+    A label may sit ON a line. What it may not do is paint over it: this looks for
+    a Text whose bbox patch is opaque enough to hide a stroke and whose box a line
+    segment passes through.
+    """
+    fig = ax.get_figure()
+    fig.canvas.draw()
+    r = fig.canvas.get_renderer()
+    # Sampled along the segment, not at its ends and middle. The first version of
+    # this tested the two endpoints and the midpoint, and passed: the green line
+    # runs from n_max 4 straight to n_max 8 as ONE segment, so its endpoints are
+    # at the two markers and its midpoint is halfway between them, and the label
+    # that erases it sits at neither. A guard that samples three points on a
+    # segment a thousand pixels long is a guard that agrees with whatever it is
+    # shown.
+    pts = []
+    for ln in ax.lines:
+        if ln.get_linestyle() in ("None", " ", "") or ln.get_linewidth() <= 0:
+            continue
+        xy = ax.transData.transform(ln.get_xydata())
+        for i in range(len(xy) - 1):
+            (x0, y0), (x1, y1) = xy[i], xy[i + 1]
+            n = max(2, int(max(abs(x1 - x0), abs(y1 - y0)) / 4) + 1)
+            pts += [(x0 + (x1 - x0) * k / n, y0 + (y1 - y0) * k / n)
+                    for k in range(n + 1)]
+    bad = []
+    for t in ax.texts:
+        bb = t.get_bbox_patch()
+        if bb is None or (bb.get_alpha() or 1.0) < 0.35:
+            continue
+        box = bb.get_window_extent(r)
+        hit = sum(1 for q in pts if box.contains(*q))
+        if hit:
+            bad.append(f"{t.get_text()!r} covers {hit} sampled points of a line")
+    if bad:
+        raise SystemExit(f"  {name}: a label's background erases a line\n    "
+                         + "\n    ".join(sorted(set(bad))))
+
+
+def _guards(fig, name: str) -> None:
+    """Every guard, over every axes, for every figure.
+
+    Hung one at a time they were hung unevenly: `plot_head_to_head` had the text
+    one and none of the other three, and `plot_dflash_sweep` had the view one on
+    its upper panel only. One call, so a figure cannot be given a subset by
+    accident, and so a new figure gets all four by writing one line.
+    """
+    for ax in fig.axes:
+        _view_guard(ax, name)
+        _cover_guard(ax, name)
+        _ink_guard(ax, name)
+    _table_guard(fig, name)
+
+
 def load(pattern: str) -> dict[str, list[dict]]:
     arms = defaultdict(list)
     for f in sorted(glob.glob(str(DATA / pattern))):
@@ -143,9 +367,25 @@ def plot_batching() -> None:
         ax.annotate(f"{spec_y[i]:.0f}", (i, spec_y[i] - spec_e[i]),
                     textcoords="offset points", xytext=(0, -15), ha="center", color=figstyle.text_colour(C_ACTIVE),
                       bbox=box)
-        ax.annotate(f"{spec_y[i] / base_y[i]:.2f}x", (i, (base_y[i] + spec_y[i]) / 2),
-                    ha="center", color="#3f3f46",
-                    bbox=dict(boxstyle="round,pad=0.25", fc="white", ec="#d0d0d0", lw=0.7))
+
+    # The ratio row. It used to be annotated at (i, midpoint of the two series),
+    # which put it in the data coordinate space of an axis labelled "aggregate
+    # throughput", so each box read as a mark at 70, 91 and 104 tokens a second.
+    # And because the midpoint between a rising line and a flat one rises, the
+    # three boxes ASCENDED left to right while the ratios they report fall, 0.28
+    # to 0.18 to 0.16: a reader who took the shape before the text took away the
+    # opposite of the finding. They are now a row at one height, in axes
+    # coordinates, where they have no vertical reading at all.
+    _ratio = [spec_y[i] / base_y[i] for i in range(len(levels))]
+    _rowtr = mtransforms.blended_transform_factory(ax.transData, ax.transAxes)
+    ax.text(0.5 * (len(levels) - 1), 0.995,
+            "spec-draft-n8 as a fraction of no speculation",
+            transform=_rowtr, ha="center", va="top", size=10, color="#3f3f46")
+    for i in range(len(levels)):
+        ax.text(i, 0.920, f"{_ratio[i]:.2f}x", transform=_rowtr, ha="center",
+                va="top", color="#3f3f46",
+                bbox=dict(boxstyle="round,pad=0.25", fc="white", ec="#d0d0d0",
+                          lw=0.7))
 
     ax.set_xlim(-0.35, len(levels) - 0.65)
     ax.set_xticks(list(x))
@@ -158,10 +398,18 @@ def plot_batching() -> None:
                         for i, c in enumerate(levels)])
     ax.set_xlabel("concurrent client requests in flight")
     ax.set_ylabel("aggregate throughput (generated tokens / wall-clock second)")
-    ax.set_ylim(0, max(base_y) * 1.18)
+    # 1.18 left no room above the highest point and the ratio row landed on the
+    # "180" label, four pixels into it, with the row's own header touching the
+    # values. The c=8 baseline carries an SD of 15.2, so the mark to clear is
+    # 195.2, not 180. Chosen by measuring the boxes, not by eye.
+    ax.set_ylim(0, max(base_y) * 1.42)
+    # The two ratios in the subtitle were typed in as "0.28x" and "0.16x". They
+    # happened to be right, and nothing would have said so if a re-measurement had
+    # moved them.
     ax.set_title("Aggregate throughput against concurrent client requests\n"
-                 "the no-speculation arm gains, the external-drafter arm does not: "
-                 "0.28x at one, 0.16x at eight")
+                 f"the no-speculation arm gains, the external-drafter arm does not: "
+                 f"{_ratio[0]:.2f}x at {levels[0]}, {_ratio[-1]:.2f}x at {levels[-1]}",
+                 pad=22)
     # Below the axes: the only large empty region is where the c=1 labels sit.
     # -0.16 put the legend on the x axis label. The tick labels also spelled
     # "client requests in flight: N" under every tick, so the same fact was
@@ -173,6 +421,7 @@ def plot_batching() -> None:
     _footer(fig, " Error bars are the run-to-run SD of three repeats. The x axis is "
                  "CONCURRENT CLIENT REQUESTS, verified from request timestamps; the "
                  "server's decode batch width was not instrumented.")
+    _guards(fig, "batching")
     if not CHECK:  # --check verifies the numbers, it must not dirty the tree
         plt.savefig(OUT / "plot_batching.png", dpi=figstyle.DPI, bbox_inches="tight")
     plt.close()
@@ -214,23 +463,54 @@ def plot_dflash_sweep() -> None:
         print("  no DFlash data - skipping sweep chart")
         return
 
-    fig, (ax, ax2) = plt.subplots(2, 1, figsize=(9.2, 7.4), sharex=True,
+    # 9.2 wide put run J's n_max 4 label into run K's n_max 3 label: on a log
+    # base 2 axis those two are close together, and both labels are wide.
+    fig, (ax, ax2) = plt.subplots(2, 1, figsize=(11.4, 7.4), sharex=True,
                                   gridspec_kw={"height_ratios": [2.1, 1]})
     # The two runs land almost on top of each other at n_max 4 and 8 - which is
     # the replication, and also a label collision. Push each series' labels to a
     # different distance rather than letting them overprint.
     for k, (label, pts, colour, b) in enumerate(series):
         # circle and square, not two circles: the two runs were separated by
-        # colour alone, and a second channel costs nothing
+        # colour alone, and a second channel costs nothing.
+        #
+        # Run J's circle is OPEN and larger. The two runs replicate at n_max 4 and
+        # 8, which is why both are drawn, and where they replicate they are 1.31
+        # and 0.98 points apart on an axis where a filled marker covers about 1.8:
+        # the later series simply covered the earlier one and only a crescent of it
+        # showed, so the one thing the figure exists to show was the one thing
+        # hidden. An open ring with the other run's marker inside it is what
+        # agreement should look like.
+        fill = (dict(mfc="none", mew=1.8, ms=9.5, zorder=4) if k == 0
+                else dict(ms=6.5, zorder=3))
         ax.errorbar([p[0] for p in pts], [p[1] for p in pts],
                     yerr=[p[3] for p in pts], marker="os"[k % 2], lw=2.0, capsize=4,
-                    color=colour, label=f"{label}   (its baseline: {b:.1f} tok/s)")
+                    color=colour, label=f"{label}   (its baseline: {b:.1f} tok/s)",
+                    **fill)
         ax2.plot([p[0] for p in pts], [p[2] for p in pts], marker="os"[k % 2], lw=1.8,
-                 color=colour)
-        up, down = (24, -31) if k == 0 else (10, -17)
+                 color=colour, **fill)
+        # One offset per SERIES, not one per sign. The offsets were 24 points up
+        # for a positive value and 31 down for a negative one, which on this axis
+        # is 7 to 9 percentage points, so "+18.7%" was drawn level with the 26
+        # gridline; and because the two series used different distances in the same
+        # direction, "-15.8%" was drawn ABOVE "-14.8%", a pair whose vertical order
+        # contradicted the values it carries.
+        #
+        # Every label in a series now sits the same distance from its own point, so
+        # within a series the order of the labels is the order of the values, and
+        # the two series go to opposite sides, so they cannot collide even at
+        # n_max 4 and 8 where the runs replicate. Level with the point was tried
+        # first and does not fit: on a log base 2 axis the gap between 3 and 4 is
+        # 296 pixels and two of these labels are 422.
+        # Up and to the RIGHT for run J, down and to the LEFT for run K: both
+        # curves fall from left to right, so those are the two sides the curve is
+        # not on. Straight above and straight below, the labels' white boxes took
+        # segments out of the lines they annotate.
+        dx, dy, va, ha = (16, 14, "bottom", "left") if k == 0 \
+            else (-16, -14, "top", "right")
         for n, d, _acc, _sd in pts:
             ax.annotate(f"{d:+.1f}%", (n, d), textcoords="offset points",
-                        xytext=(0, up if d > 0 else down), ha="center",
+                        xytext=(dx, dy), ha=ha, va=va,
                           color=figstyle.text_colour(colour),
                         bbox=dict(boxstyle="round,pad=0.15", fc="white",
                                   ec="none", alpha=0.85))
@@ -238,16 +518,34 @@ def plot_dflash_sweep() -> None:
     ax.axhline(0, color=C_REF, ls="--", lw=1.2)
     # On the zero line itself, not in a corner: the corner it used to sit in is
     # exactly where the worst-performing point lands.
-    ax.text(0.012, 0.0, " no speculation", transform=ax.get_yaxis_transform(),
-            ha="left", va="bottom", color=figstyle.text_colour(C_REF),
+    # ...and at the LEFT end of that line it then sat on run K's n_max 1 label,
+    # which is the leftmost point on the chart. The right end of the zero line is
+    # empty on this data: the largest n_max is the deepest point of the cliff.
+    ax.text(0.988, 0.0, "no speculation ", transform=ax.get_yaxis_transform(),
+            ha="right", va="bottom", color=figstyle.text_colour(C_REF),
             bbox=dict(boxstyle="round,pad=0.15", fc="white", ec="none", alpha=0.9))
     ys = [d for _, pp, _, _ in series for _, d, _a, _s in pp] + [0.0]
     pad = max(6.0, 0.12 * (max(ys) - min(ys)))
-    ax.set_ylim(min(ys) - 1.9 * pad, max(ys) + 1.6 * pad)
+    # 1.9 and 1.6 reserved 29.6 % of the vertical range for labels thrown that far
+    # from their points. They sit beside them now.
+    ax.set_ylim(min(ys) - 1.0 * pad, max(ys) + 1.0 * pad)
     ax.set_ylabel("change in aggregate throughput\nagainst the same run's baseline (%)")
-    ax.set_title("DFlash self-speculation: a plateau at draft length 2-4, then a cliff\n"
-                 "one binary, one placement policy, three repeats per point; "
-                 "two runs, independently")
+    # The subtitle read "two runs, independently" beside a claim about a plateau at
+    # draft length 2 to 4. Run J has points at 4, 8 and 16 only: it contributes one
+    # point to that plateau and cannot corroborate it. What the two runs do
+    # independently is agree WHERE THEY OVERLAP, which is what it says now, and
+    # both the plateau's extent and the overlap are read off the data rather than
+    # typed.
+    _shared = sorted(set.intersection(*({q[0] for q in pp}
+                                        for _l, pp, _c, _bb in series)))
+    _best = max(q[1] for _l, pp, _c, _bb in series for q in pp)
+    _plateau = sorted({q[0] for _l, pp, _c, _bb in series for q in pp
+                       if q[1] > 0.9 * _best})
+    ax.set_title(
+        f"DFlash self-speculation: a plateau at draft length "
+        f"{min(_plateau)}-{max(_plateau)}, then a cliff\n"
+        f"one binary, one placement policy, three repeats per point; the two runs "
+        f"agree where they overlap, at {' and '.join(str(n) for n in _shared)}")
     ax.legend(loc="lower left", frameon=False)
     ax.grid(color="#dcdcdc", lw=0.6)
     ax.set_axisbelow(True)
@@ -255,8 +553,15 @@ def plot_dflash_sweep() -> None:
     ax2.set_ylabel("draft tokens\naccepted (%)")
     ax2.set_xlabel("--spec-draft-n-max  (maximum tokens the drafter may propose)")
     ax2.set_xscale("log", base=2)
-    ax2.set_xticks([p[0] for _, pts, _, _ in series for p in pts])
+    # sorted(set(...)): the two runs share n_max 4 and 8, so this list had them
+    # twice and matplotlib drew both tick labels, one exactly on the other.
+    ax2.set_xticks(sorted({q[0] for _l, pts, _c, _b in series for q in pts}))
     ax2.get_xaxis().set_major_formatter(matplotlib.ticker.ScalarFormatter())
+    # Room at both ends for the labels, which now sit to one side of their points:
+    # at the left edge run K's n_max 1 label ran into the y axis tick labels. The
+    # axis is log base 2, so the margin is a ratio, not an offset.
+    _ns = [q[0] for _l, pp, _c, _b in series for q in pp]
+    ax2.set_xlim(min(_ns) / 1.45, max(_ns) * 1.25)
     ax2.grid(color="#dcdcdc", lw=0.6)
     ax2.set_axisbelow(True)
 
@@ -266,6 +571,7 @@ def plot_dflash_sweep() -> None:
                  "is a pooled ratio and has none. "
                  " Runs J and K differ in context and fitter margin, so only their "
                  "deltas against their own baselines are comparable.")
+    _guards(fig, "dflash_sweep")
     if not CHECK:  # --check verifies the numbers, it must not dirty the tree
         plt.savefig(OUT / "plot_dflash_sweep.png", dpi=figstyle.DPI, bbox_inches="tight")
     plt.close()
@@ -360,25 +666,68 @@ def plot_acceptance_threshold() -> None:
                 / sum((a - mxl) ** 2 for a in xs_lm))
     brk_lm = -(myl - slope_lm * mxl) / slope_lm
 
+    # The thinking-on half on its own. Its crossing was written into this
+    # figure's caption and into the audit README as the literal "45.4 %", with
+    # nothing deriving it: the two other crossings on the same line are both
+    # recorded and both cross-checked by analysis/verify_claims.py, and this one
+    # was a number somebody had typed. It is computed here now, and it comes out
+    # at 45.41, so the published figure was right and unguarded.
+    _on = series(fit[0][1], only="dflash")
+    xs_on = [q[0] for q in _on]
+    ys_on = [q[1] for q in _on]
+    mxo, myo = st.mean(xs_on), st.mean(ys_on)
+    slope_on = (sum((a - mxo) * (b - myo) for a, b in zip(xs_on, ys_on))
+                / sum((a - mxo) ** 2 for a in xs_on))
+    brk_on = -(myo - slope_on * mxo) / slope_on
+
     record("acceptance_threshold", fitted=sorted(zip(xs, ys)),
            out_of_sample=sorted(oos), slope=slope, intercept=inter,
            break_even=brk, r=num / den,
            break_even_length_matched=brk_lm, slope_length_matched=slope_lm,
-           n_fitted=len(xs), n_fitted_length_matched=len(xs_lm))
+           break_even_thinking_on=brk_on, slope_thinking_on=slope_on,
+           n_fitted=len(xs), n_fitted_length_matched=len(xs_lm),
+           n_fitted_thinking_on=len(xs_on))
 
-    lo, hi = 15, 95
+    # `lo, hi` was 15 and 95 and served two purposes at once: the range the fit
+    # line is DRAWN over, and the axis limits. The axis then lost data. Two of the
+    # sixty fitted points sit at 9.5 % and 13.6 % accepted, left of 15, so the
+    # figure drew fifty-eight while its own legend said thirty and thirty, and the
+    # two it dropped are the lowest-acceptance pair, the points with the most
+    # leverage on the slope. The two purposes are now separate: the line is drawn
+    # over the range it was fitted on, which is also the only range it is entitled
+    # to, and the axis is set from everything the figure plots.
+    lo, hi = min(xs), max(xs)
     ax.plot([lo, hi], [slope * lo + inter, slope * hi + inter], color="#7a7a82",
             lw=1.3, ls="-", label=f"least squares on run L  (r = {num / den:+.3f})")
     ax.axhline(0, color=figstyle.BLUE, ls="--", lw=1.1)
     # a green line and a blue line meaning different things is the pair to avoid
-    ax.axvline(brk, color=figstyle.PURPLE, ls=":", lw=1.6)
+    # The figure used to draw ONE crossing and label it 48.2 %, while its own
+    # caption said the confound moves it to 46.5, that the clean half gives 45.4,
+    # and that the threshold should be read as 45 to 48. The number a reader took
+    # away was the one drawn. All three crossings are the same fit on three
+    # subsets of the same points, so the honest mark is the band they span, with
+    # the full-sample line still drawn inside it.
+    #
+    # The band's FILL cannot be what carries it. At the opacity a fill has to have
+    # to sit under the data it measures 1.1:1 against the paper, and WCAG 1.4.11
+    # asks 3:1 of any mark that carries information. So the two crossings at the
+    # edges are drawn as lines at full opacity, which measure 3.06:1, and the fill
+    # between them is only an aid.
+    _lo_b, _hi_b = min(brk, brk_lm, brk_on), max(brk, brk_lm, brk_on)
+    ax.axvspan(_lo_b, _hi_b, color=figstyle.PURPLE, alpha=0.13, lw=0, zorder=0)
+    for _b in (_lo_b, _hi_b):
+        ax.axvline(_b, color=figstyle.PURPLE, ls=":", lw=1.6)
     # anchored at the TOP of the y range, this ran straight through the third
     # line of the legend, which is also upper left. The bottom of the same
     # vertical line is empty on every rendering of this figure.
-    ax.annotate(f"break-even, {brk:.1f} % accepted", (brk, ax.get_ylim()[0]),
+    ax.annotate(f"break-even, {_lo_b:.1f} to {_hi_b:.1f} % accepted "
+                f"(full sample {brk:.1f})",
+                (_hi_b, ax.get_ylim()[0]),
                 textcoords="offset points", xytext=(6, 12),
                   color=figstyle.text_colour(figstyle.PURPLE))
-    ax.set_xlim(lo, hi)
+    _x = xs + [p[0] for p in oos]
+    _pad = 0.04 * (max(_x) - min(_x))
+    ax.set_xlim(min(_x) - _pad, max(_x) + _pad)
     ax.set_xlabel("draft tokens accepted (%)")
     ax.set_ylabel("change in decode rate against the matched baseline (%)")
     ax.set_title("Acceptance decides the sign, and only the sign\n"
@@ -389,18 +738,22 @@ def plot_acceptance_threshold() -> None:
     plt.tight_layout(rect=[0, 0.06, 1, 1])
     # This figure spans both workloads and five repeats, so the shared footer
     # ("thinking on, three repeats") would be wrong on it.
-    _footer(fig, " Acceptance is llama.cpp's server-side counter; it under-reports on "
+    _footer(fig, f" Acceptance is llama.cpp's server-side counter; it under-reports on "
                  "arms that take speculative checkpoints (ERRATA A13), which is every "
                  "external-drafter point here and none of the fitted ones. "
                  "Half the fitted points are run L's thinking-off half, where the arms "
                  "generated DIFFERENT numbers of tokens (ERRATA A17): refitting without "
-                 "that confound moves the crossing to 46.5 %, and the thinking-on half "
-                 "alone gives 45.4 %. Read the threshold as 45-48 %.",
+                 f"that confound moves the crossing to {brk_lm:.1f} % over "
+                 f"{len(xs_lm)} points, and the thinking-on half alone gives "
+                 f"{brk_on:.1f} % over {len(xs_on)}. The shaded band spans those "
+                 f"three fits; the dotted line is the full-sample one. "
+                 f"Read the threshold as 45-48 %.",
             base="2026-08-26, llama.cpp 3737e4137, one RTX 3090, "
                  "Qwen3.6-35B-A3B-UD-Q4_K_XL, greedy, ten prompts. Fitted points: run L, "
                  "both workloads, five repeats per arm, per prompt. Out-of-sample points: "
                  "runs J and K, whole arms, three repeats. "
                  "Controls and caveats: ERRATA.md, v4_audit_2026_08_25/README.md.")
+    _guards(fig, "acceptance_threshold")
     if not CHECK:  # --check verifies the numbers, it must not dirty the tree
         plt.savefig(OUT / "plot_acceptance_threshold.png", dpi=figstyle.DPI, bbox_inches="tight")
     plt.close()
@@ -464,15 +817,18 @@ def plot_head_to_head() -> None:
         n_blocks = d["blocks"]
     else:
         n_blocks = None
-    base = pooled(arms["baseline"])
     # Grouped by what the draft path IS, not by a causal claim: all three load a
-    # separate drafter GGUF through -md.
+    # separate drafter GGUF through -md. The short name is printed in a column of
+    # its own rather than looked up in a legend: a legend costs a look away from
+    # the row and back, and the drafter is a property of the row. This figure had
+    # one, and the comment where it used to be records it covering two arms'
+    # labels at "lower right" and two more in the right margin.
     FAMILY = {
-        "spec-dflash": ("DFlash draft head (purpose-built for this target)", C_DFLASH),
-        "spec-mtp":    ("MTP draft head (exported from the target)", figstyle.PURPLE),
-        "spec-draft":  ("general-purpose 0.8 B draft model", C_ACTIVE),
-        "ngram":       ("drafter-free n-gram", C_INACTIVE),
-        "baseline":    ("no speculation", C_REF),
+        "spec-dflash": ("DFlash head",  C_DFLASH),
+        "spec-mtp":    ("MTP head",     figstyle.PURPLE),
+        "spec-draft":  ("0.8 B model",  C_ACTIVE),
+        "ngram":       ("n-gram",       C_INACTIVE),
+        "baseline":    ("none",         C_REF),
     }
     def fam(a):
         for k in FAMILY:
@@ -495,53 +851,108 @@ def plot_head_to_head() -> None:
                  for a, pl, ac, fm, dg in rows])
     rows.sort(key=lambda r: r[1])
 
-    fig, ax = plt.subplots(figsize=(10.4, 6.2))
-    y = range(len(rows))
+    # ---- the layout ------------------------------------------------------
+    # This is a forest plot: a table of rows, with one column in which the
+    # interval is drawn. It replaced a bar chart of the absolute rate that
+    # carried FIVE quantities per bar in one run-on string anchored to the bar's
+    # tip, so no quantity formed a column and none could be compared down the
+    # rows: the labels' left edges staggered across 118 tok/s, 55 % of the axis
+    # width, and three of them ended up to 95 tok/s past the right end of the
+    # axis, visible only because `bbox_inches="tight"` grew the canvas around
+    # them. `set_xlim(0, max * 1.46)` reserved 31 % of the range for that text
+    # and it was still not enough.
+    #
+    # Two further things follow from the change of subject. The quantity plotted
+    # is now the CHANGE against the baseline, which has a meaningful origin at
+    # zero, rather than the absolute rate, whose origin is not a rate anyone
+    # measured; and the interval is drawn on a percentage scale, where the widest
+    # of them is 1.6 points rather than 1.2 tok/s inside a 214 tok/s axis.
+    # Position on a common scale is the encoding read most accurately, so it is
+    # spent on the estimate the document's claim is about.
+    X_ARM, X_DRAFT, X_TOKS = 0.010, 0.140, 0.250
+    X_CHG, X_CI, X_DPG, X_ACC = 0.745, 0.860, 0.918, 0.995
+    AX_L, AX_R = 0.282, 0.655
+    DASH = "\u2014"   # the glyph the README table already uses for an absent cell
+
+    fig, ax = plt.subplots(figsize=(13.2, 6.4))
+    fig.subplots_adjust(left=AX_L, right=AX_R, top=0.84, bottom=0.24)
+    # x in FIGURE fractions, y in DATA: one x per column, shared by the header
+    # and every cell, which is what makes a column a column. The old labels were
+    # drawn in data coordinates, so "draft/gen 0.81" sat at x = 180 tok/s and
+    # read as a position on the throughput axis.
+    tr = mtransforms.blended_transform_factory(fig.transFigure, ax.transData)
+    def cell(x, y, s, ha="right", gid=None, **kw):
+        t = ax.text(x, y, s, transform=tr, ha=ha, va="center",
+                    clip_on=False, **kw)
+        t.set_gid(gid)
+        return t
+
     for i, (a, p_, acc, f, dpg) in enumerate(rows):
-        ax.barh(i, p_, height=0.66, color=FAMILY[f][1], alpha=0.92, edgecolor=figstyle.EDGE, linewidth=figstyle.EDGE_LW)
-        d = 100*(p_/base - 1)
+        label, colour = FAMILY[f]
         c = ci.get(a)
         if c:
             lo, hi = c["ci95_t_pct"]
-            # the interval, drawn on the bar, in the same pooled units
-            x_lo, x_hi = base * (1 + lo/100), base * (1 + hi/100)
-            ax.plot([x_lo, x_hi], [i, i], color="#2f2f2f", lw=1.1, alpha=0.85,
-                    solid_capstyle="butt", zorder=3)
-            for x in (x_lo, x_hi):
-                ax.plot([x, x], [i - 0.16, i + 0.16], color="#2f2f2f", lw=1.1,
-                        alpha=0.85, zorder=3)
-            dtxt = f"{c['point_pct']:+.1f} % [{lo:+.1f}, {hi:+.1f}]"
+            pt = c["point_pct"]
+            # Solid, not the alpha 0.5 this was drawn at first: a stem carries
+            # the magnitude, so WCAG 1.4.11 asks 3:1 of it, and all five of these
+            # colours measured 1.7 to 2.1 at half opacity. Solid they are 3.1 to
+            # 5.2.
+            ax.plot([0, pt], [i, i], color=colour, lw=2.2,
+                    solid_capstyle="butt", zorder=2)
+            ax.plot([lo, hi], [i, i], color="#2f2f2f", lw=1.3, zorder=4)
+            for x in (lo, hi):
+                ax.plot([x, x], [i - 0.17, i + 0.17], color="#2f2f2f",
+                        lw=1.3, zorder=4)
+            ax.plot([pt], [i], "o", ms=7.5, color=colour, mec=figstyle.EDGE,
+                    mew=figstyle.EDGE_LW, zorder=5)
+            chg = _fig_num(pt, 5, 1, True)
+            cit = f"[{_fig_num(lo, 5, 1, True)}, {_fig_num(hi, 5, 1, True)}]"
         else:
-            dtxt = f"{d:+.1f} %"
-        lbl = f"{p_:.1f}   {dtxt}" + (
-            f"   draft/gen {dpg:.2f}, acc {acc:.1f} %" if acc is not None else "")
-        ax.text(max(p_, x_hi if c else p_) + 2.0, i, lbl, va="center", ha="left", color="#1f1f24")
-    ax.set_yticks(list(y))
-    ax.set_yticklabels([r[0] for r in rows])
-    ax.axvline(base, color=C_REF, ls="--", lw=1.2)
-    ax.text(base, len(rows) - 0.35, f" no speculation, {base:.1f}",
-            color=figstyle.text_colour(C_REF), va="top", ha="left")
-    ax.set_xlim(0, max(r[1] for r in rows) * 1.46)
-    ax.set_xlabel("pooled decode throughput (tokens / second)  -  higher is faster")
-    ax.set_title(f"Eight speculative configurations and one baseline, "
-                 f"balanced Latin square, {n_blocks or '?'} blocks\n"
-                 f"an observational ranking: these arms differ in several ways at once, "
-                 f"so no single cause is isolated")
-    handles = [plt.Rectangle((0, 0), 1, 1, color=v[1], label=v[0])
-               for v in FAMILY.values()]
-    # Below the axes, not beside them. Inside at "lower right" it covered the
-    # acceptance figures of the two slowest arms; moved to the right margin it
-    # covered the two fastest, because each bar's label is drawn in data
-    # coordinates and runs past `set_xlim`, so the right margin is where the
-    # text already is. Below is the only side nothing else occupies, and it is
-    # what `plot_batching` in this file already does.
-    ax.legend(handles=handles, loc="upper center", bbox_to_anchor=(0.5, -0.12),
-              ncol=3, frameon=False)
+            ax.plot([0], [i], "D", ms=7.2, color="white", mec=colour,
+                    mew=1.7, zorder=5)
+            chg = cit = DASH
+        ink = {"color": "#1f1f24" if c else "#5a5a62"}
+        cell(X_ARM, i, a, ha="left", family="DejaVu Sans Mono", size=10.4)
+        cell(X_DRAFT, i, label, ha="left", color="#3a3a42", size=10.4)
+        cell(X_TOKS, i, _fig_num(p_, 5, 1, False), size=10.4, gid="num:tok/s")
+        cell(X_CHG, i, chg, size=10.4, gid="num:change", **ink)
+        cell(X_CI, i, cit, size=10.4, gid="num:ci", **ink)
+        cell(X_DPG, i, DASH if dpg is None else _fig_num(dpg, 4, 2, False),
+             size=10.4, gid="num:draft-per-gen")
+        cell(X_ACC, i, DASH if acc is None else _fig_num(acc, 4, 1, False),
+             size=10.4, gid="num:acceptance")
+
+    # The column names are drawn as the header, which is what tells a reader the
+    # right-hand block is a table and not a caption. The unit lives in the header
+    # rather than in every cell: repeating "%" eighteen times also breaks the
+    # alignment, because the field before it is not a fixed width.
+    hy = len(rows) - 0.28
+    hdr = dict(size=10.0, color="#3a3a42", weight="bold")
+    for x, s, ha in ((X_ARM, "arm", "left"), (X_DRAFT, "drafter", "left"),
+                     (X_TOKS, "pooled\ntok/s", "right"),
+                     (X_CHG, "change\n(%)", "right"),
+                     (X_CI, "95 % CI\n(t, blocks)", "right"),
+                     (X_DPG, "draft\nper gen", "right"),
+                     (X_ACC, "acceptance\n(%)", "right")):
+        ax.text(x, hy, s, transform=tr, ha=ha, va="bottom", clip_on=False,
+                linespacing=1.25, **hdr)
+
+    ax.axvline(0, color=C_REF, ls="--", lw=1.2, zorder=1)
+    ax.set_ylim(-0.7, len(rows) - 0.05)
+    ax.set_yticks([])
+    ax.set_xlim(-80, 32)
+    for s in ("left", "right", "top"):
+        ax.spines[s].set_visible(False)
     ax.grid(axis="x", color="#dcdcdc", lw=0.6)
     ax.set_axisbelow(True)
-    plt.tight_layout(rect=[0, 0.06, 1, 1])
-    # This figure is nine Latin-square blocks, not the three repeats the shared
-    # footer describes, and spec-draft-n1's figure moved when it was re-measured.
+    ax.set_xlabel("change against no speculation (%)")
+    # The title goes at the top of the FIGURE. `ax.set_title` put it above the
+    # axes, which is the middle of this layout, and it landed on the header of
+    # the `pooled tok/s` column.
+    fig.text(0.010, 0.975,
+             f"Eight speculative configurations against one baseline, "
+             f"balanced Latin square, {n_blocks or '?'} blocks",
+             ha="left", va="top", size=14)
     _footer(fig,
             base=f"2026-08-26, llama.cpp 3737e4137, one RTX 3090, "
                  f"Qwen3.6-35B-A3B-UD-Q4_K_XL, greedy, thinking on, ten prompts. "
@@ -549,18 +960,25 @@ def plot_head_to_head() -> None:
                  f"{'position-balanced - every arm at every position an equal number of times' if balanced else 'NOT position-balanced, so arm position is confounded with time'}, "
                  f"verified from the arm-runs' own timestamps. Controls and caveats: ERRATA.md, "
                  f"v4_audit_2026_08_25/README.md.",
-            extra=" Bars are pooled decode rate; the interval is a 95 % paired block "
-                  "interval against the baseline measured in the same block. Acceptance "
-                  "is the server-side counter, which under-reports on the checkpointing "
-                  "rows (ERRATA A13): spec-draft-n1 reads 69.7 % here and 100.0 % from "
-                  "the drafter, and is 74.8 % slower either way. draft/gen is proposals "
-                  "per generated token, and is what makes acceptance readable: "
-                  "ngram-map-k4v-m8's 50 % is 108 of 216 proposals over 27 000 tokens.")
+            extra=" An observational ranking: these arms differ in several ways at "
+                  "once, so no single cause is isolated. The dot is the point "
+                  "estimate and the bracket the 95 % paired block interval against "
+                  "the baseline measured in the same block; every interval here is "
+                  "under 1.6 percentage points wide, so most are no wider than the "
+                  "dot, and ngram-map-k4v-m8 is the one arm whose interval crosses "
+                  "zero. Acceptance is the server-side counter, which under-reports "
+                  "on the checkpointing rows (ERRATA A13): spec-draft-n1 reads 69.7 "
+                  "here and 100.0 from the drafter, and is 74.8 % slower either way. "
+                  "draft per gen is proposals per generated token, and is what makes "
+                  "acceptance readable: ngram-map-k4v-m8's 50.0 is 108 of 216 "
+                  "proposals over 27 000 tokens.")
+    _guards(fig, "head_to_head")
     if not CHECK:  # --check verifies the numbers, it must not dirty the tree
         plt.savefig(OUT / "plot_head_to_head.png", dpi=figstyle.DPI, bbox_inches="tight")
     plt.close()
     if not CHECK:
         print(f"  wrote {(OUT / 'plot_head_to_head.png').relative_to(ROOT)}")
+
 
 
 # ------------------------------------------------------- runs M1-U6 ----
@@ -639,12 +1057,19 @@ def plot_two_levels() -> None:
     # never drawn: a mean line with no spread, in a figure whose whole subject is
     # how far apart the two groups are
     for val, sd, c, lab in (
+            # The three quantities a reader compares between these two rows are
+            # the count, the mean and the SD, and they sat behind leading phrases
+            # of different widths ("above the +23 % split," against "below it,"),
+            # so none of the three lined up. They lead now and the prose trails:
+            # the fixed words are identical between the rows and the numbers are
+            # padded to equal width, so the three columns line up without the
+            # legend having to become a table.
             (st.mean(hi), st.stdev(hi), C_HI,
-             f"above the +23 % split, {len(hi)} blocks, "
-             f"mean {st.mean(hi):+.1f} % (SD {st.stdev(hi):.2f})"),
+             f"{len(hi):2d} blocks   mean {_fig_num(st.mean(hi), 5, 1, True)} %"
+             f"   SD {st.stdev(hi):.2f}   above the {SPLIT:+.0f} % split"),
             (st.mean(lo), st.stdev(lo), C_LO,
-             f"below it, {len(lo)} blocks, "
-             f"mean {st.mean(lo):+.1f} % (SD {st.stdev(lo):.2f})")):
+             f"{len(lo):2d} blocks   mean {_fig_num(st.mean(lo), 5, 1, True)} %"
+             f"   SD {st.stdev(lo):.2f}   below it")):
         ax.axhspan(val - sd, val + sd, color=c, alpha=0.12, lw=0)
         ax.axhline(val, color=c, ls="--", lw=1.2, alpha=0.8, label=lab)
     seen, ticks, labels = set(), [], []
@@ -658,7 +1083,11 @@ def plot_two_levels() -> None:
     ax.set_title(f"One arm, {len(ys)} blocks, one day: {min(ys):+.1f} % to {max(ys):+.1f} %, "
                  f"clustered by run\n"
                  f"draft_n is 2441 and acceptance 72.3 % in every one of them")
-    ax.legend(loc="lower left", frameon=False)
+    # A frame, and a background. Without one the two dashed swatches are two more
+    # dashed marks inside the data area, at a height that means nothing, in the
+    # same style and colour as the two that do mean something.
+    ax.legend(loc="lower left", frameon=True, facecolor="white",
+              edgecolor="#d0d0d0", framealpha=0.94)
     ax.grid(axis="y", color="#dcdcdc", lw=0.6)
     ax.set_axisbelow(True)
 
@@ -666,22 +1095,44 @@ def plot_two_levels() -> None:
     if o3:
         run = Path(o3[-1]).name
         man = json.load(open(DATA / run / "manifest.json", encoding="utf-8"))
+        # NOT C_LO. Vermilion means "below the +23 % split" in the panel two
+        # inches to the left, and this line is one arm, not a level: the same hue
+        # carried two meanings in two panels drawn side by side and neither legend
+        # said so. Green is what this arm's family is drawn in everywhere else in
+        # this file.
+        _others = 0
         for arm in man["arms"]:
             v = blocks(run, arm)
             if 0 not in v:
                 continue
             rel = [100 * (v[k] / v[0] - 1) for k in sorted(v)]
             focus = arm == "spec-dflash-n2"
+            _others += 0 if focus else 1
             ax2.plot(sorted(v), rel, marker="o" if focus else ".",
                      lw=2.0 if focus else 0.9,
-                     color=C_LO if focus else figstyle.GREY,
+                     color=C_DFLASH if focus else figstyle.GREY,
                      zorder=3 if focus else 1,
                      label="spec-dflash-n2" if focus else None)
+        # The grey lines were never named: not in a legend, not in the title, not
+        # in the caption. How many there are is counted, not typed.
+        ax2.plot([], [], marker=".", lw=0.9, color=figstyle.GREY,
+                 label=f"the other {_others} arms in run O3")
         ax2.axhline(0, color="#8a8a92", lw=0.8)
         ax2.set_xlabel("block within run O3")
         ax2.set_ylabel("change from that arm's own first block (%)")
-        ax2.set_title("O3: the transition happens inside one run,\nand no other arm goes with it")
-        ax2.legend(loc="lower left", frameon=False)
+        # Three lines, not two: over a panel 1047 pixels wide the two-line form
+        # rendered 1340 wide, overflowed its own panel by 146 pixels on the left,
+        # and landed on that panel's topmost y tick label.
+        ax2.set_title("O3: the transition happens\ninside one run, and no\n"
+                      "other arm goes with it")
+        # BELOW the panel. At lower left the box covered blocks 4 and 5, the two
+        # lowest points on it and the transition it is about; at lower right it
+        # still reached them, because the second entry is long and the panel is
+        # narrow. Outside the axes it cannot cover a point at all, and it cannot be
+        # read as a mark either, so it does not need the frame the left panel's
+        # does.
+        ax2.legend(loc="upper center", bbox_to_anchor=(0.5, -0.13), ncol=1,
+                   frameon=False)
         ax2.grid(color="#dcdcdc", lw=0.6)
         ax2.set_axisbelow(True)
     plt.tight_layout(rect=[0, 0.07, 1, 1])
@@ -697,6 +1148,7 @@ def plot_two_levels() -> None:
                   "The +23 % split is where the second-widest gap in the sorted values "
                   "sits and leaves 11 of 12 runs whole; it is a reading aid, not a fitted "
                   "boundary. The widest gap, 2.06 pp, isolates run U3 at the bottom.")
+    _guards(fig, "two_levels")
     if not CHECK:
         plt.savefig(OUT / "plot_two_levels.png", dpi=figstyle.DPI, bbox_inches="tight")
     plt.close()

@@ -100,6 +100,55 @@ def text_colour(fill: str) -> str:
     return TEXT.get(fill, fill)
 
 
+def rgb(colour) -> tuple[float, float, float]:
+    """`#rrggbb`, `#RGB` or an (r, g, b[, a]) tuple -> three floats in 0..1.
+
+    Alpha is dropped rather than composited: a translucent mark is not the
+    colour a reader sees, and every caller here that cares about what is seen
+    has to say what the mark is drawn ON. `over()` is that composite.
+    """
+    if isinstance(colour, str):
+        h = colour.lstrip("#")
+        if len(h) == 3:
+            h = "".join(c * 2 for c in h)
+        return tuple(int(h[i:i + 2], 16) / 255 for i in (0, 2, 4))  # type: ignore[return-value]
+    return tuple(float(c) for c in colour[:3])                      # type: ignore[return-value]
+
+
+def over(colour, alpha: float, background="#FFFFFF"):
+    """What `colour` at `alpha` actually looks like on `background`.
+
+    Alpha is where this repository's contrast measurements went wrong: the fill
+    is still named `#D55E00` in the source, and the reader sees something with
+    half the ink. Solid against white the palette runs 3.42 to 5.19; the same
+    five colours at alpha 0.5 measure 1.7 to 2.1, and 1.4.11 asks 3:1.
+    """
+    f, b = rgb(colour), rgb(background)
+    return tuple(alpha * f[i] + (1 - alpha) * b[i] for i in range(3))
+
+
+def relative_luminance(colour) -> float:
+    """WCAG 2.2's relative luminance. One implementation, used by all of them."""
+    r, g, b = rgb(colour)
+
+    def lin(c):
+        return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+
+    return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b)
+
+
+def contrast_ratio(a, b) -> float:
+    """WCAG 2.2 contrast between two colours. 1.4.11 wants 3:1, 1.4.3 4.5:1.
+
+    Exported so that a figure can CHECK rather than assume. The palette notes
+    above are measurements, but a figure composites, fades and layers colours
+    the palette never saw - a black cell outline on the deep-red end of the
+    diverging scale measures 2.06:1, and nothing in this file predicts that.
+    """
+    la, lb = relative_luminance(a), relative_luminance(b)
+    return (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
+
+
 def on_fill(rgba) -> str:
     """Black or white, whichever a reader can actually read on this cell.
 
@@ -109,14 +158,33 @@ def on_fill(rgba) -> str:
     the matrix, was the least legible number on it. The colour scale itself is
     exempt from 1.4.11 as essential, but what is printed over it is text and 1.4.3
     applies, so the ink is chosen per cell at the standard crossover luminance.
+
+    The same choice serves any mark drawn ON a cell, not only type: the black
+    outline that marks a counted draft round measured 2.06:1 on the deepest red
+    and 2.63:1 on the deepest blue, and picking it per cell here makes both ends
+    at least 4.58:1, which is what the crossover luminance guarantees.
     """
-    r, g, b = (float(c) for c in rgba[:3])
-
-    def lin(c):
-        return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
-
-    lum = 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b)
+    lum = relative_luminance(rgba)
     return BLACK if lum > 0.179 else "#FFFFFF"
+
+
+# A number that lines up under the one above it. `analysis/plot_v4_runs.py`
+# holds a private copy of this, written first and owned by another change
+# today; this is the shared home, and the two are the same function.
+FIGSP = " "   # FIGURE SPACE. Measured: in DejaVu Sans its advance is one
+                   # digit wide, and the digits are themselves tabular, so a
+                   # padded number sits in the same column as an unpadded one.
+                   # An ordinary space is half a digit and silently breaks the
+                   # column, which is the whole point of the padding.
+MINUS = "−"   # the axis ticks and the README tables use it, and it is the
+                   # same advance as "+", so the sign occupies a column too;
+                   # ASCII hyphen-minus is 43 % of that width.
+
+
+def fig_num(v: float, width: int, dp: int, signed: bool = False) -> str:
+    """Format `v` so its digits sit under the digits of the cell above it."""
+    s = f"{v:+.{dp}f}" if signed else f"{v:.{dp}f}"
+    return s.replace("-", MINUS).rjust(width, FIGSP)
 
 EDGE = "#333333"
 EDGE_LW = 0.8
@@ -164,7 +232,13 @@ def footer(fig, text: str, width: int = 150) -> None:
     inv = fig.transFigure.inverted()
     lows = []
     for ax in fig.axes:
-        for a in [ax, ax.title, ax.xaxis.label, *ax.get_xticklabels()] + (
+        # The y axis LABEL belongs in this list even though it is a side
+        # artefact. A label longer than the axes is tall overflows at both ends:
+        # `plot_batching`'s runs from 180 to 1729 against an axes box of 551 to
+        # 1359, so its bottom sat 371 pixels below the axes and the caption,
+        # measured from the axes, was written across it.
+        for a in [ax, ax.title, ax.xaxis.label, ax.yaxis.label,
+                  *ax.get_xticklabels(), *ax.get_yticklabels()] + (
                 [ax.get_legend()] if ax.get_legend() else []):
             try:
                 bb = a.get_window_extent(fig.canvas.get_renderer())

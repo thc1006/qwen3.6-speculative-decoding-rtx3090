@@ -5,11 +5,14 @@ name: evidence
 # they came from the logs. Separate because it downloads 259 MiB and unpacks
 # 4 GB, which has no business running on every push.
 #
-# `workflow_dispatch` and `schedule` are declared below and NEITHER CAN FIRE
-# today: both read the workflow from the default branch, and master carries no
-# `.github/` at all. They start working the moment this branch merges. Until
-# then the `push` filter below is the only thing that runs this job, which is
-# why that filter has to be complete.
+# `workflow_dispatch` and `schedule` read the workflow from the DEFAULT branch.
+# Until 2026-09-01 master carried no `.github/` at all, so a dispatch returned
+# 404 and the schedule never fired; the merge put this file there and the first
+# dispatch ran on 2026-09-02. `release` never belonged in that group: it reads
+# the workflow from the tag's own ref, so it fired twice on 2026-09-01 while
+# master was still bare, failing on the first tag and passing on `v4.2`. The
+# `push` filter below is what made the chain runnable from a branch at all,
+# which is why that filter has to be complete.
 
 on:
   workflow_dispatch:
@@ -22,11 +25,12 @@ on:
     types: [published]
   schedule:
     - cron: "37 5 * * 1"
-  # `schedule` and `workflow_dispatch` only fire from the DEFAULT branch, so on
-  # a branch this workflow could not run at all and its evidence chain was
-  # never demonstrated - only asserted. `push` reads the workflow from the ref
-  # being pushed, so this makes it runnable here. Scoped to the files that
-  # decide what the extraction does, which is when the chain needs re-proving.
+  # `schedule` and `workflow_dispatch` only fire from the DEFAULT branch, so
+  # while this workflow lived on a branch alone neither could reach it and its
+  # evidence chain was asserted rather than demonstrated. `push` reads the
+  # workflow from the ref being pushed, so this makes it runnable here. Scoped
+  # to the files that decide what the extraction does, which is when the chain
+  # needs re-proving.
   push:
     paths:
       - analysis/rederive_from_logs.py

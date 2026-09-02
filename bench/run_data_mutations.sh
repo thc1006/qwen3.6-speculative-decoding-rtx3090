@@ -41,7 +41,14 @@ fi
 SHARDS=$1
 OUT_DIR=${2:-$HOME/data_mutations_out}
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-LOCK="${TMPDIR:-/tmp}/.qwen36-verify.lock"
+# A FIXED path, not one under TMPDIR. This is meant to be a whole-host lock,
+# and it was written to follow TMPDIR: a run that moved its scratch to a
+# filesystem with room -- which is the reason to set TMPDIR here at all,
+# since two mirrors per shard do not fit in a 3 GB tmpfs -- took a different
+# lock and did not serialise against a run using the default. The two
+# pipelines the lock exists to keep apart were exactly the two that would
+# differ in scratch.
+LOCK="${QWEN36_VERIFY_LOCK:-/tmp/.qwen36-verify.lock}"
 
 case $SHARDS in ''|*[!0-9]*) echo "FAIL: SHARDS must be a number" >&2; exit 2;; esac
 [ "$SHARDS" -ge 1 ] || { echo "FAIL: SHARDS must be at least 1" >&2; exit 2; }

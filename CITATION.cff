@@ -17,7 +17,9 @@ type: dataset
 # `v4_audit_2026_08_25/RELEASE_PROCEDURE.md`.
 #
 # The tag is `v4.2`, the version this file names. It was
-# `raw-evidence-2026-08-31-v4.2` for ninety minutes on 2026-09-01, which put a
+# `raw-evidence-2026-08-31-v4.2` earlier on 2026-09-01: pushing that name
+# triggered an evidence run at 10:17 UTC and a release at 10:18, and the
+# `v4.2` that replaced it triggered the next pair at 14:14. The old name put a
 # date and a version in one name and matched neither of this repository's two
 # tag families: `git tag` held `v1.0` through `v3.0` for versions and
 # `raw-evidence-2026-08-27` for an evidence drop. It also meant the test that

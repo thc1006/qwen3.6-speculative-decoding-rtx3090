@@ -387,7 +387,7 @@ ten-prompt set, mean of three repeats:
 | 4 | 154.3 ± 0.27 | 27.0 ± 0.73 | 0.18× |
 | 8 | 180.0 ± 15.21 | 28.1 ± 0.66 | 0.16× |
 
-![Run I: aggregate throughput against concurrency](../analysis/plot_batching.png)
+![Aggregate throughput at one, four and eight concurrent client requests. The no-speculation arm rises with concurrency and the external-drafter arm stays flat, so the ratio between them falls across the three levels](../analysis/plot_batching.png)
 
 **Batching helps the target and does nothing for the drafter.** No speculation
 gains +40.6 % at c=4 and +64.0 % at c=8. Speculation moves −11.7 % and −8.4 %
@@ -462,7 +462,7 @@ drafter layers. The control is not being handicapped.
 | `spec-dflash-n16` | 62.8 | 57.7 ± 0.19 | −47.4 % | 31 728 | 21.4 % |
 | `spec-draft-n8` (matched vocab) | 31.4 | 30.5 ± 0.18 | −72.2 % | 16 641 | 29.7 % |
 
-![DFlash draft-length sweep, runs J and K](../analysis/plot_dflash_sweep.png)
+![Change in aggregate throughput against maximum draft length for two runs, with acceptance in a panel below. A plateau up to draft length four, then a fall to well below the baseline, and the two runs land together at the two draft lengths they share](../analysis/plot_dflash_sweep.png)
 
 **DFlash at `n_max 4` is +18.7 % on aggregate throughput and +24.0 % pooled.**
 It is the first configuration in this repository that beats not speculating,
@@ -723,7 +723,7 @@ acceptance and speed-up correlate at **r = +0.946**, and the least-squares line
 crosses zero at **48.2 % acceptance**. Below it 24 of 25 points are slower;
 above it 35 of 35 are faster.
 
-![Acceptance against speed-up, with the out-of-sample test](../analysis/plot_acceptance_threshold.png)
+![Change in decode rate against the share of draft tokens accepted, for sixty fitted points and ten out-of-sample ones, with the least-squares line and the band spanned by the three crossings the fit gives on three subsets of the same points](../analysis/plot_acceptance_threshold.png)
 
 ERRATA A10 is what stops that being written down as a law: a single-regressor
 fit that looked excellent in sample was falsified out of it. So this one was
@@ -1331,20 +1331,20 @@ the claim there survives on the other 526.
 > the archive, checked it against the manifest, unpacked it, re-derived the
 > committed JSON from the raw logs and ran the claim checker over the result.
 > Its **first run was on 2026-08-28**, and it did all of that: it failed on the
-> last step alone, the chart comparison, and passed in full thirty-five minutes
-> later and on five days since. **It has failed since 2026-08-31**, for two
-> reasons in turn. The tag it names became `v4.2`, which had not been cut, so
-> it stopped at the download and skipped every later step. Once the release
-> existed it got past that and stopped at the manifest check instead, on a
-> `FileNotFoundError` for `/tmp/manifest`: the manifest is split into three
-> slices and that call kept the name of the file that used to hold all of it.
-> Both are fixed here, and the run after this lands is what shows it rather
-> than this sentence. `workflow_dispatch`, `release: published` and the weekly
+> last step alone, the chart comparison, and passed in full thirty minutes
+> later. This note used to end **It has failed since 2026-08-31**, and it had,
+> for two reasons in turn. The tag it names became `v4.2`, which had not been
+> cut, so it stopped at the download and skipped every later step. Once the
+> release existed it got past that and stopped at the manifest check instead,
+> on a `FileNotFoundError` for `/tmp/manifest`: the manifest is split into
+> three slices and that call kept the name of the file that used to hold all
+> of it. Both are fixed; the last failing run was on 2026-09-01. This note
+> also said that `workflow_dispatch`, `release: published` and the weekly
 > cron all read the workflow from the
 > **default branch**, and this file lives only on `audit-2026-08-25` until it
-> merges: dispatching it returned 404 and the schedule never fired. What fired
-> was the `push` filter, which reads the workflow from the ref being pushed and
-> which lists the extractors and everything the checker imports.
+> merges. The dispatch and the cron did; a `release` reads the tag's own ref
+> and fired twice before the merge. What fired here was `push`, which reads
+> the workflow from the ref being pushed and lists what the checker imports.
 >
 > **All three are live since the merge on 2026-09-01, and the first
 > `workflow_dispatch` has run.** It fetched the archives, checked every file
