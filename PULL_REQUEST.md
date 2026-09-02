@@ -384,16 +384,16 @@ adversarial pass over this branch's own commits found:
   assertion notices: whole interval columns read as `.split("[")[0]` and
   stopped, a configuration column nobody read, the `100 %` on a total row. Each
   is compared against a value derived from the data, and the measurement says
-  so: on 2026-09-01 the probe perturbed all 2 446 numbers across all 128
-  parsed tables of commit `0ee748017143` and caught every one, in 32 shards whose
-  control passed before the work and again after it on everything except the ten
-  assertions that read the attestations themselves, which cannot be true before
-  the run that writes them; those were declared in advance, each attestation
-  records the list in `baseline_allowed`, and the aggregator refuses a set whose
-  shards declared different ones. Their union is checked
+  so: on 2026-09-02 the probe perturbed all 2 446 numbers across all 128
+  parsed tables of commit `1ac437ae81fb` and caught every one, in 32 shards
+  whose control passed before the work and again after it on everything except
+  the two assertions that read the attestations themselves, which cannot be
+  true before the run that writes them; those were declared in advance, each
+  attestation records the list in `baseline_allowed`, and the aggregator
+  refuses a set whose shards declared different ones. Their union is checked
   rather than assumed: `analysis/table_coverage.py --aggregate` over the 32
   attestations, which are committed under
-  `v4_audit_2026_08_25/coverage_attestations/`, reports **32 shards, one head `0ee748017143`, one checker `d5193848d7a0`, 2 446 locations covered exactly once, 0 survived**, each attestation carrying the head, the
+  `v4_audit_2026_08_25/coverage_attestations/`, reports **32 shards, one head `1ac437ae81fb`, one checker `d5193848d7a0`, 2 446 locations covered exactly once, 0 survived**, each attestation carrying the head, the
   checker hash, the population digest, both controls and every location as a
   character span. Before 2026-08-30 nothing showed the eight had all run, or
   were disjoint, or were the same tree, and `--shard=8/8` selected nothing and
@@ -517,19 +517,20 @@ changed. Nothing in it was rejected.
   manifest, unpacked it, re-derived the committed JSON from the raw logs and
   ran the claim checker over the result. Its first run was on 2026-08-28 and it
   did all of that, failing on the chart comparison alone; it passed in full
-  thirty-five minutes later and on five days since. It has failed since
-  2026-08-31, for two reasons in turn. The tag it names became `v4.2`, which
-  had not been cut, so it stopped at the download. Once the release existed it
-  got past that and stopped two steps later, at the manifest check, on a
-  `FileNotFoundError` for `/tmp/manifest`: the manifest is split into three
-  slices and that call kept the name of the file that used to hold all of it.
-  Both are fixed here, and the run after this lands is what shows it rather
-  than this sentence.
-  `workflow_dispatch`, `release: published` and the weekly cron
-  read the workflow from the default branch and the file exists only on this
-  one, so dispatching it returns 404 and the schedule never fires. What fired
-  was the `push` filter, which reads the workflow from the ref being pushed.
-  Those three become live when this merges.
+  thirty minutes later. This section used to say it had failed since
+  2026-08-31, and it had, for two reasons in turn. The tag it names became
+  `v4.2`, which had not been cut, so it stopped at the download. Once the
+  release existed it got past that and stopped two steps later, at the
+  manifest check, on a `FileNotFoundError` for `/tmp/manifest`: the manifest
+  is split into three slices and that call kept the name of the file that used
+  to hold all of it. Both are fixed; the last failing run was on 2026-09-01.
+  `workflow_dispatch` and the weekly cron read the workflow from the default
+  branch and the file existed only on this one until it merged, so dispatching
+  it returned 404 and the schedule never fired. What fired was the `push`
+  filter, which reads the workflow from the ref being pushed, and `release`,
+  which reads the tag's own ref and fired twice before the merge. The dispatch
+  and the cron have been live since the merge on 2026-09-01, and the first
+  `workflow_dispatch` ran the whole chain and passed.
 
   Zero records differ. The nine belong to three exploratory runs whose logs are
   in the archive and whose arm-run JSON is not committed, because they never
@@ -583,7 +584,7 @@ review:
 python analysis/rederive_from_logs.py bench   # raw logs -> four audit files
 python analysis/verify_claims.py          # 3844 assertions, re-derived
 python analysis/check_data_integrity.py   # structure of all 77 run directories
-python -m unittest discover tests         # 355 regressions for defects shipped here
+python -m unittest discover tests         # 356 regressions for defects shipped here
 python tests/mutate.py                    # break each fix, require its test to fail
 python tests/data_mutate.py               # perturb a measurement or a published
                                           #   figure, require the checker to fail

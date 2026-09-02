@@ -1,0 +1,495 @@
+{
+  "acceptance_accounting": {
+    "attempts": 53,
+    "checkpoints_created": 33,
+    "checkpoints_restored": 20,
+    "counters": [
+      {
+        "accepted": 115,
+        "name": "server counter (v1 and v2 published this)",
+        "pct": 100.0,
+        "proposed": 115
+      },
+      {
+        "accepted": 115,
+        "name": "drafter token counter",
+        "pct": 53.7383,
+        "proposed": 214
+      },
+      {
+        "accepted": 33,
+        "name": "drafter sequence counter",
+        "pct": 40.7407,
+        "proposed": 81
+      }
+    ],
+    "fully_accepted": 33,
+    "gib_read_back": 1.23,
+    "gib_written": 2.02,
+    "partially_accepted": 20
+  },
+  "mean_by_config": {
+    "reference": "baseline",
+    "rows": [
+      {
+        "config": "draft-q35-08b-max8",
+        "max_tok_s": 136.1672,
+        "min_tok_s": 59.2289,
+        "pooled_delta_pct": -19.0368,
+        "pooled_tok_s": 109.8617,
+        "request_mean_delta_pct": -10.7881,
+        "request_mean_tok_s": 121.0552,
+        "requests": 10,
+        "requests_with_draft_rounds": 2
+      },
+      {
+        "config": "draft-q35-08b-max32",
+        "max_tok_s": 134.8172,
+        "min_tok_s": 59.5182,
+        "pooled_delta_pct": -18.9564,
+        "pooled_tok_s": 109.9707,
+        "request_mean_delta_pct": -11.3579,
+        "request_mean_tok_s": 120.282,
+        "requests": 10,
+        "requests_with_draft_rounds": 2
+      },
+      {
+        "config": "draft-q35-08b-max16",
+        "max_tok_s": 136.0525,
+        "min_tok_s": 59.5836,
+        "pooled_delta_pct": -18.7452,
+        "pooled_tok_s": 110.2573,
+        "request_mean_delta_pct": -10.8535,
+        "request_mean_tok_s": 120.9665,
+        "requests": 10,
+        "requests_with_draft_rounds": 2
+      },
+      {
+        "config": "ngcache-rerun",
+        "max_tok_s": 135.7061,
+        "min_tok_s": 65.5648,
+        "pooled_delta_pct": -18.0946,
+        "pooled_tok_s": 111.1401,
+        "request_mean_delta_pct": -12.4209,
+        "request_mean_tok_s": 118.8395,
+        "requests": 10,
+        "requests_with_draft_rounds": 3
+      },
+      {
+        "config": "ngram-cache",
+        "max_tok_s": 136.1557,
+        "min_tok_s": 65.2621,
+        "pooled_delta_pct": -17.9736,
+        "pooled_tok_s": 111.3043,
+        "request_mean_delta_pct": -12.1964,
+        "request_mean_tok_s": 119.1442,
+        "requests": 10,
+        "requests_with_draft_rounds": 3
+      },
+      {
+        "config": "ngcache-kv-fp16",
+        "max_tok_s": 137.9137,
+        "min_tok_s": 67.2709,
+        "pooled_delta_pct": -16.1927,
+        "pooled_tok_s": 113.7209,
+        "request_mean_delta_pct": -10.6324,
+        "request_mean_tok_s": 121.2664,
+        "requests": 10,
+        "requests_with_draft_rounds": 3
+      },
+      {
+        "config": "ngmod-n12",
+        "max_tok_s": 134.4353,
+        "min_tok_s": 119.7663,
+        "pooled_delta_pct": -4.5756,
+        "pooled_tok_s": 129.4845,
+        "request_mean_delta_pct": -4.4588,
+        "request_mean_tok_s": 129.6437,
+        "requests": 10,
+        "requests_with_draft_rounds": 8
+      },
+      {
+        "config": "ngmod-n8",
+        "max_tok_s": 134.3031,
+        "min_tok_s": 119.9665,
+        "pooled_delta_pct": -4.321,
+        "pooled_tok_s": 129.83,
+        "request_mean_delta_pct": -4.2045,
+        "request_mean_tok_s": 129.9887,
+        "requests": 10,
+        "requests_with_draft_rounds": 7
+      },
+      {
+        "config": "ngmod-n16",
+        "max_tok_s": 134.0575,
+        "min_tok_s": 123.8315,
+        "pooled_delta_pct": -4.2497,
+        "pooled_tok_s": 129.9267,
+        "request_mean_delta_pct": -4.215,
+        "request_mean_tok_s": 129.9745,
+        "requests": 10,
+        "requests_with_draft_rounds": 9
+      },
+      {
+        "config": "ngmod-n20",
+        "max_tok_s": 134.0982,
+        "min_tok_s": 128.8201,
+        "pooled_delta_pct": -4.1803,
+        "pooled_tok_s": 130.0209,
+        "request_mean_delta_pct": -4.1594,
+        "request_mean_tok_s": 130.05,
+        "requests": 10,
+        "requests_with_draft_rounds": 8
+      },
+      {
+        "config": "ngram-mod-n24",
+        "max_tok_s": 136.131,
+        "min_tok_s": 129.5514,
+        "pooled_delta_pct": -3.4068,
+        "pooled_tok_s": 131.0705,
+        "request_mean_delta_pct": -3.3751,
+        "request_mean_tok_s": 131.1141,
+        "requests": 10,
+        "requests_with_draft_rounds": 8
+      },
+      {
+        "config": "ngmod-n32",
+        "max_tok_s": 133.8919,
+        "min_tok_s": 133.5222,
+        "pooled_delta_pct": -1.4976,
+        "pooled_tok_s": 133.6611,
+        "request_mean_delta_pct": -1.4981,
+        "request_mean_tok_s": 133.6612,
+        "requests": 10,
+        "requests_with_draft_rounds": 0
+      },
+      {
+        "config": "draft-qwen3-0.6b",
+        "max_tok_s": 135.4908,
+        "min_tok_s": 134.9891,
+        "pooled_delta_pct": -0.2988,
+        "pooled_tok_s": 135.2879,
+        "request_mean_delta_pct": -0.2991,
+        "request_mean_tok_s": 135.2882,
+        "requests": 10,
+        "requests_with_draft_rounds": 0
+      },
+      {
+        "config": "baseline-rerun",
+        "max_tok_s": 136.0418,
+        "min_tok_s": 135.1281,
+        "pooled_delta_pct": -0.1408,
+        "pooled_tok_s": 135.5023,
+        "request_mean_delta_pct": -0.1409,
+        "request_mean_tok_s": 135.5028,
+        "requests": 10,
+        "requests_with_draft_rounds": 0
+      },
+      {
+        "config": "baseline",
+        "max_tok_s": 136.1632,
+        "min_tok_s": 135.3143,
+        "pooled_delta_pct": 0.0,
+        "pooled_tok_s": 135.6933,
+        "request_mean_delta_pct": 0.0,
+        "request_mean_tok_s": 135.694,
+        "requests": 10,
+        "requests_with_draft_rounds": 0
+      }
+    ]
+  },
+  "per_prompt": {
+    "clipped_above": 0,
+    "clipped_below": 20,
+    "panels": [
+      {
+        "cap": 300,
+        "configs": [
+          "baseline",
+          "baseline-rerun",
+          "draft-qwen3-0.6b",
+          "ngmod-n32",
+          "ngram-mod-n24",
+          "ngmod-n20",
+          "ngmod-n16",
+          "ngmod-n8",
+          "ngmod-n12",
+          "ngcache-kv-fp16",
+          "ngram-cache",
+          "ngcache-rerun",
+          "draft-q35-08b-max16",
+          "draft-q35-08b-max32",
+          "draft-q35-08b-max8"
+        ],
+        "matrix": [
+          [
+            100.0,
+            100.0,
+            100.0,
+            100.0,
+            100.0,
+            100.0,
+            100.0,
+            100.0,
+            100.0,
+            100.0
+          ],
+          [
+            99.9109,
+            99.7291,
+            99.8197,
+            99.8024,
+            99.9758,
+            99.9666,
+            99.8995,
+            99.9205,
+            99.8467,
+            99.7208
+          ],
+          [
+            99.3344,
+            99.2609,
+            99.2782,
+            99.4802,
+            99.9419,
+            99.9604,
+            99.9413,
+            100.1304,
+            100.1134,
+            99.5752
+          ],
+          [
+            98.332,
+            98.2693,
+            98.3952,
+            98.2804,
+            98.6162,
+            98.6648,
+            98.5889,
+            98.7498,
+            98.6601,
+            98.4662
+          ],
+          [
+            99.704,
+            95.4874,
+            95.2805,
+            95.5075,
+            95.6094,
+            95.9964,
+            100.4505,
+            96.1569,
+            96.1829,
+            95.8704
+          ],
+          [
+            98.4834,
+            95.0339,
+            94.9034,
+            95.1142,
+            95.217,
+            95.3715,
+            98.7561,
+            95.2186,
+            95.1857,
+            95.1172
+          ],
+          [
+            98.4536,
+            96.114,
+            95.968,
+            96.2195,
+            96.1307,
+            96.36,
+            94.4687,
+            91.514,
+            96.412,
+            96.188
+          ],
+          [
+            98.6339,
+            98.4929,
+            93.7909,
+            98.3807,
+            93.5278,
+            98.2067,
+            96.0274,
+            88.6577,
+            98.7843,
+            93.4234
+          ],
+          [
+            98.731,
+            97.2488,
+            97.0717,
+            97.2581,
+            92.3137,
+            97.4507,
+            95.2382,
+            88.5097,
+            98.8719,
+            92.683
+          ],
+          [
+            101.2503,
+            101.3649,
+            101.4292,
+            101.2906,
+            49.6462,
+            71.9578,
+            61.4064,
+            101.7607,
+            101.8031,
+            101.5905
+          ],
+          [
+            99.9945,
+            99.7507,
+            99.6758,
+            99.6765,
+            48.1637,
+            70.8316,
+            58.8045,
+            100.4659,
+            100.429,
+            100.0682
+          ],
+          [
+            99.6644,
+            99.6865,
+            99.716,
+            99.7135,
+            48.3871,
+            70.8412,
+            58.6496,
+            99.7518,
+            99.7109,
+            99.4912
+          ],
+          [
+            99.9187,
+            99.6503,
+            99.6976,
+            99.6641,
+            99.9913,
+            43.9912,
+            49.8961,
+            99.6743,
+            99.5409,
+            99.2737
+          ],
+          [
+            99.0115,
+            98.9759,
+            99.0317,
+            98.9137,
+            99.0161,
+            43.9429,
+            50.6072,
+            99.0367,
+            99.0091,
+            98.7129
+          ],
+          [
+            100.003,
+            99.7541,
+            99.6693,
+            99.6434,
+            99.9711,
+            43.7294,
+            48.6188,
+            100.3054,
+            100.3165,
+            99.9425
+          ]
+        ],
+        "prompts": [
+          "short_greet",
+          "short_q",
+          "medium_chat",
+          "medium_rec",
+          "reasoning",
+          "long_explain",
+          "code_small",
+          "multi_turn_1",
+          "multi_turn_2",
+          "zh_cn"
+        ]
+      },
+      {
+        "cap": 1000,
+        "configs": [
+          "baseline-1000tok",
+          "ngmod-n24-1000tok",
+          "draft-q35-08b-1000tok",
+          "ngcache-1000tok"
+        ],
+        "matrix": [
+          [
+            100.0,
+            100.0,
+            100.0,
+            100.0,
+            100.0,
+            100.0,
+            100.0,
+            100.0,
+            100.0,
+            100.0
+          ],
+          [
+            99.8701,
+            97.4301,
+            96.5262,
+            100.1494,
+            98.9547,
+            104.0405,
+            100.204,
+            93.2127,
+            96.8727,
+            96.759
+          ],
+          [
+            99.9538,
+            100.0585,
+            100.0717,
+            100.1808,
+            100.3706,
+            48.7428,
+            51.4367,
+            100.5401,
+            100.4939,
+            100.4877
+          ],
+          [
+            99.7451,
+            99.7178,
+            99.6517,
+            99.8645,
+            45.1545,
+            66.098,
+            59.042,
+            100.065,
+            100.0997,
+            100.1646
+          ]
+        ],
+        "prompts": [
+          "short_greet",
+          "short_q",
+          "medium_chat",
+          "medium_rec",
+          "reasoning",
+          "long_explain",
+          "code_small",
+          "multi_turn_1",
+          "multi_turn_2",
+          "zh_cn"
+        ]
+      }
+    ],
+    "parity_half_width": 19.7663,
+    "vmax": 119.7663,
+    "vmin": 80.2337
+  }
+}

@@ -171,7 +171,7 @@ are the opposite: they draft on a sixth to a fifth of tokens, 0.17 and 0.19 per
 token generated, and have almost all of it rejected, which is what a 10–19 %
 loss is made of.
 
-![Eight speculative configurations, one baseline, one matrix](analysis/plot_head_to_head.png)
+![One row per configuration, sorted by throughput: pooled tokens per second, the change against no speculation drawn as a point and interval on one scale, draft tokens proposed per token generated, and acceptance. The purpose-built draft heads are above the baseline and the general-purpose draft model is far below it](analysis/plot_head_to_head.png)
 
 ## Reproduction
 

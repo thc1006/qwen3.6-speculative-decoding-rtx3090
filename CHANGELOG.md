@@ -19,6 +19,7 @@ publication point with its own data set.
   - [The raw evidence is published](#the-raw-evidence-is-published)
   - [Measured](#measured)
   - [What the adversarial pass found in this branch's own work](#what-the-adversarial-pass-found-in-this-branchs-own-work)
+  - [The figures said things they did not show](#the-figures-said-things-they-did-not-show)
   - [Added](#added)
   - [Fixed](#fixed)
 - [[v4.1] — 2026-08-26 · the controlled tier, and a reversal](#v41--2026-08-26--the-controlled-tier-and-a-reversal)
@@ -76,9 +77,9 @@ the probe over the grown set found 33 more; the run after that perturbed all
 2 252 numbers in the 119 tables parsed at the time and none survived, and
 parsing the last six grew the population again, as run W2's tables did after
 that. The complete pass on 2026-08-30 perturbed all 2 373 numbers across the
-124 tables of commit 0334c60dac82 and caught every one, in eight shards whose
-control passed before the work and again after it. The pass on 2026-09-01 perturbs all 2 446 numbers across the 128 tables of
-commit `0ee748017143` and catches every one, in 32 shards whose control passed
+124 tables parsed then and caught every one, in eight shards whose control
+passed before the work and again after it. The pass on 2026-09-02 perturbs all 2 446 numbers across the 128 tables of
+commit `1ac437ae81fb` and catches every one, in 32 shards whose control passed
 both ends and whose attestations are committed. That is
 what the W three-design table had done, in both documents that carry it: only
 the W column was read, so V2's `+12.03` and V3's `+12.17`, two thirds of a
@@ -309,21 +310,21 @@ status and a checker can print FAIL into a green job. No step here pipes today;
 naming the shell is what keeps that true when one does.
 
 **And the workflow that would do that in CI had never run, until it did.**
-`.github/workflows/evidence.yml` is wired to `workflow_dispatch`, to
-`release: published` and to a weekly cron, and none of those three can fire:
-GitHub registers workflows, schedules and dispatch targets from the **default
-branch**, and that file exists only on `audit-2026-08-25`. Dispatching it
-returns 404. Every re-derivation figure this repository published was therefore
-produced by running the script, and the documents said "CI does it" in three
-places. A `push` filter was added so the chain could be demonstrated rather
-than asserted, and it fired for the first time on 2026-08-28: the workflow
-fetched the archive, verified it against the manifest, unpacked it, re-derived
-the committed JSON from the raw logs and ran the claim checker over the result,
-and failed on the chart comparison alone. It passed in full thirty-five minutes
-later and on five days since. It has failed since 2026-08-31 and for a
-different reason: the tag it names became `v4.2`, which
-this branch has not cut, so it stops at the download and skips the rest. The
-other three triggers still become live only on merge.
+`.github/workflows/evidence.yml` is wired to `workflow_dispatch`, to `release:
+published` and to a weekly cron, and while the audit branch was open the
+dispatch and the cron could not fire: GitHub registers workflows, schedules and
+dispatch targets from the **default branch**, and that file existed only on
+`audit-2026-08-25`. Dispatching it returned 404. Every re-derivation figure
+here was therefore produced by running the script, and the documents said "CI
+does it" in three places. A `push` filter was added so the chain could be
+demonstrated rather than asserted, and it fired for the first time on
+2026-08-28: the workflow fetched the archive, checked it against the manifest,
+re-derived the JSON and ran the claim checker, failing on the chart comparison
+alone. It passed in full thirty minutes later, and failed again from 2026-08-31
+for a different reason: the tag it names became `v4.2`, which was uncut, so it
+stopped at the download. The tag and the merge both landed on 2026-09-01, when
+the dispatch and the cron went live. `release: published` was never in that
+group: it reads the tag's ref, and fired twice that day, before the merge.
 
 ### Run W, and the question it removes
 
@@ -740,8 +741,8 @@ archive alone:
 | `data/acceptance_counter_comparison.json` | 535 | **526** | 9 |
 
 **The probe would not start against a red tree and its own assertions made the
-tree red.** Ten assertions read `coverage_attestations/`, so a stale set or a
-changed shard count fails them and the run that would fix them refuses. The
+tree red.** Seventeen assertions read `coverage_attestations/`, so a stale set
+or a changed shard count fails them and the run that would fix them refuses. The
 refusal is right about the hazard it was written for, which is a FLAKY failure:
 a perturbation counts as caught when the failure set grows, and a failure that
 comes and goes reads as a catch. A stable one is subtracted out and masks
@@ -775,6 +776,24 @@ an empty third down the middle of the canvas. Both are fixed, and
 `tests/test_harness_invariants.py` holds the palette, the per-cell ink and the
 rule that no label is drawn in an unlightened series colour.
 
+**The three triggers are live, and two of them have run.**
+`workflow_dispatch` and the weekly cron read `evidence.yml` from the default
+branch, and until 2026-09-01 that file was only on `audit-2026-08-25`:
+dispatching it returned 404 and the schedule never fired, which is why every
+re-derivation figure this repository published had been produced by running the
+script. The merge put the workflow on the default branch, and the dispatch
+endpoint answers 204 now rather than 404. The first `workflow_dispatch` ran the
+whole chain against release `v4.2` and passed: it fetched the eight archives,
+checked every file against the manifest, unpacked them, re-derived the four
+log-derived audit files from the raw logs, required the result to be what is
+committed, and ran the claim checker over it. Its binding step skipped,
+correctly: a manual dispatch runs from a branch and that step is for a tag.
+
+`release: published` was never in that group: a release event reads the workflow
+from the tag's own ref, and it fired twice before the merge, failing on the tag
+later renamed and passing on `v4.2`. The cron has not fired yet; the first is
+Monday at 05:37 UTC, the one trigger of four whose first run is still ahead.
+
 **The release body was published as an eighty-column file.** GitHub Flavored
 Markdown preserves newlines in a release body exactly as it does in a pull
 request body, and `gh release create --notes-file` hands the file over
@@ -786,9 +805,9 @@ from the notes file's own first heading so the two cannot disagree, and proves
 both landed by reading them back and asking GitHub's renderer how many breaks
 are in the result.
 
-**The tag is `v4.2`.** It was `raw-evidence-2026-08-31-v4.2` for ninety
-minutes, which put a date and a version in one name and matched neither of the
-two families this repository already had: `v1.0` through `v3.0` for versions,
+**The tag is `v4.2`.** It was `raw-evidence-2026-08-31-v4.2` earlier on
+2026-09-01, a name that put a date and a version in one and matched neither of
+the two families this repository already had: `v1.0` through `v3.0` for versions,
 `raw-evidence-2026-08-27` for an evidence drop. The cost was not only tidiness.
 `CITATION.cff` names the version `v4.2`, and the test that asks whether that
 version is a tag compares the two strings; against a tag merely CONTAINING it,
@@ -955,6 +974,117 @@ and the second half of this entry is what that found.
 
   `analysis/past_threshold_fit.py` now derives all of it, and 117 new assertions
   parse the document back against the script.
+
+### The figures said things they did not show
+
+Eight figures were read as images rather than as code, and that found a family
+of defects the chart check cannot see. It compares the numbers a figure was
+drawn from against the committed data; every one of these figures agreed with
+its data and still misled a reader. The numbers below are on the figures and in
+their captions rather than repeated here, because this list is about what was
+wrong and not about the measurements, which did not change.
+
+`plot_acceptance_threshold` is the one that mattered most. Its legend said
+thirty points and thirty points and it drew fifty-eight. The axis limits and the
+range the fit line is drawn over were the same pair of numbers, and two fitted
+points sit left of the floor. They were scattered, clipped and never mentioned,
+and they are the lowest-acceptance pair, which carry the most leverage on the
+slope the whole figure is about. The two purposes are separate now: the line is
+drawn over the range it was fitted on and the axis is set from everything the
+figure plots. The same figure drew and labelled one break-even crossing while
+its own caption said the confound moves it, that the clean half moves it
+further, and that the threshold should be read as a range. The number a reader
+took away was the one drawn. It draws the band those three fits span, with its
+edges at full opacity, because a fill at the opacity a fill needs does not clear
+the ratio WCAG asks of a mark that carries information.
+
+`plot_batching` drew each ratio at the midpoint between the two series, in the
+data coordinates of an axis labelled aggregate throughput, so the three boxes
+read as marks on that axis. The midpoint between a rising line and a flat one
+rises, so the boxes ascended left to right while the ratios they carry fall: a
+reader who took the shape before the text took away the opposite of the finding.
+They are a row at one height now, outside the data space, and the two the
+subtitle quotes are computed rather than typed.
+
+`plot_dflash_sweep` hid its own replication. The two runs share two draft
+lengths, which is why both are drawn, and there they are about a percentage
+point apart on an axis where a filled marker covers nearly as much, so the
+second series covered the first and only a crescent showed. Run J is an open
+ring now, drawn over run K's square. Its labels sat two dozen and three dozen
+typographic points from their points, which on that axis is several percentage
+points, and because the two series used different distances in the same
+direction, the lower of the two values at one draft length was drawn ABOVE the
+higher: a pair whose vertical order contradicts the values it carries. Its
+subtitle said "two runs, independently" beside a claim about a plateau where run
+J has exactly one point. Both the plateau's extent and the draft lengths the
+runs share are read off the data now.
+
+`plot_head_to_head` carried five quantities per bar in one run-on string
+anchored to the bar's tip, so the label left edges staggered across more than
+half the axis width, no quantity formed a column, and the proposals per
+generated token sat far along a throughput axis where it read as a rate. Three
+labels ended well past the right end of the axis and were visible only because
+the saved bounding box grew around them, after most of a third of the range had
+already been reserved for text. It is a forest plot: one row per configuration,
+the change against the baseline drawn as a point and an interval on a common
+scale, and the rest in aligned columns with the unit in the header rather than
+in every cell.
+
+`plot_two_levels` used one hue for a group in one panel and for an arm in the
+panel beside it, and neither of the two legends said the hue had changed
+meaning; the right panel's grey lines were never named at all. The left legend
+held the two groups' count, mean and spread behind leading phrases of different
+widths, so none of the three quantities lined up.
+
+The three figures `analysis/plot.py` publishes had the same family of defects
+and one factual one. `plot_mean_by_config` anchored both of its labels to the
+top of the min-max whisker, which is neither bar's value, so a pooled rate was
+printed a long way to the right of the number it reports, and its legend spent
+two of four entries restating strings that were already on the row's own tick
+while disagreeing with that row about its colour. `plot_per_prompt` put more
+than four fifths of its cells in the top sixth of a scale whose white sat well
+below the baseline, so a map defended in this repository's own style module as
+centred on parity rendered parity as deep blue and made the one contrast it is
+for invisible. Its scale is symmetric about parity now, with a half-width
+measured from the data rather than chosen, and the cells outside it are declared
+by the colour bar rather than flattened into the end colour without comment. The
+draft-round outline was near-black, which clears neither of the two deepest
+cell colours by the non-text contrast minimum.
+
+The factual one is in `plot_acceptance_accounting`. Its caption read "Cost of
+the 20 discarded rounds: 33 state checkpoints", and 33 is `checkpoints_created`,
+which is also what the figure's own green bar counts, so one number labelled two
+quantities in one figure and the caption attached it to a third. Read as an
+event stream, `v2_3090_followup/v2_oleg_suggestions/verbose.log` holds 33
+creations, 33 full accepts, 20 partials and 20 restores; every creation opens a
+segment containing exactly one full accept and every partial is followed by a
+restore, with nothing unmatched. So a checkpoint is created per verification
+round and restored per partial acceptance, and the cost of the 20 discarded
+rounds is 20 restores, not 33 creations. The three identities are asserted in
+code, so a re-run that broke one fails instead of publishing a caption again.
+
+`analysis/plot.py` had no `--check` and was not run by CI at all: the `charts`
+job ran only `plot_v4_runs.py`, so three published figures had nothing comparing
+them against the data they were drawn from. It has one now, the job runs it, and
+the job hashes the six files it writes before and after, so the question
+answered is whether that command wrote rather than whether the tree is clean.
+
+Four guards now run inside `analysis/plot_v4_runs.py --check`, and seven inside
+`analysis/plot.py --check`, which is what the `charts` job runs, so a figure
+that fails one of them fails CI rather than waiting for someone to look at it.
+They refuse a figure whose texts are closer than five pixels or whose numeric
+columns do not render at the same width; one that plots a point outside its own
+axis limits; one whose legend covers a point it drew; and one where a label's
+opaque background is painted across a line. Each was tested in both directions
+against a fault injected on purpose, and each needed that: the first form of the
+column check compared the anchor edge of each cell, which is the same point for
+a left-aligned and a right-aligned cell by construction, so it could not fail;
+the first form of the line check sampled each segment at its ends and its
+middle, and the segment a label was erasing is one straight run between two
+markers, so it passed. The fourth guard found a fault the other three could not
+see, and it was one this pass had just introduced: giving a legend a white
+background to stop its swatches reading as data put that background over the two
+lowest points in the panel, which are the transition the panel exists to show.
 
 ### Added
 

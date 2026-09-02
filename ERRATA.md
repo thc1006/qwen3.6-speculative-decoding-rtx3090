@@ -1339,7 +1339,7 @@ computed inside one run can see it.
 comparable run, 43 measurements of this one arm on 2026-08-26, same policy,
 same models, same prompts:
 
-![One arm, 43 blocks, one day](analysis/plot_two_levels.png)
+![Every block of one arm over one day, ordered by clock and separated into a higher and a lower group with each group's mean and spread, and beside it the single run in which the change happens while no other arm moves with it](analysis/plot_two_levels.png)
 
 They span **+17.0 % to +27.8 %**, and **`draft_n` is 2441 with acceptance 72.3
 % in every one of the 43** — the speculative work is identical to the token and
@@ -2088,10 +2088,10 @@ perturbed **2 252** numbers across the **119** tables parsed at the time and
 **33** of them changed nothing. The runs it took are the point: the population
 grows as the coverage does, so a clean run is only clean for the tree it ran
 on: parsing the last six tables grew it, and so did run W2's three tables and
-the column it added to A17's. On 2026-09-01, at commit
-`0ee748017143`, all **2 446** numbers across all **128** tables were perturbed
+the column it added to A17's. On 2026-09-02, at commit
+`1ac437ae81fb`, all **2 446** numbers across all **128** tables were perturbed
 one at a time and **every one was caught**, in thirty-two shards whose control
-passed before the work and again after it on everything except the ten
+passed before the work and again after it on everything except the two
 assertions that read the attestations themselves. Those cannot be true before
 the run that produces them, and a shard refuses to start against a red tree, so
 they were declared in advance and nothing else was: each attestation records
@@ -2109,7 +2109,7 @@ readings and every location as a character span.
 
 That check had only ever been run against fixtures until 2026-09-01, when it
 refused a real set twice. Once for twelve survivors, which is item 51 below.
-Once because the eight shards of that run did not report one
+Once because the shards of that run did not report one
 `checker_sha256`, which was
 this operator editing the tree the shards were launched from while they ran:
 the attestation took its digests from that tree rather than from the worktree
@@ -2117,9 +2117,9 @@ each shard measured in, so shards that finished at different moments described
 a checker none of them had used. It takes them from the worktree now, at the
 moment the opening control passes.
 
-Over the eight attestations committed under
+Over the thirty-two attestations committed under
 [`coverage_attestations/`](v4_audit_2026_08_25/coverage_attestations) it
-reports: **32 shards, one head `0ee748017143`, one checker `d5193848d7a0`, 2 446 locations covered exactly once, 0 survived** Covered *exactly once* is the part the earlier sentence
+reports: **32 shards, one head `1ac437ae81fb`, one checker `d5193848d7a0`, 2 446 locations covered exactly once, 0 survived**. Covered *exactly once* is the part the earlier sentence
 could not say: no location probed twice, none missed, and every shard on the
 same tree with the same checker. The attestations are in the repository, so
 that sentence is a reading of files rather than a memory of a run, and
@@ -2180,7 +2180,7 @@ tables happen to reach, which is the only reason the figure moved. The prose
 half of this repository is, to a first approximation, unchecked.
 
 **And that census counts decimals only.** In the same prose, on the same lines,
-sit **2 591** whole numbers, **357** of which are not a string literal in the
+sit **2 628** whole numbers, **357** of which are not a string literal in the
 checker either. They are reported beside the decimals rather than folded into
 them, because the probe below sampled the decimal population and the rate it
 publishes is about that population; widening what a measured rate refers to,

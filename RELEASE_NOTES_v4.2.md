@@ -63,9 +63,11 @@ carry no per-request timing rows, so those files can only be integrity-checked
 against the manifest. That distinction is in the registry rather than in prose
 alone. `.github/workflows/evidence.yml` performs that whole chain when it
 runs. It has run once, on 2026-08-29, through a scoped `push` trigger, and
-passed. Its `release: published` trigger reads the workflow from the default
-branch, where this file does not yet exist, so publishing this release does not
-by itself re-run the check; that begins working when this branch merges.
+passed. Its `release: published` trigger reads the workflow from the TAG's own
+ref rather than from the default branch, so publishing this release did re-run
+the check by itself. This paragraph said the opposite when the release was cut,
+and was wrong about it: the chain ran twice on 2026-09-01, on the tag as first
+named, which stopped at the manifest, and on `v4.2`, which passed in full.
 
 ## The verifier
 
