@@ -5742,10 +5742,10 @@ class AGroupedThousandIsOneNumber(unittest.TestCase):
 class TheProbeLauncherMustRefuseAHostThatCannotRunIt(unittest.TestCase):
     """The launcher was a file in a home directory, outside every gate here.
 
-    On 2026-09-01 it asked for twenty-eight shards on an eight-processor host.
-    That is not an error anywhere: the run simply takes four times as long,
-    every process sitting at thirty per cent of a core, and it took thirty
-    minutes to notice. Every gate was green at the time and every one of them
+    On 2026-09-01 it asked for twenty-eight shards on an eight-processor host,
+    and ran all twenty-eight at once. That is not an error anywhere: the run
+    simply takes four times as long, every process sitting at thirty per cent of
+    a core, and it took thirty minutes to notice. Every gate was green at the time and every one of them
     was telling the truth, because `shellcheck` runs over `find . -name '*.sh'`
     and the file was not in the repository. It is in `bench/` now, and these
     drive each refusal rather than reading the source for it.
@@ -5754,11 +5754,12 @@ class TheProbeLauncherMustRefuseAHostThatCannotRunIt(unittest.TestCase):
     ROOT = Path(__file__).resolve().parents[1]
     SH = ROOT / "bench" / "run_cell_probe.sh"
 
-    def _run(self, *args):
-        import subprocess
+    def _run(self, *args, env=None):
+        import os, subprocess
         return subprocess.run(["bash", str(self.SH), "--check-only", *args],
                               cwd=self.ROOT, capture_output=True, text=True,
-                              timeout=300)
+                              timeout=300,
+                              env={**os.environ, **(env or {})})
 
     def _head(self):
         import subprocess
@@ -5769,14 +5770,36 @@ class TheProbeLauncherMustRefuseAHostThatCannotRunIt(unittest.TestCase):
         if not self.SH.exists():
             self.skipTest("the launcher is not in the tree")
 
-    def test_it_refuses_more_shards_than_processors(self):
+    def test_it_refuses_more_concurrency_than_processors(self):
+        """What must not exceed the host is the CONCURRENCY.
+
+        This asserted the shard count, and that was wrong in a way that mattered.
+        `analysis/verify_claims.py` asserts that exactly thirty-two attestations
+        are committed, and it is one of the six files the release binding freezes,
+        so thirty-two is not a free parameter: refusing it on an eight processor
+        host left no way to produce a usable set anywhere but a thirty-two
+        processor host. The shards are independent, so the division and the
+        parallelism are separate numbers, and only the second has to fit.
+        """
+        import os, tempfile
+        n = (os.cpu_count() or 1) + 1
+        with tempfile.TemporaryDirectory() as d:
+            r = self._run(str(n), self._head(), d, d,
+                          env={"BENCH_PROBE_JOBS": str(n)})
+        self.assertNotEqual(r.returncode, 0,
+                            f"{n} at once accepted on {os.cpu_count()} processors")
+        self.assertIn("at once on", r.stderr)
+
+    def test_it_accepts_more_shards_than_processors(self):
+        """The other half, and the case the checker's shard count requires."""
         import os, tempfile
         n = (os.cpu_count() or 1) + 1
         with tempfile.TemporaryDirectory() as d:
             r = self._run(str(n), self._head(), d, d)
-        self.assertNotEqual(r.returncode, 0,
-                            f"{n} shards accepted on {os.cpu_count()} processors")
-        self.assertIn("processor host", r.stderr)
+        self.assertEqual(r.returncode, 0,
+                         f"{n} shards refused on {os.cpu_count()} processors: "
+                         f"{r.stderr}")
+        self.assertIn("at a time", r.stdout)
 
     def test_it_accepts_a_shard_count_the_host_can_run(self):
         """The known negative: a refusal that refuses everything proves nothing."""
