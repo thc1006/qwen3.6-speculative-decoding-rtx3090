@@ -1087,9 +1087,14 @@ def plot_head_to_head() -> None:
             lo, hi = c["ci95_t_pct"]
             # no end caps: at one to four pixels the two caps merge back into the
             # blob the tick was chosen to avoid
-            ax.plot([lo, hi], [i, i], color=colour, lw=3.0,
+            # the interval is drawn TALLER than the estimate mark, so its colour
+            # shows above and below the tick even on the two rows where the
+            # interval is narrower than the tick is wide. Before this, those two
+            # rows were a bare dark mark: the interval was invisible and so was
+            # the family colour that identifies the arm.
+            ax.plot([lo, hi], [i, i], color=colour, lw=7.0,
                     solid_capstyle="butt", zorder=3)
-            ax.plot([c["point_pct"]] * 2, [i - 0.20, i + 0.20], color="#1f1f24",
+            ax.plot([c["point_pct"]] * 2, [i - 0.105, i + 0.105], color="#1f1f24",
                     lw=TICK_LW, solid_capstyle="butt", zorder=5)
         else:
             ax.plot([0], [i], "D", ms=6.5, color="white", mec=colour, mew=1.6,
@@ -1124,9 +1129,9 @@ def plot_head_to_head() -> None:
              ha="left", va="top", size=14)
     _wci = ci[_SP_ARM]["ci95_t_pct"][1] - ci[_SP_ARM]["ci95_t_pct"][0]
     fig.text(0.008, 0.925,
-             f"bar: the 95 % t interval over run {tag}'s {n_blocks} blocks. Tick: "
-             f"the point estimate.\nTicks above the top row: {len(_SP_MEANS)} "
-             f"invocations of {_SP_ARM} in one day. They span\n"
+             f"bar: the 95 % t interval over run {tag}'s {n_blocks} blocks, with "
+             f"the point estimate through it.\nAbove the top row, one mark per "
+             f"invocation: {len(_SP_MEANS)} runs of {_SP_ARM} in one day, spanning\n"
              f"{_SP_HI - _SP_LO:.1f} points against that arm's {_wci:.1f}, and it "
              f"is the only arm measured repeatedly.",
              ha="left", va="top", size=11, color="#3f3f46")
@@ -1135,7 +1140,9 @@ def plot_head_to_head() -> None:
             base=f"2026-08-26, llama.cpp 3737e4137, one RTX 3090, "
                  f"Qwen3.6-35B-A3B-UD-Q4_K_XL, greedy, thinking on, ten prompts, "
                  f"run {tag}. Intervals are {min(_w):.2f} to {max(_w):.2f} points "
-                 f"wide; the two 0.8 B arms' are at the tick's width. Values and "
+                 f"wide; on the two 0.8 B arms the interval is narrower than the "
+                 f"mark that crosses it, and shows only above and below it. "
+                 f"Values and "
                  f"caveats: the table and the note above this figure, and "
                  f"ERRATA.md.",
             extra="", width=96)
