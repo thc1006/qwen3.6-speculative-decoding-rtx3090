@@ -1,4 +1,66 @@
 {
+  "acceptance_correlation": {
+    "baseline_tok_s": 132.894,
+    "corrected_accepted": 4926,
+    "corrected_drafted": 16590,
+    "intercept": 14.9717,
+    "legacy_accepted": 194,
+    "legacy_drafted": 194,
+    "points": [
+      {
+        "accepted_pct": 20.3647,
+        "prompt": "medium_chat",
+        "tok_s": 27.3022
+      },
+      {
+        "accepted_pct": 20.4893,
+        "prompt": "multi_turn_1",
+        "tok_s": 27.0828
+      },
+      {
+        "accepted_pct": 21.6383,
+        "prompt": "short_q",
+        "tok_s": 27.7968
+      },
+      {
+        "accepted_pct": 24.3377,
+        "prompt": "multi_turn_2",
+        "tok_s": 29.5003
+      },
+      {
+        "accepted_pct": 26.7361,
+        "prompt": "short_greet",
+        "tok_s": 31.0433
+      },
+      {
+        "accepted_pct": 28.0423,
+        "prompt": "long_explain",
+        "tok_s": 31.2938
+      },
+      {
+        "accepted_pct": 35.119,
+        "prompt": "medium_rec",
+        "tok_s": 36.4387
+      },
+      {
+        "accepted_pct": 35.4582,
+        "prompt": "zh_hant",
+        "tok_s": 35.2521
+      },
+      {
+        "accepted_pct": 50.2415,
+        "prompt": "code_small",
+        "tok_s": 45.4919
+      },
+      {
+        "accepted_pct": 52.2277,
+        "prompt": "reasoning",
+        "tok_s": 45.5431
+      }
+    ],
+    "r": 0.9979,
+    "slope": 0.5944
+  },
   "acceptance_threshold": {
     "break_even": 48.1654,
     "break_even_length_matched": 46.502,

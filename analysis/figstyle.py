@@ -237,8 +237,16 @@ def footer(fig, text: str, width: int = 150) -> None:
         # `plot_batching`'s runs from 180 to 1729 against an axes box of 551 to
         # 1359, so its bottom sat 371 pixels below the axes and the caption,
         # measured from the axes, was written across it.
+        # ...and any text the axes carries that sits entirely BELOW it. The list
+        # was fixed and hand-written, so it measured what its author remembered:
+        # first the y axis label was missing and a caption was written across it,
+        # then a row of direction labels under the ticks was missing and the
+        # caption landed on that. A rule reaches what a list does not.
+        _axbb = ax.get_window_extent(fig.canvas.get_renderer())
+        _below = [t for t in ax.texts if t.get_text().strip()
+                  and t.get_window_extent(fig.canvas.get_renderer()).y1 <= _axbb.y0]
         for a in [ax, ax.title, ax.xaxis.label, ax.yaxis.label,
-                  *ax.get_xticklabels(), *ax.get_yticklabels()] + (
+                  *ax.get_xticklabels(), *ax.get_yticklabels(), *_below] + (
                 [ax.get_legend()] if ax.get_legend() else []):
             try:
                 bb = a.get_window_extent(fig.canvas.get_renderer())
