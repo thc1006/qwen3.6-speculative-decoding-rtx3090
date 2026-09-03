@@ -5809,6 +5809,44 @@ class TheProbeLauncherMustRefuseAHostThatCannotRunIt(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("nothing launched", r.stdout)
 
+    def test_it_refuses_to_run_beside_another_verification_pipeline(self):
+        """It took no lock at all, and two runs of it overlapped on one host.
+
+        `bench/run_data_mutations.sh` takes an exclusive flock on the same path
+        and its comment says what the lock is for: that two verification
+        pipelines never overlap on a host that may be measuring. This script did
+        not take it. On 2026-09-03 two probe runs overlapped on a twenty-four
+        processor host, thirty-two shard processes against a concurrency of
+        twenty-four, both writing into one output directory, and every
+        attestation was empty at the end of it. Neither launcher said anything,
+        because neither could see the other.
+
+        The dry run must NOT take it, which is the other half: a `--check-only`
+        that blocked on a lock would be a dry run with a side effect.
+        """
+        import fcntl, os, subprocess, tempfile
+        lock = os.environ.get("QWEN36_VERIFY_LOCK") or "/tmp/.qwen36-verify.lock"
+        with tempfile.TemporaryDirectory() as d:
+            held = os.path.join(d, "lock")
+            fh = open(held, "w")
+            fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            env = {"QWEN36_VERIFY_LOCK": held}
+            try:
+                r = subprocess.run(
+                    ["bash", str(self.SH), "--bootstrap", "2", self._head(), d, d],
+                    cwd=self.ROOT, capture_output=True, text=True, timeout=300,
+                    env={**os.environ, **env})
+                self.assertNotEqual(r.returncode, 0,
+                                    "a second pipeline was allowed to start")
+                self.assertIn("another verification pipeline holds", r.stderr)
+                dry = self._run("2", self._head(), d, d, env=env)
+                self.assertEqual(dry.returncode, 0,
+                                 f"the dry run blocked on the lock: {dry.stderr}")
+            finally:
+                fcntl.flock(fh, fcntl.LOCK_UN)
+                fh.close()
+        self.assertTrue(lock)
+
     def test_it_refuses_a_head_it_was_not_asked_to_attest(self):
         import tempfile
         with tempfile.TemporaryDirectory() as d:
@@ -6298,3 +6336,103 @@ class TheBindingStepMustRunForTheTagThisRepositoryCuts(unittest.TestCase):
         self.assertTrue(f"refs/tags/{v}".startswith(m.group(1)),
                         f"refs/tags/{v} does not satisfy {m.group(1)!r}, so the "
                         f"binding is never checked for the tag this repository cuts")
+
+
+class AFigureMayNotPublishAFigureNothingRederives(unittest.TestCase):
+    """The correlation the retraction rests on, tied to the data in two places.
+
+    `analysis/plot_v4_runs.py` records `acceptance_correlation.r` and draws it as
+    "r = +0.998", which is the number the README uses to retract this
+    repository's original headline. `analysis/verify_claims.py` computes the same
+    quantity from the same run and asserts 0.998, but nothing compared the two:
+    the figure's `--check` compares the recorded value against the figure's own
+    recomputation, and the checker compares its own against a literal, so both
+    could drift together from a third derivation and neither would say so.
+
+    This recomputes it a third time, here, from the committed arm-runs, and
+    requires the recorded value, the checker's literal and this one to agree. It
+    also holds the two counts the figure's caption turns on, because those are
+    what make the retraction legible: the legacy binary reported 194 of 194 and
+    the corrected one 4 926 of 16 590.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+    DATA = ROOT / "v4_audit_2026_08_25" / "data"
+    ARM = "draft-max8-matched"
+
+    def _runs(self, d):
+        import collections, glob
+        out = collections.defaultdict(list)
+        for f in sorted(glob.glob(str(self.DATA / d / "*__rep*.json"))):
+            r = json.loads(Path(f).read_text(encoding="utf-8"))
+            out[r["arm"]].append(r)
+        return out
+
+    def setUp(self):
+        pd = self.ROOT / "analysis" / "plot_data.json"
+        if not pd.exists():
+            self.skipTest("analysis/plot_data.json is not in the tree")
+        self.rec = json.loads(pd.read_text(encoding="utf-8")).get("acceptance_correlation")
+        if self.rec is None:
+            self.skipTest("the correlation series is not recorded")
+
+    def test_the_recorded_r_is_the_one_the_data_gives(self):
+        import statistics as st
+        import collections
+        B = self._runs("B_master_3737e4137")
+        per = collections.defaultdict(lambda: collections.defaultdict(list))
+        acc = {}
+        for arm, runs in B.items():
+            for r in runs:
+                for x in r["rows"]:
+                    per[x["tag"]][arm].append(x["predicted_per_second"])
+                    if x["draft_n"] and arm == self.ARM:
+                        acc[x["tag"]] = (x["draft_n_accepted"], x["draft_n"])
+        xs = [100 * acc[t][0] / acc[t][1] for t in per]
+        ys = [st.mean(per[t][self.ARM]) for t in per]
+        mx, my = st.mean(xs), st.mean(ys)
+        r = (sum((a - mx) * (b - my) for a, b in zip(xs, ys))
+             / ((sum((a - mx) ** 2 for a in xs)
+                 * sum((b - my) ** 2 for b in ys)) ** 0.5))
+        self.assertEqual(len(xs), 10, "the figure is one point per prompt")
+        # `record` rounds every float it stores to four places, which is what
+        # `--check` then compares, so the recorded value is `round(r, 4)` and not
+        # `r`. Comparing at nine places fails on the rounding rather than on a
+        # drift, which is a test that cries wolf.
+        self.assertEqual(self.rec["r"], round(r, 4),
+                         "the recorded correlation is not the one this tree's "
+                         "arm-runs give")
+        self.assertAlmostEqual(round(r, 3), 0.998, places=3,
+                               msg="the checker asserts 0.998 for the same quantity")
+
+    def test_the_two_counts_the_caption_turns_on(self):
+        A = self._runs("A_bcb5eeb64_legacy")
+        B = self._runs("B_master_3737e4137")
+
+        def counts(arms):
+            return (sum(x["draft_n"] for r in arms[self.ARM] for x in r["rows"]),
+                    sum(x["draft_n_accepted"] for r in arms[self.ARM]
+                        for x in r["rows"]))
+        self.assertEqual(counts(A), (self.rec["legacy_drafted"],
+                                     self.rec["legacy_accepted"]))
+        self.assertEqual(counts(B), (self.rec["corrected_drafted"],
+                                     self.rec["corrected_accepted"]))
+        self.assertEqual(self.rec["legacy_drafted"], self.rec["legacy_accepted"],
+                         "the legacy counter's 100 % is what the figure is about")
+
+    def test_the_legacy_arm_did_not_cover_the_workload_the_figure_plots(self):
+        """The caption says six prompts, and it has to keep saying six.
+
+        A first version said the legacy binary counted its 194 tokens "in this
+        workload", which is the ten prompts plotted. Its speculative arm stopped
+        after six while its own baseline ran all ten, so the sentence compared a
+        six prompt total against a ten prompt one, and a ratio of the two totals
+        divided thirty arm-run rows by twelve.
+        """
+        A = self._runs("A_bcb5eeb64_legacy")
+        spec = {x["tag"] for r in A[self.ARM] for x in r["rows"]}
+        base = {x["tag"] for r in A["baseline"] for x in r["rows"]}
+        self.assertLess(len(spec), len(base),
+                        "run A's speculative arm is expected to be short of its "
+                        "own baseline; if that changed, the caption must change")
+        self.assertEqual((len(spec), len(base)), (6, 10))

@@ -23,6 +23,7 @@ from __future__ import annotations
 import glob
 import json
 import os
+import re
 import sys
 import statistics as st
 from collections import defaultdict
@@ -865,6 +866,16 @@ def plot_acceptance_correlation() -> None:
            legacy_drafted=a_dn, legacy_accepted=a_da,
            corrected_drafted=b_dn, corrected_accepted=b_da)
 
+    # SIX, counted from run C's arms, not seven. ERRATA A7's table has seven rows
+    # and the paragraph under it says the seventh is not an independent
+    # configuration and should not be counted as one: v1's setting differs from
+    # n_max 8 only in n_min. A first draft of this caption said seven and
+    # contradicted the document it cites.
+    _cman = json.loads((DATA / "C_master_matrix_think_on" / "manifest.json")
+                       .read_text(encoding="utf-8"))["arms"]
+    _n_dl = len({re.fullmatch(r"spec-draft-n(\d+)", _a).group(1)
+                 for _a in _cman if re.fullmatch(r"spec-draft-n\d+", _a)})
+
     fig, ax = plt.subplots(figsize=(9.0, 5.0))
     fig.subplots_adjust(left=0.095, right=0.985, top=0.735, bottom=0.145)
     ax.plot([min(xs), max(xs)],
@@ -888,12 +899,21 @@ def plot_acceptance_correlation() -> None:
             size=11, color=figstyle.text_colour(C_REF))
     # below the rule, not across it: the rule spans the axes and any text that
     # crosses it is struck through, which `_ink_guard` now refuses.
+    # `a_rows`, because run A's speculative arm stopped after six of the ten
+    # prompts while its own baseline ran all ten: 194 is over six prompts, not
+    # over the workload this figure plots, and a ratio of the two totals would
+    # divide thirty arm-run rows by twelve. Per request it is about thirty-four
+    # times, not eighty-five.
+    a_rows = sum(len(r["rows"]) for r in A["draft-max8-matched"])
+    b_rows = sum(len(r["rows"]) for r in B["draft-max8-matched"])
+    a_tags = len({x["tag"] for r in A["draft-max8-matched"] for x in r["rows"]})
     ax.annotate(
-        f"The legacy binary counted {a_dn} draft tokens in this workload and\n"
-        f"called all {a_da} accepted. The corrected one counts "
+        f"The legacy binary counted {a_dn} draft tokens over the {a_tags} prompts its\n"
+        f"speculative arm completed, and called all {a_da} accepted. The corrected\n"
+        f"one counts "
         + f"{b_dn:,}".replace(",", " ")
-        + f" and finds\n{100 * b_da / b_dn:.1f} % accepted. With real numbers the "
-        f"speed follows the\nacceptance: r = {r:+.3f}.",
+        + f" and finds {100 * b_da / b_dn:.1f} % accepted.\nWith real numbers the "
+        f"speed follows the acceptance: r = {r:+.3f}.",
         (0.03, 0.80), xycoords="axes fraction", ha="left", va="top", size=11,
         color="#1f1f24")
     ax.set_xlim(min(xs) - 4, max(xs) + 6)
@@ -914,8 +934,12 @@ def plot_acceptance_correlation() -> None:
     _footer(fig,
             base="2026-04-21 workload re-run on llama.cpp 3737e4137. Run A is the "
                  "archived legacy binary bcb5eeb64, whose acceptance counter is "
-                 "the subject of ERRATA A7 and which is not plotted here because "
-                 "it drafted eighty-five times less. Speculation is slower than "
+                 "the subject of ERRATA A7. It is not plotted: its speculative "
+                 "arm stopped after six of the ten prompts, and per request it "
+                 f"drafted about {b_dn / b_rows / (a_dn / a_rows):.0f} times less. "
+                 f"ERRATA A7 reproduces this correlation in run C at five "
+                 f"repeats, across {_n_dl} distinct draft lengths. "
+                 "Speculation is slower than "
                  "no speculation at every acceptance rate reached, and the reason "
                  "is ordinary: the best prompt accepts about half its draft "
                  "tokens and pays the draft path for all of them.",
@@ -998,6 +1022,13 @@ def plot_head_to_head() -> None:
         "ngram":       ("n-gram",       C_INACTIVE),
         "baseline":    ("none",         C_REF),
     }
+    # Not "the only arm measured repeatedly", which is what this said and which is
+    # false: spec-draft-n8 appears in fifty-four run directories and spec-mtp-n2 in
+    # forty-nine, and within the twelve invocations A16's filter selects the other
+    # arms appear three to five times. Those twelve are twelve BECAUSE the filter
+    # requires this arm, so the count is not a property of the arm. What is true is
+    # that this is the only arm whose across-run spread the repository computes.
+    #
     # The spread this arm shows ACROSS invocations, which is the caveat the
     # documents put on the headline and which the figure used to leave out
     # entirely: it drew a 1.6 point interval around a value that is the second
@@ -1060,8 +1091,13 @@ def plot_head_to_head() -> None:
     # would compress the six informative arms from 44.8 % of the axis to 27.6 %,
     # because the outliers here are on the side where the ratio approaches zero.
     FIG_W = 9.0
-    X_ARM, X_DRAFT = 0.008, 0.246
-    AX_L, AX_R = 0.380, 0.985
+    # Measured, not guessed: the longest arm name ends at 0.1739 of the figure
+    # and the longest drafter label is 0.1052 wide, so the two columns and their
+    # gutters fit in 0.32 and the panel gets the rest. The first version of this
+    # left 0.072 of empty paper between the two columns, which is 0.65 inches of
+    # the one thing the figure is short of.
+    X_ARM, X_DRAFT = 0.008, 0.186
+    AX_L, AX_R = 0.320, 0.985
     XLO, XHI = -80.0, 32.0
     TICK_LW = 1.1
 
@@ -1087,9 +1123,14 @@ def plot_head_to_head() -> None:
             lo, hi = c["ci95_t_pct"]
             # no end caps: at one to four pixels the two caps merge back into the
             # blob the tick was chosen to avoid
-            ax.plot([lo, hi], [i, i], color=colour, lw=3.0,
+            # the interval is drawn TALLER than the estimate mark, so its colour
+            # shows above and below the tick even on the two rows where the
+            # interval is narrower than the tick is wide. Before this, those two
+            # rows were a bare dark mark: the interval was invisible and so was
+            # the family colour that identifies the arm.
+            ax.plot([lo, hi], [i, i], color=colour, lw=7.0,
                     solid_capstyle="butt", zorder=3)
-            ax.plot([c["point_pct"]] * 2, [i - 0.20, i + 0.20], color="#1f1f24",
+            ax.plot([c["point_pct"]] * 2, [i - 0.105, i + 0.105], color="#1f1f24",
                     lw=TICK_LW, solid_capstyle="butt", zorder=5)
         else:
             ax.plot([0], [i], "D", ms=6.5, color="white", mec=colour, mew=1.6,
@@ -1124,18 +1165,20 @@ def plot_head_to_head() -> None:
              ha="left", va="top", size=14)
     _wci = ci[_SP_ARM]["ci95_t_pct"][1] - ci[_SP_ARM]["ci95_t_pct"][0]
     fig.text(0.008, 0.925,
-             f"bar: the 95 % t interval over run {tag}'s {n_blocks} blocks. Tick: "
-             f"the point estimate.\nTicks above the top row: {len(_SP_MEANS)} "
-             f"invocations of {_SP_ARM} in one day. They span\n"
-             f"{_SP_HI - _SP_LO:.1f} points against that arm's {_wci:.1f}, and it "
-             f"is the only arm measured repeatedly.",
+             f"bar: the 95 % t interval over run {tag}'s {n_blocks} blocks, with "
+             f"the point estimate through it.\nAbove the top row, one mark per "
+             f"invocation: {len(_SP_MEANS)} runs of {_SP_ARM} in one day, spanning\n"
+             f"{_SP_HI - _SP_LO:.1f} points against that arm's {_wci:.1f}. It is the "
+             f"only arm whose spread across runs is computed here.",
              ha="left", va="top", size=11, color="#3f3f46")
     _w = [c["ci95_t_pct"][1] - c["ci95_t_pct"][0] for c in ci.values()]
     _footer(fig,
             base=f"2026-08-26, llama.cpp 3737e4137, one RTX 3090, "
                  f"Qwen3.6-35B-A3B-UD-Q4_K_XL, greedy, thinking on, ten prompts, "
                  f"run {tag}. Intervals are {min(_w):.2f} to {max(_w):.2f} points "
-                 f"wide; the two 0.8 B arms' are at the tick's width. Values and "
+                 f"wide; on the two 0.8 B arms the interval is narrower than the "
+                 f"mark that crosses it, and shows only above and below it. "
+                 f"Values and "
                  f"caveats: the table and the note above this figure, and "
                  f"ERRATA.md.",
             extra="", width=96)
