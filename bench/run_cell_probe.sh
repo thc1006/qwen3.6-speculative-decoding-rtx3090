@@ -110,6 +110,25 @@ echo "$SHARDS shards, $JOBS at a time on $CPUS processors, head $HEAD_SHA"
 echo "  scratch $TMP_DIR: $((FREE_KB / 1024)) MB free, about $((NEED_KB / 1024)) MB wanted"
 [ "$CHECK_ONLY" -eq 1 ] && { echo "check only, nothing launched"; exit 0; }
 
+# The same whole-host lock `bench/run_data_mutations.sh` takes, and for the same
+# reason, which this script did not take at all. Two probe runs overlapped on one
+# host on 2026-09-03: thirty-two shard processes on a twenty-four processor host
+# against a `JOBS` of twenty-four, two launchers writing into one output
+# directory, and every attestation empty at the end of it. Neither launcher said
+# anything, because neither could see the other. It is also the lock that keeps a
+# verification pipeline off a host that may be measuring, which is what the
+# comment in the other launcher is about.
+#
+# `-n`, so the second one fails immediately with a message rather than waiting an
+# hour and looking hung.
+LOCK="${QWEN36_VERIFY_LOCK:-/tmp/.qwen36-verify.lock}"
+exec 9>"$LOCK"
+if ! flock -n 9; then
+    echo "FAIL: another verification pipeline holds $LOCK. Two of them on one" >&2
+    echo "      host oversubscribe it and write over each other's output." >&2
+    exit 1
+fi
+
 export TMPDIR="$TMP_DIR"
 # In waves of $JOBS. Every exit code is collected, not just the last: `wait` with
 # no argument returns 0 whatever the children did, which is why a crashed shard

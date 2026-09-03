@@ -1107,6 +1107,19 @@ its colour shows above and below the mark wherever the mark is the wider of the
 two. That is the same fault, three orders of magnitude smaller, that the pass
 before it rebuilt the figure to remove.
 
+The probe's launcher took no lock. `bench/run_data_mutations.sh` takes an
+exclusive flock on a fixed path and its own comment says what the lock is for,
+that two verification pipelines never overlap on a host that may be measuring,
+and `bench/run_cell_probe.sh` did not take it. Two probe runs then overlapped on
+one host: thirty-two shard processes against a concurrency of twenty-four, two
+launchers writing into one output directory, and every attestation empty at the
+end of it. Neither launcher said anything, because neither could see the other.
+It takes the same lock now, refuses with a message rather than waiting, and a
+regression holds both halves, that a second pipeline is refused and that a dry
+run does not block on the lock. Whether this is what made the perturbation
+suite's control fail is not established: the overlap was between two probe runs
+and the suite's failures were on a different host on a different day.
+
 The data perturbation suite was run four times over this work. Two of those runs
 had one shard refuse to start, on different shards; two ran clean, and one of the
 clean ones was the faithful CI reproduction, which runs the same script. The two

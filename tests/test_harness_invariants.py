@@ -5809,6 +5809,44 @@ class TheProbeLauncherMustRefuseAHostThatCannotRunIt(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("nothing launched", r.stdout)
 
+    def test_it_refuses_to_run_beside_another_verification_pipeline(self):
+        """It took no lock at all, and two runs of it overlapped on one host.
+
+        `bench/run_data_mutations.sh` takes an exclusive flock on the same path
+        and its comment says what the lock is for: that two verification
+        pipelines never overlap on a host that may be measuring. This script did
+        not take it. On 2026-09-03 two probe runs overlapped on a twenty-four
+        processor host, thirty-two shard processes against a concurrency of
+        twenty-four, both writing into one output directory, and every
+        attestation was empty at the end of it. Neither launcher said anything,
+        because neither could see the other.
+
+        The dry run must NOT take it, which is the other half: a `--check-only`
+        that blocked on a lock would be a dry run with a side effect.
+        """
+        import fcntl, os, subprocess, tempfile
+        lock = os.environ.get("QWEN36_VERIFY_LOCK") or "/tmp/.qwen36-verify.lock"
+        with tempfile.TemporaryDirectory() as d:
+            held = os.path.join(d, "lock")
+            fh = open(held, "w")
+            fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            env = {"QWEN36_VERIFY_LOCK": held}
+            try:
+                r = subprocess.run(
+                    ["bash", str(self.SH), "--bootstrap", "2", self._head(), d, d],
+                    cwd=self.ROOT, capture_output=True, text=True, timeout=300,
+                    env={**os.environ, **env})
+                self.assertNotEqual(r.returncode, 0,
+                                    "a second pipeline was allowed to start")
+                self.assertIn("another verification pipeline holds", r.stderr)
+                dry = self._run("2", self._head(), d, d, env=env)
+                self.assertEqual(dry.returncode, 0,
+                                 f"the dry run blocked on the lock: {dry.stderr}")
+            finally:
+                fcntl.flock(fh, fcntl.LOCK_UN)
+                fh.close()
+        self.assertTrue(lock)
+
     def test_it_refuses_a_head_it_was_not_asked_to_attest(self):
         import tempfile
         with tempfile.TemporaryDirectory() as d:
