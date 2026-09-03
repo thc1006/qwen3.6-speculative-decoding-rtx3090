@@ -549,8 +549,20 @@ def main() -> None:
                               cwd=mirror(work), capture_output=True, text=True,
                               timeout=900)
         if base.returncode != 0:
-            sys.exit("the checker fails on an unperturbed mirror; fix that first\n"
-                     + base.stdout[-2000:])
+            # the RETURN CODE and stderr, not the tail of stdout alone. A
+            # checker killed by a signal looked exactly like one that failed an
+            # assertion: the tail was a run of PASS lines either way, and there
+            # was no way to tell a crash from a red tree without re-running the
+            # shard by hand. A negative return code is a signal.
+            _fails = [_l for _l in base.stdout.splitlines() if "  FAIL  " in _l]
+            sys.exit(
+                "the checker fails on an unperturbed mirror; fix that first\n"
+                f"  exit {base.returncode}"
+                + (" (killed by a signal)" if base.returncode < 0 else "")
+                + f", {len(_fails)} FAIL line(s) in its output\n"
+                + "".join(f"  {_l}\n" for _l in _fails[:5])
+                + (f"  stderr tail: {base.stderr[-600:]}\n" if base.stderr else "")
+                + base.stdout[-1200:])
         for name, fn in picked:
             # restore only what the last mutation touched. Re-copying the
             # whole mirror each time cost about six minutes of the seven the
