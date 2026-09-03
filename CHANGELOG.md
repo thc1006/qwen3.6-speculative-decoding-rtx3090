@@ -1107,6 +1107,27 @@ its colour shows above and below the mark wherever the mark is the wider of the
 two. That is the same fault, three orders of magnitude smaller, that the pass
 before it rebuilt the figure to remove.
 
+The data perturbation suite was run four times over this work. Two of those runs
+had one shard refuse to start, on different shards; two ran clean, and one of the
+clean ones was the faithful CI reproduction, which runs the same script. The two
+that refused were at twenty-four and at twelve shards and the two that ran clean
+were at twelve and at thirty-two, so it does not follow the concurrency either.
+Each refusal is the clean-mirror control doing what it is for:
+the shard runs the claim checker on an unperturbed mirror and will not perturb
+anything if that comes back red. The direction is the safe one, a shard that
+stops rather than one that reports a catch it did not make, and no perturbation
+survived in any of the three runs.
+
+The cause is not established and this note does not claim one. Re-running the
+refusing shard on its own passed, and so did two full runs, so it is intermittent
+rather than a property of the tree. What the two failures did
+establish is that the control could not say what had happened: it printed the
+last two thousand characters of the checker's stdout and nothing else, and the
+tail of a checker killed by a signal is a run of PASS lines, exactly like the
+tail of one that failed an assertion earlier in its output. It reports the return
+code, whether that code is a signal, the FAIL lines the output actually holds and
+the tail of stderr now, so the next occurrence names itself.
+
 `tests/` gains a class that ties the correlation figure to the data in a third
 place. The figure's `--check` compares its recorded values against its own
 recomputation and the claim checker compares its own against a literal, so both
