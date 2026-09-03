@@ -1069,6 +1069,53 @@ them against the data they were drawn from. It has one now, the job runs it, and
 the job hashes the six files it writes before and after, so the question
 answered is whether that command wrote rather than whether the tree is clean.
 
+An adversarial pass over the two redrawn figures found three statements they
+published that were not true, and the pass that wrote them is the same one that
+had just corrected four others.
+
+The head to head said, of the arm whose twelve invocations it draws, that it is
+the only arm measured repeatedly and that the others therefore say nothing about
+the spread. Both halves are false. Every arm in the matrix was measured
+repeatedly: the drafter-free and draft-model arms appear in fifty-four and
+forty-nine run directories, and within the very twelve invocations ERRATA A16's
+comparability filter selects, the other arms appear three to five times each.
+Those twelve are twelve because the filter requires that arm, so the count is a
+property of the filter and not of the arm. What is true, and what the figure
+says now, is that it is the only arm whose spread across runs this repository
+computes.
+
+The correlation figure said the legacy binary counted its draft tokens "in this
+workload", meaning the ten prompts the figure plots. That binary's speculative
+arm stopped after six of them while its own baseline ran all ten, so the total
+it reports is over six prompts and not over what is drawn. The figure names the
+six now. The same caption divided the two totals and called the result
+eighty-five, which divides thirty arm-run rows by twelve; per request it is
+about thirty-four, and the figure derives that rather than stating a ratio of
+unlike totals.
+
+A fourth was introduced while fixing those three and caught before it shipped:
+the correlation figure's caption cited ERRATA A7 as reproducing the finding
+across seven configurations, and the paragraph under A7's own table says the
+seventh is not an independent configuration and should not be counted as one.
+The count is read off run C's arms now, and it is six.
+
+The figures also drew two intervals that nothing could see. On the two
+draft-model rows the interval is narrower than the mark that marks the estimate,
+so the mark covered it completely and took the family colour with it: those rows
+were a bare dark stroke. The interval is drawn taller than the estimate now, so
+its colour shows above and below the mark wherever the mark is the wider of the
+two. That is the same fault, three orders of magnitude smaller, that the pass
+before it rebuilt the figure to remove.
+
+`tests/` gains a class that ties the correlation figure to the data in a third
+place. The figure's `--check` compares its recorded values against its own
+recomputation and the claim checker compares its own against a literal, so both
+could drift together from a third derivation and neither would say so. The new
+tests recompute the correlation and the two counts from the committed arm-runs
+and require all three to agree, and they hold the six prompts against the ten,
+because a caption that stops being true when a run directory changes should fail
+here rather than in a reader's hands.
+
 Four guards now run inside `analysis/plot_v4_runs.py --check`, and seven inside
 `analysis/plot.py --check`, which is what the `charts` job runs, so a figure
 that fails one of them fails CI rather than waiting for someone to look at it.
