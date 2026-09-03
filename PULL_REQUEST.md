@@ -385,7 +385,7 @@ adversarial pass over this branch's own commits found:
   stopped, a configuration column nobody read, the `100 %` on a total row. Each
   is compared against a value derived from the data, and the measurement says
   so: on 2026-09-03 the probe perturbed all 2 446 numbers across all 128
-  parsed tables of commit `35be48ce1821` and caught every one, in 32 shards
+  parsed tables of commit `27dd6ac3d98e` and caught every one, in 32 shards
   whose control passed before the work and again after it on everything except
   the two assertions that read the attestations themselves, which cannot be
   true before the run that writes them; those were declared in advance, each
@@ -393,7 +393,7 @@ adversarial pass over this branch's own commits found:
   refuses a set whose shards declared different ones. Their union is checked
   rather than assumed: `analysis/table_coverage.py --aggregate` over the 32
   attestations, which are committed under
-  `v4_audit_2026_08_25/coverage_attestations/`, reports **32 shards, one head `35be48ce1821`, one checker `d5193848d7a0`, 2 446 locations covered exactly once, 0 survived**, each attestation carrying the head, the
+  `v4_audit_2026_08_25/coverage_attestations/`, reports **32 shards, one head `27dd6ac3d98e`, one checker `d5193848d7a0`, 2 446 locations covered exactly once, 0 survived**, each attestation carrying the head, the
   checker hash, the population digest, both controls and every location as a
   character span. Before 2026-08-30 nothing showed the eight had all run, or
   were disjoint, or were the same tree, and `--shard=8/8` selected nothing and
