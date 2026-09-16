@@ -1181,61 +1181,83 @@ ERRATA A16 ends by naming two quantities its instruments could not see. One is
 the GDDR6X memory-junction temperature, which needs a sensor NVML does not
 expose on Linux and cannot be read on this host at all. The other is host CPU
 load, and that one is testable: `bench/host_guard.py --sample` has recorded it
-since the commit that added the guard, writing a row per tick with the busy
-percentage, the load average, and how much of the processor time belongs to the
-benchmark's own process tree rather than to something else.
+since the commit that added the guard.
 
 Nothing here uses it. Not one of the seventy-seven committed run directories
-carries the column, nor any of the seventeen committed telemetry traces beside
-them, which hold `nvidia-smi` fields and nothing else. And the reason is no
-longer that the instrument did not exist: run W2 was measured two days after the
-sampler was committed and does not carry it either.
+carries the column, and none of the seventeen committed telemetry traces holds
+anything but `nvidia-smi` fields. The reason is no longer that the instrument
+did not exist: run W2 was measured two days after the sampler was committed and
+does not carry it either.
 
-So the gap is a choice now, and
 [`v4_audit_2026_08_25/PROSPECTIVE_PLAN_X_HOST_LOAD.md`](v4_audit_2026_08_25/PROSPECTIVE_PLAN_X_HOST_LOAD.md)
 is the plan that closes it, written and committed before the run. Watching a
 quantity that varies on its own is weaker than setting it, so run X applies load
 as a factor: one invocation, twenty-four blocks, three arms, and the load turned
-on and off **inside** each block so that each arm is run loaded and unloaded
-back to back. The thresholds, the estimator, the outcomes and what each one
-licenses are all fixed in the document before any data exists.
+on and off **inside** each block so that each arm runs loaded and unloaded back
+to back. Thresholds, estimator, outcomes and what each one licenses are fixed
+before any data exists.
 
-**An adversarial pass killed the first draft of that plan twice, and both
-objections are in the document rather than quietly fixed.** The first draft
-compared six loaded blocks against six unloaded ones. Simulated against this
-arm's own block-to-block variability, measured in run T4, that design had about
-one chance in ten of detecting the effect it predicted, its single most likely
-product was "inconclusive" even when its hypothesis was exactly right, and about
-one time in five it would have reported a real effect as the arm holding still.
-Moving the factor inside the block, so that the two members of a pair are
-minutes apart instead of up to eleven blocks apart, and doubling the block count
-to twenty-four, takes that to better than nine chances in ten. It also costs two
-and a half hours of wall clock instead of forty minutes, which is the price of
-an answer and is stated in the plan.
+**The plan says at the top that it cannot be executed yet, and that is the most
+useful thing in it.** Two adversarial passes found four things this harness
+cannot express. A fresh `llama-server` is started and stopped inside every
+arm-run, so the sampler cannot follow one root process across an invocation and
+would report everything as somebody else's work. Both members of a pair would be
+written to the same arm-run filename and the second would overwrite the first,
+after which the completeness check marks the whole run failed. No order mode
+produces a rotation that also keeps a pair adjacent. And no wall-clock boundary
+is recorded per arm-run, so the check that the treatment arrived has nothing to
+join on. Each is small, each is named with its file in the plan, and the run
+does not start until they land. A pre-registration that describes a run nobody
+can perform is worth less than one that says what has to be true first.
 
-The second objection survived any sample size. The first draft predicted that
-the arm A16 is about would slow by at least two per cent while a second arm held
-under one, and read that as specific to one configuration. But the three arms
-decode at about a hundred and forty-five, a hundred and sixteen and thirty-one
-tokens a second, which is to say they differ by nearly a factor of five in
-milliseconds per token. A uniform host-side cost per token, with no preference
-for any arm whatsoever, produces exactly that pattern: the same fixed cost is a
-large percentage of a short token and a small one of a long token. The plan now
-pre-registers the cross-arm comparison in milliseconds per generated token,
-where an arm-agnostic mechanism and an arm-specific one predict visibly
-different things, and keeps percentages only for deciding whether each arm moved
-at all.
+**The same passes found the plan's own numbers wrong, and the correction is now
+committed as code.** `analysis/load_run_power.py` derives both tables the plan
+publishes from run T4's committed arm-runs, and `--check` asserts the document
+prints what the code computes. It exists because the first version of the power
+table used T4's block variability as if it were noise while also adding the
+arm's own level change on top, counting that change twice: the model implied
+about a third more block spread than T4 shows, and it published a detection rate
+of about one in ten for a design whose real rate is about one in three. The
+redesign still earns its cost, since within-block pairing takes that to better
+than nine in ten, but it earns it against an honest baseline. The claim that the
+older design could not reach one in three at any switching rate was false and is
+gone.
 
-Three smaller things the same pass found and the plan now carries: the load is
-the repository's own perturbation suite at a pinned size rather than a bank of
-spinners, because the incident being modelled was a pipeline with page-cache and
-disk work and process churn, not busy loops; the run is void rather
-than negative if the recorded load does not reach a stated floor in every
-loaded block and stay under a stated ceiling in every unloaded one, since
-otherwise a generator that failed to start reads as a clean negative; and the
-branch in which nothing moves no longer retires A16, because A16 names a third
-hypothesis, page cache and allocator state, which run X does not test and which
-is now listed in `RETEST_TODO.md` as the successor.
+**The sharpest correction is that the plan's headline prediction discriminated
+nothing.** It predicted the arm A16 is about would slow while a second arm held,
+and read that as specific to one configuration. But the three arms differ by
+nearly a factor of five in milliseconds per generated token, and the plan now
+tabulates three arm-agnostic mechanisms, none of which prefers any arm: a cost
+per generated token, per model forward pass, and per target-model step. Under
+all three the control arm holds. The pattern the plan rested on is produced by
+every mechanism it was meant to exclude. What does discriminate is a
+within-block difference of differences, which every one of the three puts at or
+below zero, and the size of the no-speculation arm's own movement, which
+separates them from each other.
+
+**And the load it had chosen could not have worked.** The plan had specified
+this repository's own perturbation suite, justified as reproducing the
+contention incident. ERRATA says that incident was recorded by a sibling
+project's harness and that what this repository attests is only its absence, and
+the guard's own notes say attributing the burst to the suite is the mistake A12
+was written about. The plan was citing as its own measurement a thing its own
+errata disclaims. The suite would also have arrived at low priority with one
+BLAS thread, because the guard applies both before its own contention escape, so
+the treatment would have been de-prioritised by the guard it was invoking. The
+load is a stated number of busy processes at ordinary priority, the check is on
+the serving process's runqueue wait rather than on the load's own footprint, and
+the plan says plainly that page cache and disk are untouched so a null does not
+cover them.
+
+**Two facts about the bench host are now written down, because both passes
+reasoned about the wrong machine.** It is bare metal with no steal column, so
+hypervisor descheduling is not available as an explanation, unlike the
+development box these plans are written on. And it is a hybrid processor whose
+slow cores run about a quarter below its fast ones, with nothing in this
+repository pinning any process to any of them and no run ever recording which
+one anything ran on. That is an uncontrolled variable of the right size, on the
+right timescale, invisible to `nvidia-smi`, and applying CPU load changes it.
+Run X records it.
 
 **Where that plan sits in the coverage census, and why the reason is the release
 and not the genre.** `analysis/table_coverage.py` puts every markdown file here
@@ -1244,9 +1266,8 @@ whose table cells the probe perturbs and whose prose numbers are counted, and an
 excluded set where every entry carries a written reason. The plan is excluded,
 and the first version of this entry said that was because a plan carries
 thresholds rather than figures. That is not true here. Three prospective plans
-of exactly this kind are censused, and one of them is censused today with no
-outcome section and no data of its own, so there is no rule about plans to
-appeal to.
+of exactly this kind are censused, one of them carrying no tables of its own,
+so there is no rule about plans to appeal to.
 
 The actual reason is the release. `analysis/verify_claims.py` pins the number of
 censused documents, and the decimal prose census, and it is one of the six files
@@ -1260,9 +1281,10 @@ And the cost of censusing it later was overstated. Run X's raw logs go into the
 evidence manifest and its entry into the run registry, and both of those are
 bound, so committing the evidence re-cuts the binding whatever happens to the
 plan's classification. The census entry rides along at no additional cost. What
-this commit does pay, today, is a coverage probe re-run: adding lines to a
-censused document moves the table line numbers the existing attestations pin, so
-all thirty-two shards were produced again.
+each of these commits does pay is a coverage probe re-run, because adding lines
+to a censused document moves the table line numbers the existing attestations
+pin, so the thirty-two shards are produced again in the commit that follows the
+one which made them stale.
 
 ### Added
 

@@ -6436,3 +6436,86 @@ class AFigureMayNotPublishAFigureNothingRederives(unittest.TestCase):
                         "run A's speculative arm is expected to be short of its "
                         "own baseline; if that changed, the caption must change")
         self.assertEqual((len(spec), len(base)), (6, 10))
+
+
+class APowerTableMayNotCountTheStepTwice(unittest.TestCase):
+    """The guard on the mistake that published a power of 0.09 for a 0.34 design.
+
+    `v4_audit_2026_08_25/PROSPECTIVE_PLAN_X_HOST_LOAD.md` chose twenty-four
+    blocks over twelve because of a simulation, and the first version of that
+    simulation used run T4's block-level CV of 2.145 % as if it were residual
+    noise while ALSO adding the arm's own level change on top of it. T4's block
+    CV already contains that level change. The model therefore implied 2.768 %
+    of block spread against the 2.145 % T4 shows, and it published a detection
+    rate of about one in ten for a design whose real rate is about one in three.
+
+    The defect is invisible in the output: both readings are plausible numbers
+    and neither is flagged by anything. What makes it visible is the identity
+    the decomposition has to satisfy, so that identity is asserted here.
+
+    Also held: the cross-arm claim the plan's headline now rests on. Three
+    arm-agnostic hypotheses are pre-registered, and the plan's arm-specific
+    branch is the one-sided statement that D is above zero. That is only a
+    falsifiable branch if every one of the three puts D at or below zero, which
+    is a property of the measured denominators and not of the prose.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    def _mod(self):
+        import importlib.util
+        p = self.ROOT / "analysis" / "load_run_power.py"
+        spec = importlib.util.spec_from_file_location("load_run_power", p)
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        return m
+
+    def test_the_decomposition_reproduces_the_measured_block_spread(self):
+        m = self._mod().measured()
+        self.assertAlmostEqual(m["combined"], m["block_cv"], delta=0.15,
+                               msg="gap/2 and the residual must recombine to the "
+                                   "block CV; if they do not, one of them "
+                                   "contains the other")
+        # and the reading that was published once must NOT satisfy it
+        bad = _math.hypot(m["block_cv"], m["gap"] / 2.0)
+        self.assertGreater(abs(bad - m["block_cv"]), 0.4,
+                           "the double-counted model has to be distinguishable "
+                           "from the measured spread, or this test proves nothing")
+
+    def test_every_arm_agnostic_hypothesis_puts_D_at_or_below_zero(self):
+        mod = self._mod()
+        import statistics as _st
+        ms = {a: 1000.0 / _st.mean(mod.pooled(a, i) for i in range(6))
+              for a in mod.ARMS}
+        nz = mod.normalisers()
+        for key in ("per_token", "per_forward", "per_target_step"):
+            c = (ms["spec-dflash-n2"] * (1 / 0.98 - 1)) / nz["spec-dflash-n2"][key]
+            d = c * nz["spec-dflash-n2"][key] - c * nz["spec-draft-n8"][key]
+            self.assertLessEqual(d, 1e-9, f"{key} puts D above zero, so the "
+                                          "plan's one-sided arm-specific branch "
+                                          "is not falsifiable")
+
+    def test_the_control_arm_holds_under_all_three_so_it_cannot_discriminate(self):
+        mod = self._mod()
+        import statistics as _st
+        ms = {a: 1000.0 / _st.mean(mod.pooled(a, i) for i in range(6))
+              for a in mod.ARMS}
+        nz = mod.normalisers()
+        for key in ("per_token", "per_forward", "per_target_step"):
+            c = (ms["spec-dflash-n2"] * (1 / 0.98 - 1)) / nz["spec-dflash-n2"][key]
+            dd = c * nz["spec-draft-n8"][key]
+            pct = 100.0 * (ms["spec-draft-n8"] / (ms["spec-draft-n8"] + dd) - 1)
+            self.assertLess(abs(pct), 1.0,
+                            f"{key} moves the control past the holding band; the "
+                            "plan states it holds under all three and the "
+                            "document would have to change with this")
+
+    def test_within_block_pairing_beats_the_between_block_design(self):
+        mod = self._mod()
+        m = mod.measured()
+        p = mod.power(m, trials=3000)
+        a = p["between-block, 6 against 6"]["-2"]["moves"]
+        b = p["within-block, 24 pairs"]["-2"]["moves"]
+        self.assertGreater(b, a + 0.3,
+                           "the redesign is justified by this gap; if it closes, "
+                           "the plan is paying two and a half hours for nothing")
