@@ -1480,10 +1480,13 @@ to distinguish them was `nvidia-smi` alone.**
 `bench/host_guard.py --sample` records host load (busy percent, load average,
 and the largest process that is not the benchmark's own descendant) so a future
 run can test the second of these. **No run in this repository has it**,
-including V2, V3 and T4; it was written on 2026-08-27, after they finished, and
+including V2, V3 and T4; it was written on 2026-08-28, after they finished, and
 retrofitting a column to a trace that never had one is not something this
-repository does. The junction temperature needs a sensor the platform does not
-offer, so that one stays untestable here.
+repository does. That explains those three and not the set: run W2 was measured
+on 2026-08-30 with the sampler already committed, and it has no load column
+either, so from W2 onward the column is missing because nothing asked for it.
+The junction temperature needs a sensor the platform does not offer, so that one
+stays untestable here.
 
 ### A17. The thinking-off comparisons are not comparisons of the same amount of work
 
@@ -2180,7 +2183,7 @@ tables happen to reach, which is the only reason the figure moved. The prose
 half of this repository is, to a first approximation, unchecked.
 
 **And that census counts decimals only.** In the same prose, on the same lines,
-sit **2 628** whole numbers, **357** of which are not a string literal in the
+sit **2 635** whole numbers, **357** of which are not a string literal in the
 checker either. They are reported beside the decimals rather than folded into
 them, because the probe below sampled the decimal population and the rate it
 publishes is about that population; widening what a measured rate refers to,

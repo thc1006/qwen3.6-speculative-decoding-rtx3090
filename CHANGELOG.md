@@ -20,6 +20,7 @@ publication point with its own data set.
   - [Measured](#measured)
   - [What the adversarial pass found in this branch's own work](#what-the-adversarial-pass-found-in-this-branchs-own-work)
   - [The figures said things they did not show](#the-figures-said-things-they-did-not-show)
+  - [A plan written before its run](#a-plan-written-before-its-run)
   - [Added](#added)
   - [Fixed](#fixed)
 - [[v4.1] — 2026-08-26 · the controlled tier, and a reversal](#v41--2026-08-26--the-controlled-tier-and-a-reversal)
@@ -776,7 +777,7 @@ an empty third down the middle of the canvas. Both are fixed, and
 `tests/test_harness_invariants.py` holds the palette, the per-cell ink and the
 rule that no label is drawn in an unlightened series colour.
 
-**The three triggers are live, and two of them have run.**
+**The three triggers are live, and all three have run.**
 `workflow_dispatch` and the weekly cron read `evidence.yml` from the default
 branch, and until 2026-09-01 that file was only on `audit-2026-08-25`:
 dispatching it returned 404 and the schedule never fired, which is why every
@@ -791,8 +792,15 @@ correctly: a manual dispatch runs from a branch and that step is for a tag.
 
 `release: published` was never in that group: a release event reads the workflow
 from the tag's own ref, and it fired twice before the merge, failing on the tag
-later renamed and passing on `v4.2`. The cron has not fired yet; the first is
-Monday at 05:37 UTC, the one trigger of four whose first run is still ahead.
+later renamed and passing on `v4.2`. The cron was the last of the four with no
+run behind it, and it has two now: it fired on the Mondays of 2026-09-07 and
+2026-09-14 and passed both times. All four triggers have been demonstrated
+rather than asserted, which is what this section set out to be able to say. The
+sentence it replaces said the cron had not fired yet, and stayed on the default
+branch through both of those runs, which is the same way a merge dated three
+passages of this document and the same reason they are dated here. A count of
+days is not written here on purpose: elapsed and calendar readings of it differ,
+and a number that drifts with the date it is read on is worse than the fact.
 
 **The release body was published as an eighty-column file.** GitHub Flavored
 Markdown preserves newlines in a release body exactly as it does in a pull
@@ -1166,6 +1174,95 @@ markers, so it passed. The fourth guard found a fault the other three could not
 see, and it was one this pass had just introduced: giving a legend a white
 background to stop its swatches reading as data put that background over the two
 lowest points in the panel, which are the transition the panel exists to show.
+
+### A plan written before its run
+
+ERRATA A16 ends by naming two quantities its instruments could not see. One is
+the GDDR6X memory-junction temperature, which needs a sensor NVML does not
+expose on Linux and cannot be read on this host at all. The other is host CPU
+load, and that one is testable: `bench/host_guard.py --sample` has recorded it
+since the commit that added the guard, writing a row per tick with the busy
+percentage, the load average, and how much of the processor time belongs to the
+benchmark's own process tree rather than to something else.
+
+Nothing here uses it. Not one of the seventy-seven committed run directories
+carries the column, nor any of the seventeen committed telemetry traces beside
+them, which hold `nvidia-smi` fields and nothing else. And the reason is no
+longer that the instrument did not exist: run W2 was measured two days after the
+sampler was committed and does not carry it either.
+
+So the gap is a choice now, and
+[`v4_audit_2026_08_25/PROSPECTIVE_PLAN_X_HOST_LOAD.md`](v4_audit_2026_08_25/PROSPECTIVE_PLAN_X_HOST_LOAD.md)
+is the plan that closes it, written and committed before the run. Watching a
+quantity that varies on its own is weaker than setting it, so run X applies load
+as a factor: one invocation, twenty-four blocks, three arms, and the load turned
+on and off **inside** each block so that each arm is run loaded and unloaded
+back to back. The thresholds, the estimator, the outcomes and what each one
+licenses are all fixed in the document before any data exists.
+
+**An adversarial pass killed the first draft of that plan twice, and both
+objections are in the document rather than quietly fixed.** The first draft
+compared six loaded blocks against six unloaded ones. Simulated against this
+arm's own block-to-block variability, measured in run T4, that design had about
+one chance in ten of detecting the effect it predicted, its single most likely
+product was "inconclusive" even when its hypothesis was exactly right, and about
+one time in five it would have reported a real effect as the arm holding still.
+Moving the factor inside the block, so that the two members of a pair are
+minutes apart instead of up to eleven blocks apart, and doubling the block count
+to twenty-four, takes that to better than nine chances in ten. It also costs two
+and a half hours of wall clock instead of forty minutes, which is the price of
+an answer and is stated in the plan.
+
+The second objection survived any sample size. The first draft predicted that
+the arm A16 is about would slow by at least two per cent while a second arm held
+under one, and read that as specific to one configuration. But the three arms
+decode at about a hundred and forty-five, a hundred and sixteen and thirty-one
+tokens a second, which is to say they differ by nearly a factor of five in
+milliseconds per token. A uniform host-side cost per token, with no preference
+for any arm whatsoever, produces exactly that pattern: the same fixed cost is a
+large percentage of a short token and a small one of a long token. The plan now
+pre-registers the cross-arm comparison in milliseconds per generated token,
+where an arm-agnostic mechanism and an arm-specific one predict visibly
+different things, and keeps percentages only for deciding whether each arm moved
+at all.
+
+Three smaller things the same pass found and the plan now carries: the load is
+the repository's own perturbation suite at a pinned size rather than a bank of
+spinners, because the incident being modelled was a pipeline with page-cache and
+disk work and process churn, not busy loops; the run is void rather
+than negative if the recorded load does not reach a stated floor in every
+loaded block and stay under a stated ceiling in every unloaded one, since
+otherwise a generator that failed to start reads as a clean negative; and the
+branch in which nothing moves no longer retires A16, because A16 names a third
+hypothesis, page cache and allocator state, which run X does not test and which
+is now listed in `RETEST_TODO.md` as the successor.
+
+**Where that plan sits in the coverage census, and why the reason is the release
+and not the genre.** `analysis/table_coverage.py` puts every markdown file here
+into one of two lists and nothing lets a file be in neither: the censused set,
+whose table cells the probe perturbs and whose prose numbers are counted, and an
+excluded set where every entry carries a written reason. The plan is excluded,
+and the first version of this entry said that was because a plan carries
+thresholds rather than figures. That is not true here. Three prospective plans
+of exactly this kind are censused, and one of them is censused today with no
+outcome section and no data of its own, so there is no rule about plans to
+appeal to.
+
+The actual reason is the release. `analysis/verify_claims.py` pins the number of
+censused documents, and the decimal prose census, and it is one of the six files
+`bench/check_release_binding.py` compares between the `v4.2` tag and this tree.
+Note where the freeze bites, because the first version of this entry got that
+wrong too: `table_coverage.py` is not itself bound, so growing its list is not
+editing a frozen file. It is editing an unfrozen one in a way that makes a
+frozen one fail, which cannot then be fixed without changing the frozen one.
+
+And the cost of censusing it later was overstated. Run X's raw logs go into the
+evidence manifest and its entry into the run registry, and both of those are
+bound, so committing the evidence re-cuts the binding whatever happens to the
+plan's classification. The census entry rides along at no additional cost. What
+this commit does pay, today, is a coverage probe re-run: adding lines to a
+censused document moves the table line numbers the existing attestations pin, so
+all thirty-two shards were produced again.
 
 ### Added
 
