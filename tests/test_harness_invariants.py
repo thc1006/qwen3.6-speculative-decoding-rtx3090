@@ -6510,6 +6510,64 @@ class APowerTableMayNotCountTheStepTwice(unittest.TestCase):
                             "plan states it holds under all three and the "
                             "document would have to change with this")
 
+
+    def test_the_round_count_identity_is_the_one_the_data_supports(self):
+        """R = P - A decides every denominator, so it is checked, not assumed.
+
+        `draft_n_accepted` could count real accepts or could include the bonus
+        token the target emits each round. Only the first makes the round count
+        generated minus accepted. The second implies accepted equals generated,
+        which the data refutes, and it would put drafted-per-round above the
+        arm's own draft-max, which n=2 makes impossible to miss.
+        """
+        nz = self._mod().normalisers()
+        for arm, n_max in (("spec-dflash-n2", 2), ("spec-draft-n8", 8)):
+            self.assertNotEqual(nz[arm]["accepted"], nz[arm]["tokens"])
+            self.assertLessEqual(nz[arm]["drafted_per_round"], n_max + 0.02,
+                                 f"{arm} drafts more per round than its draft-max")
+        self.assertAlmostEqual(nz["spec-dflash-n2"]["drafted_per_round"], 2.0,
+                               delta=0.1, msg="an n=2 arm that does not come out "
+                                              "near two is the identity failing")
+
+    def test_the_hazard_is_taken_from_the_corpus_and_not_from_one_run(self):
+        """One event gives a Poisson interval three orders of magnitude wide.
+
+        The first version of the power table took the switch hazard from a
+        single transition in run T4. This requires the derivation to reach the
+        rest of the corpus, and to find a rate the design is actually sensitive
+        to rather than zero or everything.
+        """
+        h = self._mod().hazard()
+        self.assertGreaterEqual(h["runs"], 20, "the walk stopped finding runs")
+        self.assertGreater(h["changes"], 20, "one run's worth of events is what "
+                                             "this derivation exists to replace")
+        self.assertLess(h["changes"], h["gaps"],
+                        "every gap a change means the threshold is too low")
+        self.assertLess(h["hi"] / h["lo"], 3.0,
+                        "the interval is meant to be tight enough to plan on")
+
+
+    def test_the_hazard_is_a_likelihood_and_not_changes_over_time(self):
+        """Two levels means an even number of transitions is invisible.
+
+        Dividing observed changes by elapsed time assumes every gap holds at
+        most one transition. Two put the arm back where it started and record as
+        no change, and the corpus's mean gap is the same order as the interval
+        between changes, so the omission is large rather than academic: the
+        naive figure is about one per 1123 s against a likelihood estimate of
+        about one per 641. A hazard that is too slow makes any design built on
+        it look better than it is, so the two are kept apart here and required
+        to disagree.
+        """
+        h = self._mod().hazard()
+        self.assertIn("naive", h)
+        self.assertGreater(h["naive"] / h["hazard"], 1.3,
+                           "the two estimators agree, which for gaps this long "
+                           "means one of them is not doing what it says")
+        self.assertLess(h["hazard"], h["naive"],
+                        "missed transitions can only make the true rate faster")
+        self.assertTrue(h["lo"] < h["hazard"] < h["hi"])
+
     def test_within_block_pairing_beats_the_between_block_design(self):
         mod = self._mod()
         m = mod.measured()

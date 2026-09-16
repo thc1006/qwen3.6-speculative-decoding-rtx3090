@@ -473,3 +473,35 @@ each `manifest.json`: `BENCH_ARMS`, `BENCH_REPEATS`, `BENCH_MAX_TOKENS`,
 `BENCH_THINK`, `BENCH_FIT`, `BENCH_FIT_TARGET`, `BENCH_CTX`,
 `BENCH_CONCURRENCY`, `BENCH_FLAVOR`.
 
+---
+
+## CPU addendum, 2026-09-17
+
+The bench host's processor was never recorded. `collect_env.sh` captures one and
+was never run there: the only `lscpu` in this repository is the v1 `s1` host's,
+an i7-11700, and the three snapshots of `3090` above record GPU, driver, disk
+and toolchain with no CPU in any of them. A plan written in September reasoned
+about this processor's core layout from a live reading, which by this
+repository's own convention is a figure that needs a dagger and did not have
+one. This is that reading, committed, so the reasoning rests on the archive.
+
+```
+host        : 3090, Tailscale 100.112.135.98
+virtualised : no (systemd-detect-virt reports none, no hypervisor flag,
+              /proc/stat steal is zero)
+Model name  : 13th Gen Intel(R) Core(TM) i9-13900K
+CPU(s)      : 32       Core(s) per socket: 24      Thread(s) per core: 2
+CPU max MHz : 5800     CPU min MHz: 800
+
+max frequency by logical processor, from cpufreq:
+    4300 MHz on 16     the efficiency cores
+    5500 MHz on 12     performance cores
+    5800 MHz on  4     performance cores, favoured
+```
+
+It is a hybrid part and the spread between its slowest and fastest logical
+processors is about a quarter. Nothing in `bench/` pins any process to any of
+them, no run in this repository records which one anything ran on, and no
+committed arm-run carries a thread count: the server invocation passes no
+thread flag, so llama.cpp chooses, and what it chose is in the server log, which
+is a release asset rather than a file in this tree.

@@ -1223,6 +1223,43 @@ than nine in ten, but it earns it against an honest baseline. The claim that the
 older design could not reach one in three at any switching rate was false and is
 gone.
 
+**A third pass over that correction found the correction's own weakest input.**
+The power table needs to know how often the arm changes level on its own, and
+the first two versions took it from run T4: one transition across five adjacent
+gaps. That is a single event, and the exact Poisson interval for one event in a
+thousand seconds of observation runs from about a hundred and eighty seconds to
+nearly forty thousand. No table can rest on that. The script now walks every run
+in the corpus that repeats this arm inside one invocation, which is fifty of
+them, and counts a hundred level changes across two hundred and ninety one
+adjacent gaps.
+
+Counting those changes and dividing by elapsed time is not the estimator
+either, and that is the part worth keeping. It assumes every gap holds at most
+one transition, but there are two levels, so two transitions inside one gap
+return the arm to where it started and are recorded as no change at all, and
+the mean gap here is about the same length as the interval between changes. The
+likelihood over the gaps, each with its own duration, gives about one change
+every eleven minutes rather than every nineteen. The naive figure was nearly
+twice too slow, and a hazard that is too slow makes any design built on it look
+better than it is: the plan's headline power falls by three points, to about
+nineteen in twenty, and the design it replaced falls from about one in three to
+about two in seven. The interval is narrow enough to plan against and the plan
+now reports its power at both ends of it.
+
+The same pass found a real defect in that script: the call meant to advance the
+simulated level between blocks discarded its result, so the level never moved
+there. It cancels in a within-block difference and changed no published figure,
+which is exactly why it would have survived. It is fixed and the fix is why the
+figures moved by a point.
+
+And it found that the identity the whole cross-arm argument rests on had never
+been checked. The round count is generated tokens minus accepted ones only if
+the accepted field counts real accepts rather than including the token the
+target emits each round. The competing reading would make accepted equal
+generated, and it does not; it would also put drafted-per-round above an arm's
+own draft maximum, and the arm that runs at a maximum of two comes out just
+under two. Both checks are in the script and both are held as regressions.
+
 **The sharpest correction is that the plan's headline prediction discriminated
 nothing.** It predicted the arm A16 is about would slow while a second arm held,
 and read that as specific to one configuration. But the three arms differ by
@@ -1258,6 +1295,55 @@ repository pinning any process to any of them and no run ever recording which
 one anything ran on. That is an uncontrolled variable of the right size, on the
 right timescale, invisible to `nvidia-smi`, and applying CPU load changes it.
 Run X records it.
+
+**A fourth pass asked whether run X is the experiment worth making, and answered
+most of it from data already committed.** Two results, neither needing a card.
+
+Across run T4's own step the arms moved in **opposite directions**: the arm A16
+is about got faster while the no-speculation arm got slower, by about three and
+a half per cent and three quarters of a per cent. No arm-agnostic host cost can
+do that under any of the three denominators, because a cost per token, per
+forward pass or per target step moves every arm the same way. The plan's own
+pre-registered cross-arm statistic agrees on the same six blocks, with an
+interval excluding zero. The split point was chosen by eye, so this corroborates
+rather than tests, which is why the run fixes the split in advance.
+
+And no whole-host component is detectable between any pair of arms at all.
+Aligning the three arms by block across every run directory that holds all three
+for at least four blocks, their residual milliseconds per token correlate at
+about plus seven, plus three and minus eight hundredths. A shared host cost of
+any denominator moves the arms together and would show as a correlation near
+one. That has two readings, and the plan declines to pick: either the arms do
+not share a host channel, or ambient host state on a quiet bench machine does
+not vary enough to correlate anything. Only setting the level distinguishes
+them, which is the plan's own argument, sharpened rather than undermined. What
+it does do is lower the prior, and the plan now says so: the most likely outcome
+of run X is that both arms hold.
+
+So the plan gained a section saying what should run **before** it. The bench
+host is hybrid, and pinning the server to its efficiency cores is a deliberate worst
+case, a clock cut of about a quarter, beyond anything ambient scheduling could
+produce. Two arms, two pinnings, six blocks is a third of an hour, and a null
+inside one per cent bounds the entire host-processor-speed family at once, which
+would make run X unnecessary. Run X is three and a half hours once its own
+mandated washout is counted, which is also corrected here from three.
+
+The same pass found that **recording core placement is not enough; it has to be
+pinned.** Applying load changes which processors are free, so placement is a
+post-treatment mediator rather than a covariate, and if the load displaces the
+server systematically there is no comparison left to make within a stratum. The
+recorded column is also an undersampled proxy, since it says where a thread last
+ran rather than where it spent its time. The server is pinned in every arm-run
+now and the load's processor set is a design factor.
+
+**And the bench host's processor was never recorded.** `BENCHMARK_ENV.md` gains
+an addendum with it. The only processor in this repository was the v1 host's,
+and the three snapshots of the bench host record card, driver, disk and
+toolchain with no processor in any of them, although `collect_env.sh` captures
+one. A plan written this month reasoned about that processor's core layout from
+a live reading, which by this repository's own convention needs a dagger and did
+not have one. It is in the archive now, along with the fact that no committed
+arm-run carries a thread count either.
 
 **Where that plan sits in the coverage census, and why the reason is the release
 and not the genre.** `analysis/table_coverage.py` puts every markdown file here

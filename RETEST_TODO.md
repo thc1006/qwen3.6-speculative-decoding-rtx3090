@@ -72,6 +72,12 @@ New work the audit generated that was not on the original list:
   [`v4_audit_2026_08_25/PROSPECTIVE_PLAN_X_HOST_LOAD.md`](v4_audit_2026_08_25/PROSPECTIVE_PLAN_X_HOST_LOAD.md).
   `bench/host_guard.py --sample` records host CPU load and no run here carries
   the column, so run X applies it as a factor instead of watching for it
+- **before run X, and cheaper than it**: pin the server to the bench host's
+  efficiency cores in half the blocks and to its performance cores in the other
+  half, two arms, six or twelve blocks. That is a deliberate worst case, a clock
+  cut of about a quarter, and a null inside one per cent bounds core placement,
+  processor clock and ambient load acting through the scheduler in one run of
+  about twenty minutes. Run X is three and a half hours
 - the successor to run X, whichever way it goes: A16 names page cache and
   allocator state as a third hypothesis, changed by the two rebuilds and the
   killed rehearsal between runs T and T3, and no run here records either. Run X

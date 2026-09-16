@@ -41,7 +41,14 @@ ARMS = ("spec-dflash-n2", "baseline", "spec-draft-n8")
 
 SEED = 20260917
 TRIALS = 40000
-HAZARD = 1000.0          # seconds between spontaneous level changes, from T4
+# How often this arm changes level on its own. The first version of this file
+# took it from run T4 alone: one transition across five adjacent gaps, which is
+# ONE event, and the exact Poisson interval for one event in a thousand seconds
+# runs from 179 s to 39 498 s. A power table cannot rest on that. `hazard()`
+# below counts transitions across every run in the corpus that repeats this arm
+# inside one invocation, which is fifty of them.
+HAZARD_FALLBACK = 1123.0
+CHANGE_PCT = 2.0         # half the measured level gap; see hazard()
 TSTAR = {5: 2.571, 11: 2.201, 17: 2.110, 23: 2.069}
 
 
@@ -69,12 +76,129 @@ def measured() -> dict:
     combined = math.hypot(gap / 2.0, resid)
     return {"levels": (lo, hi), "gap": gap, "block_cv": cv,
             "adjacent_diff_sd": diff_sd, "residual": resid,
-            "combined": combined, "transitions": 1, "gaps": 5,
+            "combined": combined,
             "durations": {a: st.mean(
                 json.loads((T4 / f"{a}__rep{i}.json").read_text(encoding="utf-8"))
                 .get("ready_s", 0.0)
                 + sum(r["wall_ms"] for r in _rows(a, i)) / 1000.0
                 for i in range(6)) for a in ARMS}}
+
+
+def _chi2cdf(x: float, df: int) -> float:
+    if x <= 0:
+        return 0.0
+    a, z = df / 2.0, x / 2.0
+    s = term = 1.0 / a
+    for n in range(1, 4000):
+        term *= z / (a + n)
+        s += term
+        if term < 1e-16 * s:
+            break
+    return s * math.exp(-z + a * math.log(z) - math.lgamma(a))
+
+
+def _chi2inv(p: float, df: int) -> float:
+    lo, hi = 0.0, 5000.0
+    for _ in range(300):
+        mid = (lo + hi) / 2.0
+        if _chi2cdf(mid, df) < p:
+            lo = mid
+        else:
+            hi = mid
+    return (lo + hi) / 2.0
+
+
+def hazard(root: pathlib.Path | None = None) -> dict:
+    """Mean seconds between spontaneous level changes, over the whole corpus.
+
+    Every run directory that repeats `spec-dflash-n2` at least three times
+    inside one invocation contributes its adjacent gaps. A gap counts as a
+    change when the log ratio of consecutive pooled rates exceeds CHANGE_PCT,
+    which is half the measured level gap. The residual difference SD is 0.76 %,
+    so that threshold is about 2.6 sigma and costs roughly two false positives
+    across the corpus, which is reported beside the count rather than hidden.
+
+    The elapsed time between two repeats of one arm is one pass of the whole
+    block, so the block duration is summed from each arm's rep0.
+    """
+    data = (root or ROOT) / "v4_audit_2026_08_25" / "data"
+    changes = gaps = 0
+    seconds = 0.0
+    runs = 0
+    durations: list[tuple[float, bool]] = []
+    for d in sorted(data.iterdir()):
+        if not d.is_dir():
+            continue
+        fs = sorted(d.glob("spec-dflash-n2__rep*.json"),
+                    key=lambda q: int(q.stem.rpartition("__rep")[2]))
+        if len(fs) < 3:
+            continue
+        rates = []
+        for f in fs:
+            rs = json.loads(f.read_text(encoding="utf-8"))["rows"]
+            ms = sum(r["predicted_ms"] for r in rs)
+            if not ms:
+                rates = []
+                break
+            rates.append(1000.0 * sum(r["predicted_n"] for r in rs) / ms)
+        if len(rates) < 3:
+            continue
+        block = 0.0
+        for f in sorted(d.glob("*__rep0.json")):
+            j = json.loads(f.read_text(encoding="utf-8"))
+            block += j.get("ready_s", 0.0) + sum(
+                r["wall_ms"] for r in j["rows"]) / 1000.0
+        if block <= 0:
+            continue
+        runs += 1
+        gaps += len(rates) - 1
+        seconds += (len(rates) - 1) * block
+        for i in range(len(rates) - 1):
+            moved = abs(100.0 * math.log(rates[i + 1] / rates[i])) > CHANGE_PCT
+            durations.append((block, moved))
+            changes += 1 if moved else 0
+    if not changes or not durations:
+        return {"runs": runs, "gaps": gaps, "seconds": seconds, "changes": 0,
+                "naive": HAZARD_FALLBACK, "hazard": HAZARD_FALLBACK,
+                "lo": HAZARD_FALLBACK, "hi": HAZARD_FALLBACK}
+
+    # Changes over elapsed time is NOT the estimator. It assumes every interval
+    # holds at most one transition, and two transitions inside one interval put
+    # the arm back where it started and are recorded as no change. The mean gap
+    # here is about four hundred seconds, the same order as the hazard, so the
+    # omission is large: it reported one per 1123 s where the likelihood gives
+    # one per 641, which is 1.75 times too slow and makes any design built on it
+    # look better than it is.
+    def _ll(h):
+        total = 0.0
+        for t, changed in durations:
+            pr = (1.0 - math.exp(-2.0 * t / h)) / 2.0
+            pr = min(max(pr, 1e-12), 1.0 - 1e-12)
+            total += math.log(pr if changed else 1.0 - pr)
+        return total
+
+    lo_h, hi_h = 50.0, 20000.0
+    for _ in range(300):
+        a = lo_h + (hi_h - lo_h) / 3.0
+        b = hi_h - (hi_h - lo_h) / 3.0
+        if _ll(a) < _ll(b):
+            lo_h = a
+        else:
+            hi_h = b
+    mle = (lo_h + hi_h) / 2.0
+    peak = _ll(mle)
+
+    def _edge(step):
+        x = mle
+        for _ in range(500):
+            x *= step
+            if _ll(x) < peak - 1.92:      # the usual two-unit likelihood drop
+                return x
+        return x
+
+    return {"runs": runs, "gaps": gaps, "seconds": seconds, "changes": changes,
+            "naive": seconds / changes, "hazard": mle,
+            "lo": _edge(0.98), "hi": _edge(1.02)}
 
 
 def normalisers() -> dict:
@@ -93,9 +217,26 @@ def normalisers() -> dict:
                 D += r.get("draft_n") or 0
                 A += r.get("draft_n_accepted") or 0
         R = P - A
-        out[a] = {"tokens": P, "drafted": D, "accepted": A,
+        out[a] = {"tokens": P, "drafted": D, "accepted": A, "rounds": R,
                   "per_token": 1.0, "per_target_step": R / P,
-                  "per_forward": (D + R) / P}
+                  "per_forward": (D + R) / P,
+                  "drafted_per_round": (D / R) if R else 0.0}
+    # The identity is the whole of the cross-arm discrimination, so it is checked
+    # rather than asserted in prose. Two readings of `draft_n_accepted` are
+    # possible and only one of them makes R = P - A true:
+    #   if it counts the bonus token, then P = A and the round count is lost
+    #   if it counts real accepts, then drafted-per-round cannot exceed the
+    #   arm's own draft-max
+    # `spec-dflash-n2` runs at n=2 and comes out at 1.978, which fits the second
+    # reading and refutes the first, where A would have to equal P.
+    for a, n_max in (("spec-dflash-n2", 2), ("spec-draft-n8", 8)):
+        if out[a]["accepted"] == out[a]["tokens"]:
+            raise SystemExit(f"{a}: accepted equals generated, so draft_n_accepted "
+                             f"counts the bonus token and R = P - A is wrong")
+        if out[a]["drafted_per_round"] > n_max + 0.02:
+            raise SystemExit(f"{a}: {out[a]['drafted_per_round']:.3f} drafted per "
+                             f"round exceeds its draft-max of {n_max}, so the "
+                             f"round count is not P - A")
     return out
 
 
@@ -115,7 +256,17 @@ def _verdict(d: list[float], df: int) -> str:
 
 
 def _flip(dt: float, hazard: float, state: int, rng: random.Random) -> int:
-    return 1 - state if rng.random() < 1.0 - math.exp(-dt / hazard) else state
+    """Two states, so what matters is ending in the OTHER one, not transitioning.
+
+    This read `1 - exp(-dt / hazard)`, the probability of at least one
+    transition. Two transitions inside one interval return the arm to where it
+    started, and for a symmetric two-state chain the probability of ending
+    flipped is `(1 - exp(-2 dt / hazard)) / 2`. The two agree to first order and
+    diverge once the interval approaches the hazard, which is exactly the regime
+    the between-block design sits in.
+    """
+    return (1 - state if rng.random() < (1.0 - math.exp(-2.0 * dt / hazard)) / 2.0
+            else state)
 
 
 def _between(truth, resid, gap, hazard, rng, nblocks=12):
@@ -139,23 +290,32 @@ def _within(truth, resid, gap, hazard, rng, dur, nblocks=24):
             state = _flip(dur, hazard, state, rng)
             pair.append(state * gap + rng.gauss(0, resid)
                         + (truth if (k == 0) == first_loaded else 0.0))
-        _flip((200.0 - dur) * 2.0, hazard, state, rng)
+        # the rest of the block: the other two arms run twice each. The return
+        # was DISCARDED here, so the level never advanced between blocks. It
+        # cancels in a within-block difference and changed no published figure,
+        # which is exactly why it would have sat there: a state variable that is
+        # not assigned looks like one that is.
+        state = _flip(400.0 - 2.0 * dur, hazard, state, rng)
         d.append(pair[0] - pair[1] if first_loaded else pair[1] - pair[0])
     return _verdict(d, nblocks - 1)
 
 
-def power(m: dict, hazard: float = HAZARD, trials: int = TRIALS) -> dict:
+def power(m: dict, hazard_s: float | None = None,
+          trials: int = TRIALS) -> dict:
+    if hazard_s is None:
+        hazard_s = hazard()["hazard"]
     rng = random.Random(SEED)
     dur = m["durations"]["spec-dflash-n2"]
+    hz = hazard_s
     designs = {
         "between-block, 6 against 6": lambda tr: _between(
-            tr, m["residual"], m["gap"], hazard, rng),
+            tr, m["residual"], m["gap"], hz, rng),
         "within-block, 12 pairs": lambda tr: _within(
-            tr, m["residual"], m["gap"], hazard, rng, dur, 12),
+            tr, m["residual"], m["gap"], hz, rng, dur, 12),
         "within-block, 18 pairs": lambda tr: _within(
-            tr, m["residual"], m["gap"], hazard, rng, dur, 18),
+            tr, m["residual"], m["gap"], hz, rng, dur, 18),
         "within-block, 24 pairs": lambda tr: _within(
-            tr, m["residual"], m["gap"], hazard, rng, dur, 24),
+            tr, m["residual"], m["gap"], hz, rng, dur, 24),
     }
     out = {}
     for name, fn in designs.items():
@@ -173,7 +333,8 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=(__doc__ or "").split("\n")[0])
     ap.add_argument("--check", action="store_true",
                     help="also assert the plan publishes these figures")
-    ap.add_argument("--hazard", type=float, default=HAZARD)
+    ap.add_argument("--hazard", type=float, default=None,
+                    help="override the corpus-derived hazard, in seconds")
     ap.add_argument("--trials", type=int, default=TRIALS)
     args = ap.parse_args()
 
@@ -184,17 +345,32 @@ def main() -> None:
           f"excised, so the per-arm-run residual is {m['residual']:.3f} %")
     print(f"  decomposition check: hypot(gap/2, residual) = {m['combined']:.3f} % "
           f"against the measured block CV of {m['block_cv']:.3f} %")
-    print(f"  switch hazard: {m['transitions']} transition across {m['gaps']} "
-          f"adjacent gaps of 200 s, so one per {args.hazard:.0f} s")
+    h = hazard()
+    print(f"  switch hazard, over the whole corpus rather than one run: "
+          f"{h['changes']} level changes across {h['gaps']} adjacent gaps in "
+          f"{h['runs']} runs,")
+    print(f"  {h['seconds']:.0f} s of elapsed time, so one per "
+          f"{h['hazard']:.0f} s with a 95 % interval of "
+          f"[{h['lo']:.0f}, {h['hi']:.0f}] s")
     print()
 
-    p = power(m, args.hazard, args.trials)
+    hz = args.hazard if args.hazard is not None else h["hazard"]
+    p = power(m, hz, args.trials)
     gap_col = f"-{m['gap']:.2f} %"
     print(f"  {'design':30s} {'-2 %':>8s} {gap_col:>10s} {'0 -> holds':>12s}")
     for name, row in p.items():
         print(f"  {name:30s} {row['-2']['moves']:8.2f} "
               f"{row['-gap']['moves']:10.2f} {row['0']['holds']:12.2f}")
     print()
+
+    if args.hazard is None:
+        print("  at the ends of that interval, for the design this plan chooses:")
+        for end, label in ((h["lo"], "fast"), (h["hi"], "slow")):
+            r = power(m, end, max(4000, args.trials // 4))["within-block, 24 pairs"]
+            print(f"    hazard {end:6.0f} s ({label}): "
+                  f"{r['-2']['moves']:.2f} / {r['-gap']['moves']:.2f} / "
+                  f"{r['0']['holds']:.2f}")
+        print()
 
     ms = {a: 1000.0 / st.mean(pooled(a, i) for i in range(6)) for a in ARMS}
     nz = normalisers()

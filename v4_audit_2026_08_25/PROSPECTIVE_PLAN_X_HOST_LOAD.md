@@ -89,6 +89,13 @@ Nothing in `bench/` or `analysis/` pins any process to any processor: there is
 no `taskset`, no `sched_setaffinity`, no cpuset. And no run in this repository
 records which processor anything ran on.
 
+The server's thread count is not recorded either. The committed argv carries no
+`-t` and no `--threads`, so llama.cpp chooses, and what it chose is in the
+server log, which is a release asset rather than a file in this tree. On a
+hybrid processor the thread count is exactly what decides whether work lands on
+efficiency cores at all, so run X pins it explicitly and records it in the
+manifest beside everything else.
+
 So core placement is an uncontrolled and unrecorded variable whose magnitude is
 the right order, whose timescale is a scheduler's, which produces byte-identical
 output, and which `nvidia-smi` cannot see. That is A16's signature. This plan
@@ -97,6 +104,69 @@ consecutive fresh server processes, which a single migration does not explain �
 but it is cheap to record and run X records it. It also matters for the design:
 **applying CPU load changes core placement**, so a positive result in a run that
 did not record placement would not be attributable.
+
+## What the committed data already says, before any run
+
+A third pass asked whether this run is the one worth making, and answered it
+partly from data already in the tree. Two results, both at zero GPU cost, and
+both of which change what run X is for.
+
+**Across T4's own step the arms moved in opposite directions.** Splitting T4 at
+its step, reps 0 to 2 against reps 3 to 5:
+
+| arm | low | high | change |
+|---|---:|---:|---:|
+| `spec-dflash-n2` | 139.671 | 145.161 | **+3.93 %** |
+| `baseline` | 116.533 | 115.667 | **−0.74 %** |
+| `spec-draft-n8` | 30.799 | 30.847 | +0.16 % |
+
+One arm got faster while another got slower. **No arm-agnostic host cost can do
+that**, under any of the three denominators tabulated later, because a cost per
+token, per forward pass or per target step moves every arm the same way. The
+plan's own pre-registered statistic agrees: D over those six blocks is −25.309
+before the step and −25.529 after, a shift of +0.220 ms per token with a Welch t
+of 6.25 and an interval excluding zero. The split point was chosen by eye and
+this is therefore corroboration and not a test, which is exactly why the run
+below fixes the split in advance.
+
+**And no whole-host component is detectable between any pair of arms.** Aligning
+the three arms by block within each of the 43 run directories that hold all
+three for at least four blocks, and correlating their residual milliseconds per
+token, gives +0.073 for `baseline` against `spec-dflash-n2`, +0.026 for
+`spec-dflash-n2` against `spec-draft-n8`, and −0.083 for `baseline` against
+`spec-draft-n8`. A shared host cost of any denominator moves the arms together
+and would show as a correlation near one. Nothing here does.
+
+That second result has two readings and this plan does not pick between them:
+either the arms do not share a host channel, or the ambient host state on a
+quiet bench machine does not vary enough to correlate anything. **Those are
+distinguishable only by setting the level rather than watching it**, which is
+the argument the next heading makes and which this result sharpens rather than
+undermines. What it does do is lower the prior: the most likely outcome of run X
+is that both arms hold, and the plan should be read knowing that.
+
+## What should run before this, and why it is not this
+
+The same pass costed a cheaper experiment and it is the right one to run first.
+
+The bench host is hybrid, and pinning the server to its efficiency cores is a
+deliberate worst case: a clock cut of about a quarter, far beyond anything
+ambient scheduling could produce. Two arms, two pinnings, six blocks is 24
+arm-runs and **0.34 hours**; twelve blocks is 48 and 0.68 hours. Against the
+corpus per-arm-run SD of about one and a half per cent, six paired blocks detect
+about three per cent and twelve detect about two.
+
+A null inside one per cent there bounds the **entire host-CPU-speed family** at
+once: core placement, CPU clock, and ambient load acting through the scheduler.
+It would make run X unnecessary. A positive sends you to a crossed design,
+placement against load, two arms and twelve blocks, at 1.36 hours, which also
+supplies the heat-without-contention cell this plan lists as a limitation.
+
+Run X as written is 3.03 hours of arm-runs and 3.43 with the washout it mandates
+below. It is pre-registered here because the question is worth a
+pre-registration
+and because writing it is what found everything above. It should not be the next
+thing on the card.
 
 ## Why this is an intervention and not an observation
 
@@ -129,32 +199,58 @@ in the other half, alternating ABBA over the twenty-four.
 
 `analysis/load_run_power.py` is committed with this plan and produces the table
 below; it is not a figure typed in after reading a terminal. Its inputs are
-measured from run T4's committed arm-runs:
+measured, not chosen:
 
 - the per-arm-run residual log SD is **0.537 %**, which is the measured
   adjacent-repeat difference SD of 0.760 % with the step excised, over root two
 - the telegraph gap is the measured **3.93 %**
-- the switch hazard is **one per thousand seconds**: T4 shows one transition
-  across five adjacent-repeat gaps of about two hundred seconds each. A16 states
-  no switching rate and this figure is not attributed to it
 - arm-run durations 39.8, 116.0 and 44.1 s, so a three-arm pass is 200 s
+- the switch hazard is **one per 641 s**, with a ninety-five per cent interval
+  of 455 to 863 s
 
-Those three decompose the block-level variability correctly, which is the error
-the first version of this table made: T4's block CV of 2.145 % **already
-contains the step**, and a simulation that adds a telegraph on top of it implies
-2.768 % of block spread, twenty-nine per cent more than T4 shows. The corrected
-figures, by the decision rule defined below, forty thousand draws:
+That last one is worth a paragraph, because the first version of this plan got
+it from run T4 alone: one transition across five adjacent gaps. That is a single
+event, and the exact Poisson interval for one event in a thousand seconds of
+observation runs from 179 s to 39 498 s. A power table cannot rest on it. The
+committed script instead counts level changes across **every run in the corpus
+that repeats this arm inside one invocation**, which is fifty of them: 100
+changes across 291 adjacent gaps and 112 295 seconds of elapsed time. A gap
+counts as a change when the log ratio of consecutive pooled rates exceeds two
+per cent, half the measured gap and about two and a half times the residual
+difference SD, which costs roughly two false positives across the corpus.
+
+Counting changes and dividing by elapsed time is **not** the estimator, and the
+version of this plan that did so published a hazard of one per 1123 s. That
+assumes every gap holds at most one transition. There are two levels, so two
+transitions inside one gap return the arm to where it started and are recorded
+as no change at all, and the mean gap here is 386 s, the same order as the
+hazard itself. The likelihood over the observed gaps, each with its own
+duration and the two-state probability of ending flipped, gives one per 641 s.
+The naive figure was 1.75 times too slow, and a hazard that is too slow makes
+any design built on it look better than it is.
+
+The three inputs also have to decompose correctly, and the first version of this
+table is the reason that is checked rather than assumed: T4's block CV of
+2.145 % **already contains the step**, and a simulation that adds a telegraph on
+top of it implies 2.768 % of block spread, twenty-nine per cent more than T4
+shows. It published a detection rate of about one in ten for a design whose real
+rate is about one in three. `hypot(gap / 2, residual)` is 2.037 % against the
+measured 2.145 %, the script asserts it, and
+`tests/test_harness_invariants.py` holds the identity as a regression with the
+faulty reading as its known-positive.
+
+Forty thousand draws, by the decision rule defined below:
 
 | design | truth −2 % | truth −3.93 % | truth 0, declares holds |
 |---|---:|---:|---:|
-| between-block, 6 against 6 (first draft) | 0.34 | 0.84 | 0.15 |
-| within-block, 12 pairs | 0.82 | 1.00 | 0.67 |
-| within-block, 18 pairs (the void floor below) | 0.92 | 1.00 | 0.85 |
-| **within-block, 24 pairs (this plan)** | **0.97** | **1.00** | **0.94** |
+| between-block, 6 against 6 (first draft) | 0.28 | 0.78 | 0.11 |
+| within-block, 12 pairs | 0.75 | 1.00 | 0.55 |
+| within-block, 18 pairs (the void floor below) | 0.88 | 1.00 | 0.76 |
+| **within-block, 24 pairs (this plan)** | **0.95** | **1.00** | **0.89** |
 
-At half the hazard the last row is 0.99 and 0.98; at double it, 0.92 and 0.83.
-The first draft's design reaches 0.21 to 0.48 against a true −2 % across that
-same range. It is not hopeless, which is what the first version of this section
+At the fast end of the hazard interval the last row is 0.91 and 0.83; at the
+slow end, 0.97 and 0.93. The first draft's design reaches about two in seven
+a true −2 %. It is not hopeless, which is what the first version of this section
 wrongly implied by publishing 0.09; it is inadequate against the threshold it
 set itself, and the redesign is worth its cost for that reason and not for a
 more dramatic one.
@@ -223,9 +319,23 @@ second:
 - the **runqueue wait** of the serving process, from `/proc/<pid>/schedstat`'s
   second field, at each tick
 - the processor each of the server's threads last ran on, from
-  `/proc/<pid>/task/*/stat`, at each tick
+  `/proc/<pid>/task/*/stat`, at each tick, **as a record and not as a control**
 - `/proc/meminfo`'s `Cached` at each arm-run boundary
 - wall-clock start and end of every arm-run
+
+**Placement is pinned, not merely recorded.** Recording it is not enough and the
+previous version of this plan implied it was. Applying load changes which
+processors are free, so placement is a post-treatment mediator: conditioning on
+it afterwards to recover a direct effect needs an assumption about unmeasured
+mediator-outcome confounding that nothing here supports, and if the load
+displaces the server systematically there is no within-stratum comparison left
+to make at all. The recorded column would then document the confound without
+separating it. The record is also an undersampled proxy: the field says where a
+thread last ran, not where it spent its time, and a decode step is a few
+milliseconds against a one-second tick. So the server is pinned to a fixed
+processor set in every arm-run, the load's processor set is a design factor
+rather than whatever the scheduler decides, and the recorded column becomes a
+check that the pinning held rather than a covariate to adjust for.
 
 **The manipulation check is on interference, not on presence.** The previous
 version gated on the load's own CPU percentage, which certifies that something
@@ -282,7 +392,13 @@ others are as mechanically plausible, and their denominators are already
 recorded per arm-run: a cost per model forward pass, and a cost per target-model
 step. A round that drafts k tokens and has a accepted yields a+1 tokens, so over
 a run the round count is generated minus accepted exactly, which makes both
-denominators derivable rather than assumed. `analysis/load_run_power.py`
+denominators derivable rather than assumed. That identity carries the whole
+cross-arm argument, so it is checked rather than asserted: the competing reading
+of `draft_n_accepted`, in which it counts the bonus token the target emits each
+round, would make accepted equal generated, and it does not; and it would put
+drafted-per-round above the arm's own draft maximum, while `spec-dflash-n2` at
+n equal to two comes out at 1.978. Both checks are in the script and both are
+held as regressions. `analysis/load_run_power.py`
 computes the table; scaling each hypothesis so that `spec-dflash-n2` lands at
 exactly −2 %:
 
@@ -405,7 +521,11 @@ nothing without it.
 or
    end per arm-run to join them on. Two lines in `run_arm`.
 
-A fifth is not a prerequisite but is worth fixing while these are open:
+A fifth: the server's thread count has to be passed explicitly and recorded,
+because llama.cpp's own choice is the variable that decides whether any of this
+work reaches an efficiency core, and the tree does not record what it was.
+
+A sixth is not a prerequisite but is worth fixing while these are open:
 `host_guard.protect()` applies `limit_threads()` and `be_nice()` before its
 `BENCH_ALLOW_CONTENDED` escape, so a caller that has declared its contention
 still gets de-prioritised. Whatever the escape is for, it is not that.
@@ -437,10 +557,11 @@ measurement of it.
 
 The wall-clock figure is a floor, not a budget. Twenty-four blocks of six
 arm-runs is 9600 s of `ready_s` plus summed request time, which is two hours
-forty minutes. It excludes the per-arm warm-up, which is two to ten seconds and
-is recorded nowhere, the teardown settle of about two seconds per arm-run, two
-`nvidia-smi` calls per arm-run, the load's start and stop, and a longer time to
-become healthy under load. Three hours is the honest planning figure.
+forty minutes. Run T4's own invocation prices what that leaves out: 1365 s of
+wall clock against 1198.8 s of `ready_s` plus request time, which is **9.23 s
+per arm-run** of warm-up, teardown settle, two `nvidia-smi` calls and the JSON
+writes. At 144 arm-runs that is 3.03 hours, and the washout this plan mandates
+adds another 0.4. **Three and a half hours is the honest figure**, not three.
 
 The run's data, manifest and telemetry are committed together with the outcome
 section filled in, in one commit, so that the plan and the result cannot drift
