@@ -4,8 +4,7 @@
   the eight tables below cell by cell and `tests/data_mutate.py` perturbs them;
   a figure that drifts out of agreement with the data fails CI.
 
-  Publish with `python tools/publish_pr_body.py --write`, which strips this
-  comment
+  Publish with `python tools/publish_pr_body.py --write`, which strips this comment
   line by line and then reads the body back from GitHub to prove it landed.
   Do not strip it with a regex: the previous one-liner matched a literal
   closing marker inside its own pattern and published half of itself.
@@ -16,8 +15,7 @@
   U+2212 for a negative number is fine and the tables use it.
 -->
 
-This branch audits what this repository had published, measures what it had
-never
+This branch audits what this repository had published, measures what it had never
 run, and then corrects the things the audit itself got wrong. Five external
 reviews drove the last part; every specific accusation in each was verified
 against the code and the data before anything was changed, and every one that
@@ -68,8 +66,7 @@ acceptance and −74.8 %**. A high-acceptance configuration can still lose badly
 when proposal generation, verification, checkpointing and replay are all
 expensive. Which of those dominates, this row does not say; the decomposition
 below puts 24.2 % of the excess on the drafter's own `generate()`.
-`draft/gen` is proposals per generated token, and it is what makes the
-acceptance
+`draft/gen` is proposals per generated token, and it is what makes the acceptance
 column readable: `ngram-map-k4v-m8`'s 50 % is 108 of **216 proposals over 27 000
 generated tokens**, so it is neutral because it almost never fires.
 
@@ -140,12 +137,10 @@ of **0.42 %**. Pooled by block that is 43 measurements spanning 10.8 pp, and
 `draft_n` is 2441 with acceptance 72.3 % in every single one, so the speculative
 work is identical to the token and only the time differs.
 
-Eleven of the twelve runs sit wholly above or below a +23 % split. Run O3
-crosses
+Eleven of the twelve runs sit wholly above or below a +23 % split. Run O3 crosses
 it at block 4, and **in those blocks only this arm moves**: −4.45, −4.66, −3.33,
 −2.93 % against its own first block, while eight other arms, including
-`spec-dflash-n4` (the same DFlash drafter at twice the draft length), never
-leave
+`spec-dflash-n4` (the same DFlash drafter at twice the draft length), never leave
 ±1.24 %. It survives the server restart between arm-runs and can change inside a
 single run. **Run T4 cornered it further**: six repeats in one invocation read
 139.36, 139.72, 139.93, then 145.04, 146.01, 144.43, a **3.9 % step partway
@@ -165,8 +160,7 @@ overlap by 0.1 pp, on 810 of 810 byte-identical request-pairs.
 
 **A17. Every thinking-off comparison that let the arms stop where they liked
 compares different amounts of work.**
-Speculation is not output-preserving on this build, so with thinking off the
-arms
+Speculation is not output-preserving on this build, so with thinking off the arms
 stop in different places; all 5904 thinking-on requests hit the cap and none
 stopped early, while 881 of 1440 thinking-off requests did.
 
@@ -355,15 +349,12 @@ wall-clock share, a `latin` label on a schedule that was not balanced), the
 adversarial pass over this branch's own commits found:
 
 - **`tests/mutate.py` edited the real source files** and restored them in a
-  `finally` that does not run when the process is killed. It committed one of
-  its
+  `finally` that does not run when the process is killed. It committed one of its
   own mutations into the tree; `bench/retest_runner.py` was published with
   `body.pop("ignore_eos", None)`. It runs in a mirror now.
 - **A13 was built from `*__rep0.log`**, one arm-run per arm however many repeats
-  it had. Over every repeat of every run the base grows from 73 to **517** and
-the
-  claim survives, with the margin between the two groups narrowing from 0.5 pp
-to
+  it had. Over every repeat of every run the base grows from 73 to **517** and the
+  claim survives, with the margin between the two groups narrowing from 0.5 pp to
   **0.20 pp**.
 - **The threshold scorecard**, which reads the same file and was keyed by
   `(run, arm)` in a dict, goes from **35 / 37 to 78 / 86**. Three of the eight
@@ -412,8 +403,7 @@ once, 0 survived**, each attestation carrying the head, the
   grows as the coverage does and a clean run is only clean for the tree it ran
   on: the run before this one covered 2 252 numbers across 119 tables.
   `analysis/table_coverage.py --probe --covered --every-cell` is the
-  measurement and **A19** the accounting; 88 code and 84 data and document
-  perturbations
+  measurement and **A19** the accounting; 88 code and 84 data and document perturbations
   remain permanent tests.
 
   Parsing them rather than reading them found twenty-one more published

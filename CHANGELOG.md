@@ -6,11 +6,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning is not strictly semver; each numbered release is a public
 publication point with its own data set.
 
-<!-- A contents block, because these documents are linked into by section name
-from each other and a reader arriving cold had no way to orient but to scroll.
-Generated from the headings; `analysis/check_links.py` validates every anchor
-here, so a heading renamed without this list fails the static job rather than
-rotting quietly. -->
+<!-- A contents block, because these documents are linked into by section name from each other and a reader arriving cold had no way to orient but to scroll. Generated from the headings; `analysis/check_links.py` validates every anchor here, so a heading renamed without this list fails the static job rather than rotting quietly. -->
 
 ## Contents
 
@@ -92,8 +88,7 @@ the W column was read, so V2's `+12.03` and V3's `+12.17`, two thirds of a
 three-way comparison, could have been anything.
 
 The measurement was wrong four times before it measured anything, and all
-four are recorded in the file. The first used the claim checker's exit status,
-and
+four are recorded in the file. The first used the claim checker's exit status, and
 every table came back caught, because one unrelated assertion was failing at
 the time and the checker exited non-zero whatever was done to the documents; a
 probe whose control and treatment agree measures nothing, so it compares
@@ -343,8 +338,7 @@ Every arm visits every position exactly once **and** is preceded by every other
 arm exactly once within a repeat, verified from the arm-runs' own `t_start`
 order in all five sessions rather than from the manifest.
 
-The analysis plan was committed in `PROSPECTIVE_ANALYSIS_PLAN_W.md` while the
-run was at
+The analysis plan was committed in `PROSPECTIVE_ANALYSIS_PLAN_W.md` while the run was at
 360 of 500, and the checker asserts that commit is an ancestor of the one
 carrying the data. It fixed the estimators, the thresholds, and four things
 that would cost something: that a three-way disagreement would be published as
@@ -538,8 +532,7 @@ than a literal.
 
 ### The third review
 
-A third review asking for changes, at head `8954411`. Every accusation in it
-was checked
+A third review asking for changes, at head `8954411`. Every accusation in it was checked
 against the code and the data before anything moved, and every one that could be
 checked was right.
 
@@ -823,8 +816,7 @@ are in the result.
 
 **The tag is `v4.2`.** It was `raw-evidence-2026-08-31-v4.2` earlier on
 2026-09-01, a name that put a date and a version in one and matched neither of
-the two families this repository already had: `v1.0` through `v3.0` for
-versions,
+the two families this repository already had: `v1.0` through `v3.0` for versions,
 `raw-evidence-2026-08-27` for an evidence drop. The cost was not only tidiness.
 `CITATION.cff` names the version `v4.2`, and the test that asks whether that
 version is a tag compares the two strings; against a tag merely CONTAINING it,
@@ -938,8 +930,7 @@ and the second half of this entry is what that found.
 - **Four tables were computed and asserted while the tables themselves were not
   parsed.** Planting wrong numbers in the headline table, the O2/O3 replication
   table, the footnote, A12's accounting, A13's counters and C4b's thermals all
-  passed. They are parsed cell by cell, and 36 perturbations are permanent
-  tests.
+  passed. They are parsed cell by cell, and 36 perturbations are permanent tests.
 - **Two committed `paired_blocks.json` came from an exploratory command** at
   `--iters=2000` rather than the documented default.
 - **"No raw measurement file was edited" was not what happened**: three v2 files
@@ -1139,8 +1130,7 @@ suite's control fail is not established: the overlap was between two probe runs
 and the suite's failures were on a different host on a different day.
 
 The data perturbation suite was run four times over this work. Two of those runs
-had one shard refuse to start, on different shards; two ran clean, and one of
-the
+had one shard refuse to start, on different shards; two ran clean, and one of the
 clean ones was the faithful CI reproduction, which runs the same script. The two
 that refused were at twenty-four and at twelve shards and the two that ran clean
 were at twelve and at thirty-two, so it does not follow the concurrency either.
@@ -1151,16 +1141,13 @@ stops rather than one that reports a catch it did not make, and no perturbation
 survived in any of the three runs.
 
 The cause is not established and this note does not claim one. Re-running the
-refusing shard on its own passed, and so did two full runs, so it is
-intermittent
+refusing shard on its own passed, and so did two full runs, so it is intermittent
 rather than a property of the tree. What the two failures did
 establish is that the control could not say what had happened: it printed the
 last two thousand characters of the checker's stdout and nothing else, and the
 tail of a checker killed by a signal is a run of PASS lines, exactly like the
-tail of one that failed an assertion earlier in its output. It reports the
-return
-code, whether that code is a signal, the FAIL lines the output actually holds
-and
+tail of one that failed an assertion earlier in its output. It reports the return
+code, whether that code is a signal, the FAIL lines the output actually holds and
 the tail of stderr now, so the next occurrence names itself.
 
 `tests/` gains a class that ties the correlation figure to the data in a third
@@ -1230,21 +1217,21 @@ publishes from run T4's committed arm-runs, and `--check` asserts the document
 prints what the code computes. It exists because the first version of the power
 table used T4's block variability as if it were noise while also adding the
 arm's own level change on top, counting that change twice: the model implied
-about a third more block spread than T4 shows, and it published a detection rate
-of about one in ten for a design whose real rate is about one in three. The
-redesign still earns its cost, since within-block pairing takes that to better
-than nine in ten, but it earns it against an honest baseline. The claim that the
-older design could not reach one in three at any switching rate was false and is
-gone.
+about a third more block spread than T4 shows, and it published a detection
+rate of about one in ten for a design whose real rate is about one in three.
+The redesign still earns its cost, since within-block pairing takes that to
+better than nine in ten, but it earns it against an honest baseline. The claim
+that the older design could not reach one in three at any switching rate was
+false and is gone.
 
 **A third pass over that correction found the correction's own weakest input.**
 The power table needs to know how often the arm changes level on its own, and
 the first two versions took it from run T4: one transition across five adjacent
 gaps. That is a single event, and the exact Poisson interval for one event in a
 thousand seconds of observation runs from about a hundred and eighty seconds to
-nearly forty thousand. No table can rest on that. The script now walks every run
-in the corpus that repeats this arm inside one invocation, which is fifty of
-them, and counts a hundred level changes across two hundred and ninety one
+nearly forty thousand. No table can rest on that. The script now walks every
+run in the corpus that repeats this arm inside one invocation, which is fifty
+of them, and counts a hundred level changes across two hundred and ninety one
 adjacent gaps.
 
 Counting those changes and dividing by elapsed time is not the estimator
@@ -1289,16 +1276,16 @@ separates them from each other.
 **And the load it had chosen could not have worked.** The plan had specified
 this repository's own perturbation suite, justified as reproducing the
 contention incident. ERRATA says that incident was recorded by a sibling
-project's harness and that what this repository attests is only its absence, and
-the guard's own notes say attributing the burst to the suite is the mistake A12
-was written about. The plan was citing as its own measurement a thing its own
-errata disclaims. The suite would also have arrived at low priority with one
-BLAS thread, because the guard applies both before its own contention escape, so
-the treatment would have been de-prioritised by the guard it was invoking. The
-load is a stated number of busy processes at ordinary priority, the check is on
-the serving process's runqueue wait rather than on the load's own footprint, and
-the plan says plainly that page cache and disk are untouched so a null does not
-cover them.
+project's harness and that what this repository attests is only its absence,
+and the guard's own notes say attributing the burst to the suite is the mistake
+A12 was written about. The plan was citing as its own measurement a thing its
+own errata disclaims. The suite would also have arrived at low priority with
+one BLAS thread, because the guard applies both before its own contention
+escape, so the treatment would have been de-prioritised by the guard it was
+invoking. The load is a stated number of busy processes at ordinary priority,
+the check is on the serving process's runqueue wait rather than on the load's
+own footprint, and the plan says plainly that page cache and disk are untouched
+so a null does not cover them.
 
 **Two facts about the bench host are now written down, because both passes
 reasoned about the wrong machine.** It is bare metal with no steal column, so
@@ -1336,12 +1323,11 @@ of run X is that both arms hold.
 
 So the plan gained a section saying what should run **before** it. The bench
 host is hybrid, and pinning the server to its efficiency cores is a deliberate
-worst
-case, a clock cut of about a quarter, beyond anything ambient scheduling could
-produce. Two arms, two pinnings, six blocks is a third of an hour, and a null
-inside one per cent bounds the entire host-processor-speed family at once, which
-would make run X unnecessary. Run X is three and a half hours once its own
-mandated washout is counted, which is also corrected here from three.
+worst case, a clock cut of about a quarter, beyond anything ambient scheduling
+could produce. Two arms, two pinnings, six blocks is a third of an hour, and a
+null inside one per cent bounds the entire host-processor-speed family at once,
+which would make run X unnecessary. Run X is three and a half hours once its
+own mandated washout is counted, which is also corrected here from three.
 
 The same pass found that **recording core placement is not enough; it has to be
 pinned.** Applying load changes which processors are free, so placement is a
@@ -1413,15 +1399,15 @@ matters: corrupting either fails the check by name.
 Three smaller defects from the same pass, all of which changed a published
 number. The plan mandated a washout between the two members of a pair and the
 simulation contained none, so its table described a design nobody was going to
-run; the washout is in the model now and the plan publishes what it costs, which
-is six points of detection and twelve of specificity. The t table held two
-degrees of freedom and the plan permits seven, so dropping a single pair --
-which
-the plan explicitly provides for -- raised a key error in the only committed
-implementation of its own estimator. And the rule that removes the level change
-before measuring the residual did so unconditionally, which biases the residual
-low by about a quarter when there is no level change to remove; it refuses now
-unless the change it is removing is at least three times the next largest.
+run; the washout is in the model now and the plan publishes what it costs,
+which is six points of detection and twelve of specificity. The t table held
+two degrees of freedom and the plan permits seven, so dropping a single pair --
+which the plan explicitly provides for -- raised a key error in the only
+committed implementation of its own estimator. And the rule that removes the
+level change before measuring the residual did so unconditionally, which biases
+the residual low by about a quarter when there is no level change to remove; it
+refuses now unless the change it is removing is at least three times the next
+largest.
 
 **Where that plan sits in the coverage census, and why the reason is the release
 and not the genre.** `analysis/table_coverage.py` puts every markdown file here
@@ -1468,8 +1454,7 @@ one which made them stale.
   the runner end to end in a second without a GPU. The guards that fire after
   the arm loop had no test because reaching them needed a 20 GiB model, and a
   mutation that deleted the completeness check survived the whole suite.
-- `bench/collect_evidence.sh`, `requirements-plot.lock`,
-`analysis/plot_data.json`,
+- `bench/collect_evidence.sh`, `requirements-plot.lock`, `analysis/plot_data.json`,
   and the SHA-256 manifest of the twelve run T logs.
 
 ### Fixed
@@ -1672,8 +1657,7 @@ statistics, and the causal claims. Full itemised list with evidence:
 - **"Vocab-matched draft model."** llama.cpp rejected the pair on its
   special-token gate and ran the token-translation fallback for every
   classic-draft measurement ever published here.
-- **"The regression is structural / engine-independent /
-hardware-independent."**
+- **"The regression is structural / engine-independent / hardware-independent."**
 - **"Q4 collapses the technique"**, **"the mechanism generalises to DFlash"**,
   **"co-trained heads are the only positive yield path"** — all removed from
   v3.
@@ -1750,10 +1734,7 @@ hardware-independent."**
   reconstructs the acceptance-counter artefact from any `-v` log.
 - [`bench/retest_runner.py`](bench/retest_runner.py): one pinned binary,
   ABBA ordering, N repeats, hashed manifest, and per-request capture of text,
-  reasoning channel, stop reason, timings, and token IDs via `logprobs`
-(near-complete: `probs_output` drops trailing stop-word tokens,
-`server-context.cpp:2036-2039`, so the list can run a few short of
-`predicted_n`, which stays the authority for token counts).
+  reasoning channel, stop reason, timings, and token IDs via `logprobs` (near-complete: `probs_output` drops trailing stop-word tokens, `server-context.cpp:2036-2039`, so the list can run a few short of `predicted_n`, which stays the authority for token counts).
   Thinking suppression is verified per request, not assumed.
 - `analysis/plot_acceptance_accounting.png`, replacing the retracted scatter.
 - `SHA256SUMS`, `CITATION.cff`, `DATA_LICENSE`, `LICENSES/CC0-1.0.txt`.
@@ -1771,12 +1752,7 @@ support.
 
 A natural follow-up to this repo's MTP findings was published in the sibling [`qwen3.6-vllm-2x3090` v5.0](https://github.com/thc1006/qwen3.6-vllm-2x3090/releases/tag/v5.0): a same-hardware A/B between the production MoE Qwen3.6-35B-A3B-AWQ + MTP k=3 + TP=2 stack and the new dense sibling **Qwen3.6-27B-AWQ** on a voice-agent workload (10 prompts × 3 trials × 2 models = 60 samples).
 
-Result: **MoE+MTP production stack wins decisively** — TTFT 178 ms vs Dense 771
-ms (**4.34×**), tok/s 88 vs 16 (**5.42×**), e2e 274 ms vs 1684 ms (**6.13×**).
-The "Dense 27B fits TP=1, should be cheaper to serve" intuition is falsified on
-this hardware × workload, and the MTP k=3 production recommendation from this
-repo's v3.0 is corroborated by the absence of any cheaper Dense-no-spec
-alternative.
+Result: **MoE+MTP production stack wins decisively** — TTFT 178 ms vs Dense 771 ms (**4.34×**), tok/s 88 vs 16 (**5.42×**), e2e 274 ms vs 1684 ms (**6.13×**). The "Dense 27B fits TP=1, should be cheaper to serve" intuition is falsified on this hardware × workload, and the MTP k=3 production recommendation from this repo's v3.0 is corroborated by the absence of any cheaper Dense-no-spec alternative.
 
 Caveat: see the [vllm-2x3090 v5 README scope section](https://github.com/thc1006/qwen3.6-vllm-2x3090/blob/master/v5_2026_05_17/README.md#scope-and-known-caveats), N=3, single hardware, plus several vLLM-config and prompt-specification confounds documented in the ERRATA. **Latency findings are compute-bound and robust; tool-accuracy findings need a prompt-matched retest.** This repo (`qwen3.6-speculative-decoding-rtx3090`) does not get a version bump or new release for this event, the work belongs in the sibling repo's lineage.
 
@@ -1786,11 +1762,9 @@ Caveat: see the [vllm-2x3090 v5 README scope section](https://github.com/thc1006
 
 - **DFlash speculative-decoding bench** via llama.cpp PR #22105 on the same
   hardware as v2.x. Full content in [`v3_dflash_2026_05_07/`](v3_dflash_2026_05_07/).
-  - Setup: same RTX 3090 (single card) + `Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf`
-    target. target.
+  - Setup: same RTX 3090 (single card) + `Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf` target.
     Drafter is `z-lab/Qwen3.6-35B-A3B-DFlash` (HF safetensors), converted to
-    GGUF via PR #22105's modified `convert_hf_to_gguf.py` with
-    `--target-model-dir`.
+    GGUF via PR #22105's modified `convert_hf_to_gguf.py` with `--target-model-dir`.
   - 5 prompts x 1 trial x 3 draft-max configs (4, 8, 16) = 15 measurements.
   - Result: **NET LOSS -44.6 % at best (DFlash --draft-max=8: 77.0 tok/s vs
     138.9 tok/s no-spec baseline)**. Slightly less bad than v2.x's Oleg

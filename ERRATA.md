@@ -20,11 +20,7 @@ experiment's stated treatment · **E** is a theory error · **F** is metadata.
 
 ---
 
-<!-- A contents block, because these documents are linked into by section name
-from each other and a reader arriving cold had no way to orient but to scroll.
-Generated from the headings; `analysis/check_links.py` validates every anchor
-here, so a heading renamed without this list fails the static job rather than
-rotting quietly. -->
+<!-- A contents block, because these documents are linked into by section name from each other and a reader arriving cold had no way to orient but to scroll. Generated from the headings; `analysis/check_links.py` validates every anchor here, so a heading renamed without this list fails the static job rather than rotting quietly. -->
 
 ## Contents
 
@@ -836,8 +832,7 @@ determinism control holds everywhere: 70/70 self-reproducible prompts in K1 and
 50/50 in each half of L, on top of J's original 50/50.
 
 So the effect is not a quirk of one run, and it is not constant: at a 300-token
-cap it is effectively certain, and at short answers it is a coin toss weighted
-by
+cap it is effectively certain, and at short answers it is a coin toss weighted by
 length.
 
 **What it changes here.** It does not invalidate run J's +18.7 %: every arm
@@ -959,8 +954,7 @@ stripped only the literal `__rep0.log` when deriving the arm name, so repeats
 1–3 were filed under `spec-draft-n8__rep1` and the like, and the controls
 (which were extracted for rep0 alone) rested on a single log each. The
 extractor now strips `__rep\d+` and records the repeat index separately;
-per-log SHA-256 sums are in
-`v4_audit_2026_08_25/data/checkpoint_timers_sha256.txt`.
+per-log SHA-256 sums are in `v4_audit_2026_08_25/data/checkpoint_timers_sha256.txt`.
 
 The corresponding volume, at the 82.079 MiB the server reports per checkpoint:
 `common_prompt_checkpoint::size()` returns `data_tgt + data_dft + data_spec`,
@@ -984,8 +978,7 @@ come from the same twelve logs**; the run J row is retained because the figure
 That is an event-count × reported-size estimate, not measured memory traffic; no
 profiler or memory-controller counter was read. An earlier version added the
 draft component a second time on every create and reported 76.4 and 133.2 GiB.
-Both were wrong and appeared in this file, in `README.md` and in the
-pull-request
+Both were wrong and appeared in this file, in `README.md` and in the pull-request
 description.
 
 **So the withdrawn estimate was not merely unsound, it was low, and the reason
@@ -1200,8 +1193,7 @@ ordering (self-speculation above no speculation above external speculation, by
 factors, not points) is far larger than this and is unaffected.
 
 Committed evidence: the manifests and per-request JSON of every run named above;
-the reproducibility table is recomputed from them by
-`analysis/verify_claims.py`.
+the reproducibility table is recomputed from them by `analysis/verify_claims.py`.
 
 ---
 
@@ -1229,8 +1221,7 @@ instrumented tree for run T, then reverting `server-context.cpp` and rebuilding:
 
 Two builds whose server logic differs, and the field that was supposed to tell
 them apart is byte-identical across them. `strings` finds the instrumentation
-marker in the shared object and not in the launcher, so this is not a
-build-order
+marker in the shared object and not in the launcher, so this is not a build-order
 artefact.
 
 **What it does not mean.** No run here used a binary other than the one
@@ -1246,12 +1237,9 @@ only evidence that the binary was what the manifest says is the checkout state
 and the absence of any rebuild between them: an argument from circumstance
 rather than from a recorded fact. Run O2 onward carry the real evidence.
 
-**Fixed.** The runner now records `server_lib_sha256`: every shared object
-beside
-the binary, de-duplicated by the file each symlink resolves to, since
-`libfoo.so`
-and `libfoo.so.0` are the same file. That is the field that distinguishes the
-two
+**Fixed.** The runner now records `server_lib_sha256`: every shared object beside
+the binary, de-duplicated by the file each symlink resolves to, since `libfoo.so`
+and `libfoo.so.0` are the same file. That is the field that distinguishes the two
 builds above.
 
 The instrumentation itself is archived at
@@ -1266,8 +1254,7 @@ Run T3 (2026-08-26 20:32) is run T (18:26) repeated at three balanced blocks
 instead of four unbalanced ones. Everything else was held: the same instrumented
 `libllama-server-impl.so` `ce94855f…`, the same target, drafter and DFlash GGUFs
 by SHA-256, the same `--fit-target 3072`, the same ten prompts, greedy at seed
-42. The runner asserted the library hash **per arm-run** this time, so the
-binary
+42. The runner asserted the library hash **per arm-run** this time, so the binary
 is pinned for each of the nine, not once for the run.
 
 The two runs produced **byte-identical output**. Every generated token id, every
@@ -1286,8 +1273,7 @@ The DFlash shortfall is on **every prompt** (−0.6 % to −4.7 %, never positiv
 and the three T3 repeats agree among themselves to 0.7 %. It is a shift of the
 whole run, not one bad arm-run.
 
-**It is not thermal, and it is not the fitter.** The continuous telemetry for
-the
+**It is not thermal, and it is not the fitter.** The continuous telemetry for the
 two runs agrees to a tenth of a degree and a megahertz over their loaded
 samples: mean **63.5 °C and 1946 MHz** in T against **63.6 °C and 1947 MHz** in
 T3, mean board power **240.3 W** against **240.1 W**. Both DFlash servers logged
@@ -1669,8 +1655,7 @@ that moves every arm equally cancels.
 > other method, `analysis/length_matching.py`, reports for the same arms, which
 > is why it is the published one.
 >
-> `analysis/length_mode.py` defined the session effect as a difference of
-**log**
+> `analysis/length_mode.py` defined the session effect as a difference of **log**
 > ratios in its own documentation while averaging the percentage-point form, and
 > the two are not the same estimand. They agree where the arm sits near its
 > baseline and diverge sharply where it does not:
@@ -1907,8 +1892,7 @@ loaded, the software power cap is flagged on **1 762**, the software thermal
 slowdown on **13** and the hardware one on **10**, between 45 and 73 °C against
 the ~83 °C point A16 measures, which is the same order as W's 4 and 3 in 4 297.
 Every session: 100 files, 10 arms, 1000 request rows, 630 at the cap,
-first-order carryover balanced verified from `t_start`. It is a separate
-invocation with its own `BENCH_RUN_LABEL`, so no
+first-order carryover balanced verified from `t_start`. It is a separate invocation with its own `BENCH_RUN_LABEL`, so no
 analyser can pool it with W by accident, and the runner and server hashes are
 identical to W's. Twelve sessions was fixed in advance from W's own spread, in
 [`PROSPECTIVE_ANALYSIS_PLAN_W2.md`](v4_audit_2026_08_25/PROSPECTIVE_ANALYSIS_PLAN_W2.md),
@@ -2463,8 +2447,7 @@ number and this file exists because of unchecked numbers.
     the body said 3792 and the comparison agreed with itself. A figure derived
     once, at a place the code then grows past, is the same shape as a guard
     written as a floor and left behind by the tree it guards, which the commit
-    before this one removed from five places. The count is taken last now, and
-    a regression refuses
+    before this one removed from five places. The count is taken last now, and a regression refuses
     any `chk` after it.
 55. **119 MB of derivable duplicates were committed, and the copy belonging to
     the run the headline table comes from was stale.** Each run directory

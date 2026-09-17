@@ -73,12 +73,11 @@ because two of these facts are candidate explanations that cost one column to
 rule out.
 
 The bench host is bare metal: `systemd-detect-virt` reports none,
-`/proc/cpuinfo`
-carries no hypervisor flag, and `/proc/stat`'s steal column is zero. Hypervisor
-descheduling, which would look exactly like A16 and is invisible to every guest
-counter, is therefore not available as an explanation here. The development box
-these plans are written on IS a KVM guest with a live steal column, which is why
-the distinction is worth writing down.
+`/proc/cpuinfo` carries no hypervisor flag, and `/proc/stat`'s steal column is
+zero. Hypervisor descheduling, which would look exactly like A16 and is
+invisible to every guest counter, is therefore not available as an explanation
+here. The development box these plans are written on IS a KVM guest with a live
+steal column, which is why the distinction is worth writing down.
 
 It is an i9-13900K: thirty-two logical processors across three frequency tiers,
 5800 MHz on four of them, 5500 MHz on twelve and **4300 MHz on sixteen**. The
@@ -162,11 +161,10 @@ It would make run X unnecessary. A positive sends you to a crossed design,
 placement against load, two arms and twelve blocks, at 1.36 hours, which also
 supplies the heat-without-contention cell this plan lists as a limitation.
 
-Run X as written is 3.03 hours of arm-runs and 3.43 with the washout it mandates
-below. It is pre-registered here because the question is worth a
-pre-registration
-and because writing it is what found everything above. It should not be the next
-thing on the card.
+Run X as written is 3.03 hours of arm-runs and 3.43 with the washout it
+mandates below. It is pre-registered here because the question is worth a
+pre-registration and because writing it is what found everything above. It
+should not be the next thing on the card.
 
 ## Why this is an intervention and not an observation
 
@@ -276,8 +274,7 @@ most unloaded arm-runs immediately follow a loaded one. Alternating the order
 spreads that contamination evenly across the contrast rather than removing it.
 So the plan inserts an explicit equal washout between pair members and records
 `/proc/meminfo`'s `Cached` at every arm-run boundary, which makes the carryover
-a
-measured covariate instead of an argument.
+a measured covariate instead of an argument.
 
 ## What the load is
 
@@ -434,8 +431,8 @@ arm-specific branch as the one-sided claim that D lies wholly above zero. That
 worked only while every hypothesis put D on the same side of zero, which was an
 artefact of the wrong round count. With the drafter's count the three give
 +0.000, −0.102 and **+0.062** ms per token: a purely arm-agnostic
-per-target-step
-cost now produces exactly the signature the rule reserved for arm-specificity.
+per-target-step cost now produces exactly the signature the rule reserved for
+arm-specificity.
 
 **So the test is a fit, not a contrast.** Each row above is one free scale over
 fixed per-arm weights, so with three arms it leaves two degrees of freedom and
@@ -469,9 +466,9 @@ by a coincidence. The power table is computed against both.
 
 ## What would falsify what
 
-Two words, defined on the **interval** so that both are reachable and neither is
-an absence-of-evidence claim, and **two sided**, because a load that makes an
-arm faster is a real finding and the first version of this plan filed it as
+Two words, defined on the **interval** so that both are reachable and neither
+is an absence-of-evidence claim, and **two sided**, because a load that makes
+an arm faster is a real finding and the first version of this plan filed it as
 undecided:
 
 - an arm **moves** when its whole interval lies outside ±1 %; the sign is
@@ -481,12 +478,11 @@ undecided:
 
 **The arm moves and every arm-agnostic fit is rejected.** The mechanism exists
 on this host and it is not any host cost this plan can name. This does not
-establish
-that ambient load caused the steps A16 recorded: those runs have no load column
-and cannot be revisited. What it establishes is that the column has to exist
-from now on, and that every decode-rate comparison **on this host** is exposed
-to it. The other hosts carry different toolchains and the question is open on
-each of them separately.
+establish that ambient load caused the steps A16 recorded: those runs have no
+load column and cannot be revisited. What it establishes is that the column has
+to exist from now on, and that every decode-rate comparison **on this host** is
+exposed to it. The other hosts carry different toolchains and the question is
+open on each of them separately.
 
 **The arm moves and one arm-agnostic fit survives.** Host load costs this
 machine a fixed amount per token, or per forward pass, or per target-model step,
@@ -500,8 +496,8 @@ tell them apart and says that instead.
 hypotheses A16 names, the junction temperature stays untestable here, and the
 page-cache and allocator-state one is untested rather than excluded; it is the
 successor run and is listed in `RETEST_TODO.md` as such. This branch does not
-license the sentence that A16 has no testable hypothesis left, which is what the
-first version of this plan pre-committed to and which A16's own text
+license the sentence that A16 has no testable hypothesis left, which is what
+the first version of this plan pre-committed to and which A16's own text
 contradicts.
 
 **Anything else: inconclusive, and it licenses nothing.** An arm landing between
@@ -601,16 +597,15 @@ prospective plans of exactly this kind are censused, and one of them,
 own — run W2's data is committed, but the plan document holds none of it.
 
 What excludes this one is that `analysis/verify_claims.py` pins the number of
-censused documents at eleven and the decimal prose census at its current pair of
-values, and that checker is one of the six files
-`bench/check_release_binding.py`
-compares between the `v4.2` tag and HEAD. Note where the freeze bites:
-`table_coverage.py` is not itself bound, so growing its list is not editing a
-frozen file. It is editing an unfrozen one in a way that makes a frozen one
-fail, which cannot then be fixed without changing the frozen one, and the tag
-would stop publishing the tree that verifies it. This document also quotes
-decimals from A16, so censusing it would move the decimal census as well as the
-count.
+censused documents at eleven and the decimal prose census at its current pair
+of values, and that checker is one of the six files
+`bench/check_release_binding.py` compares between the `v4.2` tag and HEAD. Note
+where the freeze bites: `table_coverage.py` is not itself bound, so growing its
+list is not editing a frozen file. It is editing an unfrozen one in a way that
+makes a frozen one fail, which cannot then be fixed without changing the frozen
+one, and the tag would stop publishing the tree that verifies it. This document
+also quotes decimals from A16, so censusing it would move the decimal census as
+well as the count.
 
 When run X produces data, that changes. The honest accounting is that the census
 is not what costs anything: run X's raw logs go into `EVIDENCE_MANIFEST.sha256`
@@ -625,5 +620,4 @@ existing attestations pin, so all thirty-two shards have to be produced again.
 # Outcome
 
 Not run yet. This section is filled in when the data is committed, and until
-then
-its emptiness is the point.
+then its emptiness is the point.
