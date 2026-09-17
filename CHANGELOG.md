@@ -1383,8 +1383,11 @@ did not work.** `--check` matched by substring, so swapping two rows of the
 power table, flipping every sign in the cross-arm table, or destroying the
 critical values the intervals are built from all passed it; sixteen of
 twenty-two deliberate corruptions went through. It anchors on each row's own
-label now and reads every published cell, ten of ten corruptions fail it, and
-`audit.yml`'s claims job runs it. A guard nothing invokes is not a guard, and
+label now, reads all four of the plan's tables, and 13 of 13 corruptions fail
+it. The corruptions are a committed test rather than a sentence, because the
+first version of this claim was a figure with nothing deriving it, which is the
+failing this branch is about; the test also requires this number to be the one
+the harness actually holds. `audit.yml`'s claims job runs the check. A guard nothing invokes is not a guard, and
 the previous entry called it the thing that stops the figures drifting.
 
 Widening it found two more numbers with no code path behind them, both written

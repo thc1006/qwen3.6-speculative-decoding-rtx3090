@@ -6679,3 +6679,93 @@ class APowerTableMayNotCountTheStepTwice(unittest.TestCase):
         self.assertGreater(b, a + 0.3,
                            "the redesign is justified by this gap; if it closes, "
                            "the plan is paying two and a half hours for nothing")
+
+
+class APlanCheckMustCatchACorruptedPlan(unittest.TestCase):
+    """The corruption count the changelog quotes, derived instead of asserted.
+
+    `analysis/load_run_power.py --check` compares the plan document against what
+    the script derives. A changelog entry said it "reads every published cell"
+    and that "ten of ten corruptions fail it", and nothing in the tree enumerated
+    those corruptions: a figure with no code path, which is the failing the same
+    branch was written to remove. The corruptions live here now, so the count is
+    a property of this file rather than of a sentence.
+
+    Each case corrupts a COPY of the plan in memory and requires `check_plan` to
+    name the thing it corrupted. The power table is not corrupted here, because
+    reproducing its figures needs forty thousand draws per design; the cases are
+    the deterministic ones, and the power table is covered by the claims job
+    running `--check` at the trial count the document was written at.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    @classmethod
+    def setUpClass(cls):
+        import importlib.util
+        import statistics as _st
+        spec = importlib.util.spec_from_file_location(
+            "load_run_power", cls.ROOT / "analysis" / "load_run_power.py")
+        cls.mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.mod)
+        m = cls.mod
+        cls.plan = m.PLAN.read_text(encoding="utf-8")
+        cls.m = m.measured()
+        cls.p_table = m.power(cls.m, None, 400)          # cheap: not corrupted below
+        cls.ms = {a: 1000.0 / _st.mean(m.pooled(a, i) for i in range(6))
+                  for a in m.ARMS}
+        cls.nz = m.normalisers()
+        cls.keys = (("per_token", "per generated token"),
+                    ("per_forward", "per model forward pass"),
+                    ("per_target_step", "per target-model step"))
+        cls.dl, cls.sg = m.t4_step()
+        cls.cc = m.corpus_correlation()
+        cls.wc = m.wall_clock()
+
+    def _missing(self, txt):
+        return self.mod.check_plan(txt, self.m, self.p_table, self.ms, self.nz,
+                                   self.keys, self.dl, self.sg, self.cc,
+                                   self.wc, {}, {})
+
+    def _cases(self):
+        p = self.plan
+        return {
+            "arm levels, every sign flipped":
+                p.replace("**+3.93 %**", "**\u22123.93 %**")
+                 .replace("**\u22120.74 %**", "**+0.74 %**"),
+            "arm levels, a row deleted":
+                p.replace("| `spec-dflash-n2` | 139.671 | 145.161 | **+3.93 %** |\n", ""),
+            "arm levels, a level edited":
+                p.replace("139.671", "149.671"),
+            "the measured gap":      p.replace("3.93 %", "3.50 %"),
+            "the residual":          p.replace("0.537 %", "0.760 %"),
+            "the block CV":          p.replace("2.145 %", "2.768 %"),
+            "the adjacent SD":       p.replace("0.760 %", "0.999 %"),
+            "a corpus correlation":  p.replace("+0.073", "+0.573"),
+            "another correlation":   p.replace("\u22120.083", "+0.983"),
+            "a chi-square":          p.replace("chi-square 89", "chi-square 12"),
+            "the wall clock":        p.replace("3.63", "9.63"),
+            "a normaliser row":      p.replace("| **\u22123.93 %** |", "| \u22121.64 % |"),
+            "the normaliser signs":  p.replace("| \u22122.00 % |", "| +2.00 % |"),
+        }
+
+    def test_the_plan_as_committed_raises_nothing_outside_the_power_table(self):
+        left = [x for x in self._missing(self.plan) if "within-block" not in x
+                and "between-block" not in x]
+        self.assertEqual(left, [], "the document disagrees with the script")
+
+    def test_every_corruption_is_caught_and_named(self):
+        base = set(self._missing(self.plan))
+        missed = []
+        for name, txt in self._cases().items():
+            new = set(self._missing(txt)) - base
+            if not new:
+                missed.append(name)
+        self.assertEqual(missed, [], f"{len(missed)} corruption(s) pass the check")
+
+    def test_the_corruption_set_is_not_empty_and_is_the_count_published(self):
+        n = len(self._cases())
+        self.assertGreaterEqual(n, 13, "the set shrank without the changelog moving")
+        doc = (self.ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+        self.assertIn(f"{n} of {n} corruptions", " ".join(doc.split()),
+                      "the changelog quotes a corruption count this file does not have")

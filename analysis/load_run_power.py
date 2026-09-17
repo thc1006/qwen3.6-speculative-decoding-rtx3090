@@ -502,6 +502,101 @@ def power(m: dict, hazard_s: float | None = None,
     return out
 
 
+def check_plan(txt, m, p_table, ms, nz, keys, dl, sg, cc, wc, ends, washouts):
+    """Every published figure this file derives, compared against the document.
+
+    Returned as a list rather than printed, so that a regression test can
+    corrupt the document and assert WHICH comparison fails. The count of
+    corruptions this catches was a sentence in the changelog with nothing
+    deriving it, which is the failing this file exists to remove.
+    """
+    missing = []
+    for want in (f"{m['gap']:.2f} %", f"{m['residual']:.3f} %",
+                 f"{m['adjacent_diff_sd']:.3f} %", f"{m['block_cv']:.3f} %"):
+        if want not in txt:
+            missing.append(want)
+    # ROW-ANCHORED, not a bare substring: the first version looked for the
+    # value anywhere after a pipe, so swapping two rows of the table, or
+    # flipping every sign in the normaliser table, passed unnoticed.
+    rows = {"between-block, 6 against 6": "between-block, 6 against 6",
+            "within-block, 12 pairs": "within-block, 12 pairs",
+            "within-block, 18 pairs": "within-block, 18 pairs",
+            "within-block, 24 pairs": "within-block, 24 pairs"}
+    for name, label in rows.items():
+        r = p_table[name]
+        want = [f"{r['-2']['moves']:.2f}", f"{r['-gap']['moves']:.2f}",
+                f"{r['0']['holds']:.2f}"]
+        line = next((l for l in txt.splitlines()
+                     if l.startswith("|") and label in l), None)
+        if line is None:
+            missing.append(f"row {label!r} absent")
+            continue
+        cells = [c.strip().strip("*") for c in line.strip("|").split("|")]
+        if cells[1:4] != want:
+            missing.append(f"row {label!r} prints {cells[1:4]} not {want}")
+    # the chi-squares the plan quotes, to the precision it quotes them
+    chis = []
+    for key, _label in keys:
+        f = fit_agnostic(dl, sg, {a: nz[a][key] for a in ARMS})
+        chis.append(f"{f['chi2']:.0f}")
+    flat = " ".join(txt.split())
+    if f"chi-square {chis[0]}, {chis[1]} and {chis[2]}" not in flat:
+        missing.append(f"chi-squares {chis}")
+    # the two tables the first version of this check never looked at
+    levels = {a: (st.mean(pooled(a, i) for i in range(3)),
+                  st.mean(pooled(a, i) for i in range(3, 6))) for a in ARMS}
+    for a in ARMS:
+        lo_, hi_ = levels[a]
+        want = [f"{lo_:.3f}", f"{hi_:.3f}",
+                f"{100 * (hi_ / lo_ - 1):+.2f} %".replace("+", "+")]
+        line = next((l for l in txt.splitlines()
+                     if l.startswith("|") and f"`{a}`" in l), None)
+        if line is None:
+            missing.append(f"arm-levels row {a!r} absent"); continue
+        got = [c.strip().strip("*").replace("\u2212", "-")
+               for c in line.strip("|").split("|")][1:4]
+        if [g.replace(" ", "") for g in got] != [w.replace(" ", "") for w in want]:
+            missing.append(f"arm-levels row {a!r} prints {got} not {want}")
+    for w, r in washouts.items():
+        label = "none" if w == 0 else f"{w:.0f} s"
+        line = next((l for l in txt.splitlines()
+                     if l.startswith("|") and label in l
+                     and "washout" not in l.lower()), None)
+        if line is None:
+            missing.append(f"washout row {label!r} absent"); continue
+        cells = [c.strip().strip("*") for c in line.strip("|").split("|")]
+        wantw = [f"{r['-2']['moves']:.2f}", f"{r['0']['holds']:.2f}"]
+        if cells[1:3] != wantw:
+            missing.append(f"washout row {label!r} prints {cells[1:3]} not {wantw}")
+    for label, r in ends.items():
+        for v in (f"{r['-2']['moves']:.2f}", f"{r['0']['holds']:.2f}"):
+            if v not in txt:
+                missing.append(f"hazard {label} end {v}")
+    for want in (f"{wc['with_overhead_h']:.2f} hours",
+                 f"{wc['total_h']:.2f}"):
+        if want not in txt:
+            missing.append(f"wall clock {want!r}")
+    for r, _n in cc["r"].values():
+        if f"{r:+.3f}".replace("+", "+") not in txt.replace("−", "-"):
+            missing.append(f"corpus correlation {r:+.3f}")
+    for key, label in keys:
+        c = (ms["spec-dflash-n2"] * (1 / 0.98 - 1)) / nz["spec-dflash-n2"][key]
+        want = [f"{100 * (ms[a] / (ms[a] + c * nz[a][key]) - 1):+.2f} %".replace("+", "+")
+                for a in ARMS]
+        line = next((l for l in txt.splitlines()
+                     if l.startswith("|") and label in l), None)
+        if line is None:
+            missing.append(f"normaliser row {label!r} absent")
+            continue
+        got = [x.strip().strip("*").replace("−", "-") for x in line.strip("|").split("|")][1:4]
+        if [g.replace(" ", "") for g in got] != [w.replace(" ", "").replace("+-", "-")
+                                                 for w in want]:
+            missing.append(f"normaliser row {label!r} prints {got} not {want}")
+
+
+    return missing
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=(__doc__ or "").split("\n")[0])
     ap.add_argument("--check", action="store_true",
@@ -609,91 +704,11 @@ def main() -> None:
     print("  A shared host cost of any denominator would put these near one.")
 
     if args.check:
-        txt = PLAN.read_text(encoding="utf-8")
-        missing = []
-        for want in (f"{m['gap']:.2f} %", f"{m['residual']:.3f} %",
-                     f"{m['adjacent_diff_sd']:.3f} %", f"{m['block_cv']:.3f} %"):
-            if want not in txt:
-                missing.append(want)
-        # ROW-ANCHORED, not a bare substring: the first version looked for the
-        # value anywhere after a pipe, so swapping two rows of the table, or
-        # flipping every sign in the normaliser table, passed unnoticed.
-        rows = {"between-block, 6 against 6": "between-block, 6 against 6",
-                "within-block, 12 pairs": "within-block, 12 pairs",
-                "within-block, 18 pairs": "within-block, 18 pairs",
-                "within-block, 24 pairs": "within-block, 24 pairs"}
-        for name, label in rows.items():
-            r = p_table[name]
-            want = [f"{r['-2']['moves']:.2f}", f"{r['-gap']['moves']:.2f}",
-                    f"{r['0']['holds']:.2f}"]
-            line = next((l for l in txt.splitlines()
-                         if l.startswith("|") and label in l), None)
-            if line is None:
-                missing.append(f"row {label!r} absent")
-                continue
-            cells = [c.strip().strip("*") for c in line.strip("|").split("|")]
-            if cells[1:4] != want:
-                missing.append(f"row {label!r} prints {cells[1:4]} not {want}")
-        # the chi-squares the plan quotes, to the precision it quotes them
-        chis = []
-        for key, _label in keys:
-            f = fit_agnostic(dl, sg, {a: nz[a][key] for a in ARMS})
-            chis.append(f"{f['chi2']:.0f}")
-        flat = " ".join(txt.split())
-        if f"chi-square {chis[0]}, {chis[1]} and {chis[2]}" not in flat:
-            missing.append(f"chi-squares {chis}")
-        # the two tables the first version of this check never looked at
-        levels = {a: (st.mean(pooled(a, i) for i in range(3)),
-                      st.mean(pooled(a, i) for i in range(3, 6))) for a in ARMS}
-        for a in ARMS:
-            lo_, hi_ = levels[a]
-            want = [f"{lo_:.3f}", f"{hi_:.3f}",
-                    f"{100 * (hi_ / lo_ - 1):+.2f} %".replace("+", "+")]
-            line = next((l for l in txt.splitlines()
-                         if l.startswith("|") and f"`{a}`" in l), None)
-            if line is None:
-                missing.append(f"arm-levels row {a!r} absent"); continue
-            got = [c.strip().strip("*").replace("\u2212", "-")
-                   for c in line.strip("|").split("|")][1:4]
-            if [g.replace(" ", "") for g in got] != [w.replace(" ", "") for w in want]:
-                missing.append(f"arm-levels row {a!r} prints {got} not {want}")
-        for w, r in washouts.items():
-            label = "none" if w == 0 else f"{w:.0f} s"
-            line = next((l for l in txt.splitlines()
-                         if l.startswith("|") and label in l
-                         and "washout" not in l.lower()), None)
-            if line is None:
-                missing.append(f"washout row {label!r} absent"); continue
-            cells = [c.strip().strip("*") for c in line.strip("|").split("|")]
-            wantw = [f"{r['-2']['moves']:.2f}", f"{r['0']['holds']:.2f}"]
-            if cells[1:3] != wantw:
-                missing.append(f"washout row {label!r} prints {cells[1:3]} not {wantw}")
-        for label, r in ends.items():
-            for v in (f"{r['-2']['moves']:.2f}", f"{r['0']['holds']:.2f}"):
-                if v not in txt:
-                    missing.append(f"hazard {label} end {v}")
-        for want in (f"{wc['with_overhead_h']:.2f} hours",
-                     f"{wc['total_h']:.2f}"):
-            if want not in txt:
-                missing.append(f"wall clock {want!r}")
-        for r, _n in cc["r"].values():
-            if f"{r:+.3f}".replace("+", "+") not in txt.replace("−", "-"):
-                missing.append(f"corpus correlation {r:+.3f}")
-        for key, label in keys:
-            c = (ms["spec-dflash-n2"] * (1 / 0.98 - 1)) / nz["spec-dflash-n2"][key]
-            want = [f"{100 * (ms[a] / (ms[a] + c * nz[a][key]) - 1):+.2f} %".replace("+", "+")
-                    for a in ARMS]
-            line = next((l for l in txt.splitlines()
-                         if l.startswith("|") and label in l), None)
-            if line is None:
-                missing.append(f"normaliser row {label!r} absent")
-                continue
-            got = [x.strip().strip("*").replace("−", "-") for x in line.strip("|").split("|")][1:4]
-            if [g.replace(" ", "") for g in got] != [w.replace(" ", "").replace("+-", "-")
-                                                     for w in want]:
-                missing.append(f"normaliser row {label!r} prints {got} not {want}")
+        missing = check_plan(PLAN.read_text(encoding="utf-8"), m, p_table,
+                             ms, nz, keys, dl, sg, cc, wc, ends, washouts)
         print("\n  plan check: " + ("OK" if not missing
-                                     else "MISMATCH\n    " + "\n    ".join(missing)))
+                                    else "MISMATCH\n    "
+                                    + "\n    ".join(missing)))
         raise SystemExit(1 if missing else 0)
 
 
