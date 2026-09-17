@@ -16,9 +16,11 @@ and recomputing it later found eight wrong figures.
 The first version of the power table had one of its own, and it is the reason
 this file is here rather than in a scratch directory. It used run T4's block CV
 of 2.145 % as the residual noise AND added a telegraph on top of it. T4's block
-CV already contains the step, so that model implies 2.768 % of block spread,
-twenty-nine per cent more than T4 shows, and it published a power of 0.09 for a
-design whose real power is 0.34. The decomposition is asserted below and checked
+CV already contains the step, so that model implies 2.909 % of block spread,
+thirty-six per cent more than T4 shows, and it published a power of 0.09 for a
+design whose real power is 0.28. An earlier version of this paragraph said
+2.768 % and twenty-nine, which is the same arithmetic done with A16's rounded
+3.5 % gap rather than the measured 3.93 % this file uses everywhere else. The decomposition is asserted below and checked
 against the measured CV, so the same mistake cannot be made silently again.
 
 Everything is measured from the committed arm-runs of run T4. Nothing here is a
@@ -526,6 +528,8 @@ def main() -> None:
     print()
 
     hz = args.hazard if args.hazard is not None else h["hazard"]
+    ends: dict = {}
+    washouts: dict = {}
     p_table = power(m, hz, args.trials)
     p = p_table
     gap_col = f"-{m['gap']:.2f} %"
@@ -535,20 +539,22 @@ def main() -> None:
               f"{row['-gap']['moves']:10.2f} {row['0']['holds']:12.2f}")
     print()
 
-    if args.hazard is None and not args.check:
+    if args.hazard is None:
         print("  at the ends of that interval, for the design this plan chooses:")
         for end, label in ((h["lo"], "fast"), (h["hi"], "slow")):
             r = power(m, end, args.trials)["within-block, 24 pairs"]
+            ends[label] = r
             print(f"    hazard {end:6.0f} s ({label}): "
                   f"{r['-2']['moves']:.2f} / {r['-gap']['moves']:.2f} / "
                   f"{r['0']['holds']:.2f}")
         print()
 
-    if args.hazard is None and not args.check:
+    if args.hazard is None:
         print("  what the mandated washout costs, at the corpus hazard:")
         for w in (0.0, 15.0, 30.0, 60.0):
             r = (p_table if w == WASHOUT
                  else power(m, None, args.trials, w))["within-block, 24 pairs"]
+            washouts[w] = r
             print(f"    washout {w:5.0f} s: {r['-2']['moves']:.2f} / "
                   f"{r['-gap']['moves']:.2f} / {r['0']['holds']:.2f}")
         print()
@@ -636,6 +642,36 @@ def main() -> None:
         flat = " ".join(txt.split())
         if f"chi-square {chis[0]}, {chis[1]} and {chis[2]}" not in flat:
             missing.append(f"chi-squares {chis}")
+        # the two tables the first version of this check never looked at
+        levels = {a: (st.mean(pooled(a, i) for i in range(3)),
+                      st.mean(pooled(a, i) for i in range(3, 6))) for a in ARMS}
+        for a in ARMS:
+            lo_, hi_ = levels[a]
+            want = [f"{lo_:.3f}", f"{hi_:.3f}",
+                    f"{100 * (hi_ / lo_ - 1):+.2f} %".replace("+", "+")]
+            line = next((l for l in txt.splitlines()
+                         if l.startswith("|") and f"`{a}`" in l), None)
+            if line is None:
+                missing.append(f"arm-levels row {a!r} absent"); continue
+            got = [c.strip().strip("*").replace("\u2212", "-")
+                   for c in line.strip("|").split("|")][1:4]
+            if [g.replace(" ", "") for g in got] != [w.replace(" ", "") for w in want]:
+                missing.append(f"arm-levels row {a!r} prints {got} not {want}")
+        for w, r in washouts.items():
+            label = "none" if w == 0 else f"{w:.0f} s"
+            line = next((l for l in txt.splitlines()
+                         if l.startswith("|") and label in l
+                         and "washout" not in l.lower()), None)
+            if line is None:
+                missing.append(f"washout row {label!r} absent"); continue
+            cells = [c.strip().strip("*") for c in line.strip("|").split("|")]
+            wantw = [f"{r['-2']['moves']:.2f}", f"{r['0']['holds']:.2f}"]
+            if cells[1:3] != wantw:
+                missing.append(f"washout row {label!r} prints {cells[1:3]} not {wantw}")
+        for label, r in ends.items():
+            for v in (f"{r['-2']['moves']:.2f}", f"{r['0']['holds']:.2f}"):
+                if v not in txt:
+                    missing.append(f"hazard {label} end {v}")
         for want in (f"{wc['with_overhead_h']:.2f} hours",
                      f"{wc['total_h']:.2f}"):
             if want not in txt:

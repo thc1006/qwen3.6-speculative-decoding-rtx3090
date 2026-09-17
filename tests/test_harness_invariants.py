@@ -6439,15 +6439,18 @@ class AFigureMayNotPublishAFigureNothingRederives(unittest.TestCase):
 
 
 class APowerTableMayNotCountTheStepTwice(unittest.TestCase):
-    """The guard on the mistake that published a power of 0.09 for a 0.34 design.
+    """The guard on the mistake that published a power of 0.09 for a 0.28 design.
 
     `v4_audit_2026_08_25/PROSPECTIVE_PLAN_X_HOST_LOAD.md` chose twenty-four
     blocks over twelve because of a simulation, and the first version of that
     simulation used run T4's block-level CV of 2.145 % as if it were residual
     noise while ALSO adding the arm's own level change on top of it. T4's block
-    CV already contains that level change. The model therefore implied 2.768 %
+    CV already contains that level change. The model therefore implied 2.909 %
     of block spread against the 2.145 % T4 shows, and it published a detection
-    rate of about one in ten for a design whose real rate is about one in three.
+    rate of about one in ten for a design whose real rate is under three in ten.
+    An earlier version of this docstring said 2.768 %, which is the same
+    arithmetic done with A16's rounded 3.5 % gap rather than the measured
+    3.93 % the script uses.
 
     The defect is invisible in the output: both readings are plausible numbers
     and neither is flagged by anything. What makes it visible is the identity
