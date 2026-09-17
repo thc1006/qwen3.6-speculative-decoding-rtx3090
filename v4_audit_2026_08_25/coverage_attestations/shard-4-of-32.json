@@ -1,7 +1,7 @@
 {
-  "head_sha": "ecc29db88319af599e0756d036c0427918954d13",
+  "head_sha": "e1cbffec4c7d93dc3e149e8d1ad6d741f29019ac",
   "checker_sha256": "d5193848d7a06ed4f6e8f7b52f8a612773384be9c4baf412676973b9834f23a8",
-  "population_sha256": "5891894d7f209873c3ad442ae3851343f4ba703953d78c0494a7b80560ceff58",
+  "population_sha256": "907d072154a2ddf3485ce75f5be3c84c875f46eb31bf1376e4453226c79c7265",
   "population_size": 2446,
   "shard": [
     4,
@@ -17,48 +17,48 @@
   "locations": [
     [
       "ERRATA.md",
-      903,
-      905,
+      898,
+      900,
       1,
       36,
       41
     ],
     [
       "ERRATA.md",
-      903,
-      905,
+      898,
+      900,
       2,
       48,
       52
     ],
     [
       "ERRATA.md",
-      903,
-      906,
+      898,
+      901,
       1,
       45,
       50
     ],
     [
       "ERRATA.md",
-      903,
-      906,
+      898,
+      901,
       2,
       57,
       62
     ],
     [
       "ERRATA.md",
-      903,
-      907,
+      898,
+      902,
       1,
       29,
       34
     ],
     [
       "ERRATA.md",
-      903,
-      907,
+      898,
+      902,
       2,
       41,
       45
