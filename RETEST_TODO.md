@@ -109,7 +109,8 @@ New work the audit generated that was not on the original list:
 - two runs of one configuration that are identical in every recorded respect,
   produce byte-identical output, and differ by 3.4 % on one arm
   ([A16](ERRATA.md#a16-two-runs-identical-in-every-recorded-respect-and-byte-identical-in-output-differ-by-34--on-one-arm))
-- an end-to-end harness test with no GPU (`tests/fake_llama_server.py`), which is
+- an end-to-end harness test with no GPU (`tests/fake_llama_server.py`), which
+is
   what made the completeness and attestation guards testable at all
 
 
@@ -194,7 +195,8 @@ requests. Any master comparison must pass `--spec-type` explicitly.
   because the symptom is silent.
 - **Checkpoint invalidation on hybrid targets.**
   [#24055](https://github.com/ggml-org/llama.cpp/issues/24055). The audit
-  measured 1639 checkpoints at a server-reported 82.079 MiB in one arm-run of ten 300-token requests; whether
+  measured 1639 checkpoints at a server-reported 82.079 MiB in one arm-run of
+  ten 300-token requests; whether
   that is the same bug is untested here.
 
 ### Still open
@@ -310,7 +312,8 @@ requests. Any master comparison must pass `--spec-type` explicitly.
   | `draft-eagle3` | the loader rejects any drafter that is not an EAGLE3 model — "expected 3 extract layers", `common/speculative.cpp:471` — and no EAGLE3 head for this target exists on any of these hosts |
   | `draft-dspark` | `convert_hf_to_gguf.py` refuses: "`--dspark` is only supported for `DeepseekV4ForCausalLM`". The DFlash checkpoint here is `DFlashDraftModel` and carries no DSpark config or tensors. This is a model-family limit, not a missing download. |
 - **MTP matters more than the other open items** because the vLLM sibling result
-  on this same physical hardware is an MTP result. Until it runs here, "llama.cpp
+  on this same physical hardware is an MTP result. Until it runs here,
+  "llama.cpp
   loses where vLLM wins" confounds the engine with the speculation method.
 
 ---
@@ -436,7 +439,9 @@ Requirements:
 - full-shape warm-up, not one 8-token completion
 - persist per request: generated text, the **reasoning channel**, stop reason,
   `timings`, `draft_n` / `draft_n_accepted`, the `-v` drafter statistics, and
-  token IDs via `logprobs` (near-complete: `probs_output` drops trailing stop-word tokens, `server-context.cpp:2036-2039`, so the list can run a few short of `predicted_n`, which stays the authority for token counts)
+  token IDs via `logprobs` (near-complete: `probs_output` drops trailing
+stop-word tokens, `server-context.cpp:2036-2039`, so the list can run a few
+short of `predicted_n`, which stays the authority for token counts)
 - persist per run: argv, binary sha256, model sha256s, `nvidia-smi` telemetry
   before/after ([D5](ERRATA.md#d5-the-committed-v2-script-does-not-produce-the-committed-v2-directories))
 - separate a deterministic `temperature=0` timing study from any realistic

@@ -31,13 +31,14 @@ import json
 import math
 import pathlib
 import random
-import re
 import statistics as st
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 T4 = ROOT / "v4_audit_2026_08_25" / "data" / "matrix_T4_split_20260827_175051"
 PLAN = ROOT / "v4_audit_2026_08_25" / "PROSPECTIVE_PLAN_X_HOST_LOAD.md"
 ARMS = ("spec-dflash-n2", "baseline", "spec-draft-n8")
+# each speculative arm's draft maximum, from its own server argv
+NMAX = {"spec-dflash-n2": 2, "spec-draft-n8": 8}
 
 SEED = 20260917
 TRIALS = 40000
@@ -48,8 +49,15 @@ TRIALS = 40000
 # below counts transitions across every run in the corpus that repeats this arm
 # inside one invocation, which is fifty of them.
 HAZARD_FALLBACK = 1123.0
+# The washout the plan mandates between the two members of a pair. It was
+# not in the model at all, and it is not free: it lengthens the window in
+# which the arm can change level inside a pair.
+WASHOUT = 30.0
 CHANGE_PCT = 2.0         # half the measured level gap; see hazard()
-TSTAR = {5: 2.571, 11: 2.201, 17: 2.110, 23: 2.069}
+# df 17 to 23 is the range the plan permits once pairs may be dropped;
+# the first version held 17 and 23 only and raised KeyError between them
+TSTAR = {5: 2.571, 11: 2.201, 17: 2.110, 18: 2.101, 19: 2.093,
+         20: 2.086, 21: 2.080, 22: 2.074, 23: 2.069}
 
 
 def _rows(arm: str, rep: int) -> list[dict]:
@@ -70,6 +78,17 @@ def measured() -> dict:
     cv = 100.0 * st.stdev(v) / st.mean(v)
     adj = [100.0 * math.log(v[i + 1] / v[i]) for i in range(5)]
     step_at = max(range(5), key=lambda i: abs(adj[i]))
+    rest = sorted((abs(x) for i, x in enumerate(adj) if i != step_at), reverse=True)
+    # Excising the largest of five UNCONDITIONALLY biases the residual low by
+    # about a quarter when there is no step to excise. Here the excised value is
+    # more than three times the next largest, so there is one; the guard makes
+    # that a condition rather than a coincidence.
+    if abs(adj[step_at]) < 3.0 * rest[0]:
+        raise SystemExit(
+            f"no step to excise: the largest adjacent change is "
+            f"{abs(adj[step_at]):.3f} % against {rest[0]:.3f} % for the next, "
+            f"so removing it would bias the residual low rather than isolate a "
+            f"level change")
     diff_sd = st.stdev([a for i, a in enumerate(adj) if i != step_at])
     resid = diff_sd / math.sqrt(2.0)
     # the telegraph is symmetric about the midpoint, so its SD is half the gap
@@ -204,9 +223,30 @@ def hazard(root: pathlib.Path | None = None) -> dict:
 def normalisers() -> dict:
     """How many target steps and model forwards each arm spends per token.
 
-    A round that drafts k tokens and has a accepted yields a+1 tokens, so over a
-    whole run P = A + R and the round count is P - A exactly. One target forward
-    per round; one draft forward per drafted token.
+    The round count is `drafted / draft-max`, NOT generated minus accepted.
+
+    An earlier version of this file used the second, on the reasoning that a
+    round which drafts k tokens and has a accepted yields a+1 tokens. That is
+    true of the mechanism and false of the counter. ERRATA A1 quotes the server
+    source: on partial acceptance the checkpoint-and-restore branch returns
+    BEFORE `slot.n_draft_accepted` is incremented, so on any arm that takes that
+    branch the server's accepted counter under-counts. A13 measures it: the two
+    arms here read 72.8 % against 73.0 % with zero checkpoints for
+    `spec-dflash-n2`, and 29.7 % against 41.3 % with 772 checkpoints for
+    `spec-draft-n8`.
+
+    `drafted / draft-max` is exact for both, because the drafter always proposes
+    its maximum: 14646 / 2 and 33408 / 8 are both whole numbers, and the
+    acceptance they imply is 72.90 % and 41.38 % against A13's drafter-side
+    73.0 % and 41.3 %. The earlier reading implied 41.38 -> 29.54 % for
+    `spec-draft-n8`, which is A13's under-counted figure, and it moved that
+    arm's target-step weight from 0.232 to 0.452. That is not a rounding
+    difference: it is what decided whether a purely arm-agnostic per-target-step
+    cost produces a positive cross-arm contrast, and it does.
+
+    The check that caught nothing was "drafted per round does not exceed the
+    arm's draft maximum". The wrong round count satisfies it too, at 4.109
+    against 8. Integrality is the test that separates them.
     """
     out = {}
     for a in ARMS:
@@ -216,28 +256,40 @@ def normalisers() -> dict:
                 P += r["predicted_n"]
                 D += r.get("draft_n") or 0
                 A += r.get("draft_n_accepted") or 0
-        R = P - A
-        out[a] = {"tokens": P, "drafted": D, "accepted": A, "rounds": R,
-                  "per_token": 1.0, "per_target_step": R / P,
-                  "per_forward": (D + R) / P,
-                  "drafted_per_round": (D / R) if R else 0.0}
-    # The identity is the whole of the cross-arm discrimination, so it is checked
-    # rather than asserted in prose. Two readings of `draft_n_accepted` are
-    # possible and only one of them makes R = P - A true:
-    #   if it counts the bonus token, then P = A and the round count is lost
-    #   if it counts real accepts, then drafted-per-round cannot exceed the
-    #   arm's own draft-max
-    # `spec-dflash-n2` runs at n=2 and comes out at 1.978, which fits the second
-    # reading and refutes the first, where A would have to equal P.
-    for a, n_max in (("spec-dflash-n2", 2), ("spec-draft-n8", 8)):
-        if out[a]["accepted"] == out[a]["tokens"]:
-            raise SystemExit(f"{a}: accepted equals generated, so draft_n_accepted "
-                             f"counts the bonus token and R = P - A is wrong")
-        if out[a]["drafted_per_round"] > n_max + 0.02:
-            raise SystemExit(f"{a}: {out[a]['drafted_per_round']:.3f} drafted per "
-                             f"round exceeds its draft-max of {n_max}, so the "
-                             f"round count is not P - A")
+        if a in NMAX:
+            rounds = D / NMAX[a]
+            if abs(rounds - round(rounds)) > 1e-9:
+                raise SystemExit(f"{a}: {D} drafted is not a whole number of "
+                                 f"rounds at draft-max {NMAX[a]}, so the drafter "
+                                 f"does not always propose its maximum and this "
+                                 f"round count is not derivable this way")
+        else:
+            rounds = float(P)
+        out[a] = {"tokens": P, "drafted": D, "accepted_server": A,
+                  "rounds": rounds,
+                  "acceptance_drafter": (P - rounds) / D if D else 0.0,
+                  "acceptance_server": A / D if D else 0.0,
+                  "per_token": 1.0,
+                  "per_target_step": rounds / P,
+                  "per_forward": (D + rounds) / P}
     return out
+
+
+def fit_agnostic(deltas: dict, sigmas: dict, weights: dict) -> dict:
+    """Least-squares fit of one arm-agnostic cost, and its goodness of fit.
+
+    Each hypothesis is one free scale over fixed per-arm weights, so with three
+    arms it leaves two degrees of freedom and is falsifiable on its own. The
+    previous pre-registration used a single one-sided contrast between two arms
+    instead, and that only worked while every hypothesis put the contrast on the
+    same side of zero. With the round counts corrected they do not.
+    """
+    num = sum(weights[a] * deltas[a] / sigmas[a] ** 2 for a in deltas)
+    den = sum(weights[a] ** 2 / sigmas[a] ** 2 for a in deltas)
+    c = num / den if den else 0.0
+    chi2 = sum(((deltas[a] - c * weights[a]) / sigmas[a]) ** 2 for a in deltas)
+    return {"c": c, "chi2": chi2, "df": max(0, len(deltas) - 1),
+            "resid": {a: deltas[a] - c * weights[a] for a in deltas}}
 
 
 def _interval(d: list[float], df: int) -> tuple[float, float]:
@@ -281,13 +333,16 @@ def _between(truth, resid, gap, hazard, rng, nblocks=12):
     return _verdict([obs[a] - obs[b] for a, b in zip(L, U)], len(L) - 1)
 
 
-def _within(truth, resid, gap, hazard, rng, dur, nblocks=24):
+def _within(truth, resid, gap, hazard, rng, dur, nblocks=24, washout=0.0):
     d, state = [], rng.randint(0, 1)
     for b in range(1, nblocks + 1):
         first_loaded = (b % 4) in (1, 0)
         pair = []
         for k in range(2):
-            state = _flip(dur, hazard, state, rng)
+            # the second member is separated from the first by one arm-run AND
+            # by the washout the plan mandates between them; a longer washout is
+            # a longer window for the level to change inside the pair
+            state = _flip(dur + (washout if k else 0.0), hazard, state, rng)
             pair.append(state * gap + rng.gauss(0, resid)
                         + (truth if (k == 0) == first_loaded else 0.0))
         # the rest of the block: the other two arms run twice each. The return
@@ -295,13 +350,13 @@ def _within(truth, resid, gap, hazard, rng, dur, nblocks=24):
         # cancels in a within-block difference and changed no published figure,
         # which is exactly why it would have sat there: a state variable that is
         # not assigned looks like one that is.
-        state = _flip(400.0 - 2.0 * dur, hazard, state, rng)
+        state = _flip(max(0.0, 400.0 - 2.0 * dur - washout), hazard, state, rng)
         d.append(pair[0] - pair[1] if first_loaded else pair[1] - pair[0])
     return _verdict(d, nblocks - 1)
 
 
 def power(m: dict, hazard_s: float | None = None,
-          trials: int = TRIALS) -> dict:
+          trials: int = TRIALS, washout: float = WASHOUT) -> dict:
     if hazard_s is None:
         hazard_s = hazard()["hazard"]
     rng = random.Random(SEED)
@@ -311,11 +366,11 @@ def power(m: dict, hazard_s: float | None = None,
         "between-block, 6 against 6": lambda tr: _between(
             tr, m["residual"], m["gap"], hz, rng),
         "within-block, 12 pairs": lambda tr: _within(
-            tr, m["residual"], m["gap"], hz, rng, dur, 12),
+            tr, m["residual"], m["gap"], hz, rng, dur, 12, washout),
         "within-block, 18 pairs": lambda tr: _within(
-            tr, m["residual"], m["gap"], hz, rng, dur, 18),
+            tr, m["residual"], m["gap"], hz, rng, dur, 18, washout),
         "within-block, 24 pairs": lambda tr: _within(
-            tr, m["residual"], m["gap"], hz, rng, dur, 24),
+            tr, m["residual"], m["gap"], hz, rng, dur, 24, washout),
     }
     out = {}
     for name, fn in designs.items():
@@ -355,7 +410,8 @@ def main() -> None:
     print()
 
     hz = args.hazard if args.hazard is not None else h["hazard"]
-    p = power(m, hz, args.trials)
+    p_table = power(m, hz, args.trials)
+    p = p_table
     gap_col = f"-{m['gap']:.2f} %"
     print(f"  {'design':30s} {'-2 %':>8s} {gap_col:>10s} {'0 -> holds':>12s}")
     for name, row in p.items():
@@ -363,43 +419,101 @@ def main() -> None:
               f"{row['-gap']['moves']:10.2f} {row['0']['holds']:12.2f}")
     print()
 
-    if args.hazard is None:
+    if args.hazard is None and not args.check:
         print("  at the ends of that interval, for the design this plan chooses:")
         for end, label in ((h["lo"], "fast"), (h["hi"], "slow")):
-            r = power(m, end, max(4000, args.trials // 4))["within-block, 24 pairs"]
+            r = power(m, end, args.trials)["within-block, 24 pairs"]
             print(f"    hazard {end:6.0f} s ({label}): "
                   f"{r['-2']['moves']:.2f} / {r['-gap']['moves']:.2f} / "
                   f"{r['0']['holds']:.2f}")
         print()
 
+    if args.hazard is None and not args.check:
+        print("  what the mandated washout costs, at the corpus hazard:")
+        for w in (0.0, 15.0, 30.0, 60.0):
+            r = (p_table if w == WASHOUT
+                 else power(m, None, args.trials, w))["within-block, 24 pairs"]
+            print(f"    washout {w:5.0f} s: {r['-2']['moves']:.2f} / "
+                  f"{r['-gap']['moves']:.2f} / {r['0']['holds']:.2f}")
+        print()
+
     ms = {a: 1000.0 / st.mean(pooled(a, i) for i in range(6)) for a in ARMS}
     nz = normalisers()
-    print(f"  {'normaliser':24s} " + " ".join(f"{a:>16s}" for a in ARMS) + "   D")
-    for key, label in (("per_token", "per generated token"),
-                       ("per_forward", "per model forward"),
-                       ("per_target_step", "per target step")):
+    # the labels are the plan's own row labels, because --check anchors on them
+    keys = (("per_token", "per generated token"),
+            ("per_forward", "per model forward pass"),
+            ("per_target_step", "per target-model step"))
+    print(f"  {'arm-agnostic cost':24s} " + " ".join(f"{a:>16s}" for a in ARMS))
+    for key, label in keys:
         c = (ms["spec-dflash-n2"] * (1 / 0.98 - 1)) / nz["spec-dflash-n2"][key]
-        deltas = {a: c * nz[a][key] for a in ARMS}
         cells = " ".join(
-            f"{deltas[a]:7.3f} ms {100 * (ms[a] / (ms[a] + deltas[a]) - 1):+6.2f}%"
+            f"{c * nz[a][key]:7.3f} ms {100 * (ms[a] / (ms[a] + c * nz[a][key]) - 1):+6.2f}%"
             for a in ARMS)
-        dd = deltas["spec-dflash-n2"] - deltas["spec-draft-n8"]
-        print(f"  {label:24s} {cells}  {dd:+.3f}")
-    print("\n  D is delta(spec-dflash-n2) - delta(spec-draft-n8) in ms per token.")
-    print("  Every arm-agnostic hypothesis above puts it at or below zero, so the")
-    print("  arm-specific branch is the one-sided claim that D is above zero.")
+        print(f"  {label:24s} {cells}")
+    print("\n  Each row is ONE free scale over fixed per-arm weights, so with three")
+    print("  arms it leaves two degrees of freedom and can be rejected on its own.")
+    print("  The previous pre-registration used a one-sided contrast between two")
+    print("  arms, which only worked while every row put that contrast on the same")
+    print("  side of zero. With the round counts taken from the drafter rather than")
+    print("  from the server's under-counted accepted field, they do not:")
+    for key, label in keys:
+        c = (ms["spec-dflash-n2"] * (1 / 0.98 - 1)) / nz["spec-dflash-n2"][key]
+        dd = c * nz["spec-dflash-n2"][key] - c * nz["spec-draft-n8"][key]
+        print(f"    {label:24s} D = {dd:+.3f} ms per token"
+              + ("   <- above zero, which the old rule read as arm-specific"
+                 if dd > 1e-9 else ""))
+    print("\n  So the test is a fit, not a contrast. T4's own step already fails all")
+    print("  three, because the arms moved in opposite directions across it:")
+    lo = {a: st.mean(pooled(a, i) for i in range(3)) for a in ARMS}
+    hi = {a: st.mean(pooled(a, i) for i in range(3, 6)) for a in ARMS}
+    dl = {a: 1000.0 / hi[a] - 1000.0 / lo[a] for a in ARMS}
+    sg = {a: abs(dl[a]) * 0.25 + 1e-4 for a in ARMS}
+    for key, label in keys:
+        w = {a: nz[a][key] for a in ARMS}
+        f = fit_agnostic(dl, sg, w)
+        print(f"    {label:24s} chi2 = {f['chi2']:8.1f} on {f['df']} df")
 
     if args.check:
         txt = PLAN.read_text(encoding="utf-8")
-        want = [f"{m['gap']:.2f} %", f"{m['residual']:.3f} %",
-                f"{m['adjacent_diff_sd']:.3f} %", f"{m['block_cv']:.3f} %"]
-        missing = [w for w in want if w not in txt]
-        r24 = p["within-block, 24 pairs"]
-        for v in (f"{r24['-2']['moves']:.2f}", f"{r24['0']['holds']:.2f}"):
-            if not re.search(rf"\|\s*\*?\*?{re.escape(v)}", txt):
-                missing.append(f"24-pair power {v}")
+        missing = []
+        for want in (f"{m['gap']:.2f} %", f"{m['residual']:.3f} %",
+                     f"{m['adjacent_diff_sd']:.3f} %", f"{m['block_cv']:.3f} %"):
+            if want not in txt:
+                missing.append(want)
+        # ROW-ANCHORED, not a bare substring: the first version looked for the
+        # value anywhere after a pipe, so swapping two rows of the table, or
+        # flipping every sign in the normaliser table, passed unnoticed.
+        rows = {"between-block, 6 against 6": "between-block, 6 against 6",
+                "within-block, 12 pairs": "within-block, 12 pairs",
+                "within-block, 18 pairs": "within-block, 18 pairs",
+                "within-block, 24 pairs": "within-block, 24 pairs"}
+        for name, label in rows.items():
+            r = p_table[name]
+            want = [f"{r['-2']['moves']:.2f}", f"{r['-gap']['moves']:.2f}",
+                    f"{r['0']['holds']:.2f}"]
+            line = next((l for l in txt.splitlines()
+                         if l.startswith("|") and label in l), None)
+            if line is None:
+                missing.append(f"row {label!r} absent")
+                continue
+            cells = [c.strip().strip("*") for c in line.strip("|").split("|")]
+            if cells[1:4] != want:
+                missing.append(f"row {label!r} prints {cells[1:4]} not {want}")
+        for key, label in keys:
+            c = (ms["spec-dflash-n2"] * (1 / 0.98 - 1)) / nz["spec-dflash-n2"][key]
+            want = [f"{100 * (ms[a] / (ms[a] + c * nz[a][key]) - 1):+.2f} %".replace("+", "+")
+                    for a in ARMS]
+            line = next((l for l in txt.splitlines()
+                         if l.startswith("|") and label in l), None)
+            if line is None:
+                missing.append(f"normaliser row {label!r} absent")
+                continue
+            got = [x.strip().strip("*").replace("−", "-") for x in line.strip("|").split("|")][1:4]
+            if [g.replace(" ", "") for g in got] != [w.replace(" ", "").replace("+-", "-")
+                                                     for w in want]:
+                missing.append(f"normaliser row {label!r} prints {got} not {want}")
         print("\n  plan check: " + ("OK" if not missing
-                                    else "MISSING " + "; ".join(missing)))
+                                     else "MISMATCH\n    " + "\n    ".join(missing)))
         raise SystemExit(1 if missing else 0)
 
 

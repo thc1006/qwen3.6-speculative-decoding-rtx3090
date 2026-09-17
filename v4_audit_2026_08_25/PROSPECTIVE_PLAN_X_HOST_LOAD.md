@@ -197,46 +197,37 @@ in the other half, alternating ABBA over the twenty-four.
 
 ### The power, from this repository's own variability
 
-`analysis/load_run_power.py` is committed with this plan and produces the table
-below; it is not a figure typed in after reading a terminal. Its inputs are
-measured, not chosen:
+`analysis/load_run_power.py` is committed with this plan and produces every
+figure below; `--check` re-derives them and compares them against this document
+row by row. Its inputs are measured, not chosen:
 
-- the per-arm-run residual log SD is **0.537 %**, which is the measured
-  adjacent-repeat difference SD of 0.760 % with the step excised, over root two
-- the telegraph gap is the measured **3.93 %**
+- the per-arm-run residual log SD is **0.537 %**, the measured adjacent-repeat
+  difference SD of 0.760 % with the level change excised, over root two
+- the level gap is the measured **3.93 %**
 - arm-run durations 39.8, 116.0 and 44.1 s, so a three-arm pass is 200 s
+- the washout between the two members of a pair is **30 s**
 - the switch hazard is **one per 641 s**, with a ninety-five per cent interval
   of 455 to 863 s
 
-That last one is worth a paragraph, because the first version of this plan got
-it from run T4 alone: one transition across five adjacent gaps. That is a single
-event, and the exact Poisson interval for one event in a thousand seconds of
-observation runs from 179 s to 39 498 s. A power table cannot rest on it. The
-committed script instead counts level changes across **every run in the corpus
-that repeats this arm inside one invocation**, which is fifty of them: 100
-changes across 291 adjacent gaps and 112 295 seconds of elapsed time. A gap
-counts as a change when the log ratio of consecutive pooled rates exceeds two
-per cent, half the measured gap and about two and a half times the residual
-difference SD, which costs roughly two false positives across the corpus.
+The hazard needs a paragraph, because two earlier versions of this plan got it
+wrong in the same direction. The first took it from run T4 alone: one transition
+across five adjacent gaps, a single event whose exact Poisson interval runs from
+179 s to 39 498 s. The second counted changes across the whole corpus, fifty
+runs, 100 changes across 291 adjacent gaps and 112 295 seconds, and divided by
+elapsed time. That is still not the estimator: there are two levels, so two
+transitions inside one gap return the arm to where it started and record as no
+change at all, and the mean gap is 386 s, the same order as the hazard. The
+likelihood over the gaps, each with its own duration, gives one per 641 s where
+the count gave 1123. A hazard that is too slow makes every design built on it
+look better than it is.
 
-Counting changes and dividing by elapsed time is **not** the estimator, and the
-version of this plan that did so published a hazard of one per 1123 s. That
-assumes every gap holds at most one transition. There are two levels, so two
-transitions inside one gap return the arm to where it started and are recorded
-as no change at all, and the mean gap here is 386 s, the same order as the
-hazard itself. The likelihood over the observed gaps, each with its own
-duration and the two-state probability of ending flipped, gives one per 641 s.
-The naive figure was 1.75 times too slow, and a hazard that is too slow makes
-any design built on it look better than it is.
-
-The three inputs also have to decompose correctly, and the first version of this
-table is the reason that is checked rather than assumed: T4's block CV of
-2.145 % **already contains the step**, and a simulation that adds a telegraph on
-top of it implies 2.768 % of block spread, twenty-nine per cent more than T4
-shows. It published a detection rate of about one in ten for a design whose real
-rate is about one in three. `hypot(gap / 2, residual)` is 2.037 % against the
-measured 2.145 %, the script asserts it, and
-`tests/test_harness_invariants.py` holds the identity as a regression with the
+The inputs also have to decompose, and the first version of this table is why
+that is checked rather than assumed: T4's block CV of 2.145 % **already contains
+the level change**, and a simulation that adds a telegraph on top of it implies
+2.909 % of block spread, **thirty-six per cent** more than T4 shows. It
+published a detection rate of about one in ten for a design whose real rate is
+under three in ten. `hypot(gap / 2, residual)` is 2.037 % against the measured
+2.145 %, and `tests/test_harness_invariants.py` holds the identity with the
 faulty reading as its known-positive.
 
 Forty thousand draws, by the decision rule defined below:
@@ -244,16 +235,31 @@ Forty thousand draws, by the decision rule defined below:
 | design | truth −2 % | truth −3.93 % | truth 0, declares holds |
 |---|---:|---:|---:|
 | between-block, 6 against 6 (first draft) | 0.28 | 0.78 | 0.11 |
-| within-block, 12 pairs | 0.75 | 1.00 | 0.55 |
-| within-block, 18 pairs (the void floor below) | 0.88 | 1.00 | 0.76 |
-| **within-block, 24 pairs (this plan)** | **0.95** | **1.00** | **0.89** |
+| within-block, 12 pairs | 0.63 | 1.00 | 0.37 |
+| within-block, 18 pairs (the void floor below) | 0.78 | 1.00 | 0.58 |
+| **within-block, 24 pairs (this plan)** | **0.89** | **1.00** | **0.77** |
 
-At the fast end of the hazard interval the last row is 0.91 and 0.83; at the
-slow end, 0.97 and 0.93. The first draft's design reaches about two in seven
-a true −2 %. It is not hopeless, which is what the first version of this section
-wrongly implied by publishing 0.09; it is inadequate against the threshold it
-set itself, and the redesign is worth its cost for that reason and not for a
-more dramatic one.
+At the fast end of the hazard interval the last row is 0.82 and 0.64; at the
+slow end, 0.92 and 0.84.
+
+### What the washout costs, stated because it is not free
+
+The washout between pair members is there for one-directional carryover, and it
+is paid for in specificity, because it lengthens the window in which the arm can
+change level inside a pair:
+
+| washout | truth −2 % | truth 0, declares holds |
+|---:|---:|---:|
+| none | 0.95 | 0.89 |
+| 15 s | 0.92 | 0.83 |
+| **30 s, this plan** | **0.89** | **0.77** |
+| 60 s | 0.82 | 0.63 |
+
+Two earlier versions of this plan mandated a washout and simulated none, so
+their tables described a design nobody was going to run. Thirty seconds is the
+choice and this is its price. Recovering it means more blocks, not a shorter
+washout, because the carryover the washout is for is what makes the pairing
+trustworthy in the first place.
 
 ### What the block sequence balances, and what it does not
 
@@ -381,61 +387,72 @@ If host CPU load is the mechanism behind A16, `spec-dflash-n2` **moves** and
 
 On run T4's own pooled means the three arms decode at 142.416, 116.100 and
 30.823 tok/s, which is 7.022, 8.613 and 32.443 ms per generated token: a spread
-of **4.62 times**. A **uniform** increase in host cost per token, with no
-preference for any arm, therefore produces very different percentages, and the
-first version of this plan predicted exactly that pattern and read it as
-specific to one configuration.
+of **4.62 times**. A uniform increase in host cost per token therefore produces
+very different percentages, and the first version of this plan predicted exactly
+that pattern and read it as specific to one configuration.
 
-It is worse than that, and the correction is the sharpest thing in this
-document. "The same cost per token" is only one arm-agnostic hypothesis. Two
-others are as mechanically plausible, and their denominators are already
-recorded per arm-run: a cost per model forward pass, and a cost per target-model
-step. A round that drafts k tokens and has a accepted yields a+1 tokens, so over
-a run the round count is generated minus accepted exactly, which makes both
-denominators derivable rather than assumed. That identity carries the whole
-cross-arm argument, so it is checked rather than asserted: the competing reading
-of `draft_n_accepted`, in which it counts the bonus token the target emits each
-round, would make accepted equal generated, and it does not; and it would put
-drafted-per-round above the arm's own draft maximum, while `spec-dflash-n2` at
-n equal to two comes out at 1.978. Both checks are in the script and both are
-held as regressions. `analysis/load_run_power.py`
-computes the table; scaling each hypothesis so that `spec-dflash-n2` lands at
-exactly −2 %:
+"The same cost per token" is only one arm-agnostic hypothesis. Two others are as
+mechanically plausible and their denominators are recorded per arm-run: a cost
+per model forward pass, and a cost per target-model step. **The round count is
+`drafted / draft-max`, and getting that wrong is what invalidated the previous
+version of this section.**
 
-| arm-agnostic cost | `spec-dflash-n2` | `baseline` | `spec-draft-n8` | D |
-|---|---:|---:|---:|---:|
-| per generated token | −2.00 % | −1.64 % | −0.44 % | +0.000 |
-| per model forward pass | −2.00 % | −1.34 % | −0.83 % | −0.127 |
-| per target-model step | −2.00 % | **−3.89 %** | −0.48 % | −0.014 |
+It had used generated minus accepted, on the reasoning that a round drafting k
+tokens with a accepted yields a+1 tokens. That is true of the mechanism and
+false of the counter. ERRATA A1 quotes the server source: on partial acceptance
+the checkpoint-and-restore branch returns **before** the accepted counter is
+incremented, so on any arm taking that branch the server under-counts. A13
+measures it on these two arms: `spec-dflash-n2` reads 72.8 % against the
+drafter's 73.0 % with zero checkpoints, and `spec-draft-n8` reads 29.7 % against
+41.3 % with 772. Drafted over draft-max is exact for both, because the drafter
+always proposes its maximum: 14646 over 2 and 33408 over 8 are both whole
+numbers, and the acceptance they imply is 72.90 % and 41.38 % against A13's
+73.0 % and 41.3 %.
 
-Read the third column. **`spec-draft-n8` holds under all three**, at −0.44,
-−0.83 and −0.48 per cent, every one of them inside the holding band. So the
-prediction "the arm moves and the control holds" is satisfied by every
-arm-agnostic mechanism this plan can name, and on its own it discriminates
-nothing. The first version of this plan rested its headline on exactly that
-pattern.
+The check that let the wrong reading through was "drafted per round does not
+exceed the arm's draft maximum". The wrong round count satisfies it too, at
+4.109 against a maximum of 8. **Integrality is the test that separates them**,
+and it is held as a regression now.
 
-Two things do discriminate, and both are pre-registered here.
+Scaling each hypothesis so that `spec-dflash-n2` lands at exactly −2 %:
 
-**D, the within-block difference of differences.** For each block, form
+| arm-agnostic cost | `spec-dflash-n2` | `baseline` | `spec-draft-n8` |
+|---|---:|---:|---:|
+| per generated token | −2.00 % | −1.64 % | −0.44 % |
+| per model forward pass | −2.00 % | −1.34 % | −0.75 % |
+| per target-model step | −2.00 % | **−3.93 %** | −0.25 % |
 
-    D = (delta ms per token for spec-dflash-n2) - (delta ms per token for
-spec-draft-n8)
+`spec-draft-n8` holds under all three, at −0.44, −0.75 and −0.25 per cent, every
+one inside the holding band. So "the arm moves and the control holds" is
+satisfied by every arm-agnostic mechanism this plan can name and discriminates
+nothing on its own.
 
-and put one Student t interval on the mean of those. Every arm-agnostic
-hypothesis in the table puts D at or below zero, so the arm-specific claim is
-the one-sided statement that **D's interval lies wholly above zero**. This is
-formed within blocks, so block-level noise shared between the arms cancels in D,
-and it is one interval with one meaning rather than three intervals compared by
-whether they overlap. Overlapping intervals is a conservative test of difference
-being used as a test of equality, and it is favoured by noise: the wider the
-intervals, the more confidently it would assert that nothing is arm-specific.
+**And a single contrast cannot fix it either.** The previous version replaced
+that prediction with D, the within-block difference in milliseconds per token
+between `spec-dflash-n2` and `spec-draft-n8`, and pre-registered the
+arm-specific branch as the one-sided claim that D lies wholly above zero. That
+worked only while every hypothesis put D on the same side of zero, which was an
+artefact of the wrong round count. With the drafter's count the three give
++0.000, −0.102 and **+0.062** ms per token: a purely arm-agnostic
+per-target-step
+cost now produces exactly the signature the rule reserved for arm-specificity.
 
-**`baseline`'s magnitude, which names the agnostic hypothesis.** If D does not
-exclude zero, the three rows are separated by what `baseline` did: about −1.6 %
-for a per-token cost, −1.3 % for a per-forward cost, and −3.9 % for a per-target
-step cost, the last being the only hypothesis under which `baseline` moves more
-than the arm this run is about. The outcome section names the row.
+**So the test is a fit, not a contrast.** Each row above is one free scale over
+fixed per-arm weights, so with three arms it leaves two degrees of freedom and
+can be rejected on its own. Measure the change in milliseconds per generated
+token for each arm, with its paired interval; for each hypothesis fit the single
+scale by weighted least squares and compute the chi-square of the residuals on
+two degrees of freedom.
+
+- **every hypothesis rejected**: the cost is not any arm-agnostic form this plan
+  can name, and the effect is specific to the configuration
+- **exactly one survives**: that is the mechanism, and the outcome section names
+  it
+- **more than one survives**: the run cannot distinguish them and says so
+
+T4's own step already fails all three, at chi-square 46, 40 and 42 on two
+degrees of freedom, because the arms moved in opposite directions across it. The
+split point there was chosen by eye, which is why this run fixes it in advance.
 
 ### Why 2 % and not 3.93 %
 
@@ -457,17 +474,20 @@ undecided:
 - an arm **holds** when its whole interval lies inside ±1 %
 - otherwise it does neither, and that is an outcome with a name
 
-**The arm moves, the control holds, and D excludes zero.** The mechanism exists
-on this host and it is not a uniform per-token cost. This does not establish
+**The arm moves and every arm-agnostic fit is rejected.** The mechanism exists
+on this host and it is not any host cost this plan can name. This does not
+establish
 that ambient load caused the steps A16 recorded: those runs have no load column
 and cannot be revisited. What it establishes is that the column has to exist
 from now on, and that every decode-rate comparison **on this host** is exposed
 to it. The other hosts carry different toolchains and the question is open on
 each of them separately.
 
-**The arm moves and D contains zero.** Host load costs this machine a fixed
-amount per token, or per forward pass, or per target step, and the outcome
-section says which. Worth recording, and not A16's shape.
+**The arm moves and one arm-agnostic fit survives.** Host load costs this
+machine a fixed amount per token, or per forward pass, or per target-model step,
+and the outcome section names which row survived and reports its chi-square.
+Worth recording, and not A16's shape. If more than one survives the run cannot
+tell them apart and says that instead.
 
 **Both move.** General starvation of the serving process.
 

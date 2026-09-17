@@ -6482,18 +6482,56 @@ class APowerTableMayNotCountTheStepTwice(unittest.TestCase):
                            "the double-counted model has to be distinguishable "
                            "from the measured spread, or this test proves nothing")
 
-    def test_every_arm_agnostic_hypothesis_puts_D_at_or_below_zero(self):
+    def test_a_one_sided_cross_arm_contrast_is_not_a_valid_rule(self):
+        """The rule this plan used to pre-register, and why it cannot come back.
+
+        Two versions of the plan tested arm-specificity as "D lies wholly above
+        zero", D being the within-block difference in ms per token between
+        `spec-dflash-n2` and `spec-draft-n8`. That is only falsifiable while
+        every arm-agnostic hypothesis puts D on one side of zero, and with the
+        round count taken from the drafter rather than from the server's
+        under-counted accepted field, they do not: the per-target-step cost puts
+        it at about +0.06. This asserts the hypotheses straddle zero, so that
+        reinstating a one-sided rule fails here rather than in the outcome.
+        """
         mod = self._mod()
         import statistics as _st
         ms = {a: 1000.0 / _st.mean(mod.pooled(a, i) for i in range(6))
               for a in mod.ARMS}
         nz = mod.normalisers()
+        ds = []
         for key in ("per_token", "per_forward", "per_target_step"):
             c = (ms["spec-dflash-n2"] * (1 / 0.98 - 1)) / nz["spec-dflash-n2"][key]
-            d = c * nz["spec-dflash-n2"][key] - c * nz["spec-draft-n8"][key]
-            self.assertLessEqual(d, 1e-9, f"{key} puts D above zero, so the "
-                                          "plan's one-sided arm-specific branch "
-                                          "is not falsifiable")
+            ds.append(c * nz["spec-dflash-n2"][key] - c * nz["spec-draft-n8"][key])
+        self.assertGreater(max(ds), 1e-3, "no hypothesis puts D above zero")
+        self.assertLess(min(ds), -1e-3, "no hypothesis puts D below zero")
+
+    def test_the_fit_rejects_every_arm_agnostic_cost_on_T4s_own_step(self):
+        """The replacement rule, exercised on the one step already measured.
+
+        Each hypothesis is one free scale over fixed weights, so with three arms
+        it has two residual degrees of freedom. Across T4's step the arms moved
+        in opposite directions, which no single host cost can produce, so all
+        three must be rejected by a wide margin. If any of them fits, the
+        discriminator this plan now rests on does not discriminate.
+        """
+        mod = self._mod()
+        import statistics as _st
+        lo = {a: _st.mean(mod.pooled(a, i) for i in range(3)) for a in mod.ARMS}
+        hi = {a: _st.mean(mod.pooled(a, i) for i in range(3, 6)) for a in mod.ARMS}
+        # the arms moved in opposite directions: that is the whole argument
+        self.assertGreater(hi["spec-dflash-n2"], lo["spec-dflash-n2"])
+        self.assertLess(hi["baseline"], lo["baseline"])
+        d = {a: 1000.0 / hi[a] - 1000.0 / lo[a] for a in mod.ARMS}
+        sg = {a: abs(d[a]) * 0.25 + 1e-4 for a in mod.ARMS}
+        nz = mod.normalisers()
+        for key in ("per_token", "per_forward", "per_target_step"):
+            f = mod.fit_agnostic(d, sg, {a: nz[a][key] for a in mod.ARMS})
+            self.assertEqual(f["df"], 2)
+            self.assertGreater(f["chi2"], 9.21,
+                               f"{key} is not rejected at one per cent on two "
+                               f"degrees of freedom, so the fit does not "
+                               f"discriminate on the one step already measured")
 
     def test_the_control_arm_holds_under_all_three_so_it_cannot_discriminate(self):
         mod = self._mod()
@@ -6511,23 +6549,77 @@ class APowerTableMayNotCountTheStepTwice(unittest.TestCase):
                             "document would have to change with this")
 
 
-    def test_the_round_count_identity_is_the_one_the_data_supports(self):
-        """R = P - A decides every denominator, so it is checked, not assumed.
+    def test_the_round_count_comes_from_the_drafter_not_the_server(self):
+        """The check that let a wrong round count through, and the one that does not.
 
-        `draft_n_accepted` could count real accepts or could include the bonus
-        token the target emits each round. Only the first makes the round count
-        generated minus accepted. The second implies accepted equals generated,
-        which the data refutes, and it would put drafted-per-round above the
-        arm's own draft-max, which n=2 makes impossible to miss.
+        Generated minus accepted is true of the mechanism and false of the
+        counter: ERRATA A1 quotes the server returning from the
+        checkpoint-and-restore branch before it increments the accepted field,
+        and A13 measures the gap at 0.2 pp for `spec-dflash-n2`, which takes no
+        checkpoints, and 11.6 pp for `spec-draft-n8`, which takes 772.
+
+        The guard that failed was "drafted per round does not exceed the arm's
+        draft maximum": the wrong count satisfies it at 4.109 against 8.
+        Integrality is what separates them, and the acceptance the drafter's
+        count implies has to match A13's drafter column rather than its server
+        column. Getting this wrong is not cosmetic: it moved the target-step
+        weight from 0.232 to 0.452, which decided whether a purely arm-agnostic
+        cost produces the contrast the plan once reserved for arm-specificity.
         """
-        nz = self._mod().normalisers()
-        for arm, n_max in (("spec-dflash-n2", 2), ("spec-draft-n8", 8)):
-            self.assertNotEqual(nz[arm]["accepted"], nz[arm]["tokens"])
-            self.assertLessEqual(nz[arm]["drafted_per_round"], n_max + 0.02,
-                                 f"{arm} drafts more per round than its draft-max")
-        self.assertAlmostEqual(nz["spec-dflash-n2"]["drafted_per_round"], 2.0,
-                               delta=0.1, msg="an n=2 arm that does not come out "
-                                              "near two is the identity failing")
+        mod = self._mod()
+        nz = mod.normalisers()
+        A13 = {"spec-dflash-n2": (0.728, 0.730), "spec-draft-n8": (0.297, 0.413)}
+        for arm, (server, drafter) in A13.items():
+            z = nz[arm]
+            self.assertAlmostEqual(z["rounds"], round(z["rounds"]), places=6,
+                                   msg=f"{arm}: drafted is not a whole number of "
+                                       f"rounds, so the drafter does not always "
+                                       f"propose its maximum")
+            self.assertAlmostEqual(z["acceptance_drafter"], drafter, delta=0.005,
+                                   msg=f"{arm}: the round count implies an "
+                                       f"acceptance that is not A13's drafter "
+                                       f"column")
+            self.assertAlmostEqual(z["acceptance_server"], server, delta=0.006,
+                                   msg=f"{arm}: the server field is not A13's "
+                                       f"server column either, so this data is "
+                                       f"not the run A13 measured")
+        # and the wrong reading must be distinguishable, or this proves nothing
+        z = nz["spec-draft-n8"]
+        wrong = z["tokens"] - z["accepted_server"]
+        self.assertGreater(abs(wrong - z["rounds"]) / z["rounds"], 0.5,
+                           "generated minus accepted and drafted over draft-max "
+                           "agree here, so this test cannot tell them apart")
+
+    def test_the_t_table_covers_every_df_the_plan_permits(self):
+        """Eighteen to twenty-four surviving pairs is df seventeen to twenty-three.
+
+        The first version of the table held 17 and 23 only, so dropping a single
+        pair -- which the plan explicitly provides for -- raised KeyError in the
+        only committed implementation of its own estimator.
+        """
+        mod = self._mod()
+        for n in range(18, 25):
+            self.assertIn(n - 1, mod.TSTAR, f"df {n - 1} is missing")
+
+    def test_the_excise_rule_refuses_when_there_is_no_step(self):
+        """Removing the largest of five unconditionally biases the residual low.
+
+        Measured by simulation at the plan's own residual, the bias with no step
+        present is about a quarter. The rule is safe on this data because the
+        excised value is more than three times the next largest; the guard makes
+        that a condition rather than a coincidence, so the check is that the
+        condition actually holds here by a margin.
+        """
+        import json as _json
+        mod = self._mod()
+        v = [mod.pooled("spec-dflash-n2", i) for i in range(6)]
+        adj = [100.0 * _math.log(v[i + 1] / v[i]) for i in range(5)]
+        big = max(adj, key=abs)
+        rest = max(abs(x) for x in adj if x is not big)
+        self.assertGreater(abs(big), 3.0 * rest,
+                           "the excised change is not clearly a level change, so "
+                           "measured() should be refusing rather than excising")
+        del _json
 
     def test_the_hazard_is_taken_from_the_corpus_and_not_from_one_run(self):
         """One event gives a Poisson interval three orders of magnitude wide.

@@ -185,7 +185,8 @@ cmake --build build -j $(nproc) --target llama-cli
 21G  ~/models/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf
 508M ~/models/Qwen3.5-0.8B-Q4_K_M.gguf
 ```
-SHA-256 matches v1 (see `v2_3090_followup/v2_oleg_suggestions/01_baseline/p1.log`
+SHA-256 matches v1 (see
+`v2_3090_followup/v2_oleg_suggestions/01_baseline/p1.log`
 header for the `general.architecture` / `tokenizer.ggml.tokens` fields).
 
 ## Bench tool
@@ -355,7 +356,8 @@ $ ~/bench/llama.cpp/build/bin/llama-cli \
 common_memory_breakdown_print: |   - CUDA0 (RTX 3090) | 24115 = 761 + (21445 = 20798 + 105 + 541) + 1908 |
 ```
 
-GPU memory: ~20.8 GB model weights + ~1.9 GB CUDA workspace, fits comfortably in 24 GB.
+GPU memory: ~20.8 GB model weights + ~1.9 GB CUDA workspace, fits comfortably
+in 24 GB.
 
 ---
 
