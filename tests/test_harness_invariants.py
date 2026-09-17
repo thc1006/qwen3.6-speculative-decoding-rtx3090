@@ -6436,3 +6436,336 @@ class AFigureMayNotPublishAFigureNothingRederives(unittest.TestCase):
                         "run A's speculative arm is expected to be short of its "
                         "own baseline; if that changed, the caption must change")
         self.assertEqual((len(spec), len(base)), (6, 10))
+
+
+class APowerTableMayNotCountTheStepTwice(unittest.TestCase):
+    """The guard on the mistake that published a power of 0.09 for a 0.28 design.
+
+    `v4_audit_2026_08_25/PROSPECTIVE_PLAN_X_HOST_LOAD.md` chose twenty-four
+    blocks over twelve because of a simulation, and the first version of that
+    simulation used run T4's block-level CV of 2.145 % as if it were residual
+    noise while ALSO adding the arm's own level change on top of it. T4's block
+    CV already contains that level change. The model therefore implied 2.909 %
+    of block spread against the 2.145 % T4 shows, and it published a detection
+    rate of about one in ten for a design whose real rate is under three in ten.
+    An earlier version of this docstring said 2.768 %, which is the same
+    arithmetic done with A16's rounded 3.5 % gap rather than the measured
+    3.93 % the script uses.
+
+    The defect is invisible in the output: both readings are plausible numbers
+    and neither is flagged by anything. What makes it visible is the identity
+    the decomposition has to satisfy, so that identity is asserted here.
+
+    Also held: the cross-arm claim the plan's headline now rests on. Three
+    arm-agnostic hypotheses are pre-registered, and the plan's arm-specific
+    branch is the one-sided statement that D is above zero. That is only a
+    falsifiable branch if every one of the three puts D at or below zero, which
+    is a property of the measured denominators and not of the prose.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    def _mod(self):
+        import importlib.util
+        p = self.ROOT / "analysis" / "load_run_power.py"
+        spec = importlib.util.spec_from_file_location("load_run_power", p)
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        return m
+
+    def test_the_decomposition_reproduces_the_measured_block_spread(self):
+        m = self._mod().measured()
+        self.assertAlmostEqual(m["combined"], m["block_cv"], delta=0.15,
+                               msg="gap/2 and the residual must recombine to the "
+                                   "block CV; if they do not, one of them "
+                                   "contains the other")
+        # and the reading that was published once must NOT satisfy it
+        bad = _math.hypot(m["block_cv"], m["gap"] / 2.0)
+        self.assertGreater(abs(bad - m["block_cv"]), 0.4,
+                           "the double-counted model has to be distinguishable "
+                           "from the measured spread, or this test proves nothing")
+
+    def test_a_one_sided_cross_arm_contrast_is_not_a_valid_rule(self):
+        """The rule this plan used to pre-register, and why it cannot come back.
+
+        Two versions of the plan tested arm-specificity as "D lies wholly above
+        zero", D being the within-block difference in ms per token between
+        `spec-dflash-n2` and `spec-draft-n8`. That is only falsifiable while
+        every arm-agnostic hypothesis puts D on one side of zero, and with the
+        round count taken from the drafter rather than from the server's
+        under-counted accepted field, they do not: the per-target-step cost puts
+        it at about +0.06. This asserts the hypotheses straddle zero, so that
+        reinstating a one-sided rule fails here rather than in the outcome.
+        """
+        mod = self._mod()
+        import statistics as _st
+        ms = {a: 1000.0 / _st.mean(mod.pooled(a, i) for i in range(6))
+              for a in mod.ARMS}
+        nz = mod.normalisers()
+        ds = []
+        for key in ("per_token", "per_forward", "per_target_step"):
+            c = (ms["spec-dflash-n2"] * (1 / 0.98 - 1)) / nz["spec-dflash-n2"][key]
+            ds.append(c * nz["spec-dflash-n2"][key] - c * nz["spec-draft-n8"][key])
+        self.assertGreater(max(ds), 1e-3, "no hypothesis puts D above zero")
+        self.assertLess(min(ds), -1e-3, "no hypothesis puts D below zero")
+
+    def test_the_fit_rejects_every_arm_agnostic_cost_on_T4s_own_step(self):
+        """The replacement rule, exercised on the one step already measured.
+
+        Each hypothesis is one free scale over fixed weights, so with three arms
+        it has two residual degrees of freedom. Across T4's step the arms moved
+        in opposite directions, which no single host cost can produce, so all
+        three must be rejected by a wide margin. If any of them fits, the
+        discriminator this plan now rests on does not discriminate.
+        """
+        mod = self._mod()
+        import statistics as _st
+        lo = {a: _st.mean(mod.pooled(a, i) for i in range(3)) for a in mod.ARMS}
+        hi = {a: _st.mean(mod.pooled(a, i) for i in range(3, 6)) for a in mod.ARMS}
+        # the arms moved in opposite directions: that is the whole argument
+        self.assertGreater(hi["spec-dflash-n2"], lo["spec-dflash-n2"])
+        self.assertLess(hi["baseline"], lo["baseline"])
+        d, sg = mod.t4_step()
+        # and the standard error has to come from the blocks, not from the effect
+        for a in mod.ARMS:
+            self.assertGreater(sg[a], 0.0)
+            self.assertNotAlmostEqual(sg[a], abs(d[a]) * 0.25, places=4,
+                                      msg=f"{a}: the standard error is a fixed "
+                                          f"fraction of the effect, which makes "
+                                          f"the chi-square a function of the "
+                                          f"fraction that was chosen")
+        nz = mod.normalisers()
+        for key in ("per_token", "per_forward", "per_target_step"):
+            f = mod.fit_agnostic(d, sg, {a: nz[a][key] for a in mod.ARMS})
+            self.assertEqual(f["df"], 2)
+            self.assertGreater(f["chi2"], 9.21,
+                               f"{key} is not rejected at one per cent on two "
+                               f"degrees of freedom, so the fit does not "
+                               f"discriminate on the one step already measured")
+
+    def test_the_control_arm_holds_under_all_three_so_it_cannot_discriminate(self):
+        mod = self._mod()
+        import statistics as _st
+        ms = {a: 1000.0 / _st.mean(mod.pooled(a, i) for i in range(6))
+              for a in mod.ARMS}
+        nz = mod.normalisers()
+        for key in ("per_token", "per_forward", "per_target_step"):
+            c = (ms["spec-dflash-n2"] * (1 / 0.98 - 1)) / nz["spec-dflash-n2"][key]
+            dd = c * nz["spec-draft-n8"][key]
+            pct = 100.0 * (ms["spec-draft-n8"] / (ms["spec-draft-n8"] + dd) - 1)
+            self.assertLess(abs(pct), 1.0,
+                            f"{key} moves the control past the holding band; the "
+                            "plan states it holds under all three and the "
+                            "document would have to change with this")
+
+
+    def test_the_round_count_comes_from_the_drafter_not_the_server(self):
+        """The check that let a wrong round count through, and the one that does not.
+
+        Generated minus accepted is true of the mechanism and false of the
+        counter: ERRATA A1 quotes the server returning from the
+        checkpoint-and-restore branch before it increments the accepted field,
+        and A13 measures the gap at 0.2 pp for `spec-dflash-n2`, which takes no
+        checkpoints, and 11.6 pp for `spec-draft-n8`, which takes 772.
+
+        The guard that failed was "drafted per round does not exceed the arm's
+        draft maximum": the wrong count satisfies it at 4.109 against 8.
+        Integrality is what separates them, and the acceptance the drafter's
+        count implies has to match A13's drafter column rather than its server
+        column. Getting this wrong is not cosmetic: it moved the target-step
+        weight from 0.232 to 0.452, which decided whether a purely arm-agnostic
+        cost produces the contrast the plan once reserved for arm-specificity.
+        """
+        mod = self._mod()
+        nz = mod.normalisers()
+        A13 = {"spec-dflash-n2": (0.728, 0.730), "spec-draft-n8": (0.297, 0.413)}
+        for arm, (server, drafter) in A13.items():
+            z = nz[arm]
+            self.assertAlmostEqual(z["rounds"], round(z["rounds"]), places=6,
+                                   msg=f"{arm}: drafted is not a whole number of "
+                                       f"rounds, so the drafter does not always "
+                                       f"propose its maximum")
+            self.assertAlmostEqual(z["acceptance_drafter"], drafter, delta=0.005,
+                                   msg=f"{arm}: the round count implies an "
+                                       f"acceptance that is not A13's drafter "
+                                       f"column")
+            self.assertAlmostEqual(z["acceptance_server"], server, delta=0.006,
+                                   msg=f"{arm}: the server field is not A13's "
+                                       f"server column either, so this data is "
+                                       f"not the run A13 measured")
+        # and the wrong reading must be distinguishable, or this proves nothing
+        z = nz["spec-draft-n8"]
+        wrong = z["tokens"] - z["accepted_server"]
+        self.assertGreater(abs(wrong - z["rounds"]) / z["rounds"], 0.5,
+                           "generated minus accepted and drafted over draft-max "
+                           "agree here, so this test cannot tell them apart")
+
+    def test_the_t_table_covers_every_df_the_plan_permits(self):
+        """Eighteen to twenty-four surviving pairs is df seventeen to twenty-three.
+
+        The first version of the table held 17 and 23 only, so dropping a single
+        pair -- which the plan explicitly provides for -- raised KeyError in the
+        only committed implementation of its own estimator.
+        """
+        mod = self._mod()
+        for n in range(18, 25):
+            self.assertIn(n - 1, mod.TSTAR, f"df {n - 1} is missing")
+
+    def test_the_excise_rule_refuses_when_there_is_no_step(self):
+        """Removing the largest of five unconditionally biases the residual low.
+
+        Measured by simulation at the plan's own residual, the bias with no step
+        present is about a quarter. The rule is safe on this data because the
+        excised value is more than three times the next largest; the guard makes
+        that a condition rather than a coincidence, so the check is that the
+        condition actually holds here by a margin.
+        """
+        import json as _json
+        mod = self._mod()
+        v = [mod.pooled("spec-dflash-n2", i) for i in range(6)]
+        adj = [100.0 * _math.log(v[i + 1] / v[i]) for i in range(5)]
+        big = max(adj, key=abs)
+        rest = max(abs(x) for x in adj if x is not big)
+        self.assertGreater(abs(big), 3.0 * rest,
+                           "the excised change is not clearly a level change, so "
+                           "measured() should be refusing rather than excising")
+        del _json
+
+    def test_the_hazard_is_taken_from_the_corpus_and_not_from_one_run(self):
+        """One event gives a Poisson interval three orders of magnitude wide.
+
+        The first version of the power table took the switch hazard from a
+        single transition in run T4. This requires the derivation to reach the
+        rest of the corpus, and to find a rate the design is actually sensitive
+        to rather than zero or everything.
+        """
+        h = self._mod().hazard()
+        self.assertGreaterEqual(h["runs"], 20, "the walk stopped finding runs")
+        self.assertGreater(h["changes"], 20, "one run's worth of events is what "
+                                             "this derivation exists to replace")
+        self.assertLess(h["changes"], h["gaps"],
+                        "every gap a change means the threshold is too low")
+        self.assertLess(h["hi"] / h["lo"], 3.0,
+                        "the interval is meant to be tight enough to plan on")
+
+
+    def test_the_hazard_is_a_likelihood_and_not_changes_over_time(self):
+        """Two levels means an even number of transitions is invisible.
+
+        Dividing observed changes by elapsed time assumes every gap holds at
+        most one transition. Two put the arm back where it started and record as
+        no change, and the corpus's mean gap is the same order as the interval
+        between changes, so the omission is large rather than academic: the
+        naive figure is about one per 1123 s against a likelihood estimate of
+        about one per 641. A hazard that is too slow makes any design built on
+        it look better than it is, so the two are kept apart here and required
+        to disagree.
+        """
+        h = self._mod().hazard()
+        self.assertIn("naive", h)
+        self.assertGreater(h["naive"] / h["hazard"], 1.3,
+                           "the two estimators agree, which for gaps this long "
+                           "means one of them is not doing what it says")
+        self.assertLess(h["hazard"], h["naive"],
+                        "missed transitions can only make the true rate faster")
+        self.assertTrue(h["lo"] < h["hazard"] < h["hi"])
+
+    def test_within_block_pairing_beats_the_between_block_design(self):
+        mod = self._mod()
+        m = mod.measured()
+        p = mod.power(m, trials=3000)
+        a = p["between-block, 6 against 6"]["-2"]["moves"]
+        b = p["within-block, 24 pairs"]["-2"]["moves"]
+        self.assertGreater(b, a + 0.3,
+                           "the redesign is justified by this gap; if it closes, "
+                           "the plan is paying two and a half hours for nothing")
+
+
+class APlanCheckMustCatchACorruptedPlan(unittest.TestCase):
+    """The corruption count the changelog quotes, derived instead of asserted.
+
+    `analysis/load_run_power.py --check` compares the plan document against what
+    the script derives. A changelog entry said it "reads every published cell"
+    and that "ten of ten corruptions fail it", and nothing in the tree enumerated
+    those corruptions: a figure with no code path, which is the failing the same
+    branch was written to remove. The corruptions live here now, so the count is
+    a property of this file rather than of a sentence.
+
+    Each case corrupts a COPY of the plan in memory and requires `check_plan` to
+    name the thing it corrupted. The power table is not corrupted here, because
+    reproducing its figures needs forty thousand draws per design; the cases are
+    the deterministic ones, and the power table is covered by the claims job
+    running `--check` at the trial count the document was written at.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    @classmethod
+    def setUpClass(cls):
+        import importlib.util
+        import statistics as _st
+        spec = importlib.util.spec_from_file_location(
+            "load_run_power", cls.ROOT / "analysis" / "load_run_power.py")
+        cls.mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.mod)
+        m = cls.mod
+        cls.plan = m.PLAN.read_text(encoding="utf-8")
+        cls.m = m.measured()
+        cls.p_table = m.power(cls.m, None, 400)          # cheap: not corrupted below
+        cls.ms = {a: 1000.0 / _st.mean(m.pooled(a, i) for i in range(6))
+                  for a in m.ARMS}
+        cls.nz = m.normalisers()
+        cls.keys = (("per_token", "per generated token"),
+                    ("per_forward", "per model forward pass"),
+                    ("per_target_step", "per target-model step"))
+        cls.dl, cls.sg = m.t4_step()
+        cls.cc = m.corpus_correlation()
+        cls.wc = m.wall_clock()
+
+    def _missing(self, txt):
+        return self.mod.check_plan(txt, self.m, self.p_table, self.ms, self.nz,
+                                   self.keys, self.dl, self.sg, self.cc,
+                                   self.wc, {}, {})
+
+    def _cases(self):
+        p = self.plan
+        return {
+            "arm levels, every sign flipped":
+                p.replace("**+3.93 %**", "**\u22123.93 %**")
+                 .replace("**\u22120.74 %**", "**+0.74 %**"),
+            "arm levels, a row deleted":
+                p.replace("| `spec-dflash-n2` | 139.671 | 145.161 | **+3.93 %** |\n", ""),
+            "arm levels, a level edited":
+                p.replace("139.671", "149.671"),
+            "the measured gap":      p.replace("3.93 %", "3.50 %"),
+            "the residual":          p.replace("0.537 %", "0.760 %"),
+            "the block CV":          p.replace("2.145 %", "2.768 %"),
+            "the adjacent SD":       p.replace("0.760 %", "0.999 %"),
+            "a corpus correlation":  p.replace("+0.073", "+0.573"),
+            "another correlation":   p.replace("\u22120.083", "+0.983"),
+            "a chi-square":          p.replace("chi-square 89", "chi-square 12"),
+            "the wall clock":        p.replace("3.63", "9.63"),
+            "a normaliser row":      p.replace("| **\u22123.93 %** |", "| \u22121.64 % |"),
+            "the normaliser signs":  p.replace("| \u22122.00 % |", "| +2.00 % |"),
+        }
+
+    def test_the_plan_as_committed_raises_nothing_outside_the_power_table(self):
+        left = [x for x in self._missing(self.plan) if "within-block" not in x
+                and "between-block" not in x]
+        self.assertEqual(left, [], "the document disagrees with the script")
+
+    def test_every_corruption_is_caught_and_named(self):
+        base = set(self._missing(self.plan))
+        missed = []
+        for name, txt in self._cases().items():
+            new = set(self._missing(txt)) - base
+            if not new:
+                missed.append(name)
+        self.assertEqual(missed, [], f"{len(missed)} corruption(s) pass the check")
+
+    def test_the_corruption_set_is_not_empty_and_is_the_count_published(self):
+        n = len(self._cases())
+        self.assertGreaterEqual(n, 13, "the set shrank without the changelog moving")
+        doc = (self.ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+        self.assertIn(f"{n} of {n} corruptions", " ".join(doc.split()),
+                      "the changelog quotes a corruption count this file does not have")

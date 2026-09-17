@@ -67,6 +67,32 @@ should have used and did not:
 
 New work the audit generated that was not on the original list:
 
+- the one gap A16 names that this platform can still test, with a plan written
+  before the run:
+  [`v4_audit_2026_08_25/PROSPECTIVE_PLAN_X_HOST_LOAD.md`](v4_audit_2026_08_25/PROSPECTIVE_PLAN_X_HOST_LOAD.md).
+  `bench/host_guard.py --sample` records host CPU load and no run here carries
+  the column, so run X applies it as a factor instead of watching for it.
+  **It cannot be started yet**, and the plan says so in its own second
+  paragraph. Six things have to land first, each named there with its file:
+  a mode that lets the sampler follow a server started fresh in every arm-run;
+  distinct arm keys so the two members of a pair do not overwrite each other;
+  an order mode that rotates the arms and keeps a pair adjacent; a wall-clock
+  boundary per arm-run for the manipulation check to join on; pinning the
+  server to a processor set, which nothing in `bench/` can do today; and an
+  explicit thread count. None of the six is in this tree. One more is not a
+  prerequisite and is a real defect regardless: `host_guard.protect()` applies
+  `limit_threads()` and `be_nice()` before its own `BENCH_ALLOW_CONTENDED`
+  escape, so a caller that has declared its contention is de-prioritised anyway
+- **before run X, and cheaper than it**: pin the server to the bench host's
+  efficiency cores in half the blocks and to its performance cores in the other
+  half, two arms, six or twelve blocks. That is a deliberate worst case, a clock
+  cut of about a quarter, and a null inside one per cent bounds core placement,
+  processor clock and ambient load acting through the scheduler in one run of
+  about twenty minutes. Run X is three and a half hours
+- the successor to run X, whichever way it goes: A16 names page cache and
+  allocator state as a third hypothesis, changed by the two rebuilds and the
+  killed rehearsal between runs T and T3, and no run here records either. Run X
+  does not test it and its plan says so
 - the workload-shape comparison Exp 2 could not make (ERRATA D3b)
 - the pre-registered past-threshold prediction and its test
   ([`v4_audit_2026_08_25/PREREGISTERED_PREDICTION.md`](v4_audit_2026_08_25/PREREGISTERED_PREDICTION.md))
@@ -230,8 +256,8 @@ requests. Any master comparison must pass `--spec-type` explicitly.
   that arm against 0.31 % for no speculation, on work identical to the token)
   on the largest dataset this repository has for it. What would move it next is
   instrumentation, not another schedule: host CPU load (recordable now, in no
-  run yet) and the GDDR6X memory-junction temperature, which NVML does not
-  expose on Linux at all.
+  run yet, and pre-registered as run X above) and the GDDR6X memory-junction
+  temperature, which NVML does not expose on Linux at all.
 - **Recompute every `request-mean` from `predicted_n` and `predicted_ms`.**
   [B8](ERRATA.md#b8-every-request-mean-here-counts-one-token-fewer-than-it-timed):
   llama.cpp's `predicted_per_second` is a rate over `n − 1` tokens divided by

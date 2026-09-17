@@ -73,6 +73,19 @@ DOCS = ["README.md", "ERRATA.md", "CHANGELOG.md", "RETEST_TODO.md",
 # document that is in neither would escape the count silently, which is the
 # failure this whole file exists to stop.
 EXCLUDED = {
+    "v4_audit_2026_08_25/PROSPECTIVE_PLAN_X_HOST_LOAD.md":
+        "not censused while v4.2 stands, and NOT because it is a plan: the three "
+        "other prospective plans here are censused, one of them with no outcome "
+        "section and no data. verify_claims.py pins len(DOCS) and the decimal "
+        "prose census, it is bound to the v4.2 tag, and this document quotes "
+        "decimals from A16. It joins DOCS when run X lands, which re-cuts the "
+        "binding anyway because the evidence manifest is bound too. Excluded "
+        "means the cell probe does not perturb its four tables, so the "
+        "substitute is analysis/load_run_power.py --check, which the claims "
+        "job runs: it covers the power table, the cross-arm table, the three "
+        "chi-squares, the three corpus correlations, the four measured inputs "
+        "and the wall clock, and NOT the hazard interval, its sensitivity "
+        "rows, the washout table or the D values",
     "v2_3090_followup/README.md": "archived artefact; ERRATA quotes it, it is not re-derived",
     "v2_3090_followup/SUMMARY.md": "archived artefact; ERRATA quotes it, it is not re-derived",
     "v3_dflash_2026_05_07/README.md": "archived artefact; ERRATA quotes it, it is not re-derived",

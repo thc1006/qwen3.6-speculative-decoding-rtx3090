@@ -164,6 +164,20 @@ jobs:
         # ones. This step exists so the number is visible in the log rather
         # than only failing when it moves.
         run: python analysis/table_coverage.py
+      - name: the run X power and cross-arm tables are what the plan prints
+        # A pre-registration that publishes a power table and a cross-arm table
+        # has to have them derived by something, and something has to run that.
+        # `--check` re-derives both from the committed arm-runs and compares them
+        # against the document row by row. It was written, it passed, and no job
+        # invoked it: the first version of it also matched by substring, so
+        # swapping two rows of the table went unnoticed. It anchors on the row
+        # label now, and it runs here. About three minutes: it re-derives the
+        # power table at four block counts, the hazard interval at both ends and
+        # the washout table at four lengths, forty thousand draws each. An
+        # earlier version skipped the last two under `--check`, so the check
+        # computed strictly less than a plain run and two of the plan's four
+        # tables had no guard at all.
+        run: python analysis/load_run_power.py --check
       - name: the past-threshold fit reports and serialises
         run: |
           set -e
