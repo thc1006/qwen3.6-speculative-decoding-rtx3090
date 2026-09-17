@@ -71,7 +71,18 @@ New work the audit generated that was not on the original list:
   before the run:
   [`v4_audit_2026_08_25/PROSPECTIVE_PLAN_X_HOST_LOAD.md`](v4_audit_2026_08_25/PROSPECTIVE_PLAN_X_HOST_LOAD.md).
   `bench/host_guard.py --sample` records host CPU load and no run here carries
-  the column, so run X applies it as a factor instead of watching for it
+  the column, so run X applies it as a factor instead of watching for it.
+  **It cannot be started yet**, and the plan says so in its own second
+  paragraph. Six things have to land first, each named there with its file:
+  a mode that lets the sampler follow a server started fresh in every arm-run;
+  distinct arm keys so the two members of a pair do not overwrite each other;
+  an order mode that rotates the arms and keeps a pair adjacent; a wall-clock
+  boundary per arm-run for the manipulation check to join on; pinning the
+  server to a processor set, which nothing in `bench/` can do today; and an
+  explicit thread count. None of the six is in this tree. One more is not a
+  prerequisite and is a real defect regardless: `host_guard.protect()` applies
+  `limit_threads()` and `be_nice()` before its own `BENCH_ALLOW_CONTENDED`
+  escape, so a caller that has declared its contention is de-prioritised anyway
 - **before run X, and cheaper than it**: pin the server to the bench host's
   efficiency cores in half the blocks and to its performance cores in the other
   half, two arms, six or twelve blocks. That is a deliberate worst case, a clock

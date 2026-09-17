@@ -1199,7 +1199,7 @@ to back. Thresholds, estimator, outcomes and what each one licenses are fixed
 before any data exists.
 
 **The plan says at the top that it cannot be executed yet, and that is the most
-useful thing in it.** Two adversarial passes found four things this harness
+useful thing in it.** Five adversarial passes found six things this harness
 cannot express. A fresh `llama-server` is started and stopped inside every
 arm-run, so the sampler cannot follow one root process across an invocation and
 would report everything as somebody else's work. Both members of a pair would be
@@ -1268,10 +1268,13 @@ nearly a factor of five in milliseconds per generated token, and the plan now
 tabulates three arm-agnostic mechanisms, none of which prefers any arm: a cost
 per generated token, per model forward pass, and per target-model step. Under
 all three the control arm holds. The pattern the plan rested on is produced by
-every mechanism it was meant to exclude. What does discriminate is a
-within-block difference of differences, which every one of the three puts at or
-below zero, and the size of the no-speculation arm's own movement, which
-separates them from each other.
+every mechanism it was meant to exclude. What discriminates is a weighted fit
+of each of the three against the measured change per arm, with its chi-square
+on two degrees of freedom, and the size of the no-speculation arm's own
+movement, which separates the three from each other. A later pass in this same
+entry replaced an earlier answer here, a one-sided contrast between two arms,
+after correcting the round count flipped its sign. That paragraph is below and
+this sentence is the current one.
 
 **And the load it had chosen could not have worked.** The plan had specified
 this repository's own perturbation suite, justified as reproducing the
@@ -1346,7 +1349,7 @@ a live reading, which by this repository's own convention needs a dagger and did
 not have one. It is in the archive now, along with the fact that no committed
 arm-run carries a thread count either.
 
-**A fifth pass killed the discriminator the fourth pass had just installed.**
+**A fifth pass killed the discriminator the paragraph above installed.**
 The plan's cross-arm test needs to know how many rounds each arm ran, and it had
 been deriving that as generated tokens minus accepted ones. That is true of the
 mechanism and false of the counter, and this repository's own errata say so:

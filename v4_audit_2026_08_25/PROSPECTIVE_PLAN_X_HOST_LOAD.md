@@ -6,7 +6,7 @@ empty until the data exists. This repository has a retracted headline that
 asserted a mechanism chosen after the fact, which is the habit the genre exists
 to break.
 
-**This plan cannot be executed yet.** Two adversarial passes over it found four
+**This plan cannot be executed yet.** Five adversarial passes over it found six
 things the harness cannot express and several figures that did not re-derive.
 The prerequisites are listed near the end, each naming the file and the change,
 and the run does not start until they land. A pre-registration that describes a
@@ -161,7 +161,7 @@ It would make run X unnecessary. A positive sends you to a crossed design,
 placement against load, two arms and twelve blocks, at 1.36 hours, which also
 supplies the heat-without-contention cell this plan lists as a limitation.
 
-Run X as written is 3.03 hours of arm-runs and 3.43 with the washout it
+Run X as written is 3.03 hours with its overhead and 3.63 with the washout it
 mandates below. It is pre-registered here because the question is worth a
 pre-registration and because writing it is what found everything above. It
 should not be the next thing on the card.
@@ -195,9 +195,15 @@ in the other half, alternating ABBA over the twenty-four.
 
 ### The power, from this repository's own variability
 
-`analysis/load_run_power.py` is committed with this plan and produces every
-figure below; `--check` re-derives them and compares them against this document
-row by row. Its inputs are measured, not chosen:
+`analysis/load_run_power.py` is committed with this plan and `--check`
+re-derives
+what it covers, comparing it against this document row by row rather than by
+searching for a value anywhere: the power table, the cross-arm table, the three
+chi-squares, the three corpus correlations, the four measured inputs and the
+wall
+clock. What it does not yet cover is named here rather than left to be assumed:
+the hazard interval, the sensitivity rows at its ends, the washout table's other
+rows, and the D values. Its inputs are measured, not chosen:
 
 - the per-arm-run residual log SD is **0.537 %**, the measured adjacent-repeat
   difference SD of 0.760 % with the level change excised, over root two
@@ -322,7 +328,7 @@ second:
 - the **runqueue wait** of the serving process, from `/proc/<pid>/schedstat`'s
   second field, at each tick
 - the processor each of the server's threads last ran on, from
-  `/proc/<pid>/task/*/stat`, at each tick, **as a record and not as a control**
+  `/proc/<pid>/task/*/stat`, at each tick, as the check that the pinning held
 - `/proc/meminfo`'s `Cached` at each arm-run boundary
 - wall-clock start and end of every arm-run
 
@@ -378,7 +384,10 @@ Percentage change and not percentage points: A16's own figure is −3.40 % of a
 decode rate, and a threshold has to be in the unit of the thing it explains.
 
 If host CPU load is the mechanism behind A16, `spec-dflash-n2` **moves** and
-`spec-draft-n8` **holds**, as defined below.
+`spec-draft-n8` **holds**, as defined below. That is a necessary condition and
+not a test: the next heading shows every arm-agnostic mechanism this plan can
+name produces the same pattern, so it selects nothing on its own and the fit is
+what decides.
 
 ### Across arms
 
@@ -490,9 +499,13 @@ and the outcome section names which row survived and reports its chi-square.
 Worth recording, and not A16's shape. If more than one survives the run cannot
 tell them apart and says that instead.
 
-**Both move.** General starvation of the serving process.
+**Both named arms move.** General starvation of the serving process, whatever
+the fit says. This branch is selected before the fit is read, because two arms
+moving is not a pattern any single host cost produces at these rates, and the
+outcome section reports the fit beside it rather than choosing between them.
 
-**Both hold.** Host CPU load at this level is not the mechanism. Of the
+**Both named arms hold.** Host CPU load at this level is not the mechanism, and
+no fit is read because there is nothing to fit. Of the
 hypotheses A16 names, the junction temperature stays untestable here, and the
 page-cache and allocator-state one is untested rather than excluded; it is the
 successor run and is listed in `RETEST_TODO.md` as such. This branch does not
@@ -515,7 +528,7 @@ thresholds, that is reported and the normaliser table still decides.
 
 ## What must change before this run can start
 
-Four things, each small, each named. The run does not start until they land,
+Six things, each small, each named. The run does not start until they land,
 and the reason each is here is that an adversarial pass found the run producing
 nothing without it.
 
@@ -538,15 +551,22 @@ nothing without it.
    modes produces "rotate the arms, and run each arm twice back to back with the
    treatment order alternating".
 4. **The manipulation check has no join key.** Arm-runs record durations and the
-   sampler records wall-clock times, and there is no recorded wall-clock start
-or
-   end per arm-run to join them on. Two lines in `run_arm`.
+   sampler records wall-clock times, and there is no recorded wall-clock
+   start or end per arm-run to join them on. Two lines in `run_arm`.
 
-A fifth: the server's thread count has to be passed explicitly and recorded,
+5. **Nothing pins any process to any processor.** There is no `taskset`, no
+   `sched_setaffinity` and no cpuset anywhere in `bench/` or `analysis/`, while
+   this plan mandates that the server run on a fixed processor set in every
+   arm-run and that the load's set be a design factor. It is one line where the
+   server command is built, and the treatment then records itself through the
+   `argv` field every arm-run already carries. Two earlier versions of this list
+   left it out while the body of the plan required it.
+
+6. The server's thread count has to be passed explicitly and recorded,
 because llama.cpp's own choice is the variable that decides whether any of this
 work reaches an efficiency core, and the tree does not record what it was.
 
-A sixth is not a prerequisite but is worth fixing while these are open:
+One more is not a prerequisite but is worth fixing while these are open:
 `host_guard.protect()` applies `limit_threads()` and `be_nice()` before its
 `BENCH_ALLOW_CONTENDED` escape, so a caller that has declared its contention
 still gets de-prioritised. Whatever the escape is for, it is not that.
@@ -582,7 +602,11 @@ forty minutes. Run T4's own invocation prices what that leaves out: 1365 s of
 wall clock against 1198.8 s of `ready_s` plus request time, which is **9.23 s
 per arm-run** of warm-up, teardown settle, two `nvidia-smi` calls and the JSON
 writes. At 144 arm-runs that is 3.03 hours, and the washout this plan mandates
-adds another 0.4. **Three and a half hours is the honest figure**, not three.
+is per pair, one pair per arm per block, so 72 of them at 30 s add another 0.60.
+**3.63 hours is the honest figure.** An earlier version of this paragraph
+costed the washout at 20 s while the design specified 30 and published the total
+that gave; `analysis/load_run_power.py` derives it now, so changing one changes
+the other.
 
 The run's data, manifest and telemetry are committed together with the outcome
 section filled in, in one commit, so that the plan and the result cannot drift

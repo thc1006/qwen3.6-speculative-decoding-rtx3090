@@ -27,6 +27,7 @@ constant somebody remembered.
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
 import math
 import pathlib
@@ -369,6 +370,44 @@ def corpus_correlation(root: pathlib.Path | None = None) -> dict:
     return out
 
 
+def wall_clock(nblocks: int = 24, washout: float = WASHOUT) -> dict:
+    """What run X costs, derived rather than typed.
+
+    Run T4 prices the overhead the arm-run records do not contain: its manifest
+    to its completion marker is the invocation's wall clock, and the difference
+    against the summed `ready_s` plus request time is warm-up, teardown settle,
+    two `nvidia-smi` calls and the JSON writes, per arm-run.
+
+    The washout is per PAIR, and there is one pair per arm per block. A version
+    of this plan costed it at 20 s while specifying 30, and published the total
+    that gave: the figure is derived here so that changing one changes the other.
+    """
+    d = json.loads((T4 / "manifest.json").read_text(encoding="utf-8"))
+    c = json.loads((T4 / "RUN_COMPLETE.json").read_text(encoding="utf-8"))
+    k0 = next(k for k in ("created", "started", "start") if k in d)
+    k1 = next(k for k in ("completed_at", "completed", "finished") if k in c)
+    t0 = datetime.datetime.fromisoformat(d[k0])
+    t1 = datetime.datetime.fromisoformat(c[k1])
+    runs = 0
+    total = 0.0
+    for a in ARMS:
+        for i in range(6):
+            j = json.loads((T4 / f"{a}__rep{i}.json").read_text(encoding="utf-8"))
+            total += j.get("ready_s", 0.0) + sum(
+                r["wall_ms"] for r in j["rows"]) / 1000.0
+            runs += 1
+    overhead = ((t1 - t0).total_seconds() - total) / runs
+    per_pass = total / 6.0                       # six blocks of three arms in T4
+    arm_runs = nblocks * len(ARMS) * 2           # loaded and unloaded
+    measured = per_pass * nblocks * 2
+    pairs = nblocks * len(ARMS)
+    return {"overhead_per_arm_run": overhead, "arm_runs": arm_runs,
+            "pairs": pairs, "washout": washout,
+            "measured_h": measured / 3600.0,
+            "with_overhead_h": (measured + overhead * arm_runs) / 3600.0,
+            "total_h": (measured + overhead * arm_runs + pairs * washout) / 3600.0}
+
+
 def _interval(d: list[float], df: int) -> tuple[float, float]:
     h = TSTAR[df] * st.stdev(d) / math.sqrt(len(d))
     m = st.mean(d)
@@ -547,6 +586,15 @@ def main() -> None:
         f = fit_agnostic(dl, sg, w)
         print(f"    {label:24s} chi2 = {f['chi2']:8.1f} on {f['df']} df")
 
+    wc = wall_clock()
+    print("\n  wall clock, derived from run T4's own invocation:")
+    print(f"    overhead not in the arm-run records: "
+          f"{wc['overhead_per_arm_run']:.2f} s per arm-run")
+    print(f"    {wc['arm_runs']} arm-runs: {wc['measured_h']:.2f} h measured, "
+          f"{wc['with_overhead_h']:.2f} h with overhead")
+    print(f"    plus {wc['pairs']} pairs x {wc['washout']:.0f} s of washout: "
+          f"{wc['total_h']:.2f} h")
+
     cc = corpus_correlation()
     print(f"\n  block-aligned correlation of ms/token residuals, "
           f"{cc['directories']} directories:")
@@ -588,6 +636,10 @@ def main() -> None:
         flat = " ".join(txt.split())
         if f"chi-square {chis[0]}, {chis[1]} and {chis[2]}" not in flat:
             missing.append(f"chi-squares {chis}")
+        for want in (f"{wc['with_overhead_h']:.2f} hours",
+                     f"{wc['total_h']:.2f}"):
+            if want not in txt:
+                missing.append(f"wall clock {want!r}")
         for r, _n in cc["r"].values():
             if f"{r:+.3f}".replace("+", "+") not in txt.replace("−", "-"):
                 missing.append(f"corpus correlation {r:+.3f}")
