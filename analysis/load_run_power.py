@@ -292,6 +292,83 @@ def fit_agnostic(deltas: dict, sigmas: dict, weights: dict) -> dict:
             "resid": {a: deltas[a] - c * weights[a] for a in deltas}}
 
 
+def t4_step() -> tuple[dict, dict]:
+    """T4's change in ms per generated token across its own step, with a real SE.
+
+    The standard error is the paired-block one the three low and three high
+    blocks actually give, not a fraction of the effect. The first version of
+    this function invented it as a quarter of each arm's own change, which makes
+    the chi-square a function of the number that was chosen rather than of the
+    data, and it published three figures computed that way.
+    """
+    lo, hi, dl, sg = {}, {}, {}, {}
+    for a in ARMS:
+        low = [1000.0 / pooled(a, i) for i in range(3)]
+        high = [1000.0 / pooled(a, i) for i in range(3, 6)]
+        lo[a], hi[a] = st.mean(low), st.mean(high)
+        dl[a] = hi[a] - lo[a]
+        sg[a] = math.sqrt(st.stdev(low) ** 2 / 3 + st.stdev(high) ** 2 / 3)
+    return dl, sg
+
+
+def corpus_correlation(root: pathlib.Path | None = None) -> dict:
+    """Do the three arms move together, block by block, across the whole corpus?
+
+    A host cost of any denominator is shared, so it moves the arms together and
+    would show as a correlation near one. The plan publishes these three numbers
+    and nothing derived them until this function existed, which is the same
+    defect it corrects elsewhere.
+
+    Residuals are standardised within (directory, arm) so that a directory's own
+    level and scale cannot induce a correlation, and arms are aligned by repeat
+    index, which is the block.
+    """
+    data = (root or ROOT) / "v4_audit_2026_08_25" / "data"
+    pairs: dict[tuple[str, str], list[tuple[float, float]]] = {}
+    ndirs = 0
+    for d in sorted(data.iterdir()):
+        if not d.is_dir():
+            continue
+        per = {}
+        for a in ARMS:
+            got = {}
+            for f in d.glob(f"{a}__rep*.json"):
+                j = json.loads(f.read_text(encoding="utf-8"))
+                rs = j["rows"]
+                if not rs or j.get("crashed"):
+                    continue
+                n = sum(r["predicted_n"] for r in rs)
+                msec = sum(r["predicted_ms"] for r in rs)
+                if n and msec:
+                    got[int(f.stem.rpartition("__rep")[2])] = msec / n
+            per[a] = got
+        if any(not per[a] for a in ARMS):
+            continue
+        reps = sorted(set.intersection(*[set(per[a]) for a in ARMS]))
+        if len(reps) < 4:
+            continue
+        ndirs += 1
+        z = {}
+        for a in ARMS:
+            v = [per[a][r] for r in reps]
+            mu, sd = st.mean(v), st.stdev(v)
+            z[a] = [(x - mu) / sd if sd else 0.0 for x in v]
+        for i in range(len(ARMS)):
+            for j2 in range(i + 1, len(ARMS)):
+                k = tuple(sorted((ARMS[i], ARMS[j2])))
+                pairs.setdefault(k, []).extend(zip(z[ARMS[i]], z[ARMS[j2]]))
+    out = {"directories": ndirs, "r": {}}
+    for k, v in pairs.items():
+        xs = [a for a, _ in v]
+        ys = [b for _, b in v]
+        mx, my = st.mean(xs), st.mean(ys)
+        num = sum((a - mx) * (b - my) for a, b in v)
+        den = math.sqrt(sum((a - mx) ** 2 for a in xs)
+                        * sum((b - my) ** 2 for b in ys))
+        out["r"][k] = (num / den if den else float("nan"), len(v))
+    return out
+
+
 def _interval(d: list[float], df: int) -> tuple[float, float]:
     h = TSTAR[df] * st.stdev(d) / math.sqrt(len(d))
     m = st.mean(d)
@@ -464,14 +541,18 @@ def main() -> None:
                  if dd > 1e-9 else ""))
     print("\n  So the test is a fit, not a contrast. T4's own step already fails all")
     print("  three, because the arms moved in opposite directions across it:")
-    lo = {a: st.mean(pooled(a, i) for i in range(3)) for a in ARMS}
-    hi = {a: st.mean(pooled(a, i) for i in range(3, 6)) for a in ARMS}
-    dl = {a: 1000.0 / hi[a] - 1000.0 / lo[a] for a in ARMS}
-    sg = {a: abs(dl[a]) * 0.25 + 1e-4 for a in ARMS}
+    dl, sg = t4_step()
     for key, label in keys:
         w = {a: nz[a][key] for a in ARMS}
         f = fit_agnostic(dl, sg, w)
         print(f"    {label:24s} chi2 = {f['chi2']:8.1f} on {f['df']} df")
+
+    cc = corpus_correlation()
+    print(f"\n  block-aligned correlation of ms/token residuals, "
+          f"{cc['directories']} directories:")
+    for k, (r, n) in sorted(cc["r"].items(), key=lambda kv: -kv[1][0]):
+        print(f"    {k[0]:16s} vs {k[1]:16s} r = {r:+.3f}  n = {n}")
+    print("  A shared host cost of any denominator would put these near one.")
 
     if args.check:
         txt = PLAN.read_text(encoding="utf-8")
@@ -499,6 +580,17 @@ def main() -> None:
             cells = [c.strip().strip("*") for c in line.strip("|").split("|")]
             if cells[1:4] != want:
                 missing.append(f"row {label!r} prints {cells[1:4]} not {want}")
+        # the chi-squares the plan quotes, to the precision it quotes them
+        chis = []
+        for key, _label in keys:
+            f = fit_agnostic(dl, sg, {a: nz[a][key] for a in ARMS})
+            chis.append(f"{f['chi2']:.0f}")
+        flat = " ".join(txt.split())
+        if f"chi-square {chis[0]}, {chis[1]} and {chis[2]}" not in flat:
+            missing.append(f"chi-squares {chis}")
+        for r, _n in cc["r"].values():
+            if f"{r:+.3f}".replace("+", "+") not in txt.replace("−", "-"):
+                missing.append(f"corpus correlation {r:+.3f}")
         for key, label in keys:
             c = (ms["spec-dflash-n2"] * (1 / 0.98 - 1)) / nz["spec-dflash-n2"][key]
             want = [f"{100 * (ms[a] / (ms[a] + c * nz[a][key]) - 1):+.2f} %".replace("+", "+")

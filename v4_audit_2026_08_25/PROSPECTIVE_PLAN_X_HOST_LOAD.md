@@ -450,9 +450,14 @@ two degrees of freedom.
   it
 - **more than one survives**: the run cannot distinguish them and says so
 
-T4's own step already fails all three, at chi-square 46, 40 and 42 on two
-degrees of freedom, because the arms moved in opposite directions across it. The
-split point there was chosen by eye, which is why this run fixes it in advance.
+T4's own step already fails all three, at chi-square 89, 98 and 129 on two
+degrees of freedom against a one per cent critical value of 9.21, because the
+arms moved in opposite directions across it. Those standard errors are the
+paired-block ones the three low and three high blocks give; an earlier version
+of this paragraph quoted 46, 40 and 42, computed from a standard error invented
+as a quarter of each arm's own change, which makes the statistic a function of
+the number that was chosen. The split point there was chosen by eye, which is
+why this run fixes it in advance.
 
 ### Why 2 % and not 3.93 %
 

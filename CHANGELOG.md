@@ -1398,6 +1398,18 @@ label now and reads every published cell, ten of ten corruptions fail it, and
 `audit.yml`'s claims job runs it. A guard nothing invokes is not a guard, and
 the previous entry called it the thing that stops the figures drifting.
 
+Widening it found two more numbers with no code path behind them, both written
+in the same pass that was correcting exactly that failing. The chi-squares the
+plan quotes for the fit were computed from a standard error invented as a
+quarter of each arm's own change, which makes the statistic a function of the
+fraction that was chosen rather than of the data; derived from the three blocks
+on each side instead, they are several times larger and the conclusion is
+unaffected, but the published figures were not the ones the data gives. And the
+three cross-arm correlations the plan uses to say no whole-host component is
+detectable were computed by hand and never by anything committed. Both are
+derived in the script now and both are checked, verified in the direction that
+matters: corrupting either fails the check by name.
+
 Three smaller defects from the same pass, all of which changed a published
 number. The plan mandated a washout between the two members of a pair and the
 simulation contained none, so its table described a design nobody was going to

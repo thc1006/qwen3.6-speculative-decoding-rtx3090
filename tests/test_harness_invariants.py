@@ -6522,8 +6522,15 @@ class APowerTableMayNotCountTheStepTwice(unittest.TestCase):
         # the arms moved in opposite directions: that is the whole argument
         self.assertGreater(hi["spec-dflash-n2"], lo["spec-dflash-n2"])
         self.assertLess(hi["baseline"], lo["baseline"])
-        d = {a: 1000.0 / hi[a] - 1000.0 / lo[a] for a in mod.ARMS}
-        sg = {a: abs(d[a]) * 0.25 + 1e-4 for a in mod.ARMS}
+        d, sg = mod.t4_step()
+        # and the standard error has to come from the blocks, not from the effect
+        for a in mod.ARMS:
+            self.assertGreater(sg[a], 0.0)
+            self.assertNotAlmostEqual(sg[a], abs(d[a]) * 0.25, places=4,
+                                      msg=f"{a}: the standard error is a fixed "
+                                          f"fraction of the effect, which makes "
+                                          f"the chi-square a function of the "
+                                          f"fraction that was chosen")
         nz = mod.normalisers()
         for key in ("per_token", "per_forward", "per_target_step"):
             f = mod.fit_agnostic(d, sg, {a: nz[a][key] for a in mod.ARMS})
