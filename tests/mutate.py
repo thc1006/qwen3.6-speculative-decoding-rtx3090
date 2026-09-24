@@ -650,19 +650,56 @@ def mirror(into: Path) -> Path:
     return into
 
 
+def _shard_arg() -> tuple[int, int, bool]:
+    """`--shard=i/n`, or (0, 1, False) for the whole list.
+
+    Spelled and decomposed exactly as `tests/data_mutate.py` does, because two
+    suites launched the same way from the same workflow must not differ in how
+    they are split. The stride decomposition `k % n == i` partitions the list
+    exactly, so a set of shards 0..n-1 covers every mutation once and a missing
+    shard leaves a hole rather than a duplicate.
+
+    Sharding exists for CI: one `unittest` subprocess per mutation is six
+    minutes on a runner, and the shards are independent because each one gets a
+    mirror of its own.
+    """
+    for a in sys.argv[1:]:
+        if a.startswith("--shard="):
+            try:
+                i, n = (int(x) for x in a.split("=", 1)[1].split("/", 1))
+            except ValueError:
+                sys.exit(f"{a} is not --shard=i/n")
+            if not (n >= 1 and 0 <= i < n):
+                sys.exit(f"--shard={i}/{n} is not a shard of a set of {n}")
+            return i, n, True
+        sys.exit(f"unknown argument {a!r}; the only one is --shard=i/n")
+    return 0, 1, False
+
+
 def main() -> None:
     # One `unittest` subprocess per mutation, for minutes. Same reason as
     # tests/data_mutate.py: a burst on a measuring host costs an arm-pass.
+    shard, shards, sharded = _shard_arg()
     sys.path.insert(0, str(ROOT / "bench"))
     import host_guard
     host_guard.protect("the code mutation suite")
-    host_guard.serialise("verify")
+    if not sharded:
+        # The whole-host lock is taken by whoever owns the host. A fan-out
+        # cannot take it once per shard, and a CI matrix gives each shard a
+        # runner of its own where there is nothing to serialise against.
+        host_guard.serialise("verify")
 
+    picked = [m for k, m in enumerate(MUTATIONS) if k % shards == shard]
+    tag = "" if not sharded else f"shard {shard}/{shards}: "
+    if not picked:
+        sys.exit(f"{tag}no mutation in this slice, so it proves nothing")
+
+    print(f"  {tag}{len(picked)} of {len(MUTATIONS)} mutations")
     print(f"  {'mutation':52s} guarding test")
     escaped = []
     with tempfile.TemporaryDirectory() as tmp:
         work = mirror(Path(tmp) / "work")
-        for name, path, correct, defect, test in MUTATIONS:
+        for name, path, correct, defect, test in picked:
             p = work / path
             original = p.read_text(encoding="utf-8")
             if correct not in original:
@@ -683,8 +720,8 @@ def main() -> None:
 
     print()
     if escaped:
-        sys.exit(f"  {len(escaped)} mutation(s) survived: " + "; ".join(escaped))
-    print(f"  all {len(MUTATIONS)} mutations detected")
+        sys.exit(f"  {tag}{len(escaped)} mutation(s) survived: " + "; ".join(escaped))
+    print(f"  {tag}all {len(picked)} of {len(MUTATIONS)} mutations detected")
 
 
 if __name__ == "__main__":

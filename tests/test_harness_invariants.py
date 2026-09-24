@@ -5051,20 +5051,41 @@ class TheWorkflowsMustDeclareTheJobsTheySayTheyHave(unittest.TestCase):
                     out[cur] = l.split("name:", 1)[1].strip().strip("'\"")
         return out
 
-    def test_audit_declares_exactly_five_named_jobs(self):
+    def test_audit_declares_exactly_seven_named_jobs(self):
+        """Five until 2026-09-19, when `unit and mutation` became three.
+
+        It was one job running the regression suite, the code mutations and the
+        data perturbations in order, for twenty-seven minutes. Nothing ordered
+        them: each mirrors the tracked tree for itself.
+        """
         self.assertEqual(
             self._jobs("audit.yml"),
             {"audit-static": "static",
-             "audit-unit": "unit and mutation",
+             "audit-unit": "unit",
+             "audit-code-mutations": "code mutations",
+             "audit-data-perturbations": "data perturbations",
              "audit-data-integrity": "data integrity",
              "audit-claims": "claims",
              "audit-charts": "charts"})
 
-    def test_the_header_counts_them(self):
-        head = (self.ROOT / ".github" / "workflows" / "audit.yml").read_text(
-            encoding="utf-8")[:400]
-        self.assertIn("Five required jobs", head)
-        self.assertEqual(len(self._jobs("audit.yml")), 5)
+    def test_the_header_counts_them_and_their_legs(self):
+        """Twenty legs is the concurrency a free plan gets, so it is a real
+        number and not a taste. Past it the extra legs queue, which is the same
+        arithmetic both launchers refuse extra shards over."""
+        text = (self.ROOT / ".github" / "workflows" / "audit.yml").read_text(
+            encoding="utf-8")
+        self.assertIn("Seven jobs, twenty legs", text[:400])
+        self.assertEqual(len(self._jobs("audit.yml")), 7)
+        legs = 0
+        for line in text.splitlines():
+            m = re.match(r"^        shard: \[(.*)\]\s*$", line)
+            legs += len(m.group(1).split(",")) if m else 0
+        # every job without a matrix is one leg of its own
+        legs += len(self._jobs("audit.yml")) - sum(
+            1 for line in text.splitlines()
+            if re.match(r"^        shard: \[", line))
+        self.assertEqual(legs, 20, f"the workflow now has {legs} legs and the "
+                                   f"header says twenty")
 
     def test_evidence_declares_exactly_one(self):
         self.assertEqual(
@@ -5075,12 +5096,14 @@ class TheWorkflowsMustDeclareTheJobsTheySayTheyHave(unittest.TestCase):
             encoding="utf-8")
         for cmd in ("python -m unittest discover -s tests",
                     "python tests/mutate.py",
-                    # the perturbations run sharded now, so the job names the
-                    # launcher rather than the module. What the invariant is
-                    # about is that the job still runs the thing it is named
-                    # for, and the launcher requires the shards' caught counts
-                    # to add up to the whole list.
-                    "bench/run_data_mutations.sh",
+                    # The perturbations fan out over runners now, so CI calls
+                    # the suite directly and `bench/run_data_mutations.sh` stays
+                    # the single-machine launcher for a host with processors to
+                    # spare. Matched with its flag: the bare module name appears
+                    # in a comment two lines above the command, and a test that
+                    # a comment satisfies is not a test.
+                    "python tests/data_mutate.py --shard=",
+                    "python tests/mutate.py --shard=",
                     "python analysis/verify_claims.py",
                     "python analysis/check_data_integrity.py",
                     "python analysis/check_links.py",
@@ -6769,3 +6792,146 @@ class APlanCheckMustCatchACorruptedPlan(unittest.TestCase):
         doc = (self.ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
         self.assertIn(f"{n} of {n} corruptions", " ".join(doc.split()),
                       "the changelog quotes a corruption count this file does not have")
+
+
+class AShardedJobMustCoverItsWholeList(unittest.TestCase):
+    """A matrix one leg short skips that fraction of the work and stays green.
+
+    `audit.yml` fans the two mutation suites out over runners, and both suites
+    decompose by `k % n == i`, which partitions a list exactly. That is
+    arithmetic and it is sound, but it rests on two things a hand-edited YAML
+    file can break silently: that the shard list really is 0 to n-1 with nothing
+    missing, and that n really is the divisor in the command the leg runs.
+
+    Drop `11` from the twelve-element list and a twelfth of the perturbations
+    never run; every remaining leg passes and the job is green. Nothing else in
+    this repository would notice, because the suites report what they ran and
+    not what nobody asked them to run.
+
+    Parsed by hand rather than with PyYAML, because the job this test runs in
+    installs nothing and a guard that needs a dependency the runner lacks is a
+    guard that does not run.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+    WORKFLOW = ROOT / ".github" / "workflows" / "audit.yml"
+
+    def _sharded_jobs(self):
+        """[(job name, the shard list, the divisor each leg is told to use)]."""
+        text = self.WORKFLOW.read_text(encoding="utf-8")
+        out, name, shards = [], None, None
+        for line in text.splitlines():
+            m = re.match(r"^    name: (.+)$", line)
+            if m:
+                if name is not None and shards is not None:
+                    out.append([name, shards, None])
+                name, shards = m.group(1).strip(), None
+                continue
+            m = re.match(r"^        shard: \[(.*)\]\s*$", line)
+            if m:
+                shards = [int(x) for x in m.group(1).split(",") if x.strip()]
+                continue
+            m = re.search(r"--shard=\$\{\{ matrix\.shard \}\}/(\d+)", line)
+            if m and shards is not None:
+                out.append([name, shards, int(m.group(1))])
+                shards = None
+        return out
+
+    def test_the_workflow_still_has_sharded_jobs_to_check(self):
+        jobs = self._sharded_jobs()
+        self.assertGreaterEqual(len(jobs), 2,
+                                "the fan-out is gone, so this guard is checking "
+                                "nothing; it was two jobs when written")
+
+    def test_every_shard_list_is_zero_to_n_minus_one_with_no_hole(self):
+        for name, shards, _div in self._sharded_jobs():
+            self.assertEqual(sorted(shards), list(range(len(shards))),
+                             f"{name}: the shard list is {shards}, which is not "
+                             f"0 to {len(shards) - 1}; the stride decomposition "
+                             f"would leave a hole")
+
+    def test_the_divisor_each_leg_uses_is_the_number_of_legs(self):
+        for name, shards, div in self._sharded_jobs():
+            self.assertIsNotNone(div, f"{name}: no --shard=i/n command found")
+            self.assertEqual(div, len(shards),
+                             f"{name}: {len(shards)} legs are told to divide the "
+                             f"list into {div}, so "
+                             f"{abs(div - len(shards))} slice(s) run nowhere")
+
+    def test_no_shard_count_exceeds_the_list_it_divides(self):
+        """An empty slice exits zero having proved nothing, so both suites
+        refuse it. This catches the same mistake before a run rather than
+        during one."""
+        import ast as _ast
+        sizes = {}
+        for f, key in (("tests/mutate.py", "code mutations"),
+                       ("tests/data_mutate.py", "data perturbations")):
+            src = (self.ROOT / f).read_text(encoding="utf-8")
+            for n in _ast.walk(_ast.parse(src)):
+                if (isinstance(n, _ast.Assign)
+                        and any(getattr(t, "id", "") == "MUTATIONS" for t in n.targets)):
+                    sizes[key] = len(n.value.elts)
+                    break
+        for name, shards, _div in self._sharded_jobs():
+            self.assertIn(name, sizes, f"{name}: no suite maps to this job")
+            self.assertLessEqual(len(shards), sizes[name],
+                                 f"{name}: {len(shards)} legs for "
+                                 f"{sizes[name]} items leaves a leg empty")
+
+
+class APowerCellMustNotDependOnWhatRanBeforeIt(unittest.TestCase):
+    """Seeding per cell, which is what lets the claims job run them in parallel.
+
+    The first version of `analysis/load_run_power.py` drew every design from one
+    `random.Random(SEED)` consumed in order, so each published figure depended
+    on how much randomness the cells before it had taken: deleting a discarded
+    `_flip` call, a line that changed no model at all, moved the 24-pair figure
+    by three thousandths.
+
+    Seeding from the cell's own identity removes that AND makes the cells
+    independent enough to run in any process. That second property is what the
+    claims job relies on, and it is worth an assertion rather than an
+    assumption, because a parallel run that quietly differed from a serial one
+    would publish whichever the runner happened to do.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    @classmethod
+    def setUpClass(cls):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "load_run_power", cls.ROOT / "analysis" / "load_run_power.py")
+        cls.mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.mod)
+        cls.m = cls.mod.measured()
+
+    def test_serial_and_parallel_give_the_same_table(self):
+        a = self.mod.power(self.m, None, 200, jobs=1)
+        b = self.mod.power(self.m, None, 200, jobs=4)
+        self.assertEqual(a, b, "the table depends on how it was scheduled")
+
+    def test_a_cell_does_not_move_when_another_design_is_dropped(self):
+        """The property the stream-order version did not have."""
+        full = self.mod.power(self.m, None, 200)
+        one = self.mod.power(self.m, None, 200,
+                             designs=("within-block, 24 pairs",))
+        self.assertEqual(full["within-block, 24 pairs"],
+                         one["within-block, 24 pairs"],
+                         "computing fewer designs changed a figure, so the "
+                         "cells are still sharing a stream")
+
+    def test_the_seed_separates_cells_that_differ_in_any_input(self):
+        seen = set()
+        for design in self.mod.DESIGNS:
+            for label in self.mod.TRUTHS:
+                for hz in (641.0, 455.0):
+                    for w in (0.0, 30.0):
+                        seen.add(self.mod._cell_seed(design, label, hz, w, 40000))
+        self.assertEqual(len(seen), len(self.mod.DESIGNS) * len(self.mod.TRUTHS) * 4,
+                         "two different cells share a seed, so they are not "
+                         "independent draws")
+
+    def test_asking_for_a_design_that_does_not_exist_is_refused(self):
+        with self.assertRaises(SystemExit):
+            self.mod.power(self.m, None, 10, designs=("within-block, 7 pairs",))

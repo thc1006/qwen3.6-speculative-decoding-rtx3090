@@ -1180,9 +1180,8 @@ lowest points in the panel, which are the transition the panel exists to show.
 
 ERRATA A16 ends by naming two quantities its instruments could not see. One is
 the GDDR6X memory-junction temperature, which needs a sensor NVML does not
-expose on Linux and cannot be read on this host at all. The other is host CPU
-load, and that one is testable: `bench/host_guard.py --sample` has recorded it
-since the commit that added the guard.
+expose on Linux. The other is host CPU load, and `bench/host_guard.py --sample`
+has recorded it since the commit that added the guard.
 
 Nothing here uses it. Not one of the seventy-seven committed run directories
 carries the column, and none of the seventeen committed telemetry traces holds
@@ -1198,147 +1197,79 @@ on and off **inside** each block so that each arm runs loaded and unloaded back
 to back. Thresholds, estimator, outcomes and what each one licenses are fixed
 before any data exists.
 
-**The plan says at the top that it cannot be executed yet, and that is the most
-useful thing in it.** Five adversarial passes found six things this harness
-cannot express. A fresh `llama-server` is started and stopped inside every
-arm-run, so the sampler cannot follow one root process across an invocation and
-would report everything as somebody else's work. Both members of a pair would be
-written to the same arm-run filename and the second would overwrite the first,
-after which the completeness check marks the whole run failed. No order mode
-produces a rotation that also keeps a pair adjacent. And no wall-clock boundary
-is recorded per arm-run, so the check that the treatment arrived has nothing to
-join on. Each is small, each is named with its file in the plan, and the run
-does not start until they land. A pre-registration that describes a run nobody
-can perform is worth less than one that says what has to be true first.
+**It cannot be started, and saying so is the most useful thing in it.** Six
+things have to land first, each named in the document beside the file it
+belongs to. A fresh `llama-server` is started and stopped inside every arm-run,
+so the sampler cannot follow one root process across an invocation. Both members
+of a pair would be written to the same arm-run filename and the second would
+overwrite the first. No order mode rotates the arms and also keeps a pair
+adjacent. No wall-clock boundary is recorded per arm-run, so the manipulation
+check has nothing to join on. Nothing in `bench/` pins any process to any
+processor, while the plan requires the server to run on a fixed set. And the
+server's thread count is passed nowhere and recorded nowhere. `RETEST_TODO.md`
+carries all six, so a reader of the tracker is not left thinking this run is
+waiting on a free afternoon.
 
-**The same passes found the plan's own numbers wrong, and the correction is now
-committed as code.** `analysis/load_run_power.py` derives both tables the plan
-publishes from run T4's committed arm-runs, and `--check` asserts the document
-prints what the code computes. It exists because the first version of the power
-table used T4's block variability as if it were noise while also adding the
-arm's own level change on top, counting that change twice: the model implied
-about a third more block spread than T4 shows, and it published a detection
-rate of about one in ten for a design whose real rate is about one in three.
-The redesign still earns its cost, since within-block pairing takes that to
-better than nine in ten, but it earns it against an honest baseline. The claim
-that the older design could not reach one in three at any switching rate was
-false and is gone.
+**What the committed data already says, at no cost on the card.** Across run
+T4's own step the arms moved in **opposite directions**: the arm A16 is about
+got faster while the no-speculation arm got slower. No arm-agnostic host cost
+can do that under any denominator, because a cost per token, per forward pass or
+per target step moves every arm the same way, and the three fits are rejected on
+two degrees of freedom by a wide margin. The split point was chosen by eye, so
+this corroborates rather than tests, which is why the run fixes the split in
+advance. And aligning the three arms by block across every run directory that
+holds all three for at least four blocks, their residual milliseconds per token
+correlate at about plus seven, plus three and minus eight hundredths. A shared
+host cost of any denominator moves the arms together and would show as a
+correlation near one.
 
-**A third pass over that correction found the correction's own weakest input.**
-The power table needs to know how often the arm changes level on its own, and
-the first two versions took it from run T4: one transition across five adjacent
-gaps. That is a single event, and the exact Poisson interval for one event in a
-thousand seconds of observation runs from about a hundred and eighty seconds to
-nearly forty thousand. No table can rest on that. The script now walks every
-run in the corpus that repeats this arm inside one invocation, which is fifty
-of them, and counts a hundred level changes across two hundred and ninety one
-adjacent gaps.
+That has two readings and the plan declines to pick: either the arms share no
+host channel, or ambient state on a quiet bench machine does not vary enough to
+correlate anything. Only setting the level separates them, which is the plan's
+own argument. What it does do is lower the prior, and the plan says so: the most
+likely outcome of run X is that both arms hold.
 
-Counting those changes and dividing by elapsed time is not the estimator
-either, and that is the part worth keeping. It assumes every gap holds at most
-one transition, but there are two levels, so two transitions inside one gap
-return the arm to where it started and are recorded as no change at all, and
-the mean gap here is about the same length as the interval between changes. The
-likelihood over the gaps, each with its own duration, gives about one change
-every eleven minutes rather than every nineteen. The naive figure was nearly
-twice too slow, and a hazard that is too slow makes any design built on it look
-better than it is: the plan's headline power falls by three points, to about
-nineteen in twenty, and the design it replaced falls from about one in three to
-about two in seven. The interval is narrow enough to plan against and the plan
-now reports its power at both ends of it.
+**So the plan says what should run before it.** The bench host is hybrid, and
+pinning the server to its efficiency cores is a deliberate worst case, a clock
+cut of about a quarter, beyond anything ambient scheduling could produce. Two
+arms, six blocks, about a third of an hour. A null inside one per cent bounds
+core placement, processor clock and scheduler-mediated load together, which
+would make run X unnecessary. Run X is three and a half hours.
 
-The same pass found a real defect in that script: the call meant to advance the
-simulated level between blocks discarded its result, so the level never moved
-there. It cancels in a within-block difference and changed no published figure,
-which is exactly why it would have survived. It is fixed and the fix is why the
-figures moved by a point.
+**And placement has to be pinned, not merely recorded.** Applying load changes
+which processors are free, so it is a post-treatment mediator rather than a
+covariate, and if the load displaces the server systematically there is no
+comparison left to make within a stratum. The recorded column is also an
+undersampled proxy, since it says where a thread last ran rather than where it
+spent its time.
 
-And it found that the identity the whole cross-arm argument rests on had never
-been checked. The round count is generated tokens minus accepted ones only if
-the accepted field counts real accepts rather than including the token the
-target emits each round. The competing reading would make accepted equal
-generated, and it does not; it would also put drafted-per-round above an arm's
-own draft maximum, and the arm that runs at a maximum of two comes out just
-under two. Both checks are in the script and both are held as regressions.
+**Four things about the published corpus that writing the plan turned up.**
+None of them is about the plan.
 
-**The sharpest correction is that the plan's headline prediction discriminated
-nothing.** It predicted the arm A16 is about would slow while a second arm held,
-and read that as specific to one configuration. But the three arms differ by
-nearly a factor of five in milliseconds per generated token, and the plan now
-tabulates three arm-agnostic mechanisms, none of which prefers any arm: a cost
-per generated token, per model forward pass, and per target-model step. Under
-all three the control arm holds. The pattern the plan rested on is produced by
-every mechanism it was meant to exclude. What discriminates is a weighted fit
-of each of the three against the measured change per arm, with its chi-square
-on two degrees of freedom, and the size of the no-speculation arm's own
-movement, which separates the three from each other. A later pass in this same
-entry replaced an earlier answer here, a one-sided contrast between two arms,
-after correcting the round count flipped its sign. That paragraph is below and
-this sentence is the current one.
-
-**And the load it had chosen could not have worked.** The plan had specified
-this repository's own perturbation suite, justified as reproducing the
-contention incident. ERRATA says that incident was recorded by a sibling
-project's harness and that what this repository attests is only its absence,
-and the guard's own notes say attributing the burst to the suite is the mistake
-A12 was written about. The plan was citing as its own measurement a thing its
-own errata disclaims. The suite would also have arrived at low priority with
-one BLAS thread, because the guard applies both before its own contention
-escape, so the treatment would have been de-prioritised by the guard it was
-invoking. The load is a stated number of busy processes at ordinary priority,
-the check is on the serving process's runqueue wait rather than on the load's
-own footprint, and the plan says plainly that page cache and disk are untouched
-so a null does not cover them.
-
-**Two facts about the bench host are now written down, because both passes
-reasoned about the wrong machine.** It is bare metal with no steal column, so
-hypervisor descheduling is not available as an explanation, unlike the
-development box these plans are written on. And it is a hybrid processor whose
-slow cores run about a quarter below its fast ones, with nothing in this
-repository pinning any process to any of them and no run ever recording which
-one anything ran on. That is an uncontrolled variable of the right size, on the
-right timescale, invisible to `nvidia-smi`, and applying CPU load changes it.
-Run X records it.
-
-**A fourth pass asked whether run X is the experiment worth making, and answered
-most of it from data already committed.** Two results, neither needing a card.
-
-Across run T4's own step the arms moved in **opposite directions**: the arm A16
-is about got faster while the no-speculation arm got slower, by about three and
-a half per cent and three quarters of a per cent. No arm-agnostic host cost can
-do that under any of the three denominators, because a cost per token, per
-forward pass or per target step moves every arm the same way. The plan's own
-pre-registered cross-arm statistic agrees on the same six blocks, with an
-interval excluding zero. The split point was chosen by eye, so this corroborates
-rather than tests, which is why the run fixes the split in advance.
-
-And no whole-host component is detectable between any pair of arms at all.
-Aligning the three arms by block across every run directory that holds all three
-for at least four blocks, their residual milliseconds per token correlate at
-about plus seven, plus three and minus eight hundredths. A shared host cost of
-any denominator moves the arms together and would show as a correlation near
-one. That has two readings, and the plan declines to pick: either the arms do
-not share a host channel, or ambient host state on a quiet bench machine does
-not vary enough to correlate anything. Only setting the level distinguishes
-them, which is the plan's own argument, sharpened rather than undermined. What
-it does do is lower the prior, and the plan now says so: the most likely outcome
-of run X is that both arms hold.
-
-So the plan gained a section saying what should run **before** it. The bench
-host is hybrid, and pinning the server to its efficiency cores is a deliberate
-worst case, a clock cut of about a quarter, beyond anything ambient scheduling
-could produce. Two arms, two pinnings, six blocks is a third of an hour, and a
-null inside one per cent bounds the entire host-processor-speed family at once,
-which would make run X unnecessary. Run X is three and a half hours once its
-own mandated washout is counted, which is also corrected here from three.
-
-The same pass found that **recording core placement is not enough; it has to be
-pinned.** Applying load changes which processors are free, so placement is a
-post-treatment mediator rather than a covariate, and if the load displaces the
-server systematically there is no comparison left to make within a stratum. The
-recorded column is also an undersampled proxy, since it says where a thread last
-ran rather than where it spent its time. The server is pinned in every arm-run
-now and the load's processor set is a design factor.
+- **The server's accepted-draft counter under-counts on any arm that takes a
+  checkpoint.** ERRATA A1 quotes the source returning from the
+  checkpoint-and-restore branch before the counter is incremented, and A13
+  measures the gap on two arms at two tenths of a point with no checkpoints and
+  eleven and a half points with seven hundred and seventy two. Anything deriving
+  a round count from generated minus accepted is wrong on the second kind of
+  arm; drafted over draft maximum is exact for both and matches the drafter's
+  own counter.
+- **The contention incident this repository is often said to have recorded is
+  not its own.** ERRATA says a sibling project's harness recorded it, that its
+  log is not published here, and that what is attested here is only the absence.
+  `bench/host_guard.py`'s own notes add that attributing the burst to the
+  perturbation suites is the mistake ERRATA A12 was written about.
+- **`host_guard.protect()` de-prioritises a caller that has declared its
+  contention.** It applies `limit_threads()` and `be_nice()` before its own
+  `BENCH_ALLOW_CONTENDED` escape, so the escape does not do what its name says.
+  Recorded in `RETEST_TODO.md`.
+- **The bench host is bare metal and hybrid.** No hypervisor flag and a steal
+  column of zero, unlike the development box these plans are written on, so
+  hypervisor descheduling is not available here as an explanation. Its slow
+  cores run about a quarter below its fast ones, nothing in this repository pins
+  any process to any of them, and no run records which one anything ran on. That
+  is an uncontrolled variable of the right size and timescale, invisible to
+  `nvidia-smi`, and applying CPU load changes it.
 
 **And the bench host's processor was never recorded.** `BENCHMARK_ENV.md` gains
 an addendum with it. The only processor in this repository was the v1 host's,
@@ -1349,89 +1280,68 @@ a live reading, which by this repository's own convention needs a dagger and did
 not have one. It is in the archive now, along with the fact that no committed
 arm-run carries a thread count either.
 
-**A fifth pass killed the discriminator the paragraph above installed.**
-The plan's cross-arm test needs to know how many rounds each arm ran, and it had
-been deriving that as generated tokens minus accepted ones. That is true of the
-mechanism and false of the counter, and this repository's own errata say so:
-A1 quotes the server source returning from the checkpoint-and-restore branch
-before it increments the accepted field, and A13 measures the consequence on
-exactly these two arms, a gap of two tenths of a point on the arm that takes no
-checkpoints and eleven and a half points on the arm that takes seven hundred
-and seventy two.
+**What guards the plan's figures, since the cell probe does not.** The plan is
+excluded from the census below, so its four tables are not perturbed one number
+at a time like every other published table here. `analysis/load_run_power.py`
+derives all four from the committed arm-runs and `--check` compares them against
+the document row by row, anchored on each row's own label; `audit.yml`'s claims
+job runs it. 13 of 13 corruptions of the document fail it, deliberate ones,
+and they are a committed test rather than a sentence: a further test requires
+the count quoted here to be the count that file holds, so moving one without
+the other fails.
 
-Drafted over draft maximum is exact for both, because the drafter always
-proposes its maximum and both totals divide evenly, and the acceptance it
-implies matches the drafter's own counter rather than the server's. The check
-that let the wrong reading through was that drafted per round does not exceed
-the arm's draft maximum -- which the wrong count also satisfies, at about four
-against eight. **Integrality is the test that separates them**, and it is held
-as a regression now, along with the requirement that the acceptance implied
-matches A13's drafter column and not its server column.
+**The audit workflow was twenty-seven minutes and is now about four.** Measured
+per step rather than guessed: of `unit and mutation`'s twenty-seven, the
+regression suite was two, the code mutations six, and the data perturbations
+eighteen, because they run the claim checker once per perturbation. The checker
+is one of the six files the release binding freezes, so it cannot be made
+faster. The only lever is how many run at once, and `actions/checkout` in this
+repository costs three seconds, which makes a runner almost free.
 
-That correction is not cosmetic. It moves one arm's target-step weight by about
-a factor of two, and with it the sign of the contrast the plan had just
-pre-registered as its arm-specific branch: a purely arm-agnostic per-target-step
-cost now produces exactly the signature that branch reserved for specificity. So
-the one-sided contrast is gone. Each arm-agnostic hypothesis is one free scale
-over fixed per-arm weights, which with three arms leaves two degrees of freedom
-and can be rejected on its own, and the test is now a fit with its chi-square
-rather than a contrast with a sign. Run T4's own step already rejects all three
-by a wide margin, because the arms moved in opposite directions across it.
+So the one job is three, and two of them fan out: the code mutations over three
+runners and the data perturbations over twelve, which with the other four jobs
+is twenty legs, the concurrency a free plan gets. `tests/mutate.py` gained the
+`--shard=i/n` its sibling suite already had, spelled and decomposed the same
+way, and it refuses an empty slice rather than exiting zero having proved
+nothing.
 
-**And the thing that was supposed to stop the figures drifting did not run and
-did not work.** `--check` matched by substring, so swapping two rows of the
-power table, flipping every sign in the cross-arm table, or destroying the
-critical values the intervals are built from all passed it; sixteen of
-twenty-two deliberate corruptions went through. It anchors on each row's own
-label now, reads all four of the plan's tables, and 13 of 13 corruptions fail
-it. The corruptions are a committed test rather than a sentence, because the
-first version of this claim was a figure with nothing deriving it, which is the
-failing this branch is about; the test also requires this number to be the one
-the harness actually holds. `audit.yml`'s claims job runs the check. A guard nothing invokes is not a guard, and
-the previous entry called it the thing that stops the figures drifting.
+The decomposition is arithmetic and it is sound, but it rests on the shard list
+really being zero to n minus one and on n really being the divisor in the
+command. Drop one leg from a list of twelve and a twelfth of the perturbations
+never runs, every remaining leg passes, and the job is green. So a test reads
+the workflow and asserts both, parsing it by hand because the job it runs in
+installs nothing and a guard that needs a dependency the runner lacks is a guard
+that does not run. Verified against three separate ways of breaking it.
 
-Widening it found two more numbers with no code path behind them, both written
-in the same pass that was correcting exactly that failing. The chi-squares the
-plan quotes for the fit were computed from a standard error invented as a
-quarter of each arm's own change, which makes the statistic a function of the
-fraction that was chosen rather than of the data; derived from the three blocks
-on each side instead, they are several times larger and the conclusion is
-unaffected, but the published figures were not the ones the data gives. And the
-three cross-arm correlations the plan uses to say no whole-host component is
-detectable were computed by hand and never by anything committed. Both are
-derived in the script now and both are checked, verified in the direction that
-matters: corrupting either fails the check by name.
+**The claims job spent four of its six minutes on numbers nothing read.** The
+power table's hazard-interval and washout rows print one design, and every call
+computed all four; two thirds of the work was thrown away. Asking for the
+designs that get printed, and seeding each cell from its own identity so the
+cells can run in any process, takes that step from about two and a half minutes
+to twenty seconds on this machine.
 
-Three smaller defects from the same pass, all of which changed a published
-number. The plan mandated a washout between the two members of a pair and the
-simulation contained none, so its table described a design nobody was going to
-run; the washout is in the model now and the plan publishes what it costs,
-which is six points of detection and twelve of specificity. The t table held
-two degrees of freedom and the plan permits seven, so dropping a single pair --
-which the plan explicitly provides for -- raised a key error in the only
-committed implementation of its own estimator. And the rule that removes the
-level change before measuring the residual did so unconditionally, which biases
-the residual low by about a quarter when there is no level change to remove; it
-refuses now unless the change it is removing is at least three times the next
-largest.
+The seeding is worth more than the speed. The first version drew every design
+from one stream consumed in order, so each published figure depended on how much
+randomness the cells before it had taken, and deleting a discarded call that
+changed no model moved one of them by three thousandths. Cells seeded from
+themselves do not do that, and a serial run and a parallel one are then the same
+table by construction, which a test asserts rather than assumes.
 
 **Where that plan sits in the coverage census, and why the reason is the release
 and not the genre.** `analysis/table_coverage.py` puts every markdown file here
 into one of two lists and nothing lets a file be in neither: the censused set,
 whose table cells the probe perturbs and whose prose numbers are counted, and an
 excluded set where every entry carries a written reason. The plan is excluded,
-and the first version of this entry said that was because a plan carries
-thresholds rather than figures. That is not true here. Three prospective plans
-of exactly this kind are censused, one of them carrying no tables of its own,
-so there is no rule about plans to appeal to.
+and not because it is a plan: three prospective plans of exactly this kind are
+censused, one of them carrying no tables of its own.
 
-The actual reason is the release. `analysis/verify_claims.py` pins the number of
+The reason is the release. `analysis/verify_claims.py` pins the number of
 censused documents, and the decimal prose census, and it is one of the six files
 `bench/check_release_binding.py` compares between the `v4.2` tag and this tree.
-Note where the freeze bites, because the first version of this entry got that
-wrong too: `table_coverage.py` is not itself bound, so growing its list is not
-editing a frozen file. It is editing an unfrozen one in a way that makes a
-frozen one fail, which cannot then be fixed without changing the frozen one.
+Note where the freeze bites: `table_coverage.py` is not itself bound, so growing
+its list is not editing a frozen file. It is editing an unfrozen one in a way
+that makes a frozen one fail, which cannot then be fixed without changing the
+frozen one.
 
 And the cost of censusing it later was overstated. Run X's raw logs go into the
 evidence manifest and its entry into the run registry, and both of those are
@@ -1439,8 +1349,7 @@ bound, so committing the evidence re-cuts the binding whatever happens to the
 plan's classification. The census entry rides along at no additional cost. What
 each of these commits does pay is a coverage probe re-run, because adding lines
 to a censused document moves the table line numbers the existing attestations
-pin, so the thirty-two shards are produced again in the commit that follows the
-one which made them stale.
+pin.
 
 ### Added
 

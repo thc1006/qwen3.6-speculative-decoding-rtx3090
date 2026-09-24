@@ -30,6 +30,9 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import hashlib
+import os
+import pickle
 import json
 import math
 import pathlib
@@ -473,32 +476,88 @@ def _within(truth, resid, gap, hazard, rng, dur, nblocks=24, washout=0.0):
     return _verdict(d, nblocks - 1)
 
 
-def power(m: dict, hazard_s: float | None = None,
-          trials: int = TRIALS, washout: float = WASHOUT) -> dict:
+DESIGNS = ("between-block, 6 against 6", "within-block, 12 pairs",
+           "within-block, 18 pairs", "within-block, 24 pairs")
+TRUTHS = ("-2", "-gap", "0")
+ONLY_24 = ("within-block, 24 pairs",)
+
+
+def _cell_seed(design: str, label: str, hazard_s: float, washout: float,
+               trials: int) -> int:
+    """A seed that depends on the cell and on nothing else.
+
+    The first version drew every design from one `random.Random(SEED)`
+    consumed in order, which made each published figure depend on how much
+    randomness the cells before it had taken. Deleting one discarded `_flip`
+    call -- a line that changed no model -- moved the 24-pair figure by three
+    thousandths for that reason alone.
+
+    Seeding per cell removes that, and it is also what makes the cells
+    independent enough to run in any order or in any process. Serial and
+    parallel runs are then identical by construction rather than by luck, which
+    `tests/test_harness_invariants.py` checks.
+    """
+    key = (f"{SEED}|{design}|{label}|{hazard_s:.6f}|{washout:.3f}|{trials}")
+    return int(hashlib.blake2b(key.encode(), digest_size=8).hexdigest(), 16)
+
+
+def _cell(args):
+    """One (design, truth) cell, self-contained so a worker process can run it."""
+    (name, label, truth, resid, gap, hz, dur, washout, trials, seed) = args
+    rng = random.Random(seed)
+    counts = {"moves": 0, "holds": 0, "neither": 0}
+    if name.startswith("between-block"):
+        for _ in range(trials):
+            counts[_between(truth, resid, gap, hz, rng)] += 1
+    else:
+        nblocks = int(name.split()[1])
+        for _ in range(trials):
+            counts[_within(truth, resid, gap, hz, rng, dur, nblocks, washout)] += 1
+    return name, label, {k: v / trials for k, v in counts.items()}
+
+
+def power(m: dict, hazard_s: float | None = None, trials: int = TRIALS,
+          washout: float = WASHOUT, designs=None, jobs: int | None = None) -> dict:
+    """The detection rates the plan publishes, for the designs asked for.
+
+    `designs` exists because two thirds of this was being thrown away: the
+    hazard-interval and washout rows print the 24-pair design only, and every
+    call computed all four. On the runner that was four minutes of the claims
+    job spent on numbers nothing read.
+    """
     if hazard_s is None:
         hazard_s = hazard()["hazard"]
-    rng = random.Random(SEED)
+    want = tuple(designs) if designs else DESIGNS
+    for name in want:
+        if name not in DESIGNS:
+            raise SystemExit(f"{name!r} is not one of {DESIGNS}")
     dur = m["durations"]["spec-dflash-n2"]
-    hz = hazard_s
-    designs = {
-        "between-block, 6 against 6": lambda tr: _between(
-            tr, m["residual"], m["gap"], hz, rng),
-        "within-block, 12 pairs": lambda tr: _within(
-            tr, m["residual"], m["gap"], hz, rng, dur, 12, washout),
-        "within-block, 18 pairs": lambda tr: _within(
-            tr, m["residual"], m["gap"], hz, rng, dur, 18, washout),
-        "within-block, 24 pairs": lambda tr: _within(
-            tr, m["residual"], m["gap"], hz, rng, dur, 24, washout),
-    }
-    out = {}
-    for name, fn in designs.items():
-        row = {}
-        for label, truth in (("-2", -2.0), ("-gap", -m["gap"]), ("0", 0.0)):
-            c = {"moves": 0, "holds": 0, "neither": 0}
-            for _ in range(trials):
-                c[fn(truth)] += 1
-            row[label] = {k: v / trials for k, v in c.items()}
-        out[name] = row
+    truths = {"-2": -2.0, "-gap": -m["gap"], "0": 0.0}
+    cells = [(name, lab, truths[lab], m["residual"], m["gap"], hazard_s, dur,
+              washout, trials, _cell_seed(name, lab, hazard_s, washout, trials))
+             for name in want for lab in TRUTHS]
+
+    n = jobs if jobs is not None else min(len(cells), os.cpu_count() or 1)
+    if n > 1:
+        try:
+            import multiprocessing
+            with multiprocessing.Pool(n) as pool:
+                results = pool.map(_cell, cells)
+        except (OSError, ValueError, ImportError, AttributeError,
+                pickle.PicklingError):
+            # Every way this can fail is a reason to be slow rather than to
+            # fail, because the per-cell seeds make the serial answer identical.
+            # It does fail in one ordinary case: a test that loads this file
+            # with `importlib.util.spec_from_file_location` gives the module a
+            # name the worker cannot import, so the pool cannot send it the
+            # function. That path takes about a minute and is correct.
+            results = [_cell(c) for c in cells]
+    else:
+        results = [_cell(c) for c in cells]
+
+    out: dict = {}
+    for name, lab, row in results:
+        out.setdefault(name, {})[lab] = row
     return out
 
 
@@ -637,7 +696,8 @@ def main() -> None:
     if args.hazard is None:
         print("  at the ends of that interval, for the design this plan chooses:")
         for end, label in ((h["lo"], "fast"), (h["hi"], "slow")):
-            r = power(m, end, args.trials)["within-block, 24 pairs"]
+            r = power(m, end, args.trials,
+                      designs=ONLY_24)["within-block, 24 pairs"]
             ends[label] = r
             print(f"    hazard {end:6.0f} s ({label}): "
                   f"{r['-2']['moves']:.2f} / {r['-gap']['moves']:.2f} / "
@@ -648,7 +708,8 @@ def main() -> None:
         print("  what the mandated washout costs, at the corpus hazard:")
         for w in (0.0, 15.0, 30.0, 60.0):
             r = (p_table if w == WASHOUT
-                 else power(m, None, args.trials, w))["within-block, 24 pairs"]
+                 else power(m, None, args.trials, w,
+                            designs=ONLY_24))["within-block, 24 pairs"]
             washouts[w] = r
             print(f"    washout {w:5.0f} s: {r['-2']['moves']:.2f} / "
                   f"{r['-gap']['moves']:.2f} / {r['0']['holds']:.2f}")

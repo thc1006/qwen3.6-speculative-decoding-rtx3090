@@ -240,11 +240,20 @@ Forty thousand draws, by the decision rule defined below:
 |---|---:|---:|---:|
 | between-block, 6 against 6 (first draft) | 0.28 | 0.78 | 0.11 |
 | within-block, 12 pairs | 0.63 | 1.00 | 0.37 |
-| within-block, 18 pairs (the void floor below) | 0.78 | 1.00 | 0.58 |
-| **within-block, 24 pairs (this plan)** | **0.89** | **1.00** | **0.77** |
+| within-block, 18 pairs (the void floor below) | 0.79 | 1.00 | 0.58 |
+| **within-block, 24 pairs (this plan)** | **0.88** | **1.00** | **0.76** |
 
 At the fast end of the hazard interval the last row is 0.82 and 0.64; at the
-slow end, 0.92 and 0.84.
+slow end, 0.92 and 0.85.
+
+Every figure above is a cell computed from a seed derived from the cell itself,
+so it does not depend on how much randomness the cells before it drew. The first
+version of the script consumed one stream in order, and deleting a discarded
+call that changed no model moved a published figure by three thousandths for
+that reason alone. It also means the table is the same whether the cells ran in
+one process or in twelve, which is what lets the claims job compute them in
+parallel, and a regression test asserts that identity rather than assuming it.
+
 
 ### What the washout costs, stated because it is not free
 
@@ -254,10 +263,10 @@ change level inside a pair:
 
 | washout | truth −2 % | truth 0, declares holds |
 |---:|---:|---:|
-| none | 0.95 | 0.89 |
+| none | 0.95 | 0.90 |
 | 15 s | 0.92 | 0.83 |
-| **30 s, this plan** | **0.89** | **0.77** |
-| 60 s | 0.82 | 0.63 |
+| **30 s, this plan** | **0.88** | **0.76** |
+| 60 s | 0.81 | 0.63 |
 
 Two earlier versions of this plan mandated a washout and simulated none, so
 their tables described a design nobody was going to run. Thirty seconds is the
