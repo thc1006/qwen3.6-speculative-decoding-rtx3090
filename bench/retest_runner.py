@@ -167,6 +167,48 @@ IGNORE_EOS = _env_bool("BENCH_IGNORE_EOS", False)
 # in one balanced square, in one invocation, adjacent in time, so the contrast
 # is within-invocation and whatever state the drafter is in applies to both.
 HARDCAP_SUFFIX = os.environ.get("BENCH_HARDCAP_SUFFIX", "").strip()
+
+# Pinning, the same shape one dimension over. An arm whose name ends with
+# BENCH_PIN_SUFFIX takes its SERVER FLAGS from the base name and is launched on
+# BENCH_PIN_ALT_CPUS; every other arm is launched on BENCH_PIN_CPUS. Both sides
+# are pinned, because "pinned against unpinned" compares two things at once.
+#
+# It exists because nothing here could pin anything, and on a hybrid processor
+# that made core placement an uncontrolled variable of the right size to explain
+# ERRATA A16: the bench host's slow cores run about a quarter below its fast
+# ones, and no run in this repository records which kind anything ran on.
+#
+# `taskset` execs in place, so the pid the driver waits on is still the server's.
+PIN_SUFFIX = os.environ.get("BENCH_PIN_SUFFIX", "").strip()
+PIN_CPUS = os.environ.get("BENCH_PIN_CPUS", "").strip()
+PIN_ALT_CPUS = os.environ.get("BENCH_PIN_ALT_CPUS", "").strip()
+# An explicit thread count, because a cpuset changes how many threads llama.cpp
+# picks for itself: pinning to eight of thirty-two would change placement AND
+# thread count together, and the contrast would name neither.
+THREADS = os.environ.get("BENCH_THREADS", "").strip()
+if PIN_SUFFIX and not re.fullmatch(r"[A-Za-z0-9_.-]+", PIN_SUFFIX):
+    sys.exit(f"BENCH_PIN_SUFFIX={PIN_SUFFIX!r} is not a name an arm may have; it "
+             f"becomes part of a treatment identity and of a filename")
+for _n, _v in (("BENCH_PIN_CPUS", PIN_CPUS), ("BENCH_PIN_ALT_CPUS", PIN_ALT_CPUS)):
+    # it goes on a command line, so it is held to what a cpu list may contain
+    if _v and not re.fullmatch(r"\d+(?:[-,]\d+)*", _v):
+        sys.exit(f"{_n}={_v!r} is not a taskset cpu list")
+if THREADS and not re.fullmatch(r"\d+", THREADS):
+    sys.exit(f"BENCH_THREADS={THREADS!r} is not a thread count")
+if (PIN_CPUS or PIN_ALT_CPUS) and not THREADS:
+    sys.exit("pinning without BENCH_THREADS would change the cpu set and the "
+             "thread count in one step, so the contrast would name neither")
+if PIN_ALT_CPUS and not PIN_SUFFIX:
+    sys.exit("BENCH_PIN_ALT_CPUS needs BENCH_PIN_SUFFIX to say which arms get it")
+if PIN_SUFFIX and PIN_CPUS and not PIN_ALT_CPUS:
+    # The hole this closes: with a suffix and one cpu set, the suffixed arms fell
+    # through to an empty set and ran UNPINNED while the manifest said pinning
+    # was on. That is pinned against unpinned, which changes the cpu set and
+    # whether there is one at all, and it is the confound the other checks here
+    # exist to prevent. Both sides of a pinning contrast are pinned or neither is.
+    sys.exit(f"BENCH_PIN_SUFFIX={PIN_SUFFIX!r} and BENCH_PIN_CPUS are set and "
+             f"BENCH_PIN_ALT_CPUS is not, so '<arm>{PIN_SUFFIX}' would run "
+             f"unpinned against a pinned twin: two changes, one contrast")
 # The suffix becomes part of a treatment identity and of a filename. Left
 # unconstrained it could carry a path separator, `..`, or a name that collides
 # with a real arm, and the first two would place an arm-run outside the run
@@ -542,9 +584,34 @@ def arm_is_hardcap(arm: str) -> bool:
     return arm[:-len(HARDCAP_SUFFIX)] in ARMS
 
 
+def arm_is_alt_pin(arm: str) -> bool:
+    """True for `<base><PIN_SUFFIX>` where `<base>` is a real arm and this is not.
+
+    Same resolution as `arm_is_hardcap`, and for the same reason: a real arm
+    always wins, so a table entry that happens to end with the suffix is served
+    as itself.
+    """
+    if not PIN_SUFFIX or arm in ARMS or not arm.endswith(PIN_SUFFIX):
+        return False
+    return arm[:-len(PIN_SUFFIX)] in ARMS
+
+
+def arm_cpus(arm: str) -> str:
+    """The cpu list this arm's server is launched on, or "" for no pinning."""
+    if not (PIN_CPUS or PIN_ALT_CPUS):
+        return ""
+    return PIN_ALT_CPUS if arm_is_alt_pin(arm) else PIN_CPUS
+
+
 def arm_base(arm: str) -> str:
-    """The arm whose server flags this one runs with."""
-    return arm[:-len(HARDCAP_SUFFIX)] if arm_is_hardcap(arm) else arm
+    """The arm whose server flags this one runs with.
+
+    Both suffixes are stripped, pinning first: the two are independent
+    dimensions and an arm may carry either, so resolving one must not hide the
+    other. `arm_is_hardcap` is asked about the already-unpinned name.
+    """
+    a = arm[:-len(PIN_SUFFIX)] if arm_is_alt_pin(arm) else arm
+    return a[:-len(HARDCAP_SUFFIX)] if arm_is_hardcap(a) else a
 
 
 
@@ -828,7 +895,8 @@ def wait_health(port: int, timeout: float = 300.0,
 
 
 def start_server(extra: list[str], log_path: Path,
-                 args_of_arm: list[str] | None = None) -> subprocess.Popen:
+                 args_of_arm: list[str] | None = None,
+                 cpus: str = "") -> subprocess.Popen:
     args_of_arm = args_of_arm if args_of_arm is not None else extra
     env = os.environ.copy()
     env["CUDA_VISIBLE_DEVICES"] = GPU
@@ -839,7 +907,15 @@ def start_server(extra: list[str], log_path: Path,
         for f in ("-ctk", "-ctv"):
             i = common.index(f)
             del common[i:i + 2]
-    cmd = [SERVER, "-m", TARGET, "--host", "127.0.0.1", "--port", str(PORT)]
+    # `taskset` execs the server in place, so `proc.pid` is the server's and the
+    # driver's health wait, teardown and telemetry all still name the right
+    # process. The thread count is explicit whenever the cpu set is, because
+    # llama.cpp otherwise sizes its pool from the affinity mask and the two would
+    # move together.
+    cmd = (["taskset", "-c", cpus] if cpus else []) + [
+        SERVER, "-m", TARGET, "--host", "127.0.0.1", "--port", str(PORT)]
+    if THREADS:
+        cmd += ["-t", THREADS, "-tb", THREADS]
     if FIT and FIT_TARGET:
         cmd += ["--fit-target", FIT_TARGET]
     if CONCURRENCY > 1:
@@ -862,6 +938,17 @@ def start_server(extra: list[str], log_path: Path,
                             stderr=subprocess.STDOUT, preexec_fn=os.setsid)
     proc._cmd = cmd  # type: ignore[attr-defined]
     return proc
+
+
+def _cpus_allowed(pid: int) -> str | None:
+    """`Cpus_allowed_list` from the kernel, so the mask is verified not assumed."""
+    try:
+        for line in Path(f"/proc/{pid}/status").read_text(encoding="utf-8").splitlines():
+            if line.startswith("Cpus_allowed_list:"):
+                return line.split(":", 1)[1].strip()
+    except OSError:
+        return None
+    return None
 
 
 def gpu_mem_used_mib() -> int | None:
@@ -1302,7 +1389,7 @@ def run_arm(arm: str, rep: int) -> dict:
     # authority for GPU state; these two snapshots are a convenience.
     gpu_before = nvidia_smi()
     mem_before = gpu_mem_used_mib()
-    proc = start_server(extra, log_path, args_of_arm=extra)
+    proc = start_server(extra, log_path, args_of_arm=extra, cpus=arm_cpus(arm))
     try:
         try:
             ready_s = wait_health(PORT, proc=proc)
@@ -1355,6 +1442,13 @@ def run_arm(arm: str, rep: int) -> dict:
             "arm": arm, "repeat": rep, "ready_s": ready_s,
             # who actually answered, read back from the server's own startup log
             "server_pid": proc.pid,
+            # What the kernel says the mask IS, not what the driver asked for.
+            # A treatment recorded as requested rather than as applied is a
+            # treatment nobody checked; `taskset` could be missing, the mask
+            # could be narrowed by a cgroup, and the run would look pinned.
+            "cpus_requested": arm_cpus(arm) or None,
+            "cpus_allowed": _cpus_allowed(proc.pid),
+            "threads": int(THREADS) if THREADS else None,
             "server_identity": dict(server_identity(log_path), props=props),
             # Taken per arm-run, not once per run: the run-level hash cannot
             # see a binary replaced between two arms.
@@ -1477,10 +1571,13 @@ def main() -> None:
     wanted = os.environ.get("BENCH_ARMS")
     arms = [a.strip() for a in wanted.split(",")] if wanted else list(ARMS)
     for a in arms:
-        if a not in ARMS and not arm_is_hardcap(a):
-            hint = ("" if not HARDCAP_SUFFIX else
-                    f" (BENCH_HARDCAP_SUFFIX={HARDCAP_SUFFIX!r}, so "
-                    f"'<arm>{HARDCAP_SUFFIX}' is accepted for any known arm)")
+        if a not in ARMS and not arm_is_hardcap(a) and not arm_is_alt_pin(a):
+            hint = "".join(
+                "" if not suf else
+                f" (BENCH_{env}={suf!r}, so '<arm>{suf}' is accepted for any "
+                f"known arm)"
+                for env, suf in (("HARDCAP_SUFFIX", HARDCAP_SUFFIX),
+                                 ("PIN_SUFFIX", PIN_SUFFIX)))
             sys.exit(f"unknown arm {a!r}{hint}; known: {', '.join(ARMS)}")
     # A real arm named `<other><suffix>` reads two ways: as itself, or as the
     # capped twin of `<other>`. `arm_is_hardcap` resolves it deterministically -
@@ -1539,6 +1636,12 @@ def main() -> None:
         "flavor": FLAVOR,
         "arms": {a: ARMS[arm_base(a)] for a in arms},
         "hardcap_suffix": HARDCAP_SUFFIX or None,
+        "pin_suffix": PIN_SUFFIX or None,
+        "pin_cpus": PIN_CPUS or None,
+        "pin_alt_cpus": PIN_ALT_CPUS or None,
+        "pin_arms": ({a: arm_cpus(a) for a in arms}
+                     if (PIN_CPUS or PIN_ALT_CPUS) else {}),
+        "threads": int(THREADS) if THREADS else None,
         "hardcap_arms": sorted(a for a in arms if arm_is_hardcap(a)),
         # arms that read both ways under the suffix; each ran as itself
         "ambiguous_arms": AMBIGUOUS_ARMS,

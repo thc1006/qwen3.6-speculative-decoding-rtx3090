@@ -6935,3 +6935,164 @@ class APowerCellMustNotDependOnWhatRanBeforeIt(unittest.TestCase):
     def test_asking_for_a_design_that_does_not_exist_is_refused(self):
         with self.assertRaises(SystemExit):
             self.mod.power(self.m, None, 10, designs=("within-block, 7 pairs",))
+
+
+class ATreatmentMustBeVerifiedNotRequested(unittest.TestCase):
+    """Core pinning, end to end against the stub server.
+
+    Nothing in this repository could pin a process to a processor until
+    2026-09-26, and on a hybrid bench host that left core placement an
+    uncontrolled variable of the right size to explain ERRATA A16: the slow cores
+    run about a quarter below the fast ones and no run records which kind
+    anything ran on.
+
+    The invariant that matters is not that the driver asked for a cpu set. It is
+    that the kernel applied it. `taskset` can be absent, a cgroup can narrow the
+    mask, and a run would look pinned in its manifest either way, so every
+    arm-run records `Cpus_allowed_list` read back from `/proc` and this compares
+    the two AS SETS. The kernel normalises "4,5" to "4-5", so a string
+    comparison passes on this data and fails on the next contiguous pair.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+    FAKE = ROOT / "tests" / "fake_llama_server.py"
+
+    @staticmethod
+    def _cpus(spec):
+        """"0,2" and "4-5" to sets, so a comparison is about cpus not spelling."""
+        out = set()
+        for part in (spec or "").split(","):
+            if not part:
+                continue
+            if "-" in part:
+                a, b = part.split("-", 1)
+                out |= set(range(int(a), int(b) + 1))
+            else:
+                out.add(int(part))
+        return out
+
+    def _run(self, out, extra=None, arms="baseline"):
+        env = dict(os.environ)
+        env.update({"LLAMA_SERVER_BIN": str(self.FAKE), "MODEL_TARGET": "/dev/null",
+                    "BENCH_ARMS": arms, "BENCH_REPEATS": "1",
+                    "BENCH_ORDER": "cyclic", "BENCH_OUT": str(out),
+                    "BENCH_PORT": free_port(), "BENCH_MAX_TOKENS": "8",
+                    "BENCH_FIT": "off"})
+        env.update(extra or {})
+        return subprocess.run([sys.executable, str(RUNNER)], env=env,
+                              capture_output=True, text=True, timeout=600)
+
+    def test_the_mask_the_kernel_applied_is_the_one_asked_for(self):
+        with tempfile.TemporaryDirectory() as d:
+            out = Path(d) / "pinned"
+            # CONTIGUOUS sets on purpose. The kernel spells a contiguous mask as
+            # a range, so "0,1,2" comes back as "0-2" and the readback is
+            # distinguishable from an echo of the request. With non-contiguous
+            # sets the two are identical strings and this test passed on a
+            # mutation that recorded `arm_cpus(arm)` instead of reading /proc,
+            # which is the whole defect it is named for.
+            r = self._run(out, {"BENCH_PIN_SUFFIX": "-alt",
+                                "BENCH_PIN_CPUS": "0,1,2",
+                                "BENCH_PIN_ALT_CPUS": "4,5,6",
+                                "BENCH_THREADS": "2"},
+                          arms="baseline,baseline-alt")
+            self.assertEqual(r.returncode, 0, r.stdout[-1500:] + r.stderr[-1500:])
+            seen = {}
+            for f in sorted(out.glob("*__rep*.json")):
+                j = json.loads(f.read_text(encoding="utf-8"))
+                req, got = j.get("cpus_requested"), j.get("cpus_allowed")
+                self.assertIsNotNone(req, f"{f.name}: nothing was requested")
+                self.assertIsNotNone(got, f"{f.name}: the mask was never read back")
+                self.assertEqual(self._cpus(req), self._cpus(got),
+                                 f"{f.name}: asked for {req!r}, kernel says {got!r}")
+                # and it has to be the KERNEL's spelling, not the request's
+                self.assertIn("-", got,
+                              f"{f.name}: cpus_allowed is {got!r}, which is the "
+                              f"request verbatim rather than the kernel's own "
+                              f"range form; nothing read /proc")
+                self.assertNotIn("-", req)
+                seen[j["arm"]] = self._cpus(got)
+                self.assertEqual(j.get("threads"), 2)
+            self.assertEqual(seen["baseline"], {0, 1, 2})
+            self.assertEqual(seen["baseline-alt"], {4, 5, 6})
+            self.assertNotEqual(seen["baseline"], seen["baseline-alt"],
+                                "both conditions ran on the same processors, so "
+                                "the contrast is between nothing")
+            man = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(man["pin_arms"],
+                             {"baseline": "0,1,2", "baseline-alt": "4,5,6"})
+            self.assertEqual(man["threads"], 2)
+
+    def test_without_the_knobs_nothing_changes(self):
+        with tempfile.TemporaryDirectory() as d:
+            out = Path(d) / "plain"
+            self.assertEqual(self._run(out).returncode, 0)
+            j = json.loads(next(out.glob("*__rep*.json")).read_text(encoding="utf-8"))
+            argv = " ".join(j["argv"])
+            self.assertNotIn("taskset", argv)
+            self.assertNotIn(" -t ", argv)
+            self.assertIsNone(j.get("cpus_requested"))
+            self.assertIsNone(j.get("threads"))
+
+    def test_a_configuration_that_would_confound_the_contrast_is_refused(self):
+        for why, extra in (
+                ("a cpu list that is not one", {"BENCH_PIN_CPUS": "0;rm",
+                                                "BENCH_THREADS": "2"}),
+                ("pinning with no thread count", {"BENCH_PIN_CPUS": "0,2"}),
+                ("an alt set with no suffix", {"BENCH_PIN_CPUS": "0,2",
+                                               "BENCH_PIN_ALT_CPUS": "1,3",
+                                               "BENCH_THREADS": "2"}),
+                ("a suffix that is not a name", {"BENCH_PIN_SUFFIX": "../x",
+                                                 "BENCH_PIN_CPUS": "0,2",
+                                                 "BENCH_THREADS": "2"}),
+                ("a thread count that is not one", {"BENCH_PIN_CPUS": "0,2",
+                                                    "BENCH_THREADS": "many"}),
+                # the hole: a suffix and one cpu set left the suffixed arms
+                # unpinned against a pinned twin, which is two changes
+                ("a suffix with only one cpu set", {"BENCH_PIN_SUFFIX": "-alt",
+                                                    "BENCH_PIN_CPUS": "0,2",
+                                                    "BENCH_THREADS": "2"})):
+            with tempfile.TemporaryDirectory() as d:
+                r = self._run(Path(d) / "x", extra)
+                self.assertNotEqual(r.returncode, 0, f"{why} was accepted")
+
+    def test_an_arm_stacking_both_suffixes_is_refused_not_half_resolved(self):
+        with tempfile.TemporaryDirectory() as d:
+            r = self._run(Path(d) / "x",
+                          {"BENCH_PIN_SUFFIX": "-alt", "BENCH_HARDCAP_SUFFIX": "-cap",
+                           "BENCH_PIN_CPUS": "0,2", "BENCH_PIN_ALT_CPUS": "1,3",
+                           "BENCH_THREADS": "2"},
+                          arms="baseline-cap-alt")
+            self.assertNotEqual(r.returncode, 0)
+            self.assertIn("unknown arm", r.stdout + r.stderr)
+
+    def test_both_suffixes_resolve_independently(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "rr_pin", self.ROOT / "bench" / "retest_runner.py")
+        mod = importlib.util.module_from_spec(spec)
+        env = dict(os.environ)
+        try:
+            os.environ.update({"BENCH_PIN_SUFFIX": "-alt",
+                               "BENCH_HARDCAP_SUFFIX": "-cap",
+                               "BENCH_PIN_CPUS": "0", "BENCH_PIN_ALT_CPUS": "1",
+                               "BENCH_THREADS": "1",
+                               "MODEL_TARGET": "/dev/null"})
+            spec.loader.exec_module(mod)
+            self.assertEqual(mod.arm_base("baseline"), "baseline")
+            self.assertEqual(mod.arm_base("baseline-alt"), "baseline")
+            self.assertEqual(mod.arm_base("baseline-cap"), "baseline")
+            self.assertTrue(mod.arm_is_alt_pin("baseline-alt"))
+            self.assertFalse(mod.arm_is_alt_pin("baseline"))
+            # Stacking the two is NOT supported: both resolvers require what is
+            # left after stripping to be a REAL arm, and `baseline-cap` is not.
+            # It fails closed rather than resolving half way, which is what a
+            # measurement harness should do with a treatment identity it cannot
+            # parse; the arm validation refuses the name outright.
+            self.assertFalse(mod.arm_is_alt_pin("baseline-cap-alt"))
+            self.assertFalse(mod.arm_is_hardcap("baseline-cap-alt"))
+            self.assertEqual(mod.arm_base("baseline-cap-alt"), "baseline-cap-alt")
+            self.assertNotIn("baseline-cap-alt", mod.ARMS)
+        finally:
+            os.environ.clear()
+            os.environ.update(env)
