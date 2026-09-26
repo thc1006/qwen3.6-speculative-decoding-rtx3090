@@ -42,8 +42,15 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BENCH="${BENCH_ROOT:-$HOME/bench}"
+# The REPO copy first, then $BENCH. The older launchers here search $BENCH
+# first, and on this bench host that directory holds a runner 181 lines away
+# from HEAD which matches none of the thirty-seven versions this repository has
+# ever committed. The first attempt at this run used it and died on an unknown
+# arm, which was luck: a stale copy that happened to accept the flags would have
+# measured with code the repository does not have and recorded a
+# `runner_sha256` resolving to nothing.
 RUNNER="${BENCH_RUNNER:-}"
-for cand in "$RUNNER" "$BENCH/retest_runner.py" "$HERE/retest_runner.py"; do
+for cand in "$RUNNER" "$HERE/retest_runner.py" "$BENCH/retest_runner.py"; do
     [ -n "$cand" ] && [ -f "$cand" ] && { RUNNER="$cand"; break; }
 done
 TELE_SH="${BENCH_TELEMETRY:-}"
@@ -51,6 +58,21 @@ for cand in "$TELE_SH" "$HERE/gpu_telemetry.sh" "$BENCH/gpu_telemetry.sh"; do
     [ -n "$cand" ] && [ -f "$cand" ] && { TELE_SH="$cand"; break; }
 done
 [ -f "$RUNNER" ]  || { echo "no retest_runner.py: set BENCH_RUNNER" >&2; exit 1; }
+# Order is not enough: BENCH_RUNNER can still point anywhere, and a working copy
+# can be edited. The runner this run measures with has to be a version the
+# repository holds, because `runner_sha256` in the manifest is resolved against
+# exactly that set and a run whose runner is not there is a run nobody can check.
+if command -v git >/dev/null && git -C "$HERE/.." rev-parse --git-dir >/dev/null 2>&1; then
+    want=$(git -C "$HERE/.." show HEAD:bench/retest_runner.py | sha256sum | cut -d" " -f1)
+    got=$(sha256sum < "$RUNNER" | cut -d" " -f1)
+    [ "$want" = "$got" ] || {
+        echo "FAIL: $RUNNER is not bench/retest_runner.py at HEAD." >&2
+        echo "      ${got:0:16} against ${want:0:16}. A measurement taken with a" >&2
+        echo "      runner the repository does not hold cannot be checked." >&2
+        exit 1
+    }
+    echo "runner sha ${got:0:16}, which is HEAD's"
+fi
 [ -f "$TELE_SH" ] || { echo "no gpu_telemetry.sh: set BENCH_TELEMETRY" >&2; exit 1; }
 STAMP="$(date +%Y%m%d_%H%M%S)"
 TELE_SCHEMA="${BENCH_TELEMETRY_SCHEMA:-raw}"
