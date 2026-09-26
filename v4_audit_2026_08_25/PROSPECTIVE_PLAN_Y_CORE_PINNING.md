@@ -147,6 +147,13 @@ Its absolute rates are not comparable with any earlier run here, because no
 earlier run was pinned at all and none passed an explicit thread count. Only the
 within-run contrast is a measurement; the levels are not.
 
+And it runs the stock master build, not the split-timer build run T4 used, which
+adds host-side instrumentation. The variability the power arithmetic above rests
+on was measured on T4, so it is an estimate for this run and not a measurement of
+it. If the observed pair-to-pair spread comes back wider than 0.760 %, the bound
+widens with it and the outcome section says so rather than quoting the number
+planned for.
+
 It bounds processor speed. It does not bound memory bandwidth contention, page
 cache or allocator state, which A16 names separately and which stays the
 successor run.
