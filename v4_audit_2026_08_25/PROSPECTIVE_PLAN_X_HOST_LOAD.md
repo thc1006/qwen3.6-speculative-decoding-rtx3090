@@ -144,27 +144,30 @@ the argument the next heading makes and which this result sharpens rather than
 undermines. What it does do is lower the prior: the most likely outcome of run X
 is that both arms hold, and the plan should be read knowing that.
 
-## What should run before this, and why it is not this
+## What ran before this, and what it found
 
-The same pass costed a cheaper experiment and it is the right one to run first.
+**Corrected on 2026-09-30.** This section used to recommend a cheaper experiment
+first and to say that a null result in it would make run X unnecessary. That
+experiment is run Y, it was pre-registered in
+[`PROSPECTIVE_PLAN_Y_CORE_PINNING.md`](PROSPECTIVE_PLAN_Y_CORE_PINNING.md) and
+run on 2026-09-26, and it came back the other way.
 
-The bench host is hybrid, and pinning the server to its efficiency cores is a
-deliberate worst case: a clock cut of about a quarter, far beyond anything
-ambient scheduling could produce. Two arms, two pinnings, six blocks is 24
-arm-runs and **0.34 hours**; twelve blocks is 48 and 0.68 hours. Against the
-corpus per-arm-run SD of about one and a half per cent, six paired blocks detect
-about three per cent and twelve detect about two.
+Pinning the server to eight efficiency cores rather than eight performance cores,
+a clock cut of 26 %, costs **15.6 %** of the decode rate on `spec-dflash-n2` and
+**15.9 %** on `baseline`, with intervals excluding zero by a wide margin and a
+one-sided upper limit near 16.6 % on both. The output is identical to the token,
+the GPU's SM clock is the same or higher in the slow condition, and its power,
+utilisation and temperature all fall: the card is waiting on the host.
 
-A null inside one per cent there bounds the **entire host-CPU-speed family** at
-once: core placement, CPU clock, and ambient load acting through the scheduler.
-It would make run X unnecessary. A positive sends you to a crossed design,
-placement against load, two arms and twelve blocks, at 1.36 hours, which also
-supplies the heat-without-contention cell this plan lists as a limitation.
+So processor speed reaches this workload hard. About half a token's time is host
+work that scales with clock. **Run X is warranted, not made unnecessary**, and its
+design gains a reason it did not have: CPU contention is a channel this workload
+demonstrably rides on, rather than one this plan hoped to bound away.
 
-Run X as written is 3.03 hours with its overhead and 3.63 with the washout it
-mandates below. It is pre-registered here because the question is worth a
-pre-registration and because writing it is what found everything above. It
-should not be the next thing on the card.
+It also changes what run X has to control. Applying load changes which processors
+are free, and a displacement of two of eight threads is worth about 4 % here, so
+the pinning this plan already mandates is not a precaution but the difference
+between a measurement and a confound.
 
 ## Why this is an intervention and not an observation
 

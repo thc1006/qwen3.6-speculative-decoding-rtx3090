@@ -168,4 +168,76 @@ which needs the binding re-cut, and committing the evidence re-cuts it anyway.
 
 # Outcome
 
-Not run yet. This section is filled in when the data is committed.
+Run on 2026-09-26, forty-eight arm-runs of forty-eight, one invocation of
+forty-one minutes. The data is in
+[`v5_pinning_2026_09_26/`](../v5_pinning_2026_09_26/README.md), which is a round
+of its own because the frozen claim checker pins the run-directory count under
+this archive and is bound to the `v4.2` tag.
+
+Every arm-run's `Cpus_allowed_list`, read from `/proc`, is the set the driver
+asked for, and the two conditions ran on disjoint processors:
+
+    spec-dflash-n2         0, 2, 4, 6, 8, 10, 12, 14
+    spec-dflash-n2-ecore   16 .. 23
+    baseline               0, 2, 4, 6, 8, 10, 12, 14
+    baseline-ecore         16 .. 23
+
+## The pre-registered reading
+
+| arm | fast | slow | change | 95 % interval | one-sided upper limit |
+|---|---:|---:|---:|---|---:|
+| `spec-dflash-n2` | 140.327 | 120.068 | −15.57 % | [−16.90 %, −14.25 %] | 16.66 % |
+| `baseline` | 114.664 | 97.763 | −15.94 % | [−16.76 %, −15.12 %] | 16.61 % |
+
+Both arms **move**. Both bounds are far above A16's 3.93 % step.
+
+**The prediction above was wrong.** It said "I expect both arms to hold", on the
+argument that an arm offloading 41 of 41 target and 9 of 9 drafter layers leaves
+the host doing orchestration rather than arithmetic, and that a quarter off the
+clock of that orchestration should be a small fraction of 6.9 milliseconds per
+token. It is not a small fraction. It is about half.
+
+This is the plan's second branch: "Processor speed reaches this workload by enough
+to matter, the column has to exist from now on, and run X becomes worth its three
+and a half hours because CPU contention is then a live channel rather than a
+bounded one."
+
+## What makes it speed rather than work, and the host rather than the card
+
+Three readings, each independent of the estimator:
+
+- the output is identical to the token. 36 000 generated in both conditions, and
+  29 292 drafted and 21 192 accepted in both conditions of the speculative arm
+- the GPU's SM clock is the same or slightly **higher** in the slow condition,
+  1928.8 MHz against 1920.0, so nothing is thermally throttled
+- its power, utilisation and temperature all **fall** in the slow condition:
+  326.8 W to 302.4, 75.2 % to 56.1, 73.8 °C to 71.2. The card is idle-waiting
+
+Taking the clock ratio at face value, 4300 against 5800, the implied share of a
+token's time that is host work scaling with clock is about 48 % for
+`spec-dflash-n2` and 50 % for `baseline`. That is an inference from one ratio and
+not a measurement: efficiency cores differ from performance cores in more than
+clock, having no second thread and a different cache hierarchy, so the share is an
+upper reading.
+
+## What this does to run X, and what it does not settle
+
+The plan for run X said a null here would make it unnecessary. The opposite
+happened, so run X is warranted, and the section of that plan which recommended
+this run first is corrected rather than left standing.
+
+It does not settle A16. A16's step is 3.93 %, which is 0.23 of a full
+displacement, or roughly two of the eight threads landing on efficiency cores.
+Every published run here passes no thread count and no affinity, llama.cpp chooses
+eight threads of the thirty-two logical processors, and each arm-run starts a
+fresh server and therefore draws its own placement. That is A16's shape, per
+arm-run and sparing its neighbours, and the right order of magnitude. It is an
+arithmetic coincidence until a run sets the number of displaced threads and
+measures the response, which is the successor and is listed in `RETEST_TODO.md`.
+
+## Two things about the run itself, recorded because they are host work
+
+The sampler was not stopped when the run ended, and two of them were running
+during it rather than one. Both are described in the round's README with the
+defect that caused it and the fix. Each is one `nvidia-smi` query per second and
+the conditions alternate within every block, so neither can bias the contrast.

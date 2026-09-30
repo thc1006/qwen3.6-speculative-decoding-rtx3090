@@ -7096,3 +7096,50 @@ class ATreatmentMustBeVerifiedNotRequested(unittest.TestCase):
         finally:
             os.environ.clear()
             os.environ.update(env)
+
+
+class EveryRoundWithItsOwnDataMustBeWalked(unittest.TestCase):
+    """A round that keeps its data outside the v4 archive is easy to leave unchecked.
+
+    `analysis/check_data_integrity.py` defaults to `v4_audit_2026_08_25/data` and
+    takes a root argument. Run Y's data went to `v5_pinning_2026_09_26/data`
+    because the frozen claim checker pins the v4 directory count, and for a
+    commit or two nothing walked it at all: the integrity job ran one invocation
+    and the new round was not it.
+
+    So this finds every top-level round directory that holds run data and
+    requires `audit.yml` to invoke the checker on each. A round added without one
+    fails here rather than sitting unwalked.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    def _rounds_with_data(self):
+        out = []
+        for d in sorted(self.ROOT.iterdir()):
+            if not d.is_dir() or d.name.startswith(".") or d.name == "results":
+                continue
+            data = d / "data"
+            if not data.is_dir():
+                continue
+            # a round's data directory holds run directories with arm-runs in them
+            if any(any(x.glob("*__rep*.json")) for x in data.iterdir() if x.is_dir()):
+                out.append(f"{d.name}/data")
+        return out
+
+    def test_there_is_more_than_one_round_to_check(self):
+        self.assertGreaterEqual(len(self._rounds_with_data()), 2,
+                                "only one round holds run data, so this guard is "
+                                "checking nothing; it was two when written")
+
+    def test_the_integrity_job_walks_every_one(self):
+        wf = (self.ROOT / ".github" / "workflows" / "audit.yml").read_text(
+            encoding="utf-8")
+        default = "v4_audit_2026_08_25/data"
+        for root in self._rounds_with_data():
+            if root == default:
+                # the invocation with no argument is this one
+                self.assertIn("run: python analysis/check_data_integrity.py", wf)
+                continue
+            self.assertIn(f"check_data_integrity.py {root}", wf,
+                          f"{root} holds run data and no job walks it")

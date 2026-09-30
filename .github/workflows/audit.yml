@@ -184,6 +184,12 @@ jobs:
         with: { python-version: "3.12" }
       - name: structure of every committed run directory
         run: python analysis/check_data_integrity.py
+      - name: and of every round that keeps its data outside the v4 archive
+        # `check_data_integrity.py` defaults to `v4_audit_2026_08_25/data`, so a
+        # round that keeps its own data was unchecked by this job entirely. A
+        # test reads this file and requires an invocation for every such
+        # directory, because a round added without one is a round nothing walks.
+        run: python analysis/check_data_integrity.py v5_pinning_2026_09_26/data
 
   audit-claims:
     name: claims

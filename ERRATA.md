@@ -1488,6 +1488,35 @@ either, so from W2 onward the column is missing because nothing asked for it.
 The junction temperature needs a sensor the platform does not offer, so that one
 stays untestable here.
 
+> **Addendum, 2026-09-30: a third quantity, and it is not small.** Run Y pinned
+> the server to eight efficiency cores against eight performance cores on this
+> bench host, a quarter off the clock, and measured the cost twelve times inside
+> one invocation. `spec-dflash-n2` loses about **fifteen and a half per cent** of
+> its decode rate and the no-speculation arm nearly **sixteen**, both intervals
+> clear of zero, with output identical to the token, the GPU's SM clock the same
+> or higher in the slow condition, and its power, utilisation and temperature all
+> falling. The card is waiting on the host, and about **half** a token's time here
+> is host work that scales with processor clock.
+>
+> Nothing in this repository pinned any process to any processor before
+> 2026-09-26, and no run records which kind of core anything ran on. llama.cpp
+> chooses eight threads of this host's thirty-two logical processors, sixteen of
+> which are efficiency cores, and every arm-run starts a fresh server and so
+> draws its own placement.
+>
+> So placement is a candidate for this entry with the right shape and the right
+> order of magnitude: the step this entry is about is **under a quarter** of a
+> full displacement, or roughly **two of eight** threads landing slow. **It is
+> arithmetic and not evidence** until a run sets the number of displaced threads
+> and measures the response, which is pre-registered as the successor. The entry
+> is not retracted and nothing above it is withdrawn; what changes is that
+> "nothing recorded distinguishes them" now has a named, measured quantity that
+> nothing recorded.
+>
+> The figures are in `v5_pinning_2026_09_26/`, a round of its own: the
+> run-directory count under this archive is pinned in a file bound to the `v4.2`
+> tag.
+
 ### A17. The thinking-off comparisons are not comparisons of the same amount of work
 
 Pooled decode rate is generated tokens over decode milliseconds. It is the right
@@ -2185,7 +2214,7 @@ tables happen to reach, which is the only reason the figure moved. The prose
 half of this repository is, to a first approximation, unchecked.
 
 **And that census counts decimals only.** In the same prose, on the same lines,
-sit **2 643** whole numbers, **358** of which are not a string literal in the
+sit **2 649** whole numbers, **358** of which are not a string literal in the
 checker either. They are reported beside the decimals rather than folded into
 them, because the probe below sampled the decimal population and the rate it
 publishes is about that population; widening what a measured rate refers to,
