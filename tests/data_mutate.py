@@ -27,79 +27,50 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-# Everything verify_claims.py reads. It grew: the historical-script check added
-# four files at the repository root, and the mirror silently lacked them until
-# the checker crashed on the unperturbed copy.
-COPY = ("analysis", "bench", "tests", "v4_audit_2026_08_25", "results",
-        "v2_3090_followup", "v3_dflash_2026_05_07", "README.md", "ERRATA.md",
-        "CHANGELOG.md", "RETEST_TODO.md", "BENCHMARK_ENV.md",
-        "CITATION.cff",
-        # the CI-install guard reads both locks, so a mirror
-        # without them turns that test into a FileNotFoundError
-        "requirements-lint.lock", "requirements-plot.lock",
-        # the v4.2 release notes are a censused document and the checker
-        # reads them; a mirror without them dies before it measures
-        "RELEASE_NOTES_v4.2.md",
-        # the v1 archive's own request payload carries `temperature: 0.0`, which
-        # the tier registry's row is checked against, and `pr_comment.md` is the
-        # third document quoting the 0.6B drafter's vocabulary
-        "bench_runner.py", "pr_comment.md",
-        "PULL_REQUEST.md",
-        # the coverage census asserts that every markdown file in the tree is
-        # either censused or excluded with a reason, so a mirror missing one
-        # fails on the unperturbed copy
-        "pr_comment.md",
-        "run_matrix.sh", "run_p0_matrix.sh", "run_verify_matrix.sh",
-        "collect_env.sh",
-        # the checker reads `.github/workflows/evidence.yml` -- the path filter
-        # is held to the import closure of `verify_claims.py`, and the archive
-        # digests are grepped out of the job. Without it the mirror's checker
-        # dies with FileNotFoundError at 3034 of 3708 assertions and this suite
-        # refuses to run at all, which is what it did from the commit that
-        # added that assertion until 2026-08-30.
-        ".github")
+def _tracked() -> list:
+    """Every path git tracks: what a reader clones and what CI checks out.
 
+    This was `COPY`, a hand-written tuple of top-level paths, and three comments
+    in these two files recorded it going stale: four scripts at the repository
+    root, then `CITATION.cff`, then `.github`, each noticed only when the checker
+    crashed or failed on the UNPERTURBED mirror. It went stale a fourth time with
+    `v5_pinning_2026_09_26`, whose README the coverage census reaches by WALKING
+    the tree rather than by naming it, so neither of the two guards that read
+    path literals out of the checker could see it and both stayed green. A list
+    is not kept in step with a tree by hand; git already holds the answer.
 
-def _ignored_by_git() -> set:
-    """Every path git ignores, so the mirror is the COMMITTED tree.
-
-    `copytree` copies the working tree, which is not what CI checks out and not
-    what a reader clones. The difference used to be only `__pycache__`, so it
-    never mattered; on 2026-09-01 it started mattering, because 119 MB of
-    derivable duplicates were untracked and ignored rather than deleted, and a
-    checker assertion that reads `git ls-files` cannot see them while a mirror
-    built by `copytree` still holds every one. A mirror that carries files the
+    Tracked, and not present-on-disk. `copytree` copies the working tree, which
+    is neither: on 2026-09-01 it carried 119 MB of untracked ignored duplicates
+    that an assertion reading `git ls-files` could not see, and an untracked file
+    that is not ignored at all would be carried too. A mirror holding files the
     tree does not is a control measuring something other than the subject.
     """
-    # `--directory` collapses a wholly ignored directory into one entry, so
-    # `__pycache__` is skipped as a directory instead of leaving an empty one
-    # behind; a directory only partly ignored still lists its files one by one,
-    # which is what `v4_audit_2026_08_25/data/*` needs.
-    r = subprocess.run(["git", "ls-files", "--others", "--ignored",
-                        "--exclude-standard", "--directory", "-z", *COPY],
-                       cwd=ROOT, capture_output=True, text=True, timeout=300)
+    r = subprocess.run(["git", "ls-files", "-z"], cwd=ROOT,
+                       capture_output=True, text=True, timeout=300)
+    # Fail closed. Its predecessor returned an empty skip-set when git failed,
+    # which degraded in silence into mirroring every ignored file as well.
     if r.returncode != 0:
-        return set()
-    return {(ROOT / p).resolve() for p in r.stdout.split("\0") if p}
+        raise SystemExit(f"git ls-files failed in {ROOT}: {r.stderr.strip()}")
+    paths = [p for p in r.stdout.split("\0") if p]
+    if not paths:
+        raise SystemExit(f"git ls-files listed nothing in {ROOT}")
+    return paths
 
 
 def mirror(into: Path) -> Path:
     into.mkdir(parents=True, exist_ok=True)
-    skip = _ignored_by_git()
-
-    def _ignore(directory, names):
-        d = Path(directory)
-        return [n for n in names if (d / n).resolve() in skip]
-
-    for rel in COPY:
+    made = set()
+    for rel in _tracked():
         src = ROOT / rel
-        if not src.exists():
+        # tracked and deleted in the working tree: let the checker report that
+        # rather than quietly restoring it here
+        if not src.is_file():
             continue
         dst = into / rel
-        if src.is_dir():
-            shutil.copytree(src, dst, dirs_exist_ok=True, ignore=_ignore)
-        elif src.resolve() not in skip:
-            shutil.copy2(src, dst)
+        if dst.parent not in made:
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            made.add(dst.parent)
+        shutil.copy2(src, dst)
     return into
 
 

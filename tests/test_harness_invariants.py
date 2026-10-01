@@ -2195,17 +2195,103 @@ class EveryPerturbationAnchorMustResolve(unittest.TestCase):
 
     def test_every_code_mutation_names_a_test_that_exists(self):
         """A mutation pointed at a class that has been renamed reports the
-        mutation as caught, because the runner exits non-zero either way."""
+        mutation as caught, because the runner exits non-zero either way.
+
+        `module.Class.method` resolves too, and has to. A mutation of the mirror
+        cannot be anchored on the whole mirror class: its other test reads
+        `git ls-files`, the mirror the anchor runs in has no `.git`, and that
+        test therefore fails in there whatever the mutation did -- which is the
+        same pass-never-earned this test exists to stop, arriving by the other
+        door. So the method is checked to be in THAT class rather than merely
+        somewhere in the file, and a deeper path is refused because `unittest`
+        cannot load one.
+        """
+        import ast as _ast
         sys.path.insert(0, str(self.ROOT / "tests"))
         import mutate
-        src = (self.ROOT / "tests" / "test_harness_invariants.py").read_text(
-            encoding="utf-8")
+        tree = _ast.parse((self.ROOT / "tests" / "test_harness_invariants.py")
+                          .read_text(encoding="utf-8"))
+        methods = {c.name: {f.name for f in c.body
+                            if isinstance(f, _ast.FunctionDef)}
+                   for c in _ast.walk(tree) if isinstance(c, _ast.ClassDef)}
+        self.assertGreater(len(methods), 50,
+                           "no classes parsed; this test proves nothing")
         for name, _rel, _c, _d, test in mutate.MUTATIONS:
-            leaf = test.rsplit(".", 1)[1]
-            mod = test.rsplit(".", 2)[0] if test.count(".") > 1 else test
-            if mod.endswith("test_harness_invariants"):
-                self.assertIn(f"class {leaf}(", src,
-                              f"{name!r} names a class that does not exist")
+            parts = test.split(".")
+            if "test_harness_invariants" not in parts:
+                continue
+            rest = parts[parts.index("test_harness_invariants") + 1:]
+            self.assertTrue(rest, f"{name!r} names a module and no class")
+            self.assertLessEqual(len(rest), 2,
+                                 f"{name!r} anchors on {test!r}, which unittest "
+                                 f"cannot load")
+            self.assertIn(rest[0], methods,
+                          f"{name!r} names a class that does not exist")
+            if len(rest) == 2:
+                self.assertIn(rest[1], methods[rest[0]],
+                              f"{name!r} anchors on {rest[1]!r} and "
+                              f"{rest[0]} has no such test")
+
+    def test_no_anchor_names_a_class_that_cannot_pass_in_the_mirror(self):
+        """The anchor runs in the mirror, and the mirror has no `.git`.
+
+        A test that shells out to git fails in there whatever the mutation did,
+        so a mutation anchored on the class holding one reports `caught` without
+        the guard it names having been exercised at all. One decorative mutation
+        was already found here by hand, by restoring the file and watching the
+        anchor fail anyway. The fix for such an anchor is to narrow it to the
+        method that does not read git, which is why this file resolves a
+        `Class.method` anchor.
+
+        Detected at the call sites rather than in the text: a method whose prose
+        merely mentions `git ls-files` is not a method that runs it, and this
+        file's docstrings say that phrase several times.
+        """
+        import ast as _ast
+        sys.path.insert(0, str(self.ROOT / "tests"))
+        import mutate
+        tree = _ast.parse((self.ROOT / "tests" / "test_harness_invariants.py")
+                          .read_text(encoding="utf-8"))
+
+        def reads_git(fn):
+            body = fn.body[1:] if (fn.body and isinstance(fn.body[0], _ast.Expr)
+                                   and isinstance(fn.body[0].value, _ast.Constant)
+                                   ) else fn.body
+            for stmt in body:
+                for n in _ast.walk(stmt):
+                    if not (isinstance(n, _ast.Constant)
+                            and isinstance(n.value, str)):
+                        continue
+                    v = n.value
+                    if v == "git" or "ls-files" in v or "rev-parse" in v:
+                        return True
+            return False
+
+        git_tests = {}
+        for c in _ast.walk(tree):
+            if not isinstance(c, _ast.ClassDef):
+                continue
+            git_tests[c.name] = sorted(
+                f.name for f in c.body
+                if isinstance(f, _ast.FunctionDef) and f.name.startswith("test")
+                and reads_git(f))
+        self.assertTrue(any(git_tests.values()),
+                        "no git-reading test found at all; this proves nothing")
+        bad = []
+        for name, _rel, _c, _d, test in mutate.MUTATIONS:
+            parts = test.split(".")
+            if "test_harness_invariants" not in parts:
+                continue
+            rest = parts[parts.index("test_harness_invariants") + 1:]
+            if len(rest) != 1:
+                continue
+            for meth in git_tests.get(rest[0], []):
+                bad.append(f"{name!r} -> {rest[0]}.{meth}")
+        self.assertEqual(sorted(bad), [],
+                         "these mutations anchor on a class holding a test that "
+                         "reads git, and the mirror they run in has none, so the "
+                         "anchor fails there with or without the mutation: "
+                         + "; ".join(sorted(bad)))
 
 
 class TheGitlessAssertionGapMustBeTheDeclaredOne(unittest.TestCase):
@@ -3247,10 +3333,13 @@ class TheMirrorsMustCarryEverythingTheCheckerReads(unittest.TestCase):
 
     ROOT = Path(__file__).resolve().parents[1]
 
-    def _copy_list(self, rel):
-        src = (self.ROOT / rel).read_text(encoding="utf-8")
-        body = src.split("COPY = (")[1].split(")")[0]
-        return set(re.findall(r'"([^"]+)"', body))
+    def _tracked_tops(self):
+        r = subprocess.run(["git", "ls-files", "-z"], cwd=self.ROOT,
+                           capture_output=True, text=True, timeout=300)
+        self.assertEqual(r.returncode, 0, f"git ls-files failed: {r.stderr}")
+        tops = {p.split("/")[0] for p in r.stdout.split("\0") if p}
+        self.assertTrue(tops, "git listed nothing; this test proves nothing")
+        return tops
 
     def _named_by_the_checker(self):
         src = (self.ROOT / "analysis" / "verify_claims.py").read_text(encoding="utf-8")
@@ -3269,14 +3358,20 @@ class TheMirrorsMustCarryEverythingTheCheckerReads(unittest.TestCase):
         self.assertIn("CITATION.cff", named)
 
     def test_both_mirrors_carry_all_of_them(self):
+        """Both derive the mirror from `git ls-files`, so TRACKED is the test.
+
+        This read the `COPY` tuple out of each harness. That tuple is gone,
+        because it went stale four times. What decides now is whether the path
+        the checker names is tracked: an untracked one is absent from a CI
+        checkout as well, so the crash would happen there too.
+        """
         named = self._named_by_the_checker()
-        for rel in ("tests/data_mutate.py", "tests/mutate.py"):
-            with self.subTest(suite=rel):
-                missing = sorted(named - self._copy_list(rel))
-                self.assertEqual(missing, [],
-                                 f"{rel}'s mirror would lack {missing}, so the "
-                                 f"checker crashes on the unperturbed copy and "
-                                 f"no perturbation is ever evaluated")
+        missing = sorted(named - self._tracked_tops())
+        self.assertEqual(missing, [],
+                         f"the checker names {missing} and git does not track "
+                         f"them, so both mirrors lack them, the checker crashes "
+                         f"on the unperturbed copy and no perturbation is ever "
+                         f"evaluated")
 
 
 class AShallowCloneMustBeDiagnosedNotEndured(unittest.TestCase):
@@ -4410,17 +4505,22 @@ class TheDataMirrorMustHoldEveryPathTheCheckerOpens(unittest.TestCase):
     84 data perturbations measured nothing.
 
     Every path literal in the checker that exists in this tree must be
-    reachable in the mirror. Compared as top-level names, which is what `COPY`
-    is a list of.
+    reachable in the mirror. The mirror is every tracked path, so the comparison
+    is against what git tracks, as top-level names.
     """
 
     ROOT = Path(__file__).resolve().parents[1]
 
     def test_every_path_the_checker_reads_is_mirrored(self):
         import ast as _ast
-        sys.path.insert(0, str(self.ROOT / "tests"))
-        import data_mutate
-        copied = set(data_mutate.COPY)
+        # `set(data_mutate.COPY)` until the list it read was removed. The
+        # mirror is every tracked path now, so being tracked is what makes a
+        # path reachable in it.
+        r = subprocess.run(["git", "ls-files", "-z"], cwd=self.ROOT,
+                           capture_output=True, text=True, timeout=300)
+        self.assertEqual(r.returncode, 0, f"git ls-files failed: {r.stderr}")
+        copied = {p.split("/")[0] for p in r.stdout.split("\0") if p}
+        self.assertTrue(copied, "git listed nothing; this test proves nothing")
         src = (self.ROOT / "analysis" / "verify_claims.py").read_text(
             encoding="utf-8")
         missing = set()
@@ -4443,7 +4543,7 @@ class TheDataMirrorMustHoldEveryPathTheCheckerOpens(unittest.TestCase):
             if top in {".git"}:
                 continue
             if top not in copied:
-                missing.add(f"{rel} (top-level {top!r} is not in COPY)")
+                missing.add(f"{rel} (top-level {top!r} is not tracked)")
         self.assertEqual(
             sorted(missing), [],
             "the checker opens these and the mirror does not have them, so "
@@ -5671,6 +5771,13 @@ class AMutationMirrorMustBeTheCommittedTree(unittest.TestCase):
     rather than deleted: a checker assertion reading `git ls-files` cannot see
     them, and a mirror built by `copytree` still held every one. A control that
     carries files the subject does not is measuring something else.
+
+    The converse cost five days: both harnesses copied a hand-written list of
+    top-level paths, `v5_pinning_2026_09_26` was never added to it, and the
+    coverage census -- which walks the tree for markdown rather than naming the
+    files -- failed on the unperturbed mirror, so all 32 shards exited non-zero
+    and 0 of 84 perturbations were evaluated. The mirror is derived from
+    `git ls-files` now and there is no list to forget.
     """
 
     ROOT = Path(__file__).resolve().parents[1]
@@ -5684,8 +5791,13 @@ class AMutationMirrorMustBeTheCommittedTree(unittest.TestCase):
             "dm_mirror", self.ROOT / "tests" / "data_mutate.py")
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
+        # NOT `*mod.COPY`. Passing the harness's own path list into the
+        # question made this test's scope "tracked, within COPY", which is not
+        # what its name says and cannot see a tracked path COPY omits. It could
+        # not: `v5_pinning_2026_09_26/README.md` was missing from the mirror for
+        # five days with this test green.
         want = set(subprocess.run(
-            ["git", "ls-files", "-z", *mod.COPY], cwd=self.ROOT,
+            ["git", "ls-files", "-z"], cwd=self.ROOT,
             capture_output=True, text=True, timeout=300).stdout.split("\0")) - {""}
         self.assertTrue(want, "git listed nothing; this test proves nothing")
         d = Path(tempfile.mkdtemp(prefix="mirror-invariant-"))
@@ -5708,12 +5820,12 @@ class AMutationMirrorMustBeTheCommittedTree(unittest.TestCase):
             out = {}
             for n in tree.body:
                 if isinstance(n, ast.FunctionDef) and n.name in ("mirror",
-                                                                 "_ignored_by_git"):
+                                                                 "_tracked"):
                     out[n.name] = ast.unparse(n)
             return out
 
         a, b = src("tests/mutate.py"), src("tests/data_mutate.py")
-        self.assertEqual(sorted(a), ["_ignored_by_git", "mirror"])
+        self.assertEqual(sorted(a), ["_tracked", "mirror"])
         self.assertEqual(a, b, "the two harnesses build their mirror differently")
 
 
