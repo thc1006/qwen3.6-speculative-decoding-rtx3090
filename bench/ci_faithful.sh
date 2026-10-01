@@ -26,13 +26,19 @@
 # release and is rehearsed against the real archives instead.
 set -u
 
-SHA_IN=${1:?usage: ci_faithful.sh <commit>}
-SRC=$HOME/dev/qwen3.6-speculative-decoding-rtx3090
-W=$HOME/ci_repro
+die() { echo "FAIL: $*" >&2; exit 2; }
+
+SHA_IN=${1:?usage: bench/ci_faithful.sh <commit>}
+# The repository this script is IN, not a path written down. It was
+# `$HOME/dev/qwen3.6-speculative-decoding-rtx3090` while the script lived in a
+# home directory; in a repository that spelling would clone some other checkout
+# than the one the script came from, which is the wrong-copy defect that put this
+# file here, arriving by the other door.
+SRC=$(cd "$(dirname "$0")/.." && pwd)
+[ -d "$SRC/.git" ] || die "$SRC is not a git repository; run this from a checkout"
+W=${CI_REPRO_DIR:-$HOME/ci_repro}
 WANT_PY=3.12
 export TZ=UTC
-
-die() { echo "FAIL: $*" >&2; exit 2; }
 
 got_py=$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')
 [ "$got_py" = "$WANT_PY" ] || die "python is $got_py and the jobs reproduced here pin $WANT_PY.

@@ -7515,6 +7515,26 @@ class TheLocalGateMustRunEveryStepTheWorkflowDoes(unittest.TestCase):
                 [x for x in by_name[name]["paths"] if x not in reach],
                 f"{name} is excused and the gate runs all of its scripts")
 
+    def test_it_clones_the_repository_it_is_in(self):
+        """A written-down path would clone some other checkout than this one.
+
+        It read `$HOME/dev/qwen3.6-speculative-decoding-rtx3090` while it lived in
+        a home directory, which was right there and wrong the moment the file
+        moved: a gate run from one checkout would have attested another, which is
+        the wrong-copy defect that put the file here arriving by the other door.
+        """
+        gate = (self.ROOT / self.GATE).read_text(encoding="utf-8")
+        # code, not comments: the comment above that line names the old spelling
+        # on purpose, and a test that forbids naming a defect forbids explaining
+        # it
+        code = [l for l in gate.splitlines() if not l.lstrip().startswith("#")]
+        named = [l.strip() for l in code if "$HOME/dev/" in l]
+        self.assertEqual(named, [],
+                         "the gate names a home-directory checkout in code, so "
+                         "running it from one repository can attest another")
+        self.assertIn('SRC=$(cd "$(dirname "$0")/.." && pwd)', gate,
+                      "SRC is not derived from the script's own location")
+
     def test_its_own_coverage_list_is_what_it_covers(self):
         """The closing sentence counts that list, so it is a published number."""
         gate = (self.ROOT / self.GATE).read_text(encoding="utf-8")
