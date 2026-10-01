@@ -7570,6 +7570,28 @@ class TheLocalGateMustRunEveryStepTheWorkflowDoes(unittest.TestCase):
         self.assertIn('SRC=$(cd "$(dirname "$0")/.." && pwd)', gate,
                       "SRC is not derived from the script's own location")
 
+    def test_the_unit_step_runs_on_a_runners_processor_count(self):
+        """The one difference this gate used to hope about rather than eliminate.
+
+        A test that asked for processors four, five and six passed on the
+        thirty-two processor bench host and on an eight processor box, and failed
+        on a runner that has four: `taskset` had nothing to pin to. `taskset`
+        restricts the affinity, which is what `os.sched_getaffinity` reads, so
+        running the unit job under a runner's count makes a test that derives its
+        processors derive what a runner would give it.
+        """
+        gate = (self.ROOT / self.GATE).read_text(encoding="utf-8")
+        self.assertIn("RUNNER_CPUS=${CI_RUNNER_CPUS:-0-3}", gate,
+                      "the runner's processor count is not a named default")
+        self.assertIn('PIN=(taskset -c "$RUNNER_CPUS")', gate,
+                      "nothing restricts the affinity the unit job runs under")
+        pinned = [l for l in gate.splitlines()
+                  if "unittest discover" in l and '"${PIN[@]}"' in l]
+        self.assertEqual(
+            len(pinned), 1,
+            "the unit step does not run under the restricted affinity, so a test "
+            "that reads the processor count is still unchecked here")
+
     def test_its_own_coverage_list_is_what_it_covers(self):
         """The closing sentence counts that list, so it is a published number."""
         gate = (self.ROOT / self.GATE).read_text(encoding="utf-8")

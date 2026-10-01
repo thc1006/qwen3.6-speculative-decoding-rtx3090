@@ -196,7 +196,26 @@ aggregate_attested() {
 run matrix_report -- aggregate_attested
 
 echo "=== unit and mutation (full history) ==="
-python3 -m unittest discover -s tests -p 'test_*.py' > "$W/unit.log" 2>&1
+# UNDER THE RUNNER'S PROCESSOR COUNT. A test that asked for processors four,
+# five and six passed here on thirty-two of them and failed on a runner that has
+# four, and this script's whole claim is that it does not hope about such a
+# difference. `taskset` restricts the affinity, which is what
+# `os.sched_getaffinity` reads, so a test deriving what it needs from the host
+# derives what a runner would give it. `os.cpu_count()` ignores affinity and the
+# two launchers read `getconf`, so the shard-count refusals still see the real
+# machine, which is what they are about.
+#
+# Not written down as a number of its own: CI_RUNNER_CPUS says what a runner has,
+# the default is the four that `ubuntu-latest` gives, and a host with fewer than
+# that runs the suite unrestricted rather than pretending.
+RUNNER_CPUS=${CI_RUNNER_CPUS:-0-3}
+PIN=()
+if command -v taskset > /dev/null 2>&1 \
+   && [ "$(getconf _NPROCESSORS_ONLN)" -gt 4 ]; then
+    PIN=(taskset -c "$RUNNER_CPUS")
+    echo "  unit runs on processors $RUNNER_CPUS, as a runner has" >&2
+fi
+"${PIN[@]}" python3 -m unittest discover -s tests -p 'test_*.py' > "$W/unit.log" 2>&1
 if grep -qE "^OK$" "$W/unit.log"; then
     note "unittest ($(grep -oE '^Ran [0-9]+ tests' "$W/unit.log"))" OK
 else
