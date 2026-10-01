@@ -68,9 +68,8 @@ ninety-five per cent upper limit on the slowdown.
 
 The pre-registration expected both arms to hold. Both move, by about fourteen
 and a half per cent, and the bound is far above the 3.93 % step ERRATA A16 is
-about. That is
-the plan's second branch: processor speed reaches this workload by enough to
-matter.
+about. That is the plan's second branch: processor speed reaches this workload
+by enough to matter.
 
 Three things establish that this is speed and not different work, and that it is
 the host and not the card:
