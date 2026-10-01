@@ -1,7 +1,7 @@
 {
-  "head_sha": "1f39f166ac2aecfce292d502738bb3ffa959ce23",
+  "head_sha": "68d72f6bc1bb69efb465e376f244d44ba221a59f",
   "checker_sha256": "d5193848d7a06ed4f6e8f7b52f8a612773384be9c4baf412676973b9834f23a8",
-  "population_sha256": "dbbf75d6f96c83a0099040a934cd98261fef9c95c1df561dbdf8a40dd8a8ae1c",
+  "population_sha256": "fa341880bbdaebc5e2321abe278d3c75c2f390302eeec0e79f2bc65d75c50ebf",
   "population_size": 2446,
   "shard": [
     6,
@@ -89,40 +89,40 @@
     ],
     [
       "ERRATA.md",
-      1994,
-      1996,
+      2009,
+      2011,
       1,
       23,
       27
     ],
     [
       "ERRATA.md",
-      1994,
-      1997,
+      2009,
+      2012,
       1,
       27,
       31
     ],
     [
       "ERRATA.md",
-      1994,
-      1998,
+      2009,
+      2013,
       1,
       18,
       22
     ],
     [
       "ERRATA.md",
-      1994,
-      1999,
+      2009,
+      2014,
       1,
       21,
       25
     ],
     [
       "ERRATA.md",
-      1994,
-      2000,
+      2009,
+      2015,
       1,
       20,
       24

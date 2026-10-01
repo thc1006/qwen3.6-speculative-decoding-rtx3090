@@ -2136,7 +2136,7 @@ perturbed **2 252** numbers across the **119** tables parsed at the time and
 grows as the coverage does, so a clean run is only clean for the tree it ran
 on: parsing the last six tables grew it, and so did run W2's three tables and
 the column it added to A17's. On 2026-09-03, at commit
-`1f39f166ac2a`, all **2 446** numbers across all **128** tables were perturbed
+`68d72f6bc1bb`, all **2 446** numbers across all **128** tables were perturbed
 one at a time and **every one was caught**, in thirty-two shards whose control
 passed before the work and again after it on everything except the two
 assertions that read the attestations themselves. Those cannot be true before
@@ -2166,7 +2166,7 @@ moment the opening control passes.
 
 Over the thirty-two attestations committed under
 [`coverage_attestations/`](v4_audit_2026_08_25/coverage_attestations) it
-reports: **32 shards, one head `1f39f166ac2a`, one checker `d5193848d7a0`, 2
+reports: **32 shards, one head `68d72f6bc1bb`, one checker `d5193848d7a0`, 2
 446 locations covered exactly once, 0 survived**. Covered *exactly once* is the
 part the earlier sentence
 could not say: no location probed twice, none missed, and every shard on the
