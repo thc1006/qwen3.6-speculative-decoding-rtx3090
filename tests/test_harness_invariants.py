@@ -7406,3 +7406,125 @@ class RunYsTableMustBeDerivedFromItsData(unittest.TestCase):
                     wrong, (self.ROOT / doc).read_text(encoding="utf-8"),
                     f"{doc} carries {wrong}, which is {r['arm']}'s mean log "
                     f"ratio and not its change of {rry._pct(r['change_pct'])}")
+
+
+class TheLocalGateMustRunEveryStepTheWorkflowDoes(unittest.TestCase):
+    """`bench/ci_faithful.sh` is what decides whether a commit gets pushed.
+
+    It lived in a home directory, where nothing here could see it, which is the
+    same reason `bench/run_cell_probe.sh` was moved into this repository. Two
+    copies of it existed. The one at the path that gets invoked was from
+    2026-09-01 and ran ONE of the claims job's steps; a newer copy in a scratchpad
+    had the other three and the corrected job list, and was never promoted. So a
+    run of the gate reported "4 of audit.yml's 7 jobs reproduced green" while
+    reproducing six, and counted `claims` as a job it had reproduced while running
+    a quarter of it. It also missed the second `check_data_integrity` invocation
+    and the step that aggregates every attested run under `--strict`.
+
+    So: every repository script a job's `run:` steps name has to be reachable from
+    the gate, one level of indirection allowed because the gate runs launchers
+    that run the rest. A job that is not reproduced has to be named here with the
+    reason, and the gate's own `covered` list has to be exactly the jobs it does
+    reproduce, because that list is what the closing sentence counts.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+    GATE = "bench/ci_faithful.sh"
+    # the charts job pins python 3.13 where every other job pins 3.12, so it
+    # cannot run in the same interpreter this gate asserts it is using
+    NOT_REPRODUCED = {"charts": "pins python 3.13, so it runs separately"}
+    PATH_RE = r"\b((?:analysis|tests|bench)/[A-Za-z0-9_./-]+\.(?:py|sh))\b"
+
+    def _jobs(self):
+        """Each job's display name and the repository paths its `run:` steps name.
+
+        Only `run:` values, never comments: the comments in that workflow name
+        nine more scripts than the steps do, and counting those made four jobs
+        look uncovered that are covered.
+        """
+        wf = (self.ROOT / ".github" / "workflows" / "audit.yml").read_text(
+            encoding="utf-8").splitlines()
+        i = next(k for k, l in enumerate(wf) if l.rstrip() == "jobs:")
+        job, out, block = None, {}, None
+        for l in wf[i + 1:]:
+            st = l.strip()
+            if (l.startswith("  ") and not l.startswith("   ")
+                    and st.endswith(":") and ":" not in st[:-1]):
+                job, block = st[:-1], None
+                out[job] = {"name": None, "paths": set()}
+                continue
+            if job is None:
+                continue
+            if (st.startswith("name:") and l.startswith("    ")
+                    and out[job]["name"] is None):
+                out[job]["name"] = st.split("name:", 1)[1].strip().strip("'\"")
+            if block is not None:
+                if st and not l.startswith(block):
+                    block = None
+                elif not st.startswith("#"):
+                    out[job]["paths"] |= set(re.findall(self.PATH_RE, l))
+                    continue
+            m = re.match(r"^(\s+)run:\s*(.*)$", l)
+            if m:
+                if m.group(2).strip() in ("|", ">", "|-", ">-"):
+                    block = m.group(1) + "  "
+                else:
+                    out[job]["paths"] |= set(re.findall(self.PATH_RE, m.group(2)))
+        return out
+
+    def _reachable(self):
+        gate = (self.ROOT / self.GATE).read_text(encoding="utf-8")
+        reach = set(re.findall(self.PATH_RE, gate))
+        for rel in sorted(reach):
+            p = self.ROOT / rel
+            if p.suffix == ".sh" and p.is_file():
+                reach |= set(re.findall(self.PATH_RE,
+                                        p.read_text(encoding="utf-8")))
+        return reach
+
+    def test_the_gate_is_in_this_repository(self):
+        self.assertTrue((self.ROOT / self.GATE).is_file(),
+                        f"{self.GATE} is missing, so the gate is a file in a home "
+                        f"directory again and nothing here checks it")
+
+    def test_it_runs_every_script_every_reproduced_job_names(self):
+        jobs, reach = self._jobs(), self._reachable()
+        self.assertGreaterEqual(len(jobs), 7, "the workflow's jobs did not parse")
+        bad = []
+        for _job, d in jobs.items():
+            # keyed by the DISPLAY name, which is what the gate's own list uses
+            if d["name"] in self.NOT_REPRODUCED:
+                continue
+            missing = sorted(x for x in d["paths"] if x not in reach)
+            if missing:
+                bad.append(f"{d['name']}: {missing}")
+        self.assertEqual(bad, [],
+                         f"the gate does not run what these jobs run, so a green "
+                         f"gate says less than it reads: {bad}")
+
+    def test_a_job_it_cannot_run_is_named_with_a_reason(self):
+        jobs = self._jobs()
+        by_name = {d["name"]: d for d in jobs.values()}
+        reach = self._reachable()
+        for name, why in self.NOT_REPRODUCED.items():
+            self.assertIn(name, by_name, f"{name} is excused and no longer exists")
+            self.assertTrue(why.strip(), f"{name} is excused with no reason")
+            # and the excuse has to still be needed: a job listed here whose
+            # scripts the gate does run is an exemption standing after the fact
+            self.assertTrue(
+                [x for x in by_name[name]["paths"] if x not in reach],
+                f"{name} is excused and the gate runs all of its scripts")
+
+    def test_its_own_coverage_list_is_what_it_covers(self):
+        """The closing sentence counts that list, so it is a published number."""
+        gate = (self.ROOT / self.GATE).read_text(encoding="utf-8")
+        m = re.search(r'covered="([^"]*)"', gate)
+        self.assertIsNotNone(m, "the gate has no `covered` list to check")
+        said = sorted(x for x in m.group(1).split("\n") if x.strip())
+        jobs, reach = self._jobs(), self._reachable()
+        real = sorted(d["name"] for d in jobs.values()
+                      if d["name"] not in self.NOT_REPRODUCED
+                      and not [x for x in d["paths"] if x not in reach])
+        self.assertEqual(said, real,
+                         "the gate says it reproduces one set of jobs and runs "
+                         "another")
