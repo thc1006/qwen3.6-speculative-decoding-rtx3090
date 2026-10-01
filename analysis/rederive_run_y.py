@@ -281,6 +281,90 @@ def derived_prose() -> dict:
     }
 
 
+# the pre-registration's power table: blocks, hours, the one-sided bound a true
+# null would leave, and a simulated two-sided reading
+PLAN_POWER_BLOCKS = (6, 12, 18)
+
+
+def plan_power() -> dict:
+    """The bound column of the plan's power table, and the hours it predicted.
+
+    The bound is closed form: the one-sided t point on n-1 degrees of freedom
+    times the within-invocation SD over the root of n. The SD is the one
+    `analysis/load_run_power.py` measures from run T4's adjacent differences, so
+    the two plans rest on the same number rather than on two of them.
+
+    The hours column is a prediction, and this run is the thing that tests it:
+    the invocation's own span is compared against the row that was chosen. The
+    fourth column, the simulated probability that a two-sided reading declares
+    "holds" under a true null, is NOT derived here. It needs the simulator
+    `load_run_power.py` carries for the other plan's designs, and that one is
+    written around a between-condition contrast rather than this one. Named
+    rather than left for a reader to notice.
+    """
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+    import load_run_power                                        # noqa: E402
+    sd = load_run_power.measured()["adjacent_diff_sd"]
+    man = json.loads((RUN / "manifest.json").read_text(encoding="utf-8"))
+    created = man["created"]
+    ends = []
+    for q in sorted(RUN.glob("*__rep*.json")):
+        j = json.loads(q.read_text(encoding="utf-8"))
+        ends += [r["t_end"] for r in j["rows"]]
+    starts = []
+    for q in sorted(RUN.glob("*__rep*.json")):
+        j = json.loads(q.read_text(encoding="utf-8"))
+        starts += [r["t_start"] for r in j["rows"]]
+    span_h = (max(ends) - min(starts)) / 3600.0
+    return {
+        "sd_pct": sd,
+        "created": created,
+        "observed_span_hours": span_h,
+        "bounds": {n: t_critical_95_one_sided(n - 1) * sd / math.sqrt(n)
+                   for n in PLAN_POWER_BLOCKS},
+    }
+
+
+def check_plan_power(pp: dict) -> list[str]:
+    """The plan's own power table, row by row, anchored on the block count."""
+    doc = DOCS[1]
+    bad = []
+    lines = (ROOT / doc).read_text(encoding="utf-8").splitlines()
+    seen = set()
+    for ln in lines:
+        cells_ = _split(ln)
+        if len(cells_) != 4:
+            continue
+        label = cells_[0].replace("*", "").strip()
+        if not label.isdigit() or int(label) not in pp["bounds"]:
+            continue
+        n = int(label)
+        seen.add(n)
+        want = f"{pp['bounds'][n]:.2f} %"
+        got = cells_[2].replace("*", "").strip()
+        if got != want:
+            bad.append(f"{doc}: the bound for {n} blocks is {got!r} and the "
+                       f"measured spread gives {want!r}")
+    missing = sorted(set(pp["bounds"]) - seen)
+    if missing:
+        bad.append(f"{doc}: the power table has no row for {missing} blocks, so "
+                   f"those bounds are derived against nothing")
+    # the chosen row against what the invocation actually took
+    chosen = 12
+    predicted = None
+    for ln in lines:
+        cells_ = _split(ln)
+        if len(cells_) == 4 and cells_[0].replace("*", "").strip() == str(chosen):
+            predicted = float(cells_[1].replace("*", "").strip())
+    if predicted is None:
+        bad.append(f"{doc}: no row for the {chosen} blocks that ran")
+    elif abs(predicted - pp["observed_span_hours"]) > 0.05:
+        bad.append(f"{doc}: it predicted {predicted} hours for {chosen} blocks "
+                   f"and the invocation spanned "
+                   f"{pp['observed_span_hours']:.2f}")
+    return bad
+
+
 def main() -> None:
     show_only = "--show" in sys.argv[1:]
     for a in sys.argv[1:]:
@@ -305,7 +389,7 @@ def main() -> None:
                      f"the output is identical to the token, and it is not.")
         print(f"  {fast}: generated {tot[fast][0]}, drafted {tot[fast][1]}, "
               f"accepted {tot[fast][2]}, identical in both conditions")
-    tel, pro = telemetry(), derived_prose()
+    tel, pro, pp = telemetry(), derived_prose(), plan_power()
     print(f"  {CONTRASTS[0][0]} `gpu_after` means, twelve snapshots per condition:")
     for name, unit in (("clocks.current.sm", " MHz"), ("power.draw", " W"),
                        ("utilization.gpu", " %"), ("temperature.gpu", " °C")):
@@ -314,6 +398,12 @@ def main() -> None:
     for what, (v, forb) in pro.items():
         print(f"    {what}: {v}   "
               f"(and not {', '.join(sorted({w for w in forb if w != v}))})")
+    print(f"  the plan's power table, from a within-invocation spread of "
+          f"{pp['sd_pct']:.3f} %:")
+    for n, b in pp["bounds"].items():
+        print(f"    {n:2d} blocks -> one-sided bound {b:.2f} %")
+    print(f"    the invocation that ran spanned {pp['observed_span_hours']:.2f} "
+          f"hours over twelve blocks")
     if show_only:
         return
     bad = []
@@ -322,6 +412,7 @@ def main() -> None:
         # plan, which published the table before the data existed
         bad += check_doc(doc, rows, tel, tot,
                          pro if doc == DOCS[0] else None)
+    bad += check_plan_power(pp)
     if bad:
         print("\nFAILED")
         for b in bad:

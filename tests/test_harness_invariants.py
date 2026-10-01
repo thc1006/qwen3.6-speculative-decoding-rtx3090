@@ -7379,6 +7379,12 @@ class RunYsTableMustBeDerivedFromItsData(unittest.TestCase):
             # the prose figures belong to the round's own README, not to the plan
             bad += rry.check_doc(doc, rows, tel, tot,
                                  pro if doc == rry.DOCS[0] else None)
+        # the plan's own power table: the bound column against the measured
+        # within-invocation spread, and the hours it predicted for the design it
+        # chose against what the invocation actually spanned
+        pp = rry.plan_power()
+        self.assertEqual(sorted(pp["bounds"]), [6, 12, 18])
+        bad += rry.check_plan_power(pp)
         self.assertEqual(bad, [], "; ".join(bad))
 
     def test_the_log_ratio_is_not_what_any_document_carries(self):
