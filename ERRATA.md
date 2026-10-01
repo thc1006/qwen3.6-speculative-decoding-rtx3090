@@ -1518,18 +1518,18 @@ same as one this platform lacks; the second addendum below records reading it.
 > tag.
 >
 > **Addendum, 2026-10-01: the memory sensor exists, and this entry said it did
-> not.** The sentence above about the junction temperature needing a sensor the
-> platform does not offer was wrong. NVML does not expose it, which is a
-> different statement. On this card it is a thirty-two bit register at BAR0 plus
-> `0xE2A8`, its low twelve bits the temperature in thirty-seconds of a degree,
-> and the card's own `resource0` maps it read-only without `/dev/mem`. Idle it
-> reads forty-two degrees against a core reading of thirty-five. Under a pure
-> memory-bandwidth load holding `828 GB/s`, which is most of this card's peak,
-> it rises monotonically to ninety, stays above the core reading throughout, and
-> falls back within half a minute of the load stopping. So the
-> memory-subsystem hypothesis this entry names is testable on this hardware, and
-> what stood in for testing it was one reading of
-> `nvidia-smi --query-gpu=temperature.memory`, which returns `N/A` here. The
+> not.** This entry said the junction temperature needs a sensor the platform does
+> not offer. It does not: NVML does not expose it, which is a different statement,
+> and the sentence above is corrected to say so. On this card the sensor is a
+> thirty-two bit register at BAR0 plus `0xE2A8`, its low twelve bits the
+> temperature in thirty-seconds of a degree, and the card's own `resource0` maps
+> it read-only without `/dev/mem`. Idle it reads forty-two degrees against a core
+> reading of thirty-five. Under a pure memory-bandwidth load holding `828 GB/s`,
+> which is most of this card's peak, it rises monotonically to ninety and stays
+> above the core reading throughout, and it drops thirty degrees in the half
+> minute after the load stops. So the memory-subsystem hypothesis this entry names
+> is testable on this hardware, and what stood in for testing it was one reading
+> of `nvidia-smi --query-gpu=temperature.memory`, which returns `N/A` here. The
 > hypothesis is still untested; it is no longer untestable.
 
 ### A17. The thinking-off comparisons are not comparisons of the same amount of work
@@ -2516,17 +2516,17 @@ number and this file exists because of unchecked numbers.
     documents, and nothing derived it.** The change, the interval and the
     one-sided bound, for both arms, were the log-scale quantities the t interval
     is computed on and were never exponentiated back. A slowdown of about
-    fourteen and a half per cent on the speculative arm went out as about fifteen
-    and a half, and one of about fifteen per cent on the no-speculation arm as
-    about sixteen; the two interval ends and the two bounds moved with them. The
+    fourteen and a half per cent on the speculative arm went out as about
+    fifteen and a half, and one of about fifteen per cent on the no-speculation
+    arm as about sixteen; both intervals and both bounds moved with them. The
     fast and slow columns beside them were right, which is why the rows read as
-    consistent. So was the inference drawn from them about the share of a token's
-    time that scales with clock, because that one was computed from the properly
-    back-transformed ratio. What did move with the error is A16's step as a
-    fraction of a full displacement: taken against the wrong bound it read as
-    under a quarter, and against the data it is just over one. Both arms still
-    move, both bounds are still far above that step, and no direction or
-    conclusion changes. `analysis/paired_blocks.py` has back-transformed
+    consistent. So was the inference drawn from them about the share of a
+    token's time that scales with clock, because that one was computed from the
+    properly back-transformed ratio. What did move with the error is A16's step
+    as a fraction of a full displacement: taken against the wrong bound it read
+    as under a quarter, and against the data it is just over a quarter. Both
+    arms still move, both bounds are still far above that step, and no direction
+    or conclusion changes. `analysis/paired_blocks.py` has back-transformed
     correctly since run O2 and was never run on this round, because it pairs
     every arm against one baseline ARM and the contrast here is each arm against
     its own unpinned self. Nothing read the table at all:
