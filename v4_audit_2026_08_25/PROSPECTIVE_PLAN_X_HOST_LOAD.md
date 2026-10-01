@@ -566,17 +566,21 @@ nothing without it.
    sampler records wall-clock times, and there is no recorded wall-clock
    start or end per arm-run to join them on. Two lines in `run_arm`.
 
-5. **Nothing pins any process to any processor.** There is no `taskset`, no
-   `sched_setaffinity` and no cpuset anywhere in `bench/` or `analysis/`, while
-   this plan mandates that the server run on a fixed processor set in every
-   arm-run and that the load's set be a design factor. It is one line where the
-   server command is built, and the treatment then records itself through the
-   `argv` field every arm-run already carries. Two earlier versions of this list
-   left it out while the body of the plan required it.
+5. ~~**Nothing pins any process to any processor.**~~ **Landed with run Y on
+   2026-09-26.** It was true when this was written: there was no `taskset`, no
+   `sched_setaffinity` and no cpuset anywhere in `bench/` or `analysis/`. The
+   runner now takes `BENCH_PIN_CPUS`, `BENCH_PIN_ALT_CPUS` and a pin suffix,
+   builds `taskset -c` into the server command, and records both the set it asked
+   for and `Cpus_allowed_list` as the kernel reported it, because a treatment that
+   is requested and not read back is a manifest entry rather than a treatment.
+   Two earlier versions of this list left the item out while the body of the plan
+   required it.
 
-6. The server's thread count has to be passed explicitly and recorded,
-because llama.cpp's own choice is the variable that decides whether any of this
-work reaches an efficiency core, and the tree does not record what it was.
+6. ~~The server's thread count has to be passed explicitly and recorded~~
+**Landed with run Y.** `BENCH_THREADS` reaches the server as `-t` and `-tb` and
+every arm-run records it. llama.cpp's own choice was the variable that decided
+whether any of this work reached an efficiency core, and the tree did not record
+what it was.
 
 One more is not a prerequisite but is worth fixing while these are open:
 `host_guard.protect()` applies `limit_threads()` and `be_nice()` before its

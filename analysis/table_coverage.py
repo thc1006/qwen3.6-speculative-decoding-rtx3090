@@ -83,6 +83,16 @@ EXCLUDED = {
         "said check_data_integrity.py guarded those tables, and that walks "
         "directory structure and reads no published value: the whole table was "
         "unchecked for five days and three of its columns were wrong",
+    "v4_audit_2026_08_25/PROSPECTIVE_PLAN_Z_MEMORY_STATE.md":
+        "not censused while v4.2 stands, for the reason the two plans beside it "
+        "give: verify_claims.py pins len(DOCS) and the decimal prose census and is "
+        "bound to that tag, and this document quotes decimals from A16, from run Y "
+        "and from its own design table. What guards its tables is "
+        "analysis/plan_z_power.py, which derives the thermal state on both sides "
+        "of A16's step, the reason T4's trace cannot be attributed to an arm-run, "
+        "and the design table, all from committed data, and compares every cell "
+        "against this document. It joins DOCS if run Z lands, which re-cuts the "
+        "binding anyway",
     "v4_audit_2026_08_25/PROSPECTIVE_PLAN_Y_CORE_PINNING.md":
         "the same as the plan beside it and for the same reason: verify_claims.py "
         "pins len(DOCS) and the decimal prose census and is bound to the v4.2 "

@@ -236,6 +236,14 @@ jobs:
         # no value. This derives the table from the arm-runs and compares both
         # copies of it cell by cell.
         run: python analysis/rederive_run_y.py
+      - name: plan Z's premises and design table are what the committed data says
+        # A pre-registration that quotes the recorded state on both sides of A16's
+        # step, and the reason run T4's trace cannot be attributed to an arm-run,
+        # is quoting data in this tree. Run Y's result table was hand-computed and
+        # three of its columns were wrong, so this one is derived from the start:
+        # both tables cell by cell, and each prose figure with the values that must
+        # not appear beside it.
+        run: python analysis/plan_z_power.py
       - name: the past-threshold fit reports and serialises
         run: |
           set -e

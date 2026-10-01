@@ -79,7 +79,7 @@ New work the audit generated that was not on the original list:
   an order mode that rotates the arms and keeps a pair adjacent; a wall-clock
   boundary per arm-run for the manipulation check to join on; pinning the
   server to a processor set, which nothing in `bench/` can do today; and an
-  explicit thread count. None of the six is in this tree. One more is not a
+  explicit thread count. Two of the six landed with run Y. One more is not a
   prerequisite and is a real defect regardless: `host_guard.protect()` applies
   `limit_threads()` and `be_nice()` before its own `BENCH_ALLOW_CONTENDED`
   escape, so a caller that has declared its contention is de-prioritised anyway

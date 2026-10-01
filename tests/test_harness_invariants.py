@@ -3482,8 +3482,8 @@ class TheSuiteMustRunOnAStockInterpreter(unittest.TestCase):
         # that reads it. `mutate` is one: two invariants check the mutation
         # table's own anchors, which needs the table.
         allowed = stdlib | {"host_guard", "publish_pr_body", "carryover",
-                            "length_mode", "paired_blocks", "rederive_run_y",
-                            "rr_under_test",
+                            "length_mode", "paired_blocks", "plan_z_power",
+                            "rederive_run_y", "rr_under_test",
                             "rederive_from_logs", "past_threshold_fit",
                             "verify_claims", "extract_checkpoint_timers",
                             "table_coverage", "mutate", "data_mutate",
@@ -7677,3 +7677,73 @@ class ThePushGuardMustBeInTheRepositoryToo(unittest.TestCase):
         """The comment that named a guard the tree did not hold now names a path."""
         self.assertIn("bench/hooks/pre-push.sh", self._gate(),
                       "the gate mentions a pre-push hook without saying where it is")
+
+
+class PlanZsPremisesMustBeWhatTheDataSays(unittest.TestCase):
+    """A pre-registration that quotes committed data is quoting this tree.
+
+    Plan Z's case for spending little on the memory hypothesis rests on three
+    readings of data already here: the recorded GPU state on both sides of A16's
+    step, the fact that run T4's trace cannot be attributed to an arm-run, and a
+    design table whose hours come from the span run Y actually took. Run Y's own
+    result table was computed by hand and three of its columns were the mean log
+    ratio printed as a percentage, so this document is derived from the start.
+
+    The premise that carries the argument is the SIGN: the faster of A16's two
+    levels ends hotter, and a thermal explanation predicts hotter and slower. If
+    that ever stopped being true the document's central sentence would be false,
+    so it is asserted here rather than read once.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+    DOC = "v4_audit_2026_08_25/PROSPECTIVE_PLAN_Z_MEMORY_STATE.md"
+
+    def _mod(self):
+        sys.path.insert(0, str(self.ROOT / "analysis"))
+        import plan_z_power
+        return plan_z_power
+
+    def test_a_job_invokes_it(self):
+        wf = (self.ROOT / ".github" / "workflows" / "audit.yml").read_text(
+            encoding="utf-8")
+        self.assertIn("run: python analysis/plan_z_power.py",
+                      [l.strip() for l in wf.splitlines()],
+                      "no job derives the plan's tables, so they are guarded by "
+                      "nothing, which is how run Y's went out wrong")
+
+    def test_the_document_matches_the_data(self):
+        self.assertEqual(self._mod().check_doc(), [])
+
+    def test_the_faster_level_really_is_the_hotter_one(self):
+        """The document's central premise, and it is a sign not a magnitude."""
+        s = self._mod().step_thermal_state()
+        self.assertGreater(
+            s["gap_pct"], 0.0,
+            "the level the document calls faster is not the faster one")
+        self.assertGreater(
+            s["after_delta_c"], 0.0,
+            "the faster level no longer ends hotter, so the document's reason for "
+            "doubting a thermal explanation has gone and the sentence has to go "
+            "with it")
+
+    def test_the_trace_really_cannot_be_attributed(self):
+        """The plan's first prerequisite exists because of this.
+
+        If the reconstruction ever lined up, the prerequisite would be met and the
+        plan would be asking for something it already has.
+        """
+        t = self._mod().trace_is_not_attributable()
+        self.assertEqual(len(t["arms"]), 3, "T4 no longer has three arms")
+        self.assertEqual(
+            sorted(t["arms_whose_footprint_is_wrong"]), sorted(t["arms"]),
+            "some arm's windows now hold its own VRAM footprint, so the alignment "
+            "is better than the document says it is")
+
+    def test_the_hours_are_measured_and_not_guessed(self):
+        """Run Y ran this block shape, so the per-block cost is a measurement."""
+        rows, inp = self._mod().design()
+        self.assertEqual(inp["blocks_measured"], 12)
+        self.assertGreater(inp["per_block_hours"], 0.0)
+        for r in rows:
+            self.assertAlmostEqual(r["hours"],
+                                   inp["per_block_hours"] * r["blocks"], places=9)
