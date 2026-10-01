@@ -20,10 +20,13 @@ said its tables were guarded by `check_data_integrity.py` instead; that walks
 directory structure and reads no published value. This is what that sentence
 should have named.
 
-What it covers: the seven columns of the result table, for both arms, in both
-documents, compared as whole rows -- a table in two documents with one copy
-wired to an assertion is ERRATA A51 -- and the generated, drafted and accepted
-token totals the mechanism paragraph quotes.
+What it covers: every column of the result table, for both arms, in both
+documents, cell by cell and keyed by the header each document declares -- the two
+carry the same table with different column SETS, and a table in two documents
+with one copy wired to an assertion is ERRATA A51 -- the plan's own power table,
+and the generated, drafted and accepted token totals the mechanism paragraph
+quotes. A column the checker does not know is a failure, so one added without a
+derivation cannot sit there.
 
 It also covers the four telemetry figures that paragraph quotes. They are not
 means over the sampler's trace -- segmenting that by condition would need a
@@ -31,7 +34,7 @@ mapping between CLOCK_MONOTONIC and wall clock that the run did not record -- bu
 means over the per-arm-run `gpu_after` snapshots, of the SPECULATIVE arm only.
 Both documents introduced them with "its", reading as the run rather than one arm
 of it, and the baseline arm's utilisation barely moves where the speculative
-arm's falls by fifteen points, so which arm it is was load-bearing and unstated.
+arm's falls by nineteen, so which arm it is was load-bearing and unstated.
 """
 from __future__ import annotations
 
@@ -46,7 +49,25 @@ from paired_blocks import (                                      # noqa: E402
     load_blocks, t_critical_95_one_sided, t_critical_975)
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-RUN = ROOT / "v5_pinning_2026_09_26/data/matrix_Y_pinning_20260926_131110"
+
+
+def _run_dir() -> pathlib.Path:
+    """The one run Y directory, found rather than written down.
+
+    A literal path is what went stale in both perturbation mirrors and in the
+    gate that decides a push. Here it would be worse than stale: a second
+    invocation of this design, committed beside the first, would leave this
+    checking the old one and saying so in the present tense.
+    """
+    base = ROOT / "v5_pinning_2026_09_26" / "data"
+    found = sorted(d for d in base.glob("matrix_Y_*") if d.is_dir())
+    if len(found) != 1:
+        sys.exit(f"{len(found)} run Y directories under {base}: {[d.name for d in found]}. "
+                 f"This file derives one round's table and cannot choose between two.")
+    return found[0]
+
+
+RUN = _run_dir()
 # fast (performance cores) against slow (efficiency cores), within the block
 CONTRASTS = (("spec-dflash-n2", "spec-dflash-n2-ecore"),
              ("baseline", "baseline-ecore"))
