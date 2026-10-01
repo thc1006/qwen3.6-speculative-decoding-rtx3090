@@ -83,6 +83,15 @@ the host and not the card:
   326.8 W to 302.4, from 75.2 % to 56.1, from 73.8 °C to 71.2. The card is
   waiting
 
+The four telemetry figures are means of the snapshot each arm-run takes when it
+finishes, over the twelve of the `spec-dflash-n2` arm in each condition. They are
+not means over the sampler's trace: that cannot be segmented by condition, since
+the arm-runs timestamp with `CLOCK_MONOTONIC` and the sampler writes wall clock.
+Which arm they are matters, because the no-speculation arm's utilisation barely
+moves where this one's falls by nineteen points, and it was not said.
+`analysis/rederive_run_y.py` derives them, and every cell of the table above,
+from the arm-runs.
+
 ## What follows from it, and what does not
 
 Established: a full move to the efficiency cores costs about fifteen per cent of

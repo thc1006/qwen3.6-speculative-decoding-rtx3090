@@ -25,11 +25,13 @@ documents, compared as whole rows -- a table in two documents with one copy
 wired to an assertion is ERRATA A51 -- and the generated, drafted and accepted
 token totals the mechanism paragraph quotes.
 
-What it does NOT cover, named here rather than left for a reader to find: the
-four telemetry figures in that paragraph (SM clock, power, utilisation and
-temperature per condition). The arm-runs timestamp with CLOCK_MONOTONIC and the
-sampler writes wall clock, so segmenting the trace by condition needs a mapping
-this file does not have.
+It also covers the four telemetry figures that paragraph quotes. They are not
+means over the sampler's trace -- segmenting that by condition would need a
+mapping between CLOCK_MONOTONIC and wall clock that the run did not record -- but
+means over the per-arm-run `gpu_after` snapshots, of the SPECULATIVE arm only.
+Both documents introduced them with "its", reading as the run rather than one arm
+of it, and the baseline arm's utilisation barely moves where the speculative
+arm's falls by fifteen points, so which arm it is was load-bearing and unstated.
 """
 from __future__ import annotations
 
@@ -119,9 +121,16 @@ def _split(line: str) -> list[str]:
     return [c.strip() for c in line.strip().strip("|").split("|")]
 
 
-def check_doc(doc: str, rows: list[dict]) -> list[str]:
-    """Every cell of every arm row, against the header the document declares."""
-    lines = (ROOT / doc).read_text(encoding="utf-8").splitlines()
+def check_doc(doc: str, rows: list[dict], tel: dict | None = None,
+              tot: dict | None = None, pro: dict | None = None) -> list[str]:
+    """Every cell of every arm row, and every figure the prose quotes.
+
+    The prose checks live here and not in `main`, so the unit suite exercises the
+    same function CI does. A check that only one of the two runs is a check with
+    half the coverage its name claims.
+    """
+    text = (ROOT / doc).read_text(encoding="utf-8")
+    lines = text.splitlines()
     head = [k for k, ln in enumerate(lines)
             if ln.startswith("| arm |") and "one-sided upper limit" in ln]
     if len(head) != 1:
@@ -144,6 +153,26 @@ def check_doc(doc: str, rows: list[dict]) -> list[str]:
             if cell != want[col]:
                 bad.append(f"{doc}: {r['arm']} column {col!r} is {cell!r} "
                            f"and the data gives {want[col]!r}")
+    for cond in ("fast", "slow"):
+        for name, v in (tel or {}).get(cond, {}).items():
+            # one decimal, as both documents spell them
+            if f"{v:.1f}" not in text:
+                bad.append(f"{doc}: does not carry {name} {v:.1f} for the {cond} "
+                           f"condition of {CONTRASTS[0][0]}")
+    for what, (v, forb) in (pro or {}).items():
+        forbidden = sorted({w for w in forb if w != v})
+        if v not in text:
+            bad.append(f"{doc}: does not carry {v} as the {what}")
+        for w in forbidden:
+            if w != v and w in text:
+                bad.append(f"{doc}: carries {w} where the {what} is {v}")
+    for arm, totals in (tot or {}).items():
+        if arm.endswith("-ecore"):
+            continue
+        for n in totals:
+            if n and f"{n:,}".replace(",", " ") not in text:
+                bad.append(f"{doc}: does not carry {arm}'s token total "
+                           + f"{n:,}".replace(",", " "))
     return bad
 
 
@@ -156,6 +185,100 @@ def token_totals() -> dict:
                          d + sum(r["draft_n"] for r in j["rows"]),
                          a + sum(r["draft_n_accepted"] for r in j["rows"])]
     return out
+
+
+def telemetry() -> dict:
+    """Per-condition means of the `gpu_after` snapshots, speculative arm only.
+
+    One snapshot per arm-run, taken when it finished, so twelve per condition.
+    The field order is the manifest's `gpu_fields` rather than a literal here: a
+    hand-written column list is what this repository keeps finding one level up.
+    """
+    man = json.loads((RUN / "manifest.json").read_text(encoding="utf-8"))
+    fields = [f.strip() for f in str(man["gpu_fields"]).split(",")]
+    idx = {n: i for i, n in enumerate(fields)}
+    for n in ("utilization.gpu", "power.draw", "temperature.gpu",
+              "clocks.current.sm"):
+        if n not in idx:
+            sys.exit(f"the manifest's gpu_fields has no {n!r}, so the snapshot "
+                     f"columns cannot be read by name")
+    arm = CONTRASTS[0][0]
+    out = {}
+    for cond, suffix in (("fast", ""), ("slow", "-ecore")):
+        acc = {}
+        n = 0
+        for p in sorted(RUN.glob(f"{arm}{suffix}__rep*.json")):
+            j = json.loads(p.read_text(encoding="utf-8"))
+            if j["arm"] != arm + suffix:
+                continue
+            cells = [c.strip() for c in j["gpu_after"].split(",")]
+            for name in ("utilization.gpu", "power.draw", "temperature.gpu",
+                         "clocks.current.sm"):
+                acc.setdefault(name, []).append(
+                    float(cells[idx[name]].split()[0]))
+            n += 1
+        if n != BLOCKS:
+            sys.exit(f"{arm}{suffix}: {n} snapshots, not {BLOCKS}")
+        out[cond] = {k: st.fmean(v) for k, v in acc.items()}
+    return out
+
+
+# ERRATA A16's step, which this archive's own checker holds. Taken as an input
+# here rather than re-derived, and named so that the share below is traceable to
+# it: the share was the one figure that moved with the log-ratio defect, because
+# it was computed against the wrong bound.
+A16_STEP_PCT = 3.93
+
+
+def derived_prose() -> dict:
+    """The remaining quoted figures that the committed tree can answer for.
+
+    Not the row count or digest of the untruncated trace, which is on the bench
+    host and not here, and not the dates.
+    """
+    csv = sorted((RUN.parent).glob("gpu_telemetry_Y_*.csv"))
+    if len(csv) != 1:
+        sys.exit(f"{len(csv)} telemetry traces beside the run directory, expected one")
+    rows = csv[0].read_text(encoding="utf-8").splitlines()
+    change = abs(derive()[0]["change_pct"])
+    # Not here, and each for a reason. The untruncated trace's row count and
+    # digest are of a file on the bench host. The megabytes of server logs are of
+    # files this round does not commit, by the same policy as the v4 archive. The
+    # arm-run count is spelled as a word, and is already structural: `derive`
+    # refuses anything but twelve complete blocks per contrast and `telemetry`
+    # anything but twelve snapshots per condition, which is the same forty-eight.
+    def grouped(n):
+        return f"{n:,}".replace(",", " ")
+
+    first = derive()[0]
+    log_change = abs(first["mean_log_ratio"] * 100)
+    bound = first["one_sided_bound_pct"]
+    # the bound as it was published, on the log scale
+    log_bound = abs(first["mean_log_ratio"] * 100) + (bound - abs(
+        (math.exp(first["mean_log_ratio"]) - 1) * 100))
+    # Each figure comes with the values that must NOT appear. A presence check
+    # alone is weak where a figure is quoted twice, which the row count is: one
+    # occurrence can be edited and the other still satisfies it. The forbidden
+    # neighbours are what makes it bite, and for the share they include the value
+    # the log-ratio defect produced.
+    return {
+        # the header is not a sample, and the document says so
+        "trace rows inside the invocation":
+            (grouped(len(rows) - 1), [grouped(len(rows)), grouped(len(rows) - 2)]),
+        # A16's step as a share of a full displacement, the one figure that moved
+        # with the log-ratio defect. Both arms round alike.
+        "A16's step as a share of a full displacement":
+            (f"{A16_STEP_PCT / change:.2f}",
+             # the log-scale change; the one-sided bound, which is not a full
+             # displacement and is what the published `0.23` divided by; the same
+             # bound on the log scale, which is where that `0.23` actually came
+             # from; and the two adjacent roundings
+             [f"{A16_STEP_PCT / log_change:.2f}",
+              f"{A16_STEP_PCT / bound:.2f}",
+              f"{A16_STEP_PCT / log_bound:.2f}",
+              f"{A16_STEP_PCT / change - 0.01:.2f}",
+              f"{A16_STEP_PCT / change + 0.01:.2f}"]),
+    }
 
 
 def main() -> None:
@@ -182,20 +305,23 @@ def main() -> None:
                      f"the output is identical to the token, and it is not.")
         print(f"  {fast}: generated {tot[fast][0]}, drafted {tot[fast][1]}, "
               f"accepted {tot[fast][2]}, identical in both conditions")
+    tel, pro = telemetry(), derived_prose()
+    print(f"  {CONTRASTS[0][0]} `gpu_after` means, twelve snapshots per condition:")
+    for name, unit in (("clocks.current.sm", " MHz"), ("power.draw", " W"),
+                       ("utilization.gpu", " %"), ("temperature.gpu", " °C")):
+        print(f"    {name:20s} fast {tel['fast'][name]:8.1f}{unit}   "
+              f"slow {tel['slow'][name]:8.1f}{unit}")
+    for what, (v, forb) in pro.items():
+        print(f"    {what}: {v}   "
+              f"(and not {', '.join(sorted({w for w in forb if w != v}))})")
     if show_only:
         return
     bad = []
     for doc in DOCS:
-        bad += check_doc(doc, rows)
-        text = (ROOT / doc).read_text(encoding="utf-8")
-        for fast, _slow in CONTRASTS:
-            for n in token_totals()[fast]:
-                # published grouped with a thin space, as this repository spells
-                # a thousand, and asserted so that "identical to the token" is a
-                # claim about numbers a reader can find rather than a sentence
-                if n and f"{n:,}".replace(",", " ") not in text:
-                    bad.append(f"{doc}: does not carry the token total "
-                               f"{n:,}".replace(",", " "))
+        # the prose figures are quoted by the round's own README and not by the
+        # plan, which published the table before the data existed
+        bad += check_doc(doc, rows, tel, tot,
+                         pro if doc == DOCS[0] else None)
     if bad:
         print("\nFAILED")
         for b in bad:

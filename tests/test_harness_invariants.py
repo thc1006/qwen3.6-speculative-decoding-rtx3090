@@ -7363,11 +7363,22 @@ class RunYsTableMustBeDerivedFromItsData(unittest.TestCase):
                          "derivation does not check it")
 
     def test_the_documents_match_the_data(self):
+        """Table cells, the four telemetry figures and the token totals.
+
+        All three go through the one function the claims job calls, with the same
+        arguments, so this covers what CI covers rather than a subset of it.
+        """
         rry = self._mod()
-        rows = rry.derive()
+        rows, tel, tot = rry.derive(), rry.telemetry(), rry.token_totals()
+        pro = rry.derived_prose()
+        self.assertEqual(sorted(tel), ["fast", "slow"])
+        self.assertEqual(len(tel["fast"]), 4, "four telemetry figures are published")
+        self.assertTrue(pro, "no prose figure is derived; this checks less than it says")
         bad = []
         for doc in rry.DOCS:
-            bad += rry.check_doc(doc, rows)
+            # the prose figures belong to the round's own README, not to the plan
+            bad += rry.check_doc(doc, rows, tel, tot,
+                                 pro if doc == rry.DOCS[0] else None)
         self.assertEqual(bad, [], "; ".join(bad))
 
     def test_the_log_ratio_is_not_what_any_document_carries(self):

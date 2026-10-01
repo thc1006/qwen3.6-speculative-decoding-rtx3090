@@ -211,7 +211,10 @@ Three readings, each independent of the estimator:
 - the GPU's SM clock is the same or slightly **higher** in the slow condition,
   1928.8 MHz against 1920.0, so nothing is thermally throttled
 - its power, utilisation and temperature all **fall** in the slow condition:
-  326.8 W to 302.4, 75.2 % to 56.1, 73.8 °C to 71.2. The card is idle-waiting
+  326.8 W to 302.4, 75.2 % to 56.1, 73.8 °C to 71.2. The card is idle-waiting.
+  These four are means over the twelve `spec-dflash-n2` arm-runs of each
+  condition, of the snapshot each takes when it finishes. Which arm they are
+  matters and was not said; `analysis/rederive_run_y.py` derives them
 
 Taking the clock ratio at face value, 4300 against 5800, the implied share of a
 token's time that is host work scaling with clock is about 48 % for
