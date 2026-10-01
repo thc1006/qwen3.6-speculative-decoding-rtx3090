@@ -225,6 +225,17 @@ jobs:
         # computed strictly less than a plain run and two of the plan's four
         # tables had no guard at all.
         run: python analysis/load_run_power.py --check
+      - name: run Y's result table is what its data says
+        # Every inferential column of that table was published as the mean LOG
+        # ratio printed as a percentage: a mean log ratio of -0.15573 reached two
+        # documents as "-15.57 %" when the change is -14.42 %. `verify_claims.py`
+        # holds every other published number and is bound to the `v4.2` tag, so
+        # it cannot grow an assertion for a round published later, and the
+        # exclusion keeping that README out of the census claimed its tables were
+        # guarded by `check_data_integrity.py`, which walks structure and reads
+        # no value. This derives the table from the arm-runs and compares both
+        # copies of it cell by cell.
+        run: python analysis/rederive_run_y.py
       - name: the past-threshold fit reports and serialises
         run: |
           set -e

@@ -131,6 +131,28 @@ def _betainc(a: float, b: float, x: float) -> float:
     return 1.0 - front * _betacf(b, a, 1.0 - x) / b
 
 
+def _t_bisect(df: int, two_sided_tail: float) -> float:
+    """The Student t point whose TWO-sided tail is `two_sided_tail`.
+
+    One bisection with two callers, not two copies of it. The second copy made
+    the mutation anchored on the `_betainc` line below match twice, and an
+    ambiguous anchor perturbs whichever match comes first while reporting the
+    same `caught` either way.
+    """
+    if df < 1:
+        return float("inf")
+    lo, hi = 0.0, 200.0
+    for _ in range(200):
+        mid = (lo + hi) / 2.0
+        # two-sided tail above +mid
+        tail = _betainc(df / 2.0, 0.5, df / (df + mid * mid))
+        if tail > two_sided_tail:
+            lo = mid
+        else:
+            hi = mid
+    return (lo + hi) / 2.0
+
+
 def t_critical_975(df: int) -> float:
     """Two-sided 0.975 Student-t critical value, computed rather than tabulated.
 
@@ -140,18 +162,18 @@ def t_critical_975(df: int) -> float:
     have - silently got a narrower interval than Student's t allows. No scipy:
     this file has to run in the claims job, which installs nothing.
     """
-    if df < 1:
-        return float("inf")
-    lo, hi = 0.0, 200.0
-    for _ in range(200):
-        mid = (lo + hi) / 2.0
-        # two-sided tail above +mid
-        tail = _betainc(df / 2.0, 0.5, df / (df + mid * mid))
-        if tail > 0.05:
-            lo = mid
-        else:
-            hi = mid
-    return (lo + hi) / 2.0
+    return _t_bisect(df, 0.05)
+
+
+def t_critical_95_one_sided(df: int) -> float:
+    """Upper 5 % point of Student t, by the same bisection as the two-sided one.
+
+    `_betainc(df/2, 0.5, df/(df + t*t))` is the TWO-sided tail, so a one-sided
+    0.95 point is where that tail is 0.10. Run Y's primary reading is a one-sided
+    upper limit on a slowdown and its bound was computed by hand from a table,
+    which is how it reached two documents on the log scale.
+    """
+    return _t_bisect(df, 0.10)
 
 
 def f_critical_95(d1: int, d2: int) -> float:

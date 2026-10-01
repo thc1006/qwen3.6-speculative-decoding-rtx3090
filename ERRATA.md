@@ -1485,14 +1485,14 @@ retrofitting a column to a trace that never had one is not something this
 repository does. That explains those three and not the set: run W2 was measured
 on 2026-08-30 with the sampler already committed, and it has no load column
 either, so from W2 onward the column is missing because nothing asked for it.
-The junction temperature needs a sensor the platform does not offer, so that one
-stays untestable here.
+The junction temperature needs a sensor NVML does not expose, which is not the
+same as one this platform lacks; the second addendum below records reading it.
 
 > **Addendum, 2026-09-30: a third quantity, and it is not small.** Run Y pinned
 > the server to eight efficiency cores against eight performance cores on this
 > bench host, a quarter off the clock, and measured the cost twelve times inside
-> one invocation. `spec-dflash-n2` loses about **fifteen and a half per cent** of
-> its decode rate and the no-speculation arm nearly **sixteen**, both intervals
+> one invocation. `spec-dflash-n2` loses about **fourteen and a half per cent** of
+> its decode rate and the no-speculation arm nearly **fifteen**, both intervals
 > clear of zero, with output identical to the token, the GPU's SM clock the same
 > or higher in the slow condition, and its power, utilisation and temperature all
 > falling. The card is waiting on the host, and about **half** a token's time here
@@ -1505,8 +1505,8 @@ stays untestable here.
 > draws its own placement.
 >
 > So placement is a candidate for this entry with the right shape and the right
-> order of magnitude: the step this entry is about is **under a quarter** of a
-> full displacement, or roughly **two of eight** threads landing slow. **It is
+> order of magnitude: the step this entry is about is **just over a quarter** of
+> a full displacement, or roughly **two of eight** threads landing slow. **It is
 > arithmetic and not evidence** until a run sets the number of displaced threads
 > and measures the response, which is pre-registered as the successor. The entry
 > is not retracted and nothing above it is withdrawn; what changes is that
@@ -1516,6 +1516,21 @@ stays untestable here.
 > The figures are in `v5_pinning_2026_09_26/`, a round of its own: the
 > run-directory count under this archive is pinned in a file bound to the `v4.2`
 > tag.
+>
+> **Addendum, 2026-10-01: the memory sensor exists, and this entry said it did
+> not.** The sentence above about the junction temperature needing a sensor the
+> platform does not offer was wrong. NVML does not expose it, which is a
+> different statement. On this card it is a thirty-two bit register at BAR0 plus
+> `0xE2A8`, its low twelve bits the temperature in thirty-seconds of a degree,
+> and the card's own `resource0` maps it read-only without `/dev/mem`. Idle it
+> reads forty-two degrees against a core reading of thirty-five. Under a pure
+> memory-bandwidth load holding `828 GB/s`, which is most of this card's peak,
+> it rises monotonically to ninety, stays above the core reading throughout, and
+> falls back within half a minute of the load stopping. So the
+> memory-subsystem hypothesis this entry names is testable on this hardware, and
+> what stood in for testing it was one reading of
+> `nvidia-smi --query-gpu=temperature.memory`, which returns `N/A` here. The
+> hypothesis is still untested; it is no longer untestable.
 
 ### A17. The thinking-off comparisons are not comparisons of the same amount of work
 
@@ -2214,7 +2229,7 @@ tables happen to reach, which is the only reason the figure moved. The prose
 half of this repository is, to a first approximation, unchecked.
 
 **And that census counts decimals only.** In the same prose, on the same lines,
-sit **2 649** whole numbers, **358** of which are not a string literal in the
+sit **2 653** whole numbers, **358** of which are not a string literal in the
 checker either. They are reported beside the decimals rather than folded into
 them, because the probe below sampled the decimal population and the rate it
 publishes is about that population; widening what a measured rate refers to,
@@ -2237,7 +2252,7 @@ the BOS-override table in the two documents that publish it, run I's
 acceptance under batching, the appendix's length-matched comparison, and last
 the six named above.
 
-**Fifty-five published statements were wrong and are corrected.** They are
+**Fifty-six published statements were wrong and are corrected.** They are
 listed rather than summarised, because a count of corrections is itself a
 number and this file exists because of unchecked numbers.
 
@@ -2497,6 +2512,33 @@ number and this file exists because of unchecked numbers.
     collapsed to three, and a file carrying eight fields no arm-run file has
     was reported as a copy of its neighbours. A key that does not identify
     makes any two things equal.
+56. **Run Y's result table published the mean log ratio as a percentage, in two
+    documents, and nothing derived it.** The change, the interval and the
+    one-sided bound, for both arms, were the log-scale quantities the t interval
+    is computed on and were never exponentiated back. A slowdown of about
+    fourteen and a half per cent on the speculative arm went out as about fifteen
+    and a half, and one of about fifteen per cent on the no-speculation arm as
+    about sixteen; the two interval ends and the two bounds moved with them. The
+    fast and slow columns beside them were right, which is why the rows read as
+    consistent. So was the inference drawn from them about the share of a token's
+    time that scales with clock, because that one was computed from the properly
+    back-transformed ratio. What did move with the error is A16's step as a
+    fraction of a full displacement: taken against the wrong bound it read as
+    under a quarter, and against the data it is just over one. Both arms still
+    move, both bounds are still far above that step, and no direction or
+    conclusion changes. `analysis/paired_blocks.py` has back-transformed
+    correctly since run O2 and was never run on this round, because it pairs
+    every arm against one baseline ARM and the contrast here is each arm against
+    its own unpinned self. Nothing read the table at all:
+    `analysis/verify_claims.py` holds every other published number here and is
+    one of the six files the release binding compares against the `v4.2` tag, so
+    it cannot grow an assertion for a round published after that tag, and the
+    exclusion keeping that round's README out of the census said its tables were
+    guarded by `check_data_integrity.py`, which walks directory structure and
+    reads no published value. `analysis/rederive_run_y.py` derives every cell
+    from the arm-runs and compares both copies of the table, the claims job runs
+    it, a mutation removes the back-transform and is caught, and the exclusion
+    names what guards what.
 
 A test now refuses any table row with no header above it, and another refuses
 any path the checker opens that a fresh clone would not have.
@@ -2814,7 +2856,7 @@ Measured across the audit's own matrix run
 | `clocks_throttle_reasons.sw_thermal_slowdown` | active on **2 of 1272**, at 64 °C and 65 °C |
 | `clocks_throttle_reasons.hw_thermal_slowdown` | active on **1 of 1272**, at 64 °C |
 | `clocks_throttle_reasons.hw_power_brake_slowdown` | never active |
-| `temperature.memory` | `N/A` — this card does not expose GDDR6X junction temperature through `nvidia-smi`, so the memory junction is not observable here |
+| `temperature.memory` | `N/A` — this card does not expose GDDR6X junction temperature through `nvidia-smi`; the sensor is readable off the card's own BAR0, as A16's second addendum records |
 
 † The 83 °C is the card's documented slowdown temperature, not a measurement
 from this trace, and it is the one figure in the table `nvidia-smi` never

@@ -458,24 +458,37 @@ MUTATIONS = [
 
 
 def _shard_arg() -> tuple[int, int, bool]:
-    """`--shard=i/n`, or (0, 1) for the whole list.
+    """`--shard=i/n`, or (0, 1, False) for the whole list.
 
-    Eighty-four perturbations, one checker each, one at a time: fifty-six
-    minutes on a thirty-two processor host using one of them. The work is
-    embarrassingly parallel and the only thing that made it sequential was
-    sharing one mirror. A shard gets a mirror of its own, so nothing it
-    perturbs can reach another shard at all -- which is a stronger separation
-    than the restore loop, not a weaker one -- and it checks its own mirror
-    clean at the end.
+    Byte-identical in `tests/mutate.py` and `tests/data_mutate.py`. The claim
+    that they agreed was a sentence in this docstring while this very function
+    differed between them: only one copy diagnosed a malformed argument, so
+    `--shard=0` raised an unpacking traceback out of the other one, in the CI
+    matrix, where a traceback and a failed suite look the same. A test compares
+    every name the two files define at module level now, rather than a
+    hand-written pair of them.
+
+    The stride decomposition `k % n == i` partitions the list exactly, so a set
+    of shards 0..n-1 covers every item once, and a missing shard leaves a hole
+    rather than a duplicate.
+
+    Sharding exists for CI. One `unittest` subprocess per mutation is six
+    minutes on a runner; eighty-four perturbations at one claim checker each is
+    fifty-six minutes on a thirty-two processor host, using one of them. The
+    shards are independent because each gets a mirror of its own, which is a
+    stronger separation than one shared mirror and a restore loop, not a weaker
+    one, and each checks its own mirror clean at the end.
     """
     for a in sys.argv[1:]:
         if a.startswith("--shard="):
-            i, n = a.split("=", 1)[1].split("/")
-            i, n = int(i), int(n)
+            try:
+                i, n = (int(x) for x in a.split("=", 1)[1].split("/", 1))
+            except ValueError:
+                sys.exit(f"{a} is not --shard=i/n")
             if not (n >= 1 and 0 <= i < n):
                 sys.exit(f"--shard={i}/{n} is not a shard of a set of {n}")
             return i, n, True
-        sys.exit(f"unrecognised option: {a}")
+        sys.exit(f"unknown argument {a!r}; the only one is --shard=i/n")
     return 0, 1, False
 
 

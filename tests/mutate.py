@@ -612,6 +612,15 @@ MUTATIONS = [
      '    paths = [p for p in r.stdout.split("\\0") if p and not p.startswith("v5_")]',
      "tests.test_harness_invariants.AMutationMirrorMustBeTheCommittedTree"
      ".test_both_harnesses_build_it_the_same_way"),
+    # The defect run Y published, as a mutation: the log ratio IS the quantity
+    # the t interval is computed on, and the only thing that makes it a change is
+    # exponentiating it back. Three columns of a result table went out without
+    # that step and the fast and slow columns beside them were right.
+    ("run Y's change stops being back-transformed from the log ratio",
+     "analysis/rederive_run_y.py",
+     "        change = (math.exp(m) - 1) * 100",
+     "        change = m * 100",
+     "tests.test_harness_invariants.RunYsTableMustBeDerivedFromItsData"),
 ]
 
 
@@ -665,15 +674,24 @@ def mirror(into: Path) -> Path:
 def _shard_arg() -> tuple[int, int, bool]:
     """`--shard=i/n`, or (0, 1, False) for the whole list.
 
-    Spelled and decomposed exactly as `tests/data_mutate.py` does, because two
-    suites launched the same way from the same workflow must not differ in how
-    they are split. The stride decomposition `k % n == i` partitions the list
-    exactly, so a set of shards 0..n-1 covers every mutation once and a missing
-    shard leaves a hole rather than a duplicate.
+    Byte-identical in `tests/mutate.py` and `tests/data_mutate.py`. The claim
+    that they agreed was a sentence in this docstring while this very function
+    differed between them: only one copy diagnosed a malformed argument, so
+    `--shard=0` raised an unpacking traceback out of the other one, in the CI
+    matrix, where a traceback and a failed suite look the same. A test compares
+    every name the two files define at module level now, rather than a
+    hand-written pair of them.
 
-    Sharding exists for CI: one `unittest` subprocess per mutation is six
-    minutes on a runner, and the shards are independent because each one gets a
-    mirror of its own.
+    The stride decomposition `k % n == i` partitions the list exactly, so a set
+    of shards 0..n-1 covers every item once, and a missing shard leaves a hole
+    rather than a duplicate.
+
+    Sharding exists for CI. One `unittest` subprocess per mutation is six
+    minutes on a runner; eighty-four perturbations at one claim checker each is
+    fifty-six minutes on a thirty-two processor host, using one of them. The
+    shards are independent because each gets a mirror of its own, which is a
+    stronger separation than one shared mirror and a restore loop, not a weaker
+    one, and each checks its own mirror clean at the end.
     """
     for a in sys.argv[1:]:
         if a.startswith("--shard="):

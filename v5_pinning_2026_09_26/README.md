@@ -63,11 +63,12 @@ ninety-five per cent upper limit on the slowdown.
 
 | arm | fast | slow | change | 95 % interval | one-sided upper limit | plus or minus one per cent |
 |---|---:|---:|---:|---|---:|---|
-| `spec-dflash-n2` | 140.327 | 120.068 | −15.57 % | [−16.90 %, −14.25 %] | 16.66 % | moves |
-| `baseline` | 114.664 | 97.763 | −15.94 % | [−16.76 %, −15.12 %] | 16.61 % | moves |
+| `spec-dflash-n2` | 140.327 | 120.068 | −14.42 % | [−15.55 %, −13.28 %] | 15.34 % | moves |
+| `baseline` | 114.664 | 97.763 | −14.73 % | [−15.43 %, −14.03 %] | 15.30 % | moves |
 
-The pre-registration expected both arms to hold. Both move, by more than fifteen
-per cent, and the bound is far above the 3.93 % step ERRATA A16 is about. That is
+The pre-registration expected both arms to hold. Both move, by about fourteen
+and a half per cent, and the bound is far above the 3.93 % step ERRATA A16 is
+about. That is
 the plan's second branch: processor speed reaches this workload by enough to
 matter.
 
@@ -84,13 +85,13 @@ the host and not the card:
 
 ## What follows from it, and what does not
 
-Established: a full move to the efficiency cores costs about sixteen per cent of
+Established: a full move to the efficiency cores costs about fifteen per cent of
 the decode rate on this host, on both arms, with the GPU idle-waiting for the
 difference. About half of a token's time is host work that scales with processor
 clock.
 
 Not established, and the reason the next run exists: that this explains A16. A16
-names a 3.93 % step, which is 0.23 of a full displacement, or roughly two of
+names a 3.93 % step, which is 0.27 of a full displacement, or roughly two of
 eight threads landing on efficiency cores. Every published run here passes no
 thread count and no affinity, llama.cpp chooses `n_threads = 8` of the thirty-two
 logical processors, and each arm-run starts a fresh server and so draws its own

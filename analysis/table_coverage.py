@@ -77,8 +77,12 @@ EXCLUDED = {
         "a round of its own, kept out of the v4.2 archive because verify_claims.py "
         "pins the run-directory count under v4_audit_2026_08_25/data and is "
         "bound to that tag. Censusing it would also move the decimal prose "
-        "census, which the same frozen file pins. Its tables are guarded by "
-        "check_data_integrity.py over its own data directory instead",
+        "census, which the same frozen file pins. What guards its result table "
+        "is analysis/rederive_run_y.py, which re-derives every cell of it from "
+        "the arm-runs and compares both documents that carry it. This entry "
+        "said check_data_integrity.py guarded those tables, and that walks "
+        "directory structure and reads no published value: the whole table was "
+        "unchecked for five days and three of its columns were wrong",
     "v4_audit_2026_08_25/PROSPECTIVE_PLAN_Y_CORE_PINNING.md":
         "the same as the plan beside it and for the same reason: verify_claims.py "
         "pins len(DOCS) and the decimal prose census and is bound to the v4.2 "

@@ -3482,7 +3482,8 @@ class TheSuiteMustRunOnAStockInterpreter(unittest.TestCase):
         # that reads it. `mutate` is one: two invariants check the mutation
         # table's own anchors, which needs the table.
         allowed = stdlib | {"host_guard", "publish_pr_body", "carryover",
-                            "length_mode", "paired_blocks", "rr_under_test",
+                            "length_mode", "paired_blocks", "rederive_run_y",
+                            "rr_under_test",
                             "rederive_from_logs", "past_threshold_fit",
                             "verify_claims", "extract_checkpoint_timers",
                             "table_coverage", "mutate", "data_mutate",
@@ -5812,21 +5813,49 @@ class AMutationMirrorMustBeTheCommittedTree(unittest.TestCase):
         self.assertFalse(missing, f"the mirror is missing tracked files: {missing}")
 
     def test_both_harnesses_build_it_the_same_way(self):
-        """So testing one of them is testing both."""
+        """So testing one of them is testing both, which was not true.
+
+        This compared a hand-written pair of function names. What decided what
+        the mirror held was `COPY`, a module-level tuple it did not compare, and
+        the two differed: `tests/mutate.py` listed `tools` and
+        `tests/data_mutate.py` did not, and the latter listed `pr_comment.md`
+        twice. `_shard_arg` differed too, and the sentence asserting the two
+        were spelled identically was inside the copy that had the error handling
+        the other lacked.
+
+        So every name the two define at module level is compared, and a name
+        allowed to differ is named here with its reason. A hand-written list of
+        what to check is the same defect one level up.
+        """
         import ast
 
-        def src(rel):
+        def top(rel):
             tree = ast.parse((self.ROOT / rel).read_text(encoding="utf-8"))
             out = {}
             for n in tree.body:
-                if isinstance(n, ast.FunctionDef) and n.name in ("mirror",
-                                                                 "_tracked"):
+                if isinstance(n, ast.FunctionDef):
                     out[n.name] = ast.unparse(n)
+                elif isinstance(n, ast.Assign):
+                    for t in n.targets:
+                        if getattr(t, "id", None):
+                            out[t.id] = ast.unparse(n)
             return out
 
-        a, b = src("tests/mutate.py"), src("tests/data_mutate.py")
-        self.assertEqual(sorted(a), ["_tracked", "mirror"])
-        self.assertEqual(a, b, "the two harnesses build their mirror differently")
+        # `MUTATIONS` is each suite's subject: one is source edits with a
+        # guarding test, the other data and document perturbations with a claim
+        # checker. `main` is each suite's own runner over its own list.
+        MAY_DIFFER = {"MUTATIONS", "main"}
+        a, b = top("tests/mutate.py"), top("tests/data_mutate.py")
+        shared = sorted((set(a) & set(b)) - MAY_DIFFER)
+        self.assertGreaterEqual(
+            len(shared), 3,
+            f"only {shared} are shared, so this compares almost nothing")
+        differ = [n for n in shared if a[n] != b[n]]
+        self.assertEqual(
+            differ, [],
+            f"the two harnesses define these under one name and not alike: "
+            f"{differ}. Either make them identical or add the name to "
+            f"MAY_DIFFER with the reason it is allowed to differ")
 
 
 class AGroupedThousandIsOneNumber(unittest.TestCase):
@@ -7244,14 +7273,119 @@ class EveryRoundWithItsOwnDataMustBeWalked(unittest.TestCase):
                                 "only one round holds run data, so this guard is "
                                 "checking nothing; it was two when written")
 
-    def test_the_integrity_job_walks_every_one(self):
+    def _invocations(self):
+        """The argument of each invocation, parsed as whole lines.
+
+        `assertIn("run: python analysis/check_data_integrity.py", wf)` stood for
+        the no-argument invocation, and the invocation that passes
+        `v5_pinning_2026_09_26/data` has that string as a PREFIX. Deleting the
+        one that walks the v4 archive left this test green with 3005 arm-runs
+        walked by nothing. A substring is not a line.
+        """
         wf = (self.ROOT / ".github" / "workflows" / "audit.yml").read_text(
             encoding="utf-8")
+        head = "run: python analysis/check_data_integrity.py"
+        out = set()
+        for line in wf.splitlines():
+            t = line.strip()
+            if t == head or t.startswith(head + " "):
+                out.add(t[len(head):].strip())
+        return out
+
+    def test_the_integrity_job_walks_every_one(self):
+        got = self._invocations()
+        self.assertTrue(got, "no invocation parsed at all; this proves nothing")
         default = "v4_audit_2026_08_25/data"
         for root in self._rounds_with_data():
-            if root == default:
-                # the invocation with no argument is this one
-                self.assertIn("run: python analysis/check_data_integrity.py", wf)
+            # the default root is the invocation that passes no argument
+            want = "" if root == default else root
+            self.assertIn(
+                want, got,
+                f"{root} holds run data and no job walks it; the job invokes "
+                f"the checker with {sorted(got)!r}")
+
+
+class RunYsTableMustBeDerivedFromItsData(unittest.TestCase):
+    """A published table with nothing deriving it is how three columns went wrong.
+
+    Run Y's result table was computed by hand and published in two documents, and
+    every inferential column in it was the mean LOG ratio printed as a
+    percentage: a mean log ratio of -0.15573 reached both documents as "-15.57 %"
+    when the change it describes is -14.42 %. The fast and slow columns were
+    right, which is why it read as plausible.
+
+    `analysis/verify_claims.py` holds every other published number in this
+    repository and is one of the six files the release binding compares against
+    the `v4.2` tag, so it cannot grow an assertion for a round published after
+    that tag. The exclusion keeping run Y's README out of the census said its
+    tables were guarded by `check_data_integrity.py` instead; that walks
+    directory structure and reads no published value.
+
+    So: the checker exists, a job invokes it, it covers every document carrying
+    the table, the derivation is exercised here and not only in CI, and the
+    specific defect is named so it cannot come back quietly.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    def _mod(self):
+        sys.path.insert(0, str(self.ROOT / "analysis"))
+        import rederive_run_y
+        return rederive_run_y
+
+    def test_a_job_invokes_it(self):
+        """`load_run_power.py --check` was written, passed, and nothing ran it."""
+        wf = (self.ROOT / ".github" / "workflows" / "audit.yml").read_text(
+            encoding="utf-8")
+        want = "run: python analysis/rederive_run_y.py"
+        # whole lines: a substring of a longer invocation would stand in for this
+        # one, which is how the data-integrity guard came to accept the deletion
+        # of the invocation that walks the v4 archive
+        self.assertIn(want, [ln.strip() for ln in wf.splitlines()],
+                      "no job runs the derivation, so the table it checks is "
+                      "guarded by nothing again")
+
+    def test_it_covers_every_document_that_carries_the_table(self):
+        """Derived from the tree. A17's four-design table lived in two documents
+        and only one copy was wired to an assertion."""
+        rry = self._mod()
+        carriers = []
+        for p in sorted(self.ROOT.rglob("*.md")):
+            if ".git" in p.parts:
                 continue
-            self.assertIn(f"check_data_integrity.py {root}", wf,
-                          f"{root} holds run data and no job walks it")
+            text = p.read_text(encoding="utf-8", errors="replace")
+            if any(ln.startswith("| arm |") and "one-sided upper limit" in ln
+                   for ln in text.splitlines()):
+                carriers.append(str(p.relative_to(self.ROOT)))
+        self.assertTrue(carriers, "no document carries the table; this proves nothing")
+        self.assertEqual(sorted(carriers), sorted(rry.DOCS),
+                         "a document carries run Y's result table and the "
+                         "derivation does not check it")
+
+    def test_the_documents_match_the_data(self):
+        rry = self._mod()
+        rows = rry.derive()
+        bad = []
+        for doc in rry.DOCS:
+            bad += rry.check_doc(doc, rows)
+        self.assertEqual(bad, [], "; ".join(bad))
+
+    def test_the_log_ratio_is_not_what_any_document_carries(self):
+        """The defect itself, named: `−15.57 %` IS the mean log ratio.
+
+        It differs from the change by more than a rounding step, so a document
+        carrying the log value is carrying the wrong number and not a variant
+        spelling of the right one.
+        """
+        rry = self._mod()
+        for r in rry.derive():
+            log_pct = r["mean_log_ratio"] * 100
+            self.assertGreater(abs(log_pct - r["change_pct"]), 0.5,
+                               "the two differ by less than a rounding step "
+                               "here, so this test cannot tell them apart")
+            wrong = rry._pct(log_pct)
+            for doc in rry.DOCS:
+                self.assertNotIn(
+                    wrong, (self.ROOT / doc).read_text(encoding="utf-8"),
+                    f"{doc} carries {wrong}, which is {r['arm']}'s mean log "
+                    f"ratio and not its change of {rry._pct(r['change_pct'])}")

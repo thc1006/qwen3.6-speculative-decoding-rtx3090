@@ -186,8 +186,8 @@ asked for, and the two conditions ran on disjoint processors:
 
 | arm | fast | slow | change | 95 % interval | one-sided upper limit |
 |---|---:|---:|---:|---|---:|
-| `spec-dflash-n2` | 140.327 | 120.068 | −15.57 % | [−16.90 %, −14.25 %] | 16.66 % |
-| `baseline` | 114.664 | 97.763 | −15.94 % | [−16.76 %, −15.12 %] | 16.61 % |
+| `spec-dflash-n2` | 140.327 | 120.068 | −14.42 % | [−15.55 %, −13.28 %] | 15.34 % |
+| `baseline` | 114.664 | 97.763 | −14.73 % | [−15.43 %, −14.03 %] | 15.30 % |
 
 Both arms **move**. Both bounds are far above A16's 3.93 % step.
 
@@ -226,7 +226,7 @@ The plan for run X said a null here would make it unnecessary. The opposite
 happened, so run X is warranted, and the section of that plan which recommended
 this run first is corrected rather than left standing.
 
-It does not settle A16. A16's step is 3.93 %, which is 0.23 of a full
+It does not settle A16. A16's step is 3.93 %, which is 0.27 of a full
 displacement, or roughly two of the eight threads landing on efficiency cores.
 Every published run here passes no thread count and no affinity, llama.cpp chooses
 eight threads of the thirty-two logical processors, and each arm-run starts a

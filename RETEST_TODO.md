@@ -500,7 +500,7 @@ Two further factors no historical run controlled, now instrumented
   Measured under sustained load: 65–68 °C against a ~83 °C throttle point,
   1815–1935 MHz of 2100, 246 W peak of 350, throttle bitmask constantly `0x4`
   (SW power cap) and **never** a thermal bit. Note `temperature.memory` reads
-  `N/A` on this card, so GDDR6X junction temperature is not observable here.
+  `N/A` on this card; the junction sensor is readable off BAR0, as A16 says.
 
 Beyond capturing it, the matrix repeats its no-speculation baseline five times
 spread across the run, so drift is testable from the measurement itself: if
