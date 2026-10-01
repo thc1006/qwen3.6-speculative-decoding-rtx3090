@@ -89,7 +89,7 @@ MUTATIONS = [
     ("the host sampler picks its roots by searching every command line",
      "bench/host_guard.py",
      "                roots = {pid for pid, (_, _c, argv) in proc.items()\n"
-     "                         if _benchmark_name(argv)}",
+     "                         if _benchmark_name(argv, _proc_cwd(pid))}",
      '                _own = ("retest_runner.py", "llama-server", "llama-bench")\n'
      "                roots = {pid for pid, (_, cmd, _a) in proc.items()\n"
      "                         if any(n in cmd for n in _own)}",
@@ -390,11 +390,30 @@ MUTATIONS = [
      "    return arm[:-len(HARDCAP_SUFFIX)] in ARMS",
      "    return False",
      "tests.test_harness_invariants.BothModesMustFitInOneInvocation"),
+    # The anchor moved on 2026-09-26 when `arm_base` gained a second suffix
+    # dimension for core pinning: it strips the pin suffix first and then asks
+    # about the hard cap. The mutation is the same defect -- the base arm's flags
+    # are never resolved -- expressed against the line that now does it.
     ("a hard-cap arm gets its own flags rather than the base arm's",
      "bench/retest_runner.py",
-     "    return arm[:-len(HARDCAP_SUFFIX)] if arm_is_hardcap(arm) else arm",
-     "    return arm",
+     "    return a[:-len(HARDCAP_SUFFIX)] if arm_is_hardcap(a) else a",
+     "    return a",
      "tests.test_harness_invariants.BothModesMustFitInOneInvocation"),
+    ("a pinned arm's twin gets its own flags rather than the base arm's",
+     "bench/retest_runner.py",
+     "    a = arm[:-len(PIN_SUFFIX)] if arm_is_alt_pin(arm) else arm",
+     "    a = arm",
+     "tests.test_harness_invariants.ATreatmentMustBeVerifiedNotRequested"),
+    ("the slow condition runs on the same processors as the fast one",
+     "bench/retest_runner.py",
+     "    return PIN_ALT_CPUS if arm_is_alt_pin(arm) else PIN_CPUS",
+     "    return PIN_CPUS",
+     "tests.test_harness_invariants.ATreatmentMustBeVerifiedNotRequested"),
+    ("the mask the kernel applied is never read back",
+     "bench/retest_runner.py",
+     '            "cpus_allowed": _cpus_allowed(proc.pid),',
+     '            "cpus_allowed": arm_cpus(arm) or None,',
+     "tests.test_harness_invariants.ATreatmentMustBeVerifiedNotRequested"),
     ("the cap requirement goes back to being run-level",
      "bench/retest_runner.py",
      "            elif ((IGNORE_EOS or arm_is_hardcap(str(arm)))",
@@ -583,86 +602,148 @@ MUTATIONS = [
      '                "head_sha": _CTRL["head"] or _head_sha(),',
      '                "head_sha": _head_sha(),',
      "tests.test_harness_invariants.AnAttestationMustDescribeTheTreeThatMeasured"),
+    # The mirror both suites measure in. Anchored on the AST comparison and NOT
+    # on the class, because the sibling test in it reads `git ls-files` and the
+    # mirror has no `.git`: that test fails in there whatever the mutation did,
+    # which would have made this entry report a pass it never earned.
+    ("the mirror stops carrying the round run Y wrote",
+     "tests/data_mutate.py",
+     '    paths = [p for p in r.stdout.split("\\0") if p]',
+     '    paths = [p for p in r.stdout.split("\\0") if p and not p.startswith("v5_")]',
+     "tests.test_harness_invariants.AMutationMirrorMustBeTheCommittedTree"
+     ".test_both_harnesses_build_it_the_same_way"),
+    # The defect run Y published, as a mutation: the log ratio IS the quantity
+    # the t interval is computed on, and the only thing that makes it a change is
+    # exponentiating it back. Three columns of a result table went out without
+    # that step and the fast and slow columns beside them were right.
+    ("run Y's change stops being back-transformed from the log ratio",
+     "analysis/rederive_run_y.py",
+     "        change = (math.exp(m) - 1) * 100",
+     "        change = m * 100",
+     "tests.test_harness_invariants.RunYsTableMustBeDerivedFromItsData"),
+    # The guard's two errors are not symmetric, and this flips it to the side that
+    # costs a measurement: an argv whose working directory cannot be read is
+    # treated as a copy under a mirror, so a real benchmark is not detected and
+    # CPU work starts during it. Detected without depending on where the anchor
+    # runs, which matters because the mirror the anchor runs in IS under the
+    # temporary directory.
+    ("an unreadable working directory makes a measurement invisible",
+     "bench/host_guard.py",
+     "            # an unresolvable relative path is NOT in scratch.\n"
+     "            return False",
+     "            # an unresolvable relative path is NOT in scratch.\n"
+     "            return True",
+     "tests.test_harness_invariants.TheVerificationSuitesMustRefuseAMeasuringHost"
+     ".test_detection_is_positional_not_a_substring"),
 ]
 
 
-COPY = ("analysis", "bench", "tests", "v4_audit_2026_08_25", "results",
-        "v2_3090_followup", "v3_dflash_2026_05_07", "README.md", "ERRATA.md",
-        "CHANGELOG.md", "RETEST_TODO.md", "BENCHMARK_ENV.md",
-        "CITATION.cff",
-        # the CI-install guard reads both locks, so a mirror
-        # without them turns that test into a FileNotFoundError
-        "requirements-lint.lock", "requirements-plot.lock",
-        # the v4.2 release notes are a censused document and the checker
-        # reads them; a mirror without them dies before it measures
-        "RELEASE_NOTES_v4.2.md",
-        # the v1 archive's own request payload carries `temperature: 0.0`, which
-        # the tier registry's row is checked against, and `pr_comment.md` is the
-        # third document quoting the 0.6B drafter's vocabulary
-        "bench_runner.py", "pr_comment.md",
-        "run_matrix.sh", "run_p0_matrix.sh", "run_verify_matrix.sh",
-        "collect_env.sh", "PULL_REQUEST.md", "tools",
-        # the workflows are mutated too now, and a mirror without them turns a
-        # mutation into a FileNotFoundError rather than a verdict
-        ".github")
+def _tracked() -> list:
+    """Every path git tracks: what a reader clones and what CI checks out.
 
+    This was `COPY`, a hand-written tuple of top-level paths, and three comments
+    in these two files recorded it going stale: four scripts at the repository
+    root, then `CITATION.cff`, then `.github`, each noticed only when the checker
+    crashed or failed on the UNPERTURBED mirror. It went stale a fourth time with
+    `v5_pinning_2026_09_26`, whose README the coverage census reaches by WALKING
+    the tree rather than by naming it, so neither of the two guards that read
+    path literals out of the checker could see it and both stayed green. A list
+    is not kept in step with a tree by hand; git already holds the answer.
 
-def _ignored_by_git() -> set:
-    """Every path git ignores, so the mirror is the COMMITTED tree.
-
-    `copytree` copies the working tree, which is not what CI checks out and not
-    what a reader clones. The difference used to be only `__pycache__`, so it
-    never mattered; on 2026-09-01 it started mattering, because 119 MB of
-    derivable duplicates were untracked and ignored rather than deleted, and a
-    checker assertion that reads `git ls-files` cannot see them while a mirror
-    built by `copytree` still holds every one. A mirror that carries files the
+    Tracked, and not present-on-disk. `copytree` copies the working tree, which
+    is neither: on 2026-09-01 it carried 119 MB of untracked ignored duplicates
+    that an assertion reading `git ls-files` could not see, and an untracked file
+    that is not ignored at all would be carried too. A mirror holding files the
     tree does not is a control measuring something other than the subject.
     """
-    # `--directory` collapses a wholly ignored directory into one entry, so
-    # `__pycache__` is skipped as a directory instead of leaving an empty one
-    # behind; a directory only partly ignored still lists its files one by one,
-    # which is what `v4_audit_2026_08_25/data/*` needs.
-    r = subprocess.run(["git", "ls-files", "--others", "--ignored",
-                        "--exclude-standard", "--directory", "-z", *COPY],
-                       cwd=ROOT, capture_output=True, text=True, timeout=300)
+    r = subprocess.run(["git", "ls-files", "-z"], cwd=ROOT,
+                       capture_output=True, text=True, timeout=300)
+    # Fail closed. Its predecessor returned an empty skip-set when git failed,
+    # which degraded in silence into mirroring every ignored file as well.
     if r.returncode != 0:
-        return set()
-    return {(ROOT / p).resolve() for p in r.stdout.split("\0") if p}
+        raise SystemExit(f"git ls-files failed in {ROOT}: {r.stderr.strip()}")
+    paths = [p for p in r.stdout.split("\0") if p]
+    if not paths:
+        raise SystemExit(f"git ls-files listed nothing in {ROOT}")
+    return paths
 
 
 def mirror(into: Path) -> Path:
     into.mkdir(parents=True, exist_ok=True)
-    skip = _ignored_by_git()
-
-    def _ignore(directory, names):
-        d = Path(directory)
-        return [n for n in names if (d / n).resolve() in skip]
-
-    for rel in COPY:
+    made = set()
+    for rel in _tracked():
         src = ROOT / rel
-        if not src.exists():
+        # tracked and deleted in the working tree: let the checker report that
+        # rather than quietly restoring it here
+        if not src.is_file():
             continue
         dst = into / rel
-        if src.is_dir():
-            shutil.copytree(src, dst, dirs_exist_ok=True, ignore=_ignore)
-        elif src.resolve() not in skip:
-            shutil.copy2(src, dst)
+        if dst.parent not in made:
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            made.add(dst.parent)
+        shutil.copy2(src, dst)
     return into
+
+
+def _shard_arg() -> tuple[int, int, bool]:
+    """`--shard=i/n`, or (0, 1, False) for the whole list.
+
+    Byte-identical in `tests/mutate.py` and `tests/data_mutate.py`. The claim
+    that they agreed was a sentence in this docstring while this very function
+    differed between them: only one copy diagnosed a malformed argument, so
+    `--shard=0` raised an unpacking traceback out of the other one, in the CI
+    matrix, where a traceback and a failed suite look the same. A test compares
+    every name the two files define at module level now, rather than a
+    hand-written pair of them.
+
+    The stride decomposition `k % n == i` partitions the list exactly, so a set
+    of shards 0..n-1 covers every item once, and a missing shard leaves a hole
+    rather than a duplicate.
+
+    Sharding exists for CI. One `unittest` subprocess per mutation is six
+    minutes on a runner; eighty-four perturbations at one claim checker each is
+    fifty-six minutes on a thirty-two processor host, using one of them. The
+    shards are independent because each gets a mirror of its own, which is a
+    stronger separation than one shared mirror and a restore loop, not a weaker
+    one, and each checks its own mirror clean at the end.
+    """
+    for a in sys.argv[1:]:
+        if a.startswith("--shard="):
+            try:
+                i, n = (int(x) for x in a.split("=", 1)[1].split("/", 1))
+            except ValueError:
+                sys.exit(f"{a} is not --shard=i/n")
+            if not (n >= 1 and 0 <= i < n):
+                sys.exit(f"--shard={i}/{n} is not a shard of a set of {n}")
+            return i, n, True
+        sys.exit(f"unknown argument {a!r}; the only one is --shard=i/n")
+    return 0, 1, False
 
 
 def main() -> None:
     # One `unittest` subprocess per mutation, for minutes. Same reason as
     # tests/data_mutate.py: a burst on a measuring host costs an arm-pass.
+    shard, shards, sharded = _shard_arg()
     sys.path.insert(0, str(ROOT / "bench"))
     import host_guard
     host_guard.protect("the code mutation suite")
-    host_guard.serialise("verify")
+    if not sharded:
+        # The whole-host lock is taken by whoever owns the host. A fan-out
+        # cannot take it once per shard, and a CI matrix gives each shard a
+        # runner of its own where there is nothing to serialise against.
+        host_guard.serialise("verify")
 
+    picked = [m for k, m in enumerate(MUTATIONS) if k % shards == shard]
+    tag = "" if not sharded else f"shard {shard}/{shards}: "
+    if not picked:
+        sys.exit(f"{tag}no mutation in this slice, so it proves nothing")
+
+    print(f"  {tag}{len(picked)} of {len(MUTATIONS)} mutations")
     print(f"  {'mutation':52s} guarding test")
     escaped = []
     with tempfile.TemporaryDirectory() as tmp:
         work = mirror(Path(tmp) / "work")
-        for name, path, correct, defect, test in MUTATIONS:
+        for name, path, correct, defect, test in picked:
             p = work / path
             original = p.read_text(encoding="utf-8")
             if correct not in original:
@@ -683,8 +764,8 @@ def main() -> None:
 
     print()
     if escaped:
-        sys.exit(f"  {len(escaped)} mutation(s) survived: " + "; ".join(escaped))
-    print(f"  all {len(MUTATIONS)} mutations detected")
+        sys.exit(f"  {tag}{len(escaped)} mutation(s) survived: " + "; ".join(escaped))
+    print(f"  {tag}all {len(picked)} of {len(MUTATIONS)} mutations detected")
 
 
 if __name__ == "__main__":

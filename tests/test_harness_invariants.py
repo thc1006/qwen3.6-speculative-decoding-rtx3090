@@ -2195,17 +2195,103 @@ class EveryPerturbationAnchorMustResolve(unittest.TestCase):
 
     def test_every_code_mutation_names_a_test_that_exists(self):
         """A mutation pointed at a class that has been renamed reports the
-        mutation as caught, because the runner exits non-zero either way."""
+        mutation as caught, because the runner exits non-zero either way.
+
+        `module.Class.method` resolves too, and has to. A mutation of the mirror
+        cannot be anchored on the whole mirror class: its other test reads
+        `git ls-files`, the mirror the anchor runs in has no `.git`, and that
+        test therefore fails in there whatever the mutation did -- which is the
+        same pass-never-earned this test exists to stop, arriving by the other
+        door. So the method is checked to be in THAT class rather than merely
+        somewhere in the file, and a deeper path is refused because `unittest`
+        cannot load one.
+        """
+        import ast as _ast
         sys.path.insert(0, str(self.ROOT / "tests"))
         import mutate
-        src = (self.ROOT / "tests" / "test_harness_invariants.py").read_text(
-            encoding="utf-8")
+        tree = _ast.parse((self.ROOT / "tests" / "test_harness_invariants.py")
+                          .read_text(encoding="utf-8"))
+        methods = {c.name: {f.name for f in c.body
+                            if isinstance(f, _ast.FunctionDef)}
+                   for c in _ast.walk(tree) if isinstance(c, _ast.ClassDef)}
+        self.assertGreater(len(methods), 50,
+                           "no classes parsed; this test proves nothing")
         for name, _rel, _c, _d, test in mutate.MUTATIONS:
-            leaf = test.rsplit(".", 1)[1]
-            mod = test.rsplit(".", 2)[0] if test.count(".") > 1 else test
-            if mod.endswith("test_harness_invariants"):
-                self.assertIn(f"class {leaf}(", src,
-                              f"{name!r} names a class that does not exist")
+            parts = test.split(".")
+            if "test_harness_invariants" not in parts:
+                continue
+            rest = parts[parts.index("test_harness_invariants") + 1:]
+            self.assertTrue(rest, f"{name!r} names a module and no class")
+            self.assertLessEqual(len(rest), 2,
+                                 f"{name!r} anchors on {test!r}, which unittest "
+                                 f"cannot load")
+            self.assertIn(rest[0], methods,
+                          f"{name!r} names a class that does not exist")
+            if len(rest) == 2:
+                self.assertIn(rest[1], methods[rest[0]],
+                              f"{name!r} anchors on {rest[1]!r} and "
+                              f"{rest[0]} has no such test")
+
+    def test_no_anchor_names_a_class_that_cannot_pass_in_the_mirror(self):
+        """The anchor runs in the mirror, and the mirror has no `.git`.
+
+        A test that shells out to git fails in there whatever the mutation did,
+        so a mutation anchored on the class holding one reports `caught` without
+        the guard it names having been exercised at all. One decorative mutation
+        was already found here by hand, by restoring the file and watching the
+        anchor fail anyway. The fix for such an anchor is to narrow it to the
+        method that does not read git, which is why this file resolves a
+        `Class.method` anchor.
+
+        Detected at the call sites rather than in the text: a method whose prose
+        merely mentions `git ls-files` is not a method that runs it, and this
+        file's docstrings say that phrase several times.
+        """
+        import ast as _ast
+        sys.path.insert(0, str(self.ROOT / "tests"))
+        import mutate
+        tree = _ast.parse((self.ROOT / "tests" / "test_harness_invariants.py")
+                          .read_text(encoding="utf-8"))
+
+        def reads_git(fn):
+            body = fn.body[1:] if (fn.body and isinstance(fn.body[0], _ast.Expr)
+                                   and isinstance(fn.body[0].value, _ast.Constant)
+                                   ) else fn.body
+            for stmt in body:
+                for n in _ast.walk(stmt):
+                    if not (isinstance(n, _ast.Constant)
+                            and isinstance(n.value, str)):
+                        continue
+                    v = n.value
+                    if v == "git" or "ls-files" in v or "rev-parse" in v:
+                        return True
+            return False
+
+        git_tests = {}
+        for c in _ast.walk(tree):
+            if not isinstance(c, _ast.ClassDef):
+                continue
+            git_tests[c.name] = sorted(
+                f.name for f in c.body
+                if isinstance(f, _ast.FunctionDef) and f.name.startswith("test")
+                and reads_git(f))
+        self.assertTrue(any(git_tests.values()),
+                        "no git-reading test found at all; this proves nothing")
+        bad = []
+        for name, _rel, _c, _d, test in mutate.MUTATIONS:
+            parts = test.split(".")
+            if "test_harness_invariants" not in parts:
+                continue
+            rest = parts[parts.index("test_harness_invariants") + 1:]
+            if len(rest) != 1:
+                continue
+            for meth in git_tests.get(rest[0], []):
+                bad.append(f"{name!r} -> {rest[0]}.{meth}")
+        self.assertEqual(sorted(bad), [],
+                         "these mutations anchor on a class holding a test that "
+                         "reads git, and the mirror they run in has none, so the "
+                         "anchor fails there with or without the mutation: "
+                         + "; ".join(sorted(bad)))
 
 
 class TheGitlessAssertionGapMustBeTheDeclaredOne(unittest.TestCase):
@@ -2396,19 +2482,40 @@ class TheVerificationSuitesMustRefuseAMeasuringHost(unittest.TestCase):
                           f"{rel} can overlap with another pipeline")
 
     def test_detection_is_positional_not_a_substring(self):
-        """`\"bench.py\" in cmdline` also matches an editor, a grep, and this
-        session's own shell command that merely names it."""
+        """A substring match reads text and cannot recover intent.
+
+        Every case fixes the working directory, because the verdict used to depend
+        on it and nothing said so: a relative argv was resolved against the
+        CALLER's directory, so this passed from a home directory and from a
+        runner's workspace and failed from anywhere under the temporary one. The
+        CI reproduction found it, running from a clone whose scratch was set there.
+        """
         m = self._hg()._benchmark_name
-        for argv, want in (
-                (["/opt/build/bin/llama-server", "-m", "x.gguf"], "llama-server"),
-                (["python3", "harness/bench.py", "--matrix", "phase_a"], "bench.py"),
-                (["python3", "-u", "harness/bench.py"], "bench.py"),
-                (["grep", "-rn", "bench.py", "."], None),
-                (["bash", "-c", "echo bench.py llama-server"], None),
-                (["vim", "harness/bench.py"], None),
-                (["python3", "tests/data_mutate.py"], None),
-                ([], None)):
-            self.assertEqual(m(argv), want, f"argv={argv}")
+        scratch = os.path.join(os.path.realpath(tempfile.gettempdir()),
+                               "tmpmirror", "work")
+        home = os.path.expanduser("~/bench")
+        for argv, cwd, want in (
+                (["/opt/build/bin/llama-server", "-m", "x.gguf"], None,
+                 "llama-server"),
+                # relative, and the cwd decides it. An unknown cwd fails SAFE:
+                # calling a mirror copy a measurement delays a verification run,
+                # and calling a measurement a mirror copy costs a measurement.
+                (["python3", "harness/bench.py", "--matrix", "phase_a"], None,
+                 "bench.py"),
+                (["python3", "harness/bench.py"], home, "bench.py"),
+                (["python3", "harness/bench.py"], scratch, None),
+                (["python3", "-u", "harness/bench.py"], home, "bench.py"),
+                # absolute, and it answers for itself whatever the cwd is
+                (["python3", os.path.join(home, "harness/bench.py")], scratch,
+                 "bench.py"),
+                (["python3", os.path.join(scratch, "harness/bench.py")], home,
+                 None),
+                (["grep", "-rn", "bench.py", "."], home, None),
+                (["bash", "-c", "echo bench.py llama-server"], home, None),
+                (["vim", "harness/bench.py"], home, None),
+                (["python3", "tests/data_mutate.py"], home, None),
+                ([], None, None)):
+            self.assertEqual(m(argv, cwd), want, f"argv={argv} cwd={cwd}")
 
     def test_a_harness_copy_under_a_mirror_is_not_a_measurement(self):
         """The two suites each copy `bench/` into a temporary directory and run
@@ -2586,8 +2693,9 @@ class TheTelemetryGapA16NamesMustBeReal(unittest.TestCase):
         self.assertTrue(body, "sample() not found")
         self.assertNotIn("in cmd for n in", body,
                          "the sampler still chooses roots by substring")
-        self.assertIn("_benchmark_name(argv)", body,
-                      "the fallback does not use the positional matcher")
+        self.assertIn("_benchmark_name(argv, ", body,
+                      "the fallback does not use the positional matcher, or no "
+                      "longer passes it the other process's working directory")
         self.assertIn("_starttime(root_pid) == root_start", body,
                       "a reused pid can inherit the benchmark's attribution")
         sys.path.insert(0, str(self.ROOT / "bench"))
@@ -3247,10 +3355,13 @@ class TheMirrorsMustCarryEverythingTheCheckerReads(unittest.TestCase):
 
     ROOT = Path(__file__).resolve().parents[1]
 
-    def _copy_list(self, rel):
-        src = (self.ROOT / rel).read_text(encoding="utf-8")
-        body = src.split("COPY = (")[1].split(")")[0]
-        return set(re.findall(r'"([^"]+)"', body))
+    def _tracked_tops(self):
+        r = subprocess.run(["git", "ls-files", "-z"], cwd=self.ROOT,
+                           capture_output=True, text=True, timeout=300)
+        self.assertEqual(r.returncode, 0, f"git ls-files failed: {r.stderr}")
+        tops = {p.split("/")[0] for p in r.stdout.split("\0") if p}
+        self.assertTrue(tops, "git listed nothing; this test proves nothing")
+        return tops
 
     def _named_by_the_checker(self):
         src = (self.ROOT / "analysis" / "verify_claims.py").read_text(encoding="utf-8")
@@ -3269,14 +3380,20 @@ class TheMirrorsMustCarryEverythingTheCheckerReads(unittest.TestCase):
         self.assertIn("CITATION.cff", named)
 
     def test_both_mirrors_carry_all_of_them(self):
+        """Both derive the mirror from `git ls-files`, so TRACKED is the test.
+
+        This read the `COPY` tuple out of each harness. That tuple is gone,
+        because it went stale four times. What decides now is whether the path
+        the checker names is tracked: an untracked one is absent from a CI
+        checkout as well, so the crash would happen there too.
+        """
         named = self._named_by_the_checker()
-        for rel in ("tests/data_mutate.py", "tests/mutate.py"):
-            with self.subTest(suite=rel):
-                missing = sorted(named - self._copy_list(rel))
-                self.assertEqual(missing, [],
-                                 f"{rel}'s mirror would lack {missing}, so the "
-                                 f"checker crashes on the unperturbed copy and "
-                                 f"no perturbation is ever evaluated")
+        missing = sorted(named - self._tracked_tops())
+        self.assertEqual(missing, [],
+                         f"the checker names {missing} and git does not track "
+                         f"them, so both mirrors lack them, the checker crashes "
+                         f"on the unperturbed copy and no perturbation is ever "
+                         f"evaluated")
 
 
 class AShallowCloneMustBeDiagnosedNotEndured(unittest.TestCase):
@@ -3387,7 +3504,8 @@ class TheSuiteMustRunOnAStockInterpreter(unittest.TestCase):
         # that reads it. `mutate` is one: two invariants check the mutation
         # table's own anchors, which needs the table.
         allowed = stdlib | {"host_guard", "publish_pr_body", "carryover",
-                            "length_mode", "paired_blocks", "rr_under_test",
+                            "length_mode", "paired_blocks", "plan_z_power",
+                            "rederive_run_y", "rr_under_test", "vram_temp",
                             "rederive_from_logs", "past_threshold_fit",
                             "verify_claims", "extract_checkpoint_timers",
                             "table_coverage", "mutate", "data_mutate",
@@ -4410,17 +4528,22 @@ class TheDataMirrorMustHoldEveryPathTheCheckerOpens(unittest.TestCase):
     84 data perturbations measured nothing.
 
     Every path literal in the checker that exists in this tree must be
-    reachable in the mirror. Compared as top-level names, which is what `COPY`
-    is a list of.
+    reachable in the mirror. The mirror is every tracked path, so the comparison
+    is against what git tracks, as top-level names.
     """
 
     ROOT = Path(__file__).resolve().parents[1]
 
     def test_every_path_the_checker_reads_is_mirrored(self):
         import ast as _ast
-        sys.path.insert(0, str(self.ROOT / "tests"))
-        import data_mutate
-        copied = set(data_mutate.COPY)
+        # `set(data_mutate.COPY)` until the list it read was removed. The
+        # mirror is every tracked path now, so being tracked is what makes a
+        # path reachable in it.
+        r = subprocess.run(["git", "ls-files", "-z"], cwd=self.ROOT,
+                           capture_output=True, text=True, timeout=300)
+        self.assertEqual(r.returncode, 0, f"git ls-files failed: {r.stderr}")
+        copied = {p.split("/")[0] for p in r.stdout.split("\0") if p}
+        self.assertTrue(copied, "git listed nothing; this test proves nothing")
         src = (self.ROOT / "analysis" / "verify_claims.py").read_text(
             encoding="utf-8")
         missing = set()
@@ -4443,7 +4566,7 @@ class TheDataMirrorMustHoldEveryPathTheCheckerOpens(unittest.TestCase):
             if top in {".git"}:
                 continue
             if top not in copied:
-                missing.add(f"{rel} (top-level {top!r} is not in COPY)")
+                missing.add(f"{rel} (top-level {top!r} is not tracked)")
         self.assertEqual(
             sorted(missing), [],
             "the checker opens these and the mirror does not have them, so "
@@ -5051,20 +5174,41 @@ class TheWorkflowsMustDeclareTheJobsTheySayTheyHave(unittest.TestCase):
                     out[cur] = l.split("name:", 1)[1].strip().strip("'\"")
         return out
 
-    def test_audit_declares_exactly_five_named_jobs(self):
+    def test_audit_declares_exactly_seven_named_jobs(self):
+        """Five until 2026-09-19, when `unit and mutation` became three.
+
+        It was one job running the regression suite, the code mutations and the
+        data perturbations in order, for twenty-seven minutes. Nothing ordered
+        them: each mirrors the tracked tree for itself.
+        """
         self.assertEqual(
             self._jobs("audit.yml"),
             {"audit-static": "static",
-             "audit-unit": "unit and mutation",
+             "audit-unit": "unit",
+             "audit-code-mutations": "code mutations",
+             "audit-data-perturbations": "data perturbations",
              "audit-data-integrity": "data integrity",
              "audit-claims": "claims",
              "audit-charts": "charts"})
 
-    def test_the_header_counts_them(self):
-        head = (self.ROOT / ".github" / "workflows" / "audit.yml").read_text(
-            encoding="utf-8")[:400]
-        self.assertIn("Five required jobs", head)
-        self.assertEqual(len(self._jobs("audit.yml")), 5)
+    def test_the_header_counts_them_and_their_legs(self):
+        """Twenty legs is the concurrency a free plan gets, so it is a real
+        number and not a taste. Past it the extra legs queue, which is the same
+        arithmetic both launchers refuse extra shards over."""
+        text = (self.ROOT / ".github" / "workflows" / "audit.yml").read_text(
+            encoding="utf-8")
+        self.assertIn("Seven jobs, twenty legs", text[:400])
+        self.assertEqual(len(self._jobs("audit.yml")), 7)
+        legs = 0
+        for line in text.splitlines():
+            m = re.match(r"^        shard: \[(.*)\]\s*$", line)
+            legs += len(m.group(1).split(",")) if m else 0
+        # every job without a matrix is one leg of its own
+        legs += len(self._jobs("audit.yml")) - sum(
+            1 for line in text.splitlines()
+            if re.match(r"^        shard: \[", line))
+        self.assertEqual(legs, 20, f"the workflow now has {legs} legs and the "
+                                   f"header says twenty")
 
     def test_evidence_declares_exactly_one(self):
         self.assertEqual(
@@ -5075,12 +5219,14 @@ class TheWorkflowsMustDeclareTheJobsTheySayTheyHave(unittest.TestCase):
             encoding="utf-8")
         for cmd in ("python -m unittest discover -s tests",
                     "python tests/mutate.py",
-                    # the perturbations run sharded now, so the job names the
-                    # launcher rather than the module. What the invariant is
-                    # about is that the job still runs the thing it is named
-                    # for, and the launcher requires the shards' caught counts
-                    # to add up to the whole list.
-                    "bench/run_data_mutations.sh",
+                    # The perturbations fan out over runners now, so CI calls
+                    # the suite directly and `bench/run_data_mutations.sh` stays
+                    # the single-machine launcher for a host with processors to
+                    # spare. Matched with its flag: the bare module name appears
+                    # in a comment two lines above the command, and a test that
+                    # a comment satisfies is not a test.
+                    "python tests/data_mutate.py --shard=",
+                    "python tests/mutate.py --shard=",
                     "python analysis/verify_claims.py",
                     "python analysis/check_data_integrity.py",
                     "python analysis/check_links.py",
@@ -5648,6 +5794,13 @@ class AMutationMirrorMustBeTheCommittedTree(unittest.TestCase):
     rather than deleted: a checker assertion reading `git ls-files` cannot see
     them, and a mirror built by `copytree` still held every one. A control that
     carries files the subject does not is measuring something else.
+
+    The converse cost five days: both harnesses copied a hand-written list of
+    top-level paths, `v5_pinning_2026_09_26` was never added to it, and the
+    coverage census -- which walks the tree for markdown rather than naming the
+    files -- failed on the unperturbed mirror, so all 32 shards exited non-zero
+    and 0 of 84 perturbations were evaluated. The mirror is derived from
+    `git ls-files` now and there is no list to forget.
     """
 
     ROOT = Path(__file__).resolve().parents[1]
@@ -5661,8 +5814,13 @@ class AMutationMirrorMustBeTheCommittedTree(unittest.TestCase):
             "dm_mirror", self.ROOT / "tests" / "data_mutate.py")
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
+        # NOT `*mod.COPY`. Passing the harness's own path list into the
+        # question made this test's scope "tracked, within COPY", which is not
+        # what its name says and cannot see a tracked path COPY omits. It could
+        # not: `v5_pinning_2026_09_26/README.md` was missing from the mirror for
+        # five days with this test green.
         want = set(subprocess.run(
-            ["git", "ls-files", "-z", *mod.COPY], cwd=self.ROOT,
+            ["git", "ls-files", "-z"], cwd=self.ROOT,
             capture_output=True, text=True, timeout=300).stdout.split("\0")) - {""}
         self.assertTrue(want, "git listed nothing; this test proves nothing")
         d = Path(tempfile.mkdtemp(prefix="mirror-invariant-"))
@@ -5677,21 +5835,49 @@ class AMutationMirrorMustBeTheCommittedTree(unittest.TestCase):
         self.assertFalse(missing, f"the mirror is missing tracked files: {missing}")
 
     def test_both_harnesses_build_it_the_same_way(self):
-        """So testing one of them is testing both."""
+        """So testing one of them is testing both, which was not true.
+
+        This compared a hand-written pair of function names. What decided what
+        the mirror held was `COPY`, a module-level tuple it did not compare, and
+        the two differed: `tests/mutate.py` listed `tools` and
+        `tests/data_mutate.py` did not, and the latter listed `pr_comment.md`
+        twice. `_shard_arg` differed too, and the sentence asserting the two
+        were spelled identically was inside the copy that had the error handling
+        the other lacked.
+
+        So every name the two define at module level is compared, and a name
+        allowed to differ is named here with its reason. A hand-written list of
+        what to check is the same defect one level up.
+        """
         import ast
 
-        def src(rel):
+        def top(rel):
             tree = ast.parse((self.ROOT / rel).read_text(encoding="utf-8"))
             out = {}
             for n in tree.body:
-                if isinstance(n, ast.FunctionDef) and n.name in ("mirror",
-                                                                 "_ignored_by_git"):
+                if isinstance(n, ast.FunctionDef):
                     out[n.name] = ast.unparse(n)
+                elif isinstance(n, ast.Assign):
+                    for t in n.targets:
+                        if getattr(t, "id", None):
+                            out[t.id] = ast.unparse(n)
             return out
 
-        a, b = src("tests/mutate.py"), src("tests/data_mutate.py")
-        self.assertEqual(sorted(a), ["_ignored_by_git", "mirror"])
-        self.assertEqual(a, b, "the two harnesses build their mirror differently")
+        # `MUTATIONS` is each suite's subject: one is source edits with a
+        # guarding test, the other data and document perturbations with a claim
+        # checker. `main` is each suite's own runner over its own list.
+        MAY_DIFFER = {"MUTATIONS", "main"}
+        a, b = top("tests/mutate.py"), top("tests/data_mutate.py")
+        shared = sorted((set(a) & set(b)) - MAY_DIFFER)
+        self.assertGreaterEqual(
+            len(shared), 3,
+            f"only {shared} are shared, so this compares almost nothing")
+        differ = [n for n in shared if a[n] != b[n]]
+        self.assertEqual(
+            differ, [],
+            f"the two harnesses define these under one name and not alike: "
+            f"{differ}. Either make them identical or add the name to "
+            f"MAY_DIFFER with the reason it is allowed to differ")
 
 
 class AGroupedThousandIsOneNumber(unittest.TestCase):
@@ -6436,3 +6622,1276 @@ class AFigureMayNotPublishAFigureNothingRederives(unittest.TestCase):
                         "run A's speculative arm is expected to be short of its "
                         "own baseline; if that changed, the caption must change")
         self.assertEqual((len(spec), len(base)), (6, 10))
+
+
+class APowerTableMayNotCountTheStepTwice(unittest.TestCase):
+    """The guard on the mistake that published a power of 0.09 for a 0.28 design.
+
+    `v4_audit_2026_08_25/PROSPECTIVE_PLAN_X_HOST_LOAD.md` chose twenty-four
+    blocks over twelve because of a simulation, and the first version of that
+    simulation used run T4's block-level CV of 2.145 % as if it were residual
+    noise while ALSO adding the arm's own level change on top of it. T4's block
+    CV already contains that level change. The model therefore implied 2.909 %
+    of block spread against the 2.145 % T4 shows, and it published a detection
+    rate of about one in ten for a design whose real rate is under three in ten.
+    An earlier version of this docstring said 2.768 %, which is the same
+    arithmetic done with A16's rounded 3.5 % gap rather than the measured
+    3.93 % the script uses.
+
+    The defect is invisible in the output: both readings are plausible numbers
+    and neither is flagged by anything. What makes it visible is the identity
+    the decomposition has to satisfy, so that identity is asserted here.
+
+    Also held: the cross-arm claim the plan's headline now rests on. Three
+    arm-agnostic hypotheses are pre-registered, and the plan's arm-specific
+    branch is the one-sided statement that D is above zero. That is only a
+    falsifiable branch if every one of the three puts D at or below zero, which
+    is a property of the measured denominators and not of the prose.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    def _mod(self):
+        import importlib.util
+        p = self.ROOT / "analysis" / "load_run_power.py"
+        spec = importlib.util.spec_from_file_location("load_run_power", p)
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        return m
+
+    def test_the_decomposition_reproduces_the_measured_block_spread(self):
+        m = self._mod().measured()
+        self.assertAlmostEqual(m["combined"], m["block_cv"], delta=0.15,
+                               msg="gap/2 and the residual must recombine to the "
+                                   "block CV; if they do not, one of them "
+                                   "contains the other")
+        # and the reading that was published once must NOT satisfy it
+        bad = _math.hypot(m["block_cv"], m["gap"] / 2.0)
+        self.assertGreater(abs(bad - m["block_cv"]), 0.4,
+                           "the double-counted model has to be distinguishable "
+                           "from the measured spread, or this test proves nothing")
+
+    def test_a_one_sided_cross_arm_contrast_is_not_a_valid_rule(self):
+        """The rule this plan used to pre-register, and why it cannot come back.
+
+        Two versions of the plan tested arm-specificity as "D lies wholly above
+        zero", D being the within-block difference in ms per token between
+        `spec-dflash-n2` and `spec-draft-n8`. That is only falsifiable while
+        every arm-agnostic hypothesis puts D on one side of zero, and with the
+        round count taken from the drafter rather than from the server's
+        under-counted accepted field, they do not: the per-target-step cost puts
+        it at about +0.06. This asserts the hypotheses straddle zero, so that
+        reinstating a one-sided rule fails here rather than in the outcome.
+        """
+        mod = self._mod()
+        import statistics as _st
+        ms = {a: 1000.0 / _st.mean(mod.pooled(a, i) for i in range(6))
+              for a in mod.ARMS}
+        nz = mod.normalisers()
+        ds = []
+        for key in ("per_token", "per_forward", "per_target_step"):
+            c = (ms["spec-dflash-n2"] * (1 / 0.98 - 1)) / nz["spec-dflash-n2"][key]
+            ds.append(c * nz["spec-dflash-n2"][key] - c * nz["spec-draft-n8"][key])
+        self.assertGreater(max(ds), 1e-3, "no hypothesis puts D above zero")
+        self.assertLess(min(ds), -1e-3, "no hypothesis puts D below zero")
+
+    def test_the_fit_rejects_every_arm_agnostic_cost_on_T4s_own_step(self):
+        """The replacement rule, exercised on the one step already measured.
+
+        Each hypothesis is one free scale over fixed weights, so with three arms
+        it has two residual degrees of freedom. Across T4's step the arms moved
+        in opposite directions, which no single host cost can produce, so all
+        three must be rejected by a wide margin. If any of them fits, the
+        discriminator this plan now rests on does not discriminate.
+        """
+        mod = self._mod()
+        import statistics as _st
+        lo = {a: _st.mean(mod.pooled(a, i) for i in range(3)) for a in mod.ARMS}
+        hi = {a: _st.mean(mod.pooled(a, i) for i in range(3, 6)) for a in mod.ARMS}
+        # the arms moved in opposite directions: that is the whole argument
+        self.assertGreater(hi["spec-dflash-n2"], lo["spec-dflash-n2"])
+        self.assertLess(hi["baseline"], lo["baseline"])
+        d, sg = mod.t4_step()
+        # and the standard error has to come from the blocks, not from the effect
+        for a in mod.ARMS:
+            self.assertGreater(sg[a], 0.0)
+            self.assertNotAlmostEqual(sg[a], abs(d[a]) * 0.25, places=4,
+                                      msg=f"{a}: the standard error is a fixed "
+                                          f"fraction of the effect, which makes "
+                                          f"the chi-square a function of the "
+                                          f"fraction that was chosen")
+        nz = mod.normalisers()
+        for key in ("per_token", "per_forward", "per_target_step"):
+            f = mod.fit_agnostic(d, sg, {a: nz[a][key] for a in mod.ARMS})
+            self.assertEqual(f["df"], 2)
+            self.assertGreater(f["chi2"], 9.21,
+                               f"{key} is not rejected at one per cent on two "
+                               f"degrees of freedom, so the fit does not "
+                               f"discriminate on the one step already measured")
+
+    def test_the_control_arm_holds_under_all_three_so_it_cannot_discriminate(self):
+        mod = self._mod()
+        import statistics as _st
+        ms = {a: 1000.0 / _st.mean(mod.pooled(a, i) for i in range(6))
+              for a in mod.ARMS}
+        nz = mod.normalisers()
+        for key in ("per_token", "per_forward", "per_target_step"):
+            c = (ms["spec-dflash-n2"] * (1 / 0.98 - 1)) / nz["spec-dflash-n2"][key]
+            dd = c * nz["spec-draft-n8"][key]
+            pct = 100.0 * (ms["spec-draft-n8"] / (ms["spec-draft-n8"] + dd) - 1)
+            self.assertLess(abs(pct), 1.0,
+                            f"{key} moves the control past the holding band; the "
+                            "plan states it holds under all three and the "
+                            "document would have to change with this")
+
+
+    def test_the_round_count_comes_from_the_drafter_not_the_server(self):
+        """The check that let a wrong round count through, and the one that does not.
+
+        Generated minus accepted is true of the mechanism and false of the
+        counter: ERRATA A1 quotes the server returning from the
+        checkpoint-and-restore branch before it increments the accepted field,
+        and A13 measures the gap at 0.2 pp for `spec-dflash-n2`, which takes no
+        checkpoints, and 11.6 pp for `spec-draft-n8`, which takes 772.
+
+        The guard that failed was "drafted per round does not exceed the arm's
+        draft maximum": the wrong count satisfies it at 4.109 against 8.
+        Integrality is what separates them, and the acceptance the drafter's
+        count implies has to match A13's drafter column rather than its server
+        column. Getting this wrong is not cosmetic: it moved the target-step
+        weight from 0.232 to 0.452, which decided whether a purely arm-agnostic
+        cost produces the contrast the plan once reserved for arm-specificity.
+        """
+        mod = self._mod()
+        nz = mod.normalisers()
+        A13 = {"spec-dflash-n2": (0.728, 0.730), "spec-draft-n8": (0.297, 0.413)}
+        for arm, (server, drafter) in A13.items():
+            z = nz[arm]
+            self.assertAlmostEqual(z["rounds"], round(z["rounds"]), places=6,
+                                   msg=f"{arm}: drafted is not a whole number of "
+                                       f"rounds, so the drafter does not always "
+                                       f"propose its maximum")
+            self.assertAlmostEqual(z["acceptance_drafter"], drafter, delta=0.005,
+                                   msg=f"{arm}: the round count implies an "
+                                       f"acceptance that is not A13's drafter "
+                                       f"column")
+            self.assertAlmostEqual(z["acceptance_server"], server, delta=0.006,
+                                   msg=f"{arm}: the server field is not A13's "
+                                       f"server column either, so this data is "
+                                       f"not the run A13 measured")
+        # and the wrong reading must be distinguishable, or this proves nothing
+        z = nz["spec-draft-n8"]
+        wrong = z["tokens"] - z["accepted_server"]
+        self.assertGreater(abs(wrong - z["rounds"]) / z["rounds"], 0.5,
+                           "generated minus accepted and drafted over draft-max "
+                           "agree here, so this test cannot tell them apart")
+
+    def test_the_t_table_covers_every_df_the_plan_permits(self):
+        """Eighteen to twenty-four surviving pairs is df seventeen to twenty-three.
+
+        The first version of the table held 17 and 23 only, so dropping a single
+        pair -- which the plan explicitly provides for -- raised KeyError in the
+        only committed implementation of its own estimator.
+        """
+        mod = self._mod()
+        for n in range(18, 25):
+            self.assertIn(n - 1, mod.TSTAR, f"df {n - 1} is missing")
+
+    def test_the_excise_rule_refuses_when_there_is_no_step(self):
+        """Removing the largest of five unconditionally biases the residual low.
+
+        Measured by simulation at the plan's own residual, the bias with no step
+        present is about a quarter. The rule is safe on this data because the
+        excised value is more than three times the next largest; the guard makes
+        that a condition rather than a coincidence, so the check is that the
+        condition actually holds here by a margin.
+        """
+        import json as _json
+        mod = self._mod()
+        v = [mod.pooled("spec-dflash-n2", i) for i in range(6)]
+        adj = [100.0 * _math.log(v[i + 1] / v[i]) for i in range(5)]
+        big = max(adj, key=abs)
+        rest = max(abs(x) for x in adj if x is not big)
+        self.assertGreater(abs(big), 3.0 * rest,
+                           "the excised change is not clearly a level change, so "
+                           "measured() should be refusing rather than excising")
+        del _json
+
+    def test_the_hazard_is_taken_from_the_corpus_and_not_from_one_run(self):
+        """One event gives a Poisson interval three orders of magnitude wide.
+
+        The first version of the power table took the switch hazard from a
+        single transition in run T4. This requires the derivation to reach the
+        rest of the corpus, and to find a rate the design is actually sensitive
+        to rather than zero or everything.
+        """
+        h = self._mod().hazard()
+        self.assertGreaterEqual(h["runs"], 20, "the walk stopped finding runs")
+        self.assertGreater(h["changes"], 20, "one run's worth of events is what "
+                                             "this derivation exists to replace")
+        self.assertLess(h["changes"], h["gaps"],
+                        "every gap a change means the threshold is too low")
+        self.assertLess(h["hi"] / h["lo"], 3.0,
+                        "the interval is meant to be tight enough to plan on")
+
+
+    def test_the_hazard_is_a_likelihood_and_not_changes_over_time(self):
+        """Two levels means an even number of transitions is invisible.
+
+        Dividing observed changes by elapsed time assumes every gap holds at
+        most one transition. Two put the arm back where it started and record as
+        no change, and the corpus's mean gap is the same order as the interval
+        between changes, so the omission is large rather than academic: the
+        naive figure is about one per 1123 s against a likelihood estimate of
+        about one per 641. A hazard that is too slow makes any design built on
+        it look better than it is, so the two are kept apart here and required
+        to disagree.
+        """
+        h = self._mod().hazard()
+        self.assertIn("naive", h)
+        self.assertGreater(h["naive"] / h["hazard"], 1.3,
+                           "the two estimators agree, which for gaps this long "
+                           "means one of them is not doing what it says")
+        self.assertLess(h["hazard"], h["naive"],
+                        "missed transitions can only make the true rate faster")
+        self.assertTrue(h["lo"] < h["hazard"] < h["hi"])
+
+    def test_within_block_pairing_beats_the_between_block_design(self):
+        mod = self._mod()
+        m = mod.measured()
+        p = mod.power(m, trials=3000)
+        a = p["between-block, 6 against 6"]["-2"]["moves"]
+        b = p["within-block, 24 pairs"]["-2"]["moves"]
+        self.assertGreater(b, a + 0.3,
+                           "the redesign is justified by this gap; if it closes, "
+                           "the plan is paying two and a half hours for nothing")
+
+
+class APlanCheckMustCatchACorruptedPlan(unittest.TestCase):
+    """The corruption count the changelog quotes, derived instead of asserted.
+
+    `analysis/load_run_power.py --check` compares the plan document against what
+    the script derives. A changelog entry said it "reads every published cell"
+    and that "ten of ten corruptions fail it", and nothing in the tree enumerated
+    those corruptions: a figure with no code path, which is the failing the same
+    branch was written to remove. The corruptions live here now, so the count is
+    a property of this file rather than of a sentence.
+
+    Each case corrupts a COPY of the plan in memory and requires `check_plan` to
+    name the thing it corrupted. The power table is not corrupted here, because
+    reproducing its figures needs forty thousand draws per design; the cases are
+    the deterministic ones, and the power table is covered by the claims job
+    running `--check` at the trial count the document was written at.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    @classmethod
+    def setUpClass(cls):
+        import importlib.util
+        import statistics as _st
+        spec = importlib.util.spec_from_file_location(
+            "load_run_power", cls.ROOT / "analysis" / "load_run_power.py")
+        cls.mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.mod)
+        m = cls.mod
+        cls.plan = m.PLAN.read_text(encoding="utf-8")
+        cls.m = m.measured()
+        cls.p_table = m.power(cls.m, None, 400)          # cheap: not corrupted below
+        cls.ms = {a: 1000.0 / _st.mean(m.pooled(a, i) for i in range(6))
+                  for a in m.ARMS}
+        cls.nz = m.normalisers()
+        cls.keys = (("per_token", "per generated token"),
+                    ("per_forward", "per model forward pass"),
+                    ("per_target_step", "per target-model step"))
+        cls.dl, cls.sg = m.t4_step()
+        cls.cc = m.corpus_correlation()
+        cls.wc = m.wall_clock()
+
+    def _missing(self, txt):
+        return self.mod.check_plan(txt, self.m, self.p_table, self.ms, self.nz,
+                                   self.keys, self.dl, self.sg, self.cc,
+                                   self.wc, {}, {})
+
+    def _cases(self):
+        p = self.plan
+        return {
+            "arm levels, every sign flipped":
+                p.replace("**+3.93 %**", "**\u22123.93 %**")
+                 .replace("**\u22120.74 %**", "**+0.74 %**"),
+            "arm levels, a row deleted":
+                p.replace("| `spec-dflash-n2` | 139.671 | 145.161 | **+3.93 %** |\n", ""),
+            "arm levels, a level edited":
+                p.replace("139.671", "149.671"),
+            "the measured gap":      p.replace("3.93 %", "3.50 %"),
+            "the residual":          p.replace("0.537 %", "0.760 %"),
+            "the block CV":          p.replace("2.145 %", "2.768 %"),
+            "the adjacent SD":       p.replace("0.760 %", "0.999 %"),
+            "a corpus correlation":  p.replace("+0.073", "+0.573"),
+            "another correlation":   p.replace("\u22120.083", "+0.983"),
+            "a chi-square":          p.replace("chi-square 89", "chi-square 12"),
+            "the wall clock":        p.replace("3.63", "9.63"),
+            "a normaliser row":      p.replace("| **\u22123.93 %** |", "| \u22121.64 % |"),
+            "the normaliser signs":  p.replace("| \u22122.00 % |", "| +2.00 % |"),
+        }
+
+    def test_the_plan_as_committed_raises_nothing_outside_the_power_table(self):
+        left = [x for x in self._missing(self.plan) if "within-block" not in x
+                and "between-block" not in x]
+        self.assertEqual(left, [], "the document disagrees with the script")
+
+    def test_every_corruption_is_caught_and_named(self):
+        base = set(self._missing(self.plan))
+        missed = []
+        for name, txt in self._cases().items():
+            new = set(self._missing(txt)) - base
+            if not new:
+                missed.append(name)
+        self.assertEqual(missed, [], f"{len(missed)} corruption(s) pass the check")
+
+    def test_the_corruption_set_is_not_empty_and_is_the_count_published(self):
+        n = len(self._cases())
+        self.assertGreaterEqual(n, 13, "the set shrank without the changelog moving")
+        doc = (self.ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+        self.assertIn(f"{n} of {n} corruptions", " ".join(doc.split()),
+                      "the changelog quotes a corruption count this file does not have")
+
+
+class AShardedJobMustCoverItsWholeList(unittest.TestCase):
+    """A matrix one leg short skips that fraction of the work and stays green.
+
+    `audit.yml` fans the two mutation suites out over runners, and both suites
+    decompose by `k % n == i`, which partitions a list exactly. That is
+    arithmetic and it is sound, but it rests on two things a hand-edited YAML
+    file can break silently: that the shard list really is 0 to n-1 with nothing
+    missing, and that n really is the divisor in the command the leg runs.
+
+    Drop `11` from the twelve-element list and a twelfth of the perturbations
+    never run; every remaining leg passes and the job is green. Nothing else in
+    this repository would notice, because the suites report what they ran and
+    not what nobody asked them to run.
+
+    Parsed by hand rather than with PyYAML, because the job this test runs in
+    installs nothing and a guard that needs a dependency the runner lacks is a
+    guard that does not run.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+    WORKFLOW = ROOT / ".github" / "workflows" / "audit.yml"
+
+    def _sharded_jobs(self):
+        """[(job name, the shard list, the divisor each leg is told to use)]."""
+        text = self.WORKFLOW.read_text(encoding="utf-8")
+        out, name, shards = [], None, None
+        for line in text.splitlines():
+            m = re.match(r"^    name: (.+)$", line)
+            if m:
+                if name is not None and shards is not None:
+                    out.append([name, shards, None])
+                name, shards = m.group(1).strip(), None
+                continue
+            m = re.match(r"^        shard: \[(.*)\]\s*$", line)
+            if m:
+                shards = [int(x) for x in m.group(1).split(",") if x.strip()]
+                continue
+            m = re.search(r"--shard=\$\{\{ matrix\.shard \}\}/(\d+)", line)
+            if m and shards is not None:
+                out.append([name, shards, int(m.group(1))])
+                shards = None
+        return out
+
+    def test_the_workflow_still_has_sharded_jobs_to_check(self):
+        jobs = self._sharded_jobs()
+        self.assertGreaterEqual(len(jobs), 2,
+                                "the fan-out is gone, so this guard is checking "
+                                "nothing; it was two jobs when written")
+
+    def test_every_shard_list_is_zero_to_n_minus_one_with_no_hole(self):
+        for name, shards, _div in self._sharded_jobs():
+            self.assertEqual(sorted(shards), list(range(len(shards))),
+                             f"{name}: the shard list is {shards}, which is not "
+                             f"0 to {len(shards) - 1}; the stride decomposition "
+                             f"would leave a hole")
+
+    def test_the_divisor_each_leg_uses_is_the_number_of_legs(self):
+        for name, shards, div in self._sharded_jobs():
+            self.assertIsNotNone(div, f"{name}: no --shard=i/n command found")
+            self.assertEqual(div, len(shards),
+                             f"{name}: {len(shards)} legs are told to divide the "
+                             f"list into {div}, so "
+                             f"{abs(div - len(shards))} slice(s) run nowhere")
+
+    def test_no_shard_count_exceeds_the_list_it_divides(self):
+        """An empty slice exits zero having proved nothing, so both suites
+        refuse it. This catches the same mistake before a run rather than
+        during one."""
+        import ast as _ast
+        sizes = {}
+        for f, key in (("tests/mutate.py", "code mutations"),
+                       ("tests/data_mutate.py", "data perturbations")):
+            src = (self.ROOT / f).read_text(encoding="utf-8")
+            for n in _ast.walk(_ast.parse(src)):
+                if (isinstance(n, _ast.Assign)
+                        and any(getattr(t, "id", "") == "MUTATIONS" for t in n.targets)):
+                    sizes[key] = len(n.value.elts)
+                    break
+        for name, shards, _div in self._sharded_jobs():
+            self.assertIn(name, sizes, f"{name}: no suite maps to this job")
+            self.assertLessEqual(len(shards), sizes[name],
+                                 f"{name}: {len(shards)} legs for "
+                                 f"{sizes[name]} items leaves a leg empty")
+
+
+class APowerCellMustNotDependOnWhatRanBeforeIt(unittest.TestCase):
+    """Seeding per cell, which is what lets the claims job run them in parallel.
+
+    The first version of `analysis/load_run_power.py` drew every design from one
+    `random.Random(SEED)` consumed in order, so each published figure depended
+    on how much randomness the cells before it had taken: deleting a discarded
+    `_flip` call, a line that changed no model at all, moved the 24-pair figure
+    by three thousandths.
+
+    Seeding from the cell's own identity removes that AND makes the cells
+    independent enough to run in any process. That second property is what the
+    claims job relies on, and it is worth an assertion rather than an
+    assumption, because a parallel run that quietly differed from a serial one
+    would publish whichever the runner happened to do.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    @classmethod
+    def setUpClass(cls):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "load_run_power", cls.ROOT / "analysis" / "load_run_power.py")
+        cls.mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.mod)
+        cls.m = cls.mod.measured()
+
+    def test_serial_and_parallel_give_the_same_table(self):
+        a = self.mod.power(self.m, None, 200, jobs=1)
+        b = self.mod.power(self.m, None, 200, jobs=4)
+        self.assertEqual(a, b, "the table depends on how it was scheduled")
+
+    def test_a_cell_does_not_move_when_another_design_is_dropped(self):
+        """The property the stream-order version did not have."""
+        full = self.mod.power(self.m, None, 200)
+        one = self.mod.power(self.m, None, 200,
+                             designs=("within-block, 24 pairs",))
+        self.assertEqual(full["within-block, 24 pairs"],
+                         one["within-block, 24 pairs"],
+                         "computing fewer designs changed a figure, so the "
+                         "cells are still sharing a stream")
+
+    def test_the_seed_separates_cells_that_differ_in_any_input(self):
+        seen = set()
+        for design in self.mod.DESIGNS:
+            for label in self.mod.TRUTHS:
+                for hz in (641.0, 455.0):
+                    for w in (0.0, 30.0):
+                        seen.add(self.mod._cell_seed(design, label, hz, w, 40000))
+        self.assertEqual(len(seen), len(self.mod.DESIGNS) * len(self.mod.TRUTHS) * 4,
+                         "two different cells share a seed, so they are not "
+                         "independent draws")
+
+    def test_asking_for_a_design_that_does_not_exist_is_refused(self):
+        with self.assertRaises(SystemExit):
+            self.mod.power(self.m, None, 10, designs=("within-block, 7 pairs",))
+
+
+class ATreatmentMustBeVerifiedNotRequested(unittest.TestCase):
+    """Core pinning, end to end against the stub server.
+
+    Nothing in this repository could pin a process to a processor until
+    2026-09-26, and on a hybrid bench host that left core placement an
+    uncontrolled variable of the right size to explain ERRATA A16: the slow cores
+    run about a quarter below the fast ones and no run records which kind
+    anything ran on.
+
+    The invariant that matters is not that the driver asked for a cpu set. It is
+    that the kernel applied it. `taskset` can be absent, a cgroup can narrow the
+    mask, and a run would look pinned in its manifest either way, so every
+    arm-run records `Cpus_allowed_list` read back from `/proc` and this compares
+    the two AS SETS. The kernel normalises "4,5" to "4-5", so a string
+    comparison passes on this data and fails on the next contiguous pair.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+    FAKE = ROOT / "tests" / "fake_llama_server.py"
+
+    @staticmethod
+    def _cpus(spec):
+        """"0,2" and "4-5" to sets, so a comparison is about cpus not spelling."""
+        out = set()
+        for part in (spec or "").split(","):
+            if not part:
+                continue
+            if "-" in part:
+                a, b = part.split("-", 1)
+                out |= set(range(int(a), int(b) + 1))
+            else:
+                out.add(int(part))
+        return out
+
+    def _run(self, out, extra=None, arms="baseline"):
+        env = dict(os.environ)
+        env.update({"LLAMA_SERVER_BIN": str(self.FAKE), "MODEL_TARGET": "/dev/null",
+                    "BENCH_ARMS": arms, "BENCH_REPEATS": "1",
+                    "BENCH_ORDER": "cyclic", "BENCH_OUT": str(out),
+                    "BENCH_PORT": free_port(), "BENCH_MAX_TOKENS": "8",
+                    "BENCH_FIT": "off"})
+        env.update(extra or {})
+        return subprocess.run([sys.executable, str(RUNNER)], env=env,
+                              capture_output=True, text=True, timeout=600)
+
+    @staticmethod
+    def _two_contiguous_pairs():
+        """Two disjoint runs of two adjacent processors this host actually has.
+
+        The sets were written down as `0,1,2` and `4,5,6`. A GitHub runner has
+        four processors, `taskset -c 4,5,6` fails there, and the arm pinned to the
+        alternate set crashed at startup: this test was red in CI while passing on
+        the thirty-two processor bench host and on an eight processor box, and
+        `bench/ci_faithful.sh` could not see it, because it reproduces the
+        workflow's STEPS and not the runner's hardware.
+
+        Pairs, and contiguous: the kernel spells a contiguous mask as a range, so
+        a request of "2,3" comes back as "2-3" and the readback is distinguishable
+        from an echo of the request. With non-contiguous sets the two are
+        identical strings and this test passed on a mutation that recorded
+        `arm_cpus(arm)` instead of reading `/proc`, which is the defect it is
+        named for. A single processor has no range form, so two is the floor.
+        """
+        cpus = sorted(os.sched_getaffinity(0))
+        runs = []
+        for c in cpus:
+            if runs and c == runs[-1][-1] + 1:
+                runs[-1].append(c)
+            else:
+                runs.append([c])
+        pairs = []
+        for r in runs:
+            for i in range(0, len(r) - 1, 2):
+                pairs.append(r[i:i + 2])
+                if len(pairs) == 2:
+                    return pairs
+        return pairs
+
+    def test_the_mask_the_kernel_applied_is_the_one_asked_for(self):
+        pairs = self._two_contiguous_pairs()
+        if len(pairs) < 2:
+            self.skipTest(
+                f"{len(sorted(os.sched_getaffinity(0)))} processor(s) available "
+                f"and this needs two disjoint adjacent pairs, so the kernel spells "
+                f"each mask as a range and the readback cannot be an echo of the "
+                f"request")
+        a, b = (",".join(str(c) for c in p) for p in pairs)
+        with tempfile.TemporaryDirectory() as d:
+            out = Path(d) / "pinned"
+            r = self._run(out, {"BENCH_PIN_SUFFIX": "-alt",
+                                "BENCH_PIN_CPUS": a,
+                                "BENCH_PIN_ALT_CPUS": b,
+                                "BENCH_THREADS": "2"},
+                          arms="baseline,baseline-alt")
+            self.assertEqual(r.returncode, 0, r.stdout[-1500:] + r.stderr[-1500:])
+            seen = {}
+            for f in sorted(out.glob("*__rep*.json")):
+                j = json.loads(f.read_text(encoding="utf-8"))
+                req, got = j.get("cpus_requested"), j.get("cpus_allowed")
+                self.assertIsNotNone(req, f"{f.name}: nothing was requested")
+                self.assertIsNotNone(got, f"{f.name}: the mask was never read back")
+                self.assertEqual(self._cpus(req), self._cpus(got),
+                                 f"{f.name}: asked for {req!r}, kernel says {got!r}")
+                # and it has to be the KERNEL's spelling, not the request's
+                self.assertIn("-", got,
+                              f"{f.name}: cpus_allowed is {got!r}, which is the "
+                              f"request verbatim rather than the kernel's own "
+                              f"range form; nothing read /proc")
+                self.assertNotIn("-", req)
+                seen[j["arm"]] = self._cpus(got)
+                self.assertEqual(j.get("threads"), 2)
+            self.assertEqual(seen["baseline"], set(pairs[0]))
+            self.assertEqual(seen["baseline-alt"], set(pairs[1]))
+            self.assertNotEqual(seen["baseline"], seen["baseline-alt"],
+                                "both conditions ran on the same processors, so "
+                                "the contrast is between nothing")
+            man = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(man["pin_arms"],
+                             {"baseline": a, "baseline-alt": b})
+            self.assertEqual(man["threads"], 2)
+
+    def test_without_the_knobs_nothing_changes(self):
+        with tempfile.TemporaryDirectory() as d:
+            out = Path(d) / "plain"
+            self.assertEqual(self._run(out).returncode, 0)
+            j = json.loads(next(out.glob("*__rep*.json")).read_text(encoding="utf-8"))
+            argv = " ".join(j["argv"])
+            self.assertNotIn("taskset", argv)
+            self.assertNotIn(" -t ", argv)
+            self.assertIsNone(j.get("cpus_requested"))
+            self.assertIsNone(j.get("threads"))
+
+    def test_a_configuration_that_would_confound_the_contrast_is_refused(self):
+        for why, extra in (
+                ("a cpu list that is not one", {"BENCH_PIN_CPUS": "0;rm",
+                                                "BENCH_THREADS": "2"}),
+                ("pinning with no thread count", {"BENCH_PIN_CPUS": "0,2"}),
+                ("an alt set with no suffix", {"BENCH_PIN_CPUS": "0,2",
+                                               "BENCH_PIN_ALT_CPUS": "1,3",
+                                               "BENCH_THREADS": "2"}),
+                ("a suffix that is not a name", {"BENCH_PIN_SUFFIX": "../x",
+                                                 "BENCH_PIN_CPUS": "0,2",
+                                                 "BENCH_THREADS": "2"}),
+                ("a thread count that is not one", {"BENCH_PIN_CPUS": "0,2",
+                                                    "BENCH_THREADS": "many"}),
+                # the hole: a suffix and one cpu set left the suffixed arms
+                # unpinned against a pinned twin, which is two changes
+                ("a suffix with only one cpu set", {"BENCH_PIN_SUFFIX": "-alt",
+                                                    "BENCH_PIN_CPUS": "0,2",
+                                                    "BENCH_THREADS": "2"})):
+            with tempfile.TemporaryDirectory() as d:
+                r = self._run(Path(d) / "x", extra)
+                self.assertNotEqual(r.returncode, 0, f"{why} was accepted")
+
+    def test_an_arm_stacking_both_suffixes_is_refused_not_half_resolved(self):
+        with tempfile.TemporaryDirectory() as d:
+            r = self._run(Path(d) / "x",
+                          {"BENCH_PIN_SUFFIX": "-alt", "BENCH_HARDCAP_SUFFIX": "-cap",
+                           "BENCH_PIN_CPUS": "0,2", "BENCH_PIN_ALT_CPUS": "1,3",
+                           "BENCH_THREADS": "2"},
+                          arms="baseline-cap-alt")
+            self.assertNotEqual(r.returncode, 0)
+            self.assertIn("unknown arm", r.stdout + r.stderr)
+
+    def test_both_suffixes_resolve_independently(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "rr_pin", self.ROOT / "bench" / "retest_runner.py")
+        mod = importlib.util.module_from_spec(spec)
+        env = dict(os.environ)
+        try:
+            os.environ.update({"BENCH_PIN_SUFFIX": "-alt",
+                               "BENCH_HARDCAP_SUFFIX": "-cap",
+                               "BENCH_PIN_CPUS": "0", "BENCH_PIN_ALT_CPUS": "1",
+                               "BENCH_THREADS": "1",
+                               "MODEL_TARGET": "/dev/null"})
+            spec.loader.exec_module(mod)
+            self.assertEqual(mod.arm_base("baseline"), "baseline")
+            self.assertEqual(mod.arm_base("baseline-alt"), "baseline")
+            self.assertEqual(mod.arm_base("baseline-cap"), "baseline")
+            self.assertTrue(mod.arm_is_alt_pin("baseline-alt"))
+            self.assertFalse(mod.arm_is_alt_pin("baseline"))
+            # Stacking the two is NOT supported: both resolvers require what is
+            # left after stripping to be a REAL arm, and `baseline-cap` is not.
+            # It fails closed rather than resolving half way, which is what a
+            # measurement harness should do with a treatment identity it cannot
+            # parse; the arm validation refuses the name outright.
+            self.assertFalse(mod.arm_is_alt_pin("baseline-cap-alt"))
+            self.assertFalse(mod.arm_is_hardcap("baseline-cap-alt"))
+            self.assertEqual(mod.arm_base("baseline-cap-alt"), "baseline-cap-alt")
+            self.assertNotIn("baseline-cap-alt", mod.ARMS)
+        finally:
+            os.environ.clear()
+            os.environ.update(env)
+
+
+class EveryRoundWithItsOwnDataMustBeWalked(unittest.TestCase):
+    """A round that keeps its data outside the v4 archive is easy to leave unchecked.
+
+    `analysis/check_data_integrity.py` defaults to `v4_audit_2026_08_25/data` and
+    takes a root argument. Run Y's data went to `v5_pinning_2026_09_26/data`
+    because the frozen claim checker pins the v4 directory count, and for a
+    commit or two nothing walked it at all: the integrity job ran one invocation
+    and the new round was not it.
+
+    So this finds every top-level round directory that holds run data and
+    requires `audit.yml` to invoke the checker on each. A round added without one
+    fails here rather than sitting unwalked.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    def _rounds_with_data(self):
+        out = []
+        for d in sorted(self.ROOT.iterdir()):
+            if not d.is_dir() or d.name.startswith(".") or d.name == "results":
+                continue
+            data = d / "data"
+            if not data.is_dir():
+                continue
+            # a round's data directory holds run directories with arm-runs in them
+            if any(any(x.glob("*__rep*.json")) for x in data.iterdir() if x.is_dir()):
+                out.append(f"{d.name}/data")
+        return out
+
+    def test_there_is_more_than_one_round_to_check(self):
+        self.assertGreaterEqual(len(self._rounds_with_data()), 2,
+                                "only one round holds run data, so this guard is "
+                                "checking nothing; it was two when written")
+
+    def _invocations(self):
+        """The argument of each invocation, parsed as whole lines.
+
+        `assertIn("run: python analysis/check_data_integrity.py", wf)` stood for
+        the no-argument invocation, and the invocation that passes
+        `v5_pinning_2026_09_26/data` has that string as a PREFIX. Deleting the
+        one that walks the v4 archive left this test green with 3005 arm-runs
+        walked by nothing. A substring is not a line.
+        """
+        wf = (self.ROOT / ".github" / "workflows" / "audit.yml").read_text(
+            encoding="utf-8")
+        head = "run: python analysis/check_data_integrity.py"
+        out = set()
+        for line in wf.splitlines():
+            t = line.strip()
+            if t == head or t.startswith(head + " "):
+                out.add(t[len(head):].strip())
+        return out
+
+    def test_the_integrity_job_walks_every_one(self):
+        got = self._invocations()
+        self.assertTrue(got, "no invocation parsed at all; this proves nothing")
+        default = "v4_audit_2026_08_25/data"
+        for root in self._rounds_with_data():
+            # the default root is the invocation that passes no argument
+            want = "" if root == default else root
+            self.assertIn(
+                want, got,
+                f"{root} holds run data and no job walks it; the job invokes "
+                f"the checker with {sorted(got)!r}")
+
+
+class RunYsTableMustBeDerivedFromItsData(unittest.TestCase):
+    """A published table with nothing deriving it is how three columns went wrong.
+
+    Run Y's result table was computed by hand and published in two documents, and
+    every inferential column in it was the mean LOG ratio printed as a
+    percentage: a mean log ratio of -0.15573 reached both documents as "-15.57 %"
+    when the change it describes is -14.42 %. The fast and slow columns were
+    right, which is why it read as plausible.
+
+    `analysis/verify_claims.py` holds every other published number in this
+    repository and is one of the six files the release binding compares against
+    the `v4.2` tag, so it cannot grow an assertion for a round published after
+    that tag. The exclusion keeping run Y's README out of the census said its
+    tables were guarded by `check_data_integrity.py` instead; that walks
+    directory structure and reads no published value.
+
+    So: the checker exists, a job invokes it, it covers every document carrying
+    the table, the derivation is exercised here and not only in CI, and the
+    specific defect is named so it cannot come back quietly.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    def _mod(self):
+        sys.path.insert(0, str(self.ROOT / "analysis"))
+        import rederive_run_y
+        return rederive_run_y
+
+    def test_a_job_invokes_it(self):
+        """`load_run_power.py --check` was written, passed, and nothing ran it."""
+        wf = (self.ROOT / ".github" / "workflows" / "audit.yml").read_text(
+            encoding="utf-8")
+        want = "run: python analysis/rederive_run_y.py"
+        # whole lines: a substring of a longer invocation would stand in for this
+        # one, which is how the data-integrity guard came to accept the deletion
+        # of the invocation that walks the v4 archive
+        self.assertIn(want, [ln.strip() for ln in wf.splitlines()],
+                      "no job runs the derivation, so the table it checks is "
+                      "guarded by nothing again")
+
+    def test_it_covers_every_document_that_carries_the_table(self):
+        """Derived from the tree. A17's four-design table lived in two documents
+        and only one copy was wired to an assertion."""
+        rry = self._mod()
+        carriers = []
+        for p in sorted(self.ROOT.rglob("*.md")):
+            if ".git" in p.parts:
+                continue
+            text = p.read_text(encoding="utf-8", errors="replace")
+            if any(ln.startswith("| arm |") and "one-sided upper limit" in ln
+                   for ln in text.splitlines()):
+                carriers.append(str(p.relative_to(self.ROOT)))
+        self.assertTrue(carriers, "no document carries the table; this proves nothing")
+        self.assertEqual(sorted(carriers), sorted(rry.DOCS),
+                         "a document carries run Y's result table and the "
+                         "derivation does not check it")
+
+    def test_the_documents_match_the_data(self):
+        """Table cells, the four telemetry figures and the token totals.
+
+        All three go through the one function the claims job calls, with the same
+        arguments, so this covers what CI covers rather than a subset of it.
+        """
+        rry = self._mod()
+        rows, tel, tot = rry.derive(), rry.telemetry(), rry.token_totals()
+        pro = rry.derived_prose()
+        self.assertEqual(sorted(tel), ["fast", "slow"])
+        self.assertEqual(len(tel["fast"]), 4, "four telemetry figures are published")
+        self.assertTrue(pro, "no prose figure is derived; this checks less than it says")
+        bad = []
+        for doc in rry.DOCS:
+            # the prose figures belong to the round's own README, not to the plan
+            bad += rry.check_doc(doc, rows, tel, tot,
+                                 pro if doc == rry.DOCS[0] else None)
+        # the plan's own power table: the bound column against the measured
+        # within-invocation spread, and the hours it predicted for the design it
+        # chose against what the invocation actually spanned
+        pp = rry.plan_power()
+        self.assertEqual(sorted(pp["bounds"]), [6, 12, 18])
+        bad += rry.check_plan_power(pp)
+        self.assertEqual(bad, [], "; ".join(bad))
+
+    def test_the_log_ratio_is_not_what_any_document_carries(self):
+        """The defect itself, named: `−15.57 %` IS the mean log ratio.
+
+        It differs from the change by more than a rounding step, so a document
+        carrying the log value is carrying the wrong number and not a variant
+        spelling of the right one.
+        """
+        rry = self._mod()
+        for r in rry.derive():
+            log_pct = r["mean_log_ratio"] * 100
+            self.assertGreater(abs(log_pct - r["change_pct"]), 0.5,
+                               "the two differ by less than a rounding step "
+                               "here, so this test cannot tell them apart")
+            wrong = rry._pct(log_pct)
+            for doc in rry.DOCS:
+                self.assertNotIn(
+                    wrong, (self.ROOT / doc).read_text(encoding="utf-8"),
+                    f"{doc} carries {wrong}, which is {r['arm']}'s mean log "
+                    f"ratio and not its change of {rry._pct(r['change_pct'])}")
+
+
+class TheLocalGateMustRunEveryStepTheWorkflowDoes(unittest.TestCase):
+    """`bench/ci_faithful.sh` is what decides whether a commit gets pushed.
+
+    It lived in a home directory, where nothing here could see it, which is the
+    same reason `bench/run_cell_probe.sh` was moved into this repository. Two
+    copies of it existed. The one at the path that gets invoked was from
+    2026-09-01 and ran ONE of the claims job's steps; a newer copy in a scratchpad
+    had the other three and the corrected job list, and was never promoted. So a
+    run of the gate reported "4 of audit.yml's 7 jobs reproduced green" while
+    reproducing six, and counted `claims` as a job it had reproduced while running
+    a quarter of it. It also missed the second `check_data_integrity` invocation
+    and the step that aggregates every attested run under `--strict`.
+
+    So: every repository script a job's `run:` steps name has to be reachable from
+    the gate, one level of indirection allowed because the gate runs launchers
+    that run the rest. A job that is not reproduced has to be named here with the
+    reason, and the gate's own `covered` list has to be exactly the jobs it does
+    reproduce, because that list is what the closing sentence counts.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+    GATE = "bench/ci_faithful.sh"
+    # the charts job pins python 3.13 where every other job pins 3.12, so it
+    # cannot run in the same interpreter this gate asserts it is using
+    NOT_REPRODUCED = {"charts": "pins python 3.13, so it runs separately"}
+    PATH_RE = r"\b((?:analysis|tests|bench)/[A-Za-z0-9_./-]+\.(?:py|sh))\b"
+
+    def _jobs(self):
+        """Each job's display name and the repository paths its `run:` steps name.
+
+        Only `run:` values, never comments: the comments in that workflow name
+        nine more scripts than the steps do, and counting those made four jobs
+        look uncovered that are covered.
+        """
+        wf = (self.ROOT / ".github" / "workflows" / "audit.yml").read_text(
+            encoding="utf-8").splitlines()
+        i = next(k for k, l in enumerate(wf) if l.rstrip() == "jobs:")
+        job, out, block = None, {}, None
+        for l in wf[i + 1:]:
+            st = l.strip()
+            if (l.startswith("  ") and not l.startswith("   ")
+                    and st.endswith(":") and ":" not in st[:-1]):
+                job, block = st[:-1], None
+                out[job] = {"name": None, "paths": set()}
+                continue
+            if job is None:
+                continue
+            if (st.startswith("name:") and l.startswith("    ")
+                    and out[job]["name"] is None):
+                out[job]["name"] = st.split("name:", 1)[1].strip().strip("'\"")
+            if block is not None:
+                if st and not l.startswith(block):
+                    block = None
+                elif not st.startswith("#"):
+                    out[job]["paths"] |= set(re.findall(self.PATH_RE, l))
+                    continue
+            m = re.match(r"^(\s+)run:\s*(.*)$", l)
+            if m:
+                if m.group(2).strip() in ("|", ">", "|-", ">-"):
+                    block = m.group(1) + "  "
+                else:
+                    out[job]["paths"] |= set(re.findall(self.PATH_RE, m.group(2)))
+        return out
+
+    def _reachable(self):
+        gate = (self.ROOT / self.GATE).read_text(encoding="utf-8")
+        reach = set(re.findall(self.PATH_RE, gate))
+        for rel in sorted(reach):
+            p = self.ROOT / rel
+            if p.suffix == ".sh" and p.is_file():
+                reach |= set(re.findall(self.PATH_RE,
+                                        p.read_text(encoding="utf-8")))
+        return reach
+
+    def test_the_gate_is_in_this_repository(self):
+        self.assertTrue((self.ROOT / self.GATE).is_file(),
+                        f"{self.GATE} is missing, so the gate is a file in a home "
+                        f"directory again and nothing here checks it")
+
+    def test_it_runs_every_script_every_reproduced_job_names(self):
+        jobs, reach = self._jobs(), self._reachable()
+        self.assertGreaterEqual(len(jobs), 7, "the workflow's jobs did not parse")
+        bad = []
+        for _job, d in jobs.items():
+            # keyed by the DISPLAY name, which is what the gate's own list uses
+            if d["name"] in self.NOT_REPRODUCED:
+                continue
+            missing = sorted(x for x in d["paths"] if x not in reach)
+            if missing:
+                bad.append(f"{d['name']}: {missing}")
+        self.assertEqual(bad, [],
+                         f"the gate does not run what these jobs run, so a green "
+                         f"gate says less than it reads: {bad}")
+
+    def test_a_job_it_cannot_run_is_named_with_a_reason(self):
+        jobs = self._jobs()
+        by_name = {d["name"]: d for d in jobs.values()}
+        reach = self._reachable()
+        for name, why in self.NOT_REPRODUCED.items():
+            self.assertIn(name, by_name, f"{name} is excused and no longer exists")
+            self.assertTrue(why.strip(), f"{name} is excused with no reason")
+            # and the excuse has to still be needed: a job listed here whose
+            # scripts the gate does run is an exemption standing after the fact
+            self.assertTrue(
+                [x for x in by_name[name]["paths"] if x not in reach],
+                f"{name} is excused and the gate runs all of its scripts")
+
+    def test_it_clones_the_repository_it_is_in(self):
+        """A written-down path would clone some other checkout than this one.
+
+        It read `$HOME/dev/qwen3.6-speculative-decoding-rtx3090` while it lived in
+        a home directory, which was right there and wrong the moment the file
+        moved: a gate run from one checkout would have attested another, which is
+        the wrong-copy defect that put the file here arriving by the other door.
+        """
+        gate = (self.ROOT / self.GATE).read_text(encoding="utf-8")
+        # code, not comments: the comment above that line names the old spelling
+        # on purpose, and a test that forbids naming a defect forbids explaining
+        # it
+        code = [l for l in gate.splitlines() if not l.lstrip().startswith("#")]
+        named = [l.strip() for l in code if "$HOME/dev/" in l]
+        self.assertEqual(named, [],
+                         "the gate names a home-directory checkout in code, so "
+                         "running it from one repository can attest another")
+        self.assertIn('SRC=$(cd "$(dirname "$0")/.." && pwd)', gate,
+                      "SRC is not derived from the script's own location")
+
+    def test_the_unit_step_runs_on_a_runners_processor_count(self):
+        """The one difference this gate used to hope about rather than eliminate.
+
+        A test that asked for processors four, five and six passed on the
+        thirty-two processor bench host and on an eight processor box, and failed
+        on a runner that has four: `taskset` had nothing to pin to. `taskset`
+        restricts the affinity, which is what `os.sched_getaffinity` reads, so
+        running the unit job under a runner's count makes a test that derives its
+        processors derive what a runner would give it.
+        """
+        gate = (self.ROOT / self.GATE).read_text(encoding="utf-8")
+        self.assertIn("RUNNER_CPUS=${CI_RUNNER_CPUS:-0-3}", gate,
+                      "the runner's processor count is not a named default")
+        self.assertIn('PIN=(taskset -c "$RUNNER_CPUS")', gate,
+                      "nothing restricts the affinity the unit job runs under")
+        pinned = [l for l in gate.splitlines()
+                  if "unittest discover" in l and '"${PIN[@]}"' in l]
+        self.assertEqual(
+            len(pinned), 1,
+            "the unit step does not run under the restricted affinity, so a test "
+            "that reads the processor count is still unchecked here")
+
+    def test_its_own_coverage_list_is_what_it_covers(self):
+        """The closing sentence counts that list, so it is a published number."""
+        gate = (self.ROOT / self.GATE).read_text(encoding="utf-8")
+        m = re.search(r'covered="([^"]*)"', gate)
+        self.assertIsNotNone(m, "the gate has no `covered` list to check")
+        said = sorted(x for x in m.group(1).split("\n") if x.strip())
+        jobs, reach = self._jobs(), self._reachable()
+        real = sorted(d["name"] for d in jobs.values()
+                      if d["name"] not in self.NOT_REPRODUCED
+                      and not [x for x in d["paths"] if x not in reach])
+        self.assertEqual(said, real,
+                         "the gate says it reproduces one set of jobs and runs "
+                         "another")
+
+
+class ThePushGuardMustBeInTheRepositoryToo(unittest.TestCase):
+    """`bench/ci_faithful.sh` says a pre-push hook consumes the token it writes.
+
+    That hook was a file in `.git/hooks/`, which no clone carries and nothing here
+    could see, so two comments in the gate named a guard the tree did not hold.
+    It is the third piece of this repository's own tooling found living where
+    nothing checks it: the probe launcher, then the CI reproduction, then this.
+
+    The token is the whole mechanism, and it is a filename. If the gate wrote a
+    shortened sha and the hook read a full one, or the other way round, every push
+    would be refused or every push would be allowed, and which of the two would
+    depend on a substring. So the two sides are compared here rather than trusted
+    to stay in step.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+    HOOK = "bench/hooks/pre-push.sh"
+    GATE = "bench/ci_faithful.sh"
+
+    def _hook(self):
+        return (self.ROOT / self.HOOK).read_text(encoding="utf-8")
+
+    def _gate(self):
+        return (self.ROOT / self.GATE).read_text(encoding="utf-8")
+
+    def test_the_hook_is_tracked_and_shellcheck_reaches_it(self):
+        p = self.ROOT / self.HOOK
+        self.assertTrue(p.is_file(), f"{self.HOOK} is missing")
+        # `audit.yml`'s shellcheck step globs `-name '*.sh'`. A hook named
+        # `pre-push` would sit outside that glob, which is the same narrow glob
+        # the step was widened to remove.
+        self.assertTrue(self.HOOK.endswith(".sh"),
+                        "a hook without the suffix is outside the shellcheck glob")
+        out = subprocess.run(["git", "ls-files", "--error-unmatch", self.HOOK],
+                             cwd=self.ROOT, capture_output=True, text=True)
+        self.assertEqual(out.returncode, 0,
+                         f"{self.HOOK} is not tracked, so a clone does not carry it")
+
+    def test_the_two_sides_agree_on_the_token(self):
+        """The gate writes it and the hook reads it, by the same name."""
+        hook, gate = self._hook(), self._gate()
+        self.assertIn("TOKENS=$HOME/.ci_repro_green", hook)
+        self.assertIn('"$HOME/.ci_repro_green/$SHA"', gate,
+                      "the gate does not write the token at the full sha")
+        self.assertIn('"$TOKENS/$local_sha"', hook,
+                      "the hook does not read the token at the full sha")
+        # and neither path truncates: `${SHA:0:12}` in a PATH would make the two
+        # disagree, and it appears in the gate only in the line it prints
+        for line in gate.splitlines():
+            if "ci_repro_green" in line and ":0:12" in line:
+                self.assertIn("echo", line,
+                              f"a shortened sha in a token path: {line.strip()!r}")
+
+    def test_it_names_the_gate_this_repository_has(self):
+        hook = self._hook()
+        self.assertIn("bench/ci_faithful.sh", hook)
+        self.assertNotIn("scratchpad/ci_faithful.sh", hook,
+                         "the hook sends a reader to the copy that went stale")
+
+    def test_it_refuses_a_token_that_says_nothing(self):
+        """An empty file satisfies `-f`, and that is what a failed copy leaves."""
+        hook = self._hook()
+        self.assertIn('[ ! -s "$TOKENS/$local_sha" ]', hook)
+        self.assertIn('grep -q "^python 3"', hook,
+                      "the hook accepts a token with no reproduction recorded in it")
+
+    def test_the_gate_says_where_the_hook_is(self):
+        """The comment that named a guard the tree did not hold now names a path."""
+        self.assertIn("bench/hooks/pre-push.sh", self._gate(),
+                      "the gate mentions a pre-push hook without saying where it is")
+
+
+class PlanZsPremisesMustBeWhatTheDataSays(unittest.TestCase):
+    """A pre-registration that quotes committed data is quoting this tree.
+
+    Plan Z's case for spending little on the memory hypothesis rests on three
+    readings of data already here: the recorded GPU state on both sides of A16's
+    step, the fact that run T4's trace cannot be attributed to an arm-run, and a
+    design table whose hours come from the span run Y actually took. Run Y's own
+    result table was computed by hand and three of its columns were the mean log
+    ratio printed as a percentage, so this document is derived from the start.
+
+    The premise that carries the argument is the SIGN: the faster of A16's two
+    levels ends hotter, and a thermal explanation predicts hotter and slower. If
+    that ever stopped being true the document's central sentence would be false,
+    so it is asserted here rather than read once.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+    DOC = "v4_audit_2026_08_25/PROSPECTIVE_PLAN_Z_MEMORY_STATE.md"
+
+    def _mod(self):
+        sys.path.insert(0, str(self.ROOT / "analysis"))
+        import plan_z_power
+        return plan_z_power
+
+    def test_a_job_invokes_it(self):
+        wf = (self.ROOT / ".github" / "workflows" / "audit.yml").read_text(
+            encoding="utf-8")
+        self.assertIn("run: python analysis/plan_z_power.py",
+                      [l.strip() for l in wf.splitlines()],
+                      "no job derives the plan's tables, so they are guarded by "
+                      "nothing, which is how run Y's went out wrong")
+
+    def test_the_document_matches_the_data(self):
+        self.assertEqual(self._mod().check_doc(), [])
+
+    def test_the_faster_level_really_is_the_hotter_one(self):
+        """The document's central premise, and it is a sign not a magnitude."""
+        s = self._mod().step_thermal_state()
+        self.assertGreater(
+            s["gap_pct"], 0.0,
+            "the level the document calls faster is not the faster one")
+        self.assertGreater(
+            s["after_delta_c"], 0.0,
+            "the faster level no longer ends hotter, so the document's reason for "
+            "doubting a thermal explanation has gone and the sentence has to go "
+            "with it")
+
+    def test_the_trace_really_cannot_be_attributed(self):
+        """The plan's first prerequisite exists because of this.
+
+        If the reconstruction ever lined up, the prerequisite would be met and the
+        plan would be asking for something it already has.
+        """
+        t = self._mod().trace_is_not_attributable()
+        self.assertEqual(len(t["arms"]), 3, "T4 no longer has three arms")
+        self.assertEqual(
+            sorted(t["arms_whose_footprint_is_wrong"]), sorted(t["arms"]),
+            "some arm's windows now hold its own VRAM footprint, so the alignment "
+            "is better than the document says it is")
+
+    def test_the_hours_are_measured_and_not_guessed(self):
+        """Run Y ran this block shape, so the per-block cost is a measurement."""
+        rows, inp = self._mod().design()
+        self.assertEqual(inp["blocks_measured"], 12)
+        self.assertGreater(inp["per_block_hours"], 0.0)
+        for r in rows:
+            self.assertAlmostEqual(r["hours"],
+                                   inp["per_block_hours"] * r["blocks"], places=9)
+
+
+class TheInstrumentsBehindA16sAddendumMustBeInTheTree(unittest.TestCase):
+    """A16's addendum publishes readings, and for a day their instruments were not here.
+
+    The addendum says the memory sensor reads forty-two degrees idle and rises to
+    ninety under a load holding 828 GB/s. Those readings were taken with two files
+    in `/tmp` on one host, which went offline the next day. A published measurement
+    whose instrument is not in the tree cannot be reproduced by anyone, and it is
+    the fourth time this repository has found its own tooling living where nothing
+    checks it: the probe launcher, the CI reproduction, the push guard, and these.
+
+    The bandwidth load cannot be compiled where this test runs and the card it
+    needs is one host. So what is checked is the thing that can be: the KERNEL and
+    the geometry are held to what produced the published reading, by digest, so an
+    edit to the load fails here rather than silently invalidating the provenance
+    the file claims. The temperature reader's arithmetic is pure and is checked
+    outright.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+    LOAD = "bench/vram_bandwidth.cu"
+    READER = "bench/vram_temp.py"
+    # the `stream` kernel that produced the 828 GB/s the addendum publishes,
+    # whitespace-normalised and digested. Changing the load means re-measuring
+    # before the addendum may keep that figure.
+    KERNEL_SHA256 = ("3fea4743530949c1055c75564b5de3e9"
+                     "3add50f60845fea1a4f54ef4a42e2f3f")
+
+    def _src(self, rel):
+        return (self.ROOT / rel).read_text(encoding="utf-8")
+
+    def test_both_are_tracked(self):
+        for rel in (self.LOAD, self.READER):
+            with self.subTest(file=rel):
+                r = subprocess.run(["git", "ls-files", "--error-unmatch", rel],
+                                   cwd=self.ROOT, capture_output=True, text=True)
+                self.assertEqual(r.returncode, 0,
+                                 f"{rel} is not tracked, so no clone carries the "
+                                 f"instrument A16's addendum quotes")
+
+    def test_the_load_is_the_one_that_was_measured(self):
+        import hashlib
+        m = re.search(r"__global__ void stream\(.*?\n\}\n", self._src(self.LOAD),
+                      re.S)
+        self.assertIsNotNone(m, "the stream kernel is gone from the load")
+        body = " ".join(m.group(0).split())
+        self.assertEqual(
+            hashlib.sha256(body.encode()).hexdigest(), self.KERNEL_SHA256,
+            "the kernel is not the one that produced the 828 GB/s ERRATA A16's "
+            "addendum publishes. Re-measure and update both the figure and this "
+            "digest, or put the kernel back")
+
+    def test_the_geometry_is_the_one_that_was_measured(self):
+        """Four gibibyte buffers and 256 threads at full occupancy per SM.
+
+        A bandwidth figure is a function of the buffer size and the launch
+        geometry as much as of the kernel, so holding the kernel alone would leave
+        the provenance half checked.
+        """
+        src = self._src(self.LOAD)
+        self.assertIn("gib = 4.0", src, "the default buffer is no longer four GiB")
+        self.assertIn("threads = 256", src)
+        self.assertIn("per_sm * p.multiProcessorCount", src)
+
+    def test_it_says_it_has_not_been_built(self):
+        """Until it is, nothing may be claimed from it, and the file has to say so."""
+        src = self._src(self.LOAD)
+        self.assertIn("has NOT been compiled", src,
+                      "the load no longer records that it is unbuilt, so a reader "
+                      "cannot tell a measured instrument from an unrun one")
+
+    def test_the_temperature_arithmetic(self):
+        sys.path.insert(0, str(self.ROOT / "bench"))
+        import vram_temp
+        # the mask matters: the upper twenty bits are not temperature
+        self.assertEqual(vram_temp.celsius(1344), 42.0)
+        self.assertEqual(vram_temp.celsius(0xFFFFF000 | 1344), 42.0)
+        self.assertEqual(vram_temp.celsius(2880), 90.0)
+        self.assertEqual(vram_temp.celsius(0), 0.0)
+        # and the divisor: thirty-seconds of a degree, not degrees
+        self.assertEqual(vram_temp.celsius(1), 1 / 32.0)
+
+    def test_the_reader_refuses_a_device_it_was_not_written_for(self):
+        """The offset is per architecture, so the wrong card returns a number that
+        means something else, and a number that means something else is worse than
+        a refusal."""
+        sys.path.insert(0, str(self.ROOT / "bench"))
+        import vram_temp
+        self.assertEqual(sorted(vram_temp.OFFSETS), ["0x2204"],
+                         "a device id was added; was its offset verified on that "
+                         "architecture, or assumed from this one?")
+        with tempfile.TemporaryDirectory() as d:
+            # a fake sysfs for a device that is not the one this knows
+            dev = Path(d) / "0000:99:00.0"
+            dev.mkdir()
+            (dev / "vendor").write_text("0x10de\n")
+            (dev / "device").write_text("0x2206\n")
+            saved = vram_temp.pathlib.Path
+            try:
+                vram_temp.pathlib = type(vram_temp.pathlib)("pathlib")
+                import pathlib as _pl
+                vram_temp.pathlib = _pl
+                real = vram_temp._sysfs
+                vram_temp._sysfs = lambda pci: Path(d) / pci
+                with self.assertRaises(SystemExit) as cm:
+                    vram_temp.offset_for("0000:99:00.0")
+                self.assertIn("0x2206", str(cm.exception))
+                # and `reading` turns that refusal into a recorded reason, which is
+                # the shape bench/retest_runner.py uses for nvidia-smi
+                self.assertTrue(
+                    str(vram_temp.reading("0000:99:00.0")).startswith("unavailable:"))
+            finally:
+                vram_temp._sysfs = real
+                vram_temp.pathlib = saved if False else _pl
+
+    def test_the_reader_never_opens_a_writable_mapping(self):
+        """`/dev/mem` maps all of physical memory and read-write maps can write to
+        the card. Neither appears, and a test says so rather than a comment."""
+        src = self._src(self.READER)
+        self.assertNotIn("/dev/mem", src.replace("`/dev/mem`", ""),
+                         "the reader maps /dev/mem rather than the card's own BAR")
+        self.assertIn("prot=mmap.PROT_READ", src)
+        self.assertIn('open(_sysfs(pci) / "resource0", "rb")', src)
+        for bad in ("PROT_WRITE", "ACCESS_WRITE", '"r+b"', '"wb"'):
+            self.assertNotIn(bad, src, f"the reader can write to the card: {bad}")
