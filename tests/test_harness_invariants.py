@@ -7123,18 +7123,53 @@ class ATreatmentMustBeVerifiedNotRequested(unittest.TestCase):
         return subprocess.run([sys.executable, str(RUNNER)], env=env,
                               capture_output=True, text=True, timeout=600)
 
+    @staticmethod
+    def _two_contiguous_pairs():
+        """Two disjoint runs of two adjacent processors this host actually has.
+
+        The sets were written down as `0,1,2` and `4,5,6`. A GitHub runner has
+        four processors, `taskset -c 4,5,6` fails there, and the arm pinned to the
+        alternate set crashed at startup: this test was red in CI while passing on
+        the thirty-two processor bench host and on an eight processor box, and
+        `bench/ci_faithful.sh` could not see it, because it reproduces the
+        workflow's STEPS and not the runner's hardware.
+
+        Pairs, and contiguous: the kernel spells a contiguous mask as a range, so
+        a request of "2,3" comes back as "2-3" and the readback is distinguishable
+        from an echo of the request. With non-contiguous sets the two are
+        identical strings and this test passed on a mutation that recorded
+        `arm_cpus(arm)` instead of reading `/proc`, which is the defect it is
+        named for. A single processor has no range form, so two is the floor.
+        """
+        cpus = sorted(os.sched_getaffinity(0))
+        runs = []
+        for c in cpus:
+            if runs and c == runs[-1][-1] + 1:
+                runs[-1].append(c)
+            else:
+                runs.append([c])
+        pairs = []
+        for r in runs:
+            for i in range(0, len(r) - 1, 2):
+                pairs.append(r[i:i + 2])
+                if len(pairs) == 2:
+                    return pairs
+        return pairs
+
     def test_the_mask_the_kernel_applied_is_the_one_asked_for(self):
+        pairs = self._two_contiguous_pairs()
+        if len(pairs) < 2:
+            self.skipTest(
+                f"{len(sorted(os.sched_getaffinity(0)))} processor(s) available "
+                f"and this needs two disjoint adjacent pairs, so the kernel spells "
+                f"each mask as a range and the readback cannot be an echo of the "
+                f"request")
+        a, b = (",".join(str(c) for c in p) for p in pairs)
         with tempfile.TemporaryDirectory() as d:
             out = Path(d) / "pinned"
-            # CONTIGUOUS sets on purpose. The kernel spells a contiguous mask as
-            # a range, so "0,1,2" comes back as "0-2" and the readback is
-            # distinguishable from an echo of the request. With non-contiguous
-            # sets the two are identical strings and this test passed on a
-            # mutation that recorded `arm_cpus(arm)` instead of reading /proc,
-            # which is the whole defect it is named for.
             r = self._run(out, {"BENCH_PIN_SUFFIX": "-alt",
-                                "BENCH_PIN_CPUS": "0,1,2",
-                                "BENCH_PIN_ALT_CPUS": "4,5,6",
+                                "BENCH_PIN_CPUS": a,
+                                "BENCH_PIN_ALT_CPUS": b,
                                 "BENCH_THREADS": "2"},
                           arms="baseline,baseline-alt")
             self.assertEqual(r.returncode, 0, r.stdout[-1500:] + r.stderr[-1500:])
@@ -7154,14 +7189,14 @@ class ATreatmentMustBeVerifiedNotRequested(unittest.TestCase):
                 self.assertNotIn("-", req)
                 seen[j["arm"]] = self._cpus(got)
                 self.assertEqual(j.get("threads"), 2)
-            self.assertEqual(seen["baseline"], {0, 1, 2})
-            self.assertEqual(seen["baseline-alt"], {4, 5, 6})
+            self.assertEqual(seen["baseline"], set(pairs[0]))
+            self.assertEqual(seen["baseline-alt"], set(pairs[1]))
             self.assertNotEqual(seen["baseline"], seen["baseline-alt"],
                                 "both conditions ran on the same processors, so "
                                 "the contrast is between nothing")
             man = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
             self.assertEqual(man["pin_arms"],
-                             {"baseline": "0,1,2", "baseline-alt": "4,5,6"})
+                             {"baseline": a, "baseline-alt": b})
             self.assertEqual(man["threads"], 2)
 
     def test_without_the_knobs_nothing_changes(self):
@@ -7548,3 +7583,75 @@ class TheLocalGateMustRunEveryStepTheWorkflowDoes(unittest.TestCase):
         self.assertEqual(said, real,
                          "the gate says it reproduces one set of jobs and runs "
                          "another")
+
+
+class ThePushGuardMustBeInTheRepositoryToo(unittest.TestCase):
+    """`bench/ci_faithful.sh` says a pre-push hook consumes the token it writes.
+
+    That hook was a file in `.git/hooks/`, which no clone carries and nothing here
+    could see, so two comments in the gate named a guard the tree did not hold.
+    It is the third piece of this repository's own tooling found living where
+    nothing checks it: the probe launcher, then the CI reproduction, then this.
+
+    The token is the whole mechanism, and it is a filename. If the gate wrote a
+    shortened sha and the hook read a full one, or the other way round, every push
+    would be refused or every push would be allowed, and which of the two would
+    depend on a substring. So the two sides are compared here rather than trusted
+    to stay in step.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+    HOOK = "bench/hooks/pre-push.sh"
+    GATE = "bench/ci_faithful.sh"
+
+    def _hook(self):
+        return (self.ROOT / self.HOOK).read_text(encoding="utf-8")
+
+    def _gate(self):
+        return (self.ROOT / self.GATE).read_text(encoding="utf-8")
+
+    def test_the_hook_is_tracked_and_shellcheck_reaches_it(self):
+        p = self.ROOT / self.HOOK
+        self.assertTrue(p.is_file(), f"{self.HOOK} is missing")
+        # `audit.yml`'s shellcheck step globs `-name '*.sh'`. A hook named
+        # `pre-push` would sit outside that glob, which is the same narrow glob
+        # the step was widened to remove.
+        self.assertTrue(self.HOOK.endswith(".sh"),
+                        "a hook without the suffix is outside the shellcheck glob")
+        out = subprocess.run(["git", "ls-files", "--error-unmatch", self.HOOK],
+                             cwd=self.ROOT, capture_output=True, text=True)
+        self.assertEqual(out.returncode, 0,
+                         f"{self.HOOK} is not tracked, so a clone does not carry it")
+
+    def test_the_two_sides_agree_on_the_token(self):
+        """The gate writes it and the hook reads it, by the same name."""
+        hook, gate = self._hook(), self._gate()
+        self.assertIn("TOKENS=$HOME/.ci_repro_green", hook)
+        self.assertIn('"$HOME/.ci_repro_green/$SHA"', gate,
+                      "the gate does not write the token at the full sha")
+        self.assertIn('"$TOKENS/$local_sha"', hook,
+                      "the hook does not read the token at the full sha")
+        # and neither path truncates: `${SHA:0:12}` in a PATH would make the two
+        # disagree, and it appears in the gate only in the line it prints
+        for line in gate.splitlines():
+            if "ci_repro_green" in line and ":0:12" in line:
+                self.assertIn("echo", line,
+                              f"a shortened sha in a token path: {line.strip()!r}")
+
+    def test_it_names_the_gate_this_repository_has(self):
+        hook = self._hook()
+        self.assertIn("bench/ci_faithful.sh", hook)
+        self.assertNotIn("scratchpad/ci_faithful.sh", hook,
+                         "the hook sends a reader to the copy that went stale")
+
+    def test_it_refuses_a_token_that_says_nothing(self):
+        """An empty file satisfies `-f`, and that is what a failed copy leaves."""
+        hook = self._hook()
+        self.assertIn('[ ! -s "$TOKENS/$local_sha" ]', hook)
+        self.assertIn('grep -q "^python 3"', hook,
+                      "the hook accepts a token with no reproduction recorded in it")
+
+    def test_the_gate_says_where_the_hook_is(self):
+        """The comment that named a guard the tree did not hold now names a path."""
+        self.assertIn("bench/hooks/pre-push.sh", self._gate(),
+                      "the gate mentions a pre-push hook without saying where it is")

@@ -20,6 +20,14 @@
 #   tree     a clone of the COMMIT, so an untracked or ignored file cannot make
 #            a check pass here that fails on a fresh checkout.
 #
+# One difference it does NOT eliminate, and it has cost a red run: the HARDWARE.
+# A runner has four processors. This host has thirty-two and the box these are
+# written on has eight, so a test that named processors four, five and six passed
+# in both places and failed on the runner, where `taskset` has nothing to pin to.
+# Every job here can be green and a test that reads the processor count, the
+# memory, or the disk can still be red there. Such a test has to derive what it
+# needs from the host it is on, and say so when the host cannot supply it.
+#
 # What it does NOT reproduce is named at the end rather than left for a reader
 # to notice: the `charts` job, which pins 3.13 and so has to be run separately
 # on a 3.13 interpreter, and the evidence workflow, which needs a published
@@ -230,9 +238,9 @@ if [ "$fail" -eq 0 ]; then
     echo "$n_cov of audit.yml's $n_dec jobs reproduced green on python $got_py, TZ=UTC,"
     echo "from a clean checkout of ${SHA:0:12}. That is a statement about those"
     echo "$n_cov jobs at that commit and about nothing else."
-    # The token a pre-push hook looks for. It names the commit, so verifying one
-    # tree and pushing another cannot pass: the whole point of running this is
-    # lost if the thing pushed is not the thing checked.
+    # The token `bench/hooks/pre-push.sh` looks for. It names the commit, so
+    # verifying one tree and pushing another cannot pass: the whole point of
+    # running this is lost if the thing pushed is not the thing checked.
     mkdir -p "$HOME/.ci_repro_green"
     # the HOST too. This box runs python 3.13 and the jobs pin 3.12, so the
     # reproduction happens on the bench host and the token is copied back; a
