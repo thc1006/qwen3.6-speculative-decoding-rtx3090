@@ -72,7 +72,10 @@ So the within-run thermal profile of the step is not recoverable from what the r
 recorded. That is why the first prerequisite below is a timestamp.
 
 **The sensor works and the range is wide.** Measured on 2026-10-01 on this bench
-host, idle and under a pure memory-bandwidth load: 42 °C idle against a core
+host with [`bench/vram_temp.py`](../bench/vram_temp.py) and the predecessor of
+[`bench/vram_bandwidth.cu`](../bench/vram_bandwidth.cu), which had the same kernel
+and the same geometry and differed only in reporting one aggregate instead of a
+row per window. Idle and under a pure memory-bandwidth load: 42 °C idle against a core
 reading of 35, rising monotonically to 90 °C at 828 GB/s sustained, staying above
 the core reading throughout, and dropping thirty degrees in the half minute after
 the load stops. The core reaches 77 °C at the same moment, against a slowdown
@@ -210,11 +213,23 @@ has already paid for once, in the form the payment took.
    treatment. `-lgc`, `-lmc`, `-rgc` and `-rmc`, with the restore on every exit
    path including a crash.
 3. **Each arm-run records the memory temperature before and after**, from the
-   register, beside the core temperature it already records.
-4. **A bandwidth microbenchmark in this repository**, reporting a time series
-   rather than one aggregate, with its noise floor measured at a plateau and
-   published. Layer A's reading is a slope against temperature and a slope needs
-   the scatter it is fitted through.
+   register, beside the core temperature it already records. The reader exists,
+   as `bench/vram_temp.py`, and returns the reason rather than raising when it
+   cannot map the BAR, which is the shape `bench/retest_runner.py` already uses
+   for `nvidia-smi`. What is missing is the runner calling it: mapping a PCI BAR
+   needs root and the runner does not have it, so this is a `sudo -n` invocation
+   whose failure has to be recorded rather than swallowed.
+4. ~~**A bandwidth microbenchmark in this repository**, reporting a time series
+   rather than one aggregate~~ **Landed on 2026-10-02 as
+   `bench/vram_bandwidth.cu`**, which emits a csv row per window with a wall-clock
+   stamp in the spelling the sampler writes, so a window joins a temperature trace
+   without a mapping between two clocks. Its `--idle` flag is what makes the
+   descending phase possible with one program. **Its noise floor is still
+   unmeasured and the file has never been compiled**: the bench host has `nvcc` and
+   went offline before the rewrite existed. Layer A's reading is a slope against
+   temperature and a slope needs the scatter it is fitted through, so that plateau
+   measurement is a prerequisite in its own right and nothing may be claimed from
+   this tool until it is published.
 5. **A derivation script for every table either layer publishes**, wired into the
    claims job, as `analysis/plan_z_power.py` is for this document. Run Y's result
    table was hand-computed and three of its columns were wrong.

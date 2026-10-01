@@ -1517,20 +1517,20 @@ same as one this platform lacks; the second addendum below records reading it.
 > run-directory count under this archive is pinned in a file bound to the `v4.2`
 > tag.
 >
-> **Addendum, 2026-10-01: the memory sensor exists, and this entry said it did
-> not.** This entry said the junction temperature needs a sensor the platform does
-> not offer. It does not: NVML does not expose it, which is a different statement,
-> and the sentence above is corrected to say so. On this card the sensor is a
-> thirty-two bit register at BAR0 plus `0xE2A8`, its low twelve bits the
-> temperature in thirty-seconds of a degree, and the card's own `resource0` maps
-> it read-only without `/dev/mem`. Idle it reads forty-two degrees against a core
-> reading of thirty-five. Under a pure memory-bandwidth load holding `828 GB/s`,
-> which is most of this card's peak, it rises monotonically to ninety and stays
-> above the core reading throughout, and it drops thirty degrees in the half
-> minute after the load stops. So the memory-subsystem hypothesis this entry names
-> is testable on this hardware, and what stood in for testing it was one reading
-> of `nvidia-smi --query-gpu=temperature.memory`, which returns `N/A` here. The
-> hypothesis is still untested; it is no longer untestable.
+> **Addendum, 2026-10-01: the memory sensor exists, and this entry said it did not.**
+> NVML does not expose the junction temperature, which is not the same as the platform
+> not offering it, and the sentence above is corrected to say so. On this card it is a
+> thirty-two bit register at BAR0 plus `0xE2A8`, its low twelve bits the temperature
+> in thirty-seconds of a degree, and the card's own `resource0` maps it read-only
+> without `/dev/mem`. `bench/vram_temp.py` reads it and `bench/vram_bandwidth.cu` is
+> the load, both committed here rather than left in `/tmp`, where they were for a day.
+> Idle it reads forty-two degrees against a core reading of thirty-five. Under a pure
+> memory-bandwidth load holding `828 GB/s`, most of this card's peak, it rises
+> monotonically to ninety, stays above the core reading throughout, and drops thirty
+> degrees in the half minute after the load stops. So the memory-subsystem hypothesis
+> this entry names is testable on this hardware, and what stood in for testing it was
+> one reading of `nvidia-smi --query-gpu=temperature.memory`, which returns `N/A`
+> here. The hypothesis is still untested; it is no longer untestable.
 
 ### A17. The thinking-off comparisons are not comparisons of the same amount of work
 

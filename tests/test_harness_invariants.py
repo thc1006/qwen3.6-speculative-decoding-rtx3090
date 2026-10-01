@@ -2482,19 +2482,40 @@ class TheVerificationSuitesMustRefuseAMeasuringHost(unittest.TestCase):
                           f"{rel} can overlap with another pipeline")
 
     def test_detection_is_positional_not_a_substring(self):
-        """`\"bench.py\" in cmdline` also matches an editor, a grep, and this
-        session's own shell command that merely names it."""
+        """A substring match reads text and cannot recover intent.
+
+        Every case fixes the working directory, because the verdict used to depend
+        on it and nothing said so: a relative argv was resolved against the
+        CALLER's directory, so this passed from a home directory and from a
+        runner's workspace and failed from anywhere under the temporary one. The
+        CI reproduction found it, running from a clone whose scratch was set there.
+        """
         m = self._hg()._benchmark_name
-        for argv, want in (
-                (["/opt/build/bin/llama-server", "-m", "x.gguf"], "llama-server"),
-                (["python3", "harness/bench.py", "--matrix", "phase_a"], "bench.py"),
-                (["python3", "-u", "harness/bench.py"], "bench.py"),
-                (["grep", "-rn", "bench.py", "."], None),
-                (["bash", "-c", "echo bench.py llama-server"], None),
-                (["vim", "harness/bench.py"], None),
-                (["python3", "tests/data_mutate.py"], None),
-                ([], None)):
-            self.assertEqual(m(argv), want, f"argv={argv}")
+        scratch = os.path.join(os.path.realpath(tempfile.gettempdir()),
+                               "tmpmirror", "work")
+        home = os.path.expanduser("~/bench")
+        for argv, cwd, want in (
+                (["/opt/build/bin/llama-server", "-m", "x.gguf"], None,
+                 "llama-server"),
+                # relative, and the cwd decides it. An unknown cwd fails SAFE:
+                # calling a mirror copy a measurement delays a verification run,
+                # and calling a measurement a mirror copy costs a measurement.
+                (["python3", "harness/bench.py", "--matrix", "phase_a"], None,
+                 "bench.py"),
+                (["python3", "harness/bench.py"], home, "bench.py"),
+                (["python3", "harness/bench.py"], scratch, None),
+                (["python3", "-u", "harness/bench.py"], home, "bench.py"),
+                # absolute, and it answers for itself whatever the cwd is
+                (["python3", os.path.join(home, "harness/bench.py")], scratch,
+                 "bench.py"),
+                (["python3", os.path.join(scratch, "harness/bench.py")], home,
+                 None),
+                (["grep", "-rn", "bench.py", "."], home, None),
+                (["bash", "-c", "echo bench.py llama-server"], home, None),
+                (["vim", "harness/bench.py"], home, None),
+                (["python3", "tests/data_mutate.py"], home, None),
+                ([], None, None)):
+            self.assertEqual(m(argv, cwd), want, f"argv={argv} cwd={cwd}")
 
     def test_a_harness_copy_under_a_mirror_is_not_a_measurement(self):
         """The two suites each copy `bench/` into a temporary directory and run
@@ -2672,8 +2693,9 @@ class TheTelemetryGapA16NamesMustBeReal(unittest.TestCase):
         self.assertTrue(body, "sample() not found")
         self.assertNotIn("in cmd for n in", body,
                          "the sampler still chooses roots by substring")
-        self.assertIn("_benchmark_name(argv)", body,
-                      "the fallback does not use the positional matcher")
+        self.assertIn("_benchmark_name(argv, ", body,
+                      "the fallback does not use the positional matcher, or no "
+                      "longer passes it the other process's working directory")
         self.assertIn("_starttime(root_pid) == root_start", body,
                       "a reused pid can inherit the benchmark's attribution")
         sys.path.insert(0, str(self.ROOT / "bench"))
@@ -3483,7 +3505,7 @@ class TheSuiteMustRunOnAStockInterpreter(unittest.TestCase):
         # table's own anchors, which needs the table.
         allowed = stdlib | {"host_guard", "publish_pr_body", "carryover",
                             "length_mode", "paired_blocks", "plan_z_power",
-                            "rederive_run_y", "rr_under_test",
+                            "rederive_run_y", "rr_under_test", "vram_temp",
                             "rederive_from_logs", "past_threshold_fit",
                             "verify_claims", "extract_checkpoint_timers",
                             "table_coverage", "mutate", "data_mutate",
@@ -7747,3 +7769,129 @@ class PlanZsPremisesMustBeWhatTheDataSays(unittest.TestCase):
         for r in rows:
             self.assertAlmostEqual(r["hours"],
                                    inp["per_block_hours"] * r["blocks"], places=9)
+
+
+class TheInstrumentsBehindA16sAddendumMustBeInTheTree(unittest.TestCase):
+    """A16's addendum publishes readings, and for a day their instruments were not here.
+
+    The addendum says the memory sensor reads forty-two degrees idle and rises to
+    ninety under a load holding 828 GB/s. Those readings were taken with two files
+    in `/tmp` on one host, which went offline the next day. A published measurement
+    whose instrument is not in the tree cannot be reproduced by anyone, and it is
+    the fourth time this repository has found its own tooling living where nothing
+    checks it: the probe launcher, the CI reproduction, the push guard, and these.
+
+    The bandwidth load cannot be compiled where this test runs and the card it
+    needs is one host. So what is checked is the thing that can be: the KERNEL and
+    the geometry are held to what produced the published reading, by digest, so an
+    edit to the load fails here rather than silently invalidating the provenance
+    the file claims. The temperature reader's arithmetic is pure and is checked
+    outright.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+    LOAD = "bench/vram_bandwidth.cu"
+    READER = "bench/vram_temp.py"
+    # the `stream` kernel that produced the 828 GB/s the addendum publishes,
+    # whitespace-normalised and digested. Changing the load means re-measuring
+    # before the addendum may keep that figure.
+    KERNEL_SHA256 = ("3fea4743530949c1055c75564b5de3e9"
+                     "3add50f60845fea1a4f54ef4a42e2f3f")
+
+    def _src(self, rel):
+        return (self.ROOT / rel).read_text(encoding="utf-8")
+
+    def test_both_are_tracked(self):
+        for rel in (self.LOAD, self.READER):
+            with self.subTest(file=rel):
+                r = subprocess.run(["git", "ls-files", "--error-unmatch", rel],
+                                   cwd=self.ROOT, capture_output=True, text=True)
+                self.assertEqual(r.returncode, 0,
+                                 f"{rel} is not tracked, so no clone carries the "
+                                 f"instrument A16's addendum quotes")
+
+    def test_the_load_is_the_one_that_was_measured(self):
+        import hashlib
+        m = re.search(r"__global__ void stream\(.*?\n\}\n", self._src(self.LOAD),
+                      re.S)
+        self.assertIsNotNone(m, "the stream kernel is gone from the load")
+        body = " ".join(m.group(0).split())
+        self.assertEqual(
+            hashlib.sha256(body.encode()).hexdigest(), self.KERNEL_SHA256,
+            "the kernel is not the one that produced the 828 GB/s ERRATA A16's "
+            "addendum publishes. Re-measure and update both the figure and this "
+            "digest, or put the kernel back")
+
+    def test_the_geometry_is_the_one_that_was_measured(self):
+        """Four gibibyte buffers and 256 threads at full occupancy per SM.
+
+        A bandwidth figure is a function of the buffer size and the launch
+        geometry as much as of the kernel, so holding the kernel alone would leave
+        the provenance half checked.
+        """
+        src = self._src(self.LOAD)
+        self.assertIn("gib = 4.0", src, "the default buffer is no longer four GiB")
+        self.assertIn("threads = 256", src)
+        self.assertIn("per_sm * p.multiProcessorCount", src)
+
+    def test_it_says_it_has_not_been_built(self):
+        """Until it is, nothing may be claimed from it, and the file has to say so."""
+        src = self._src(self.LOAD)
+        self.assertIn("has NOT been compiled", src,
+                      "the load no longer records that it is unbuilt, so a reader "
+                      "cannot tell a measured instrument from an unrun one")
+
+    def test_the_temperature_arithmetic(self):
+        sys.path.insert(0, str(self.ROOT / "bench"))
+        import vram_temp
+        # the mask matters: the upper twenty bits are not temperature
+        self.assertEqual(vram_temp.celsius(1344), 42.0)
+        self.assertEqual(vram_temp.celsius(0xFFFFF000 | 1344), 42.0)
+        self.assertEqual(vram_temp.celsius(2880), 90.0)
+        self.assertEqual(vram_temp.celsius(0), 0.0)
+        # and the divisor: thirty-seconds of a degree, not degrees
+        self.assertEqual(vram_temp.celsius(1), 1 / 32.0)
+
+    def test_the_reader_refuses_a_device_it_was_not_written_for(self):
+        """The offset is per architecture, so the wrong card returns a number that
+        means something else, and a number that means something else is worse than
+        a refusal."""
+        sys.path.insert(0, str(self.ROOT / "bench"))
+        import vram_temp
+        self.assertEqual(sorted(vram_temp.OFFSETS), ["0x2204"],
+                         "a device id was added; was its offset verified on that "
+                         "architecture, or assumed from this one?")
+        with tempfile.TemporaryDirectory() as d:
+            # a fake sysfs for a device that is not the one this knows
+            dev = Path(d) / "0000:99:00.0"
+            dev.mkdir()
+            (dev / "vendor").write_text("0x10de\n")
+            (dev / "device").write_text("0x2206\n")
+            saved = vram_temp.pathlib.Path
+            try:
+                vram_temp.pathlib = type(vram_temp.pathlib)("pathlib")
+                import pathlib as _pl
+                vram_temp.pathlib = _pl
+                real = vram_temp._sysfs
+                vram_temp._sysfs = lambda pci: Path(d) / pci
+                with self.assertRaises(SystemExit) as cm:
+                    vram_temp.offset_for("0000:99:00.0")
+                self.assertIn("0x2206", str(cm.exception))
+                # and `reading` turns that refusal into a recorded reason, which is
+                # the shape bench/retest_runner.py uses for nvidia-smi
+                self.assertTrue(
+                    str(vram_temp.reading("0000:99:00.0")).startswith("unavailable:"))
+            finally:
+                vram_temp._sysfs = real
+                vram_temp.pathlib = saved if False else _pl
+
+    def test_the_reader_never_opens_a_writable_mapping(self):
+        """`/dev/mem` maps all of physical memory and read-write maps can write to
+        the card. Neither appears, and a test says so rather than a comment."""
+        src = self._src(self.READER)
+        self.assertNotIn("/dev/mem", src.replace("`/dev/mem`", ""),
+                         "the reader maps /dev/mem rather than the card's own BAR")
+        self.assertIn("prot=mmap.PROT_READ", src)
+        self.assertIn('open(_sysfs(pci) / "resource0", "rb")', src)
+        for bad in ("PROT_WRITE", "ACCESS_WRITE", '"r+b"', '"wb"'):
+            self.assertNotIn(bad, src, f"the reader can write to the card: {bad}")

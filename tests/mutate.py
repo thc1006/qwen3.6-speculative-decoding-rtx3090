@@ -89,7 +89,7 @@ MUTATIONS = [
     ("the host sampler picks its roots by searching every command line",
      "bench/host_guard.py",
      "                roots = {pid for pid, (_, _c, argv) in proc.items()\n"
-     "                         if _benchmark_name(argv)}",
+     "                         if _benchmark_name(argv, _proc_cwd(pid))}",
      '                _own = ("retest_runner.py", "llama-server", "llama-bench")\n'
      "                roots = {pid for pid, (_, cmd, _a) in proc.items()\n"
      "                         if any(n in cmd for n in _own)}",
@@ -621,6 +621,20 @@ MUTATIONS = [
      "        change = (math.exp(m) - 1) * 100",
      "        change = m * 100",
      "tests.test_harness_invariants.RunYsTableMustBeDerivedFromItsData"),
+    # The guard's two errors are not symmetric, and this flips it to the side that
+    # costs a measurement: an argv whose working directory cannot be read is
+    # treated as a copy under a mirror, so a real benchmark is not detected and
+    # CPU work starts during it. Detected without depending on where the anchor
+    # runs, which matters because the mirror the anchor runs in IS under the
+    # temporary directory.
+    ("an unreadable working directory makes a measurement invisible",
+     "bench/host_guard.py",
+     "            # an unresolvable relative path is NOT in scratch.\n"
+     "            return False",
+     "            # an unresolvable relative path is NOT in scratch.\n"
+     "            return True",
+     "tests.test_harness_invariants.TheVerificationSuitesMustRefuseAMeasuringHost"
+     ".test_detection_is_positional_not_a_substring"),
 ]
 
 

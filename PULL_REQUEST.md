@@ -403,7 +403,7 @@ once, 0 survived**, each attestation carrying the head, the
   grows as the coverage does and a clean run is only clean for the tree it ran
   on: the run before this one covered 2 252 numbers across 119 tables.
   `analysis/table_coverage.py --probe --covered --every-cell` is the
-  measurement and **A19** the accounting; 93 code and 84 data and document perturbations
+  measurement and **A19** the accounting; 94 code and 84 data and document perturbations
   remain permanent tests.
 
   Parsing them rather than reading them found twenty-one more published
@@ -586,11 +586,11 @@ review:
 python analysis/rederive_from_logs.py bench   # raw logs -> four audit files
 python analysis/verify_claims.py          # 3844 assertions, re-derived
 python analysis/check_data_integrity.py   # structure of all 77 run directories
-python -m unittest discover tests         # 409 regressions for defects shipped here
+python -m unittest discover tests         # 416 regressions for defects shipped here
 python tests/mutate.py                    # break each fix, require its test to fail
 python tests/data_mutate.py               # perturb a measurement or a published
                                           #   figure, require the checker to fail
-                                          #   93 code and 84 data perturbations,
+                                          #   94 code and 84 data perturbations,
                                           #   with a clean-mirror re-check after
                                           #   the last restore
 python analysis/plot_v4_runs.py --check   # charts still match the data
