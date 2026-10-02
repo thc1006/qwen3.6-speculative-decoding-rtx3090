@@ -94,6 +94,47 @@ if [ "$FREE_KB" -lt "$NEED_KB" ]; then
     exit 2
 fi
 
+# That check is not enough when TMPDIR is tmpfs, and it was the whole check.
+# `df` on a tmpfs reports the mount's SIZE limit, which can be larger than what
+# RAM can back, and every byte written into it is an anonymous page. Two gate
+# runs were killed at this step on a 16 GB tmpfs that df called 5.6 GB free, on a
+# host with no swap and 13 GB of mirrors abandoned by the runs before them. The
+# check passed both times and the kernel killed the process group, which looks
+# from outside like a run that stopped for no reason. On tmpfs the constraint is
+# MemAvailable, not free space.
+FS_TYPE=$(findmnt -no FSTYPE --target "$TMP_DIR" 2>/dev/null || echo unknown)
+if [ "$FS_TYPE" = tmpfs ]; then
+    AVAIL_KB=$(awk '/^MemAvailable:/ {print $2}' /proc/meminfo)
+    SWAP_KB=$(awk '/^SwapTotal:/ {print $2}' /proc/meminfo)
+    : "${AVAIL_KB:=0}" "${SWAP_KB:=0}"
+    echo "  $TMP_DIR is tmpfs, so $((NEED_KB / 1024)) MB of mirrors is" \
+         "$((NEED_KB / 1024)) MB of memory: MemAvailable $((AVAIL_KB / 1024)) MB," \
+         "swap $((SWAP_KB / 1024)) MB"
+    if [ "$((AVAIL_KB + SWAP_KB))" -lt "$NEED_KB" ]; then
+        echo "FAIL: that does not fit in memory, and df would have said yes." >&2
+        echo "      Put the scratch on a disk instead:" >&2
+        echo "          TMPDIR=/var/tmp $0 $SHARDS" >&2
+        exit 2
+    fi
+fi
+
+# A killed run cannot clean up after itself, so its mirrors stay in TMPDIR and
+# shrink the next run's room. Each abandoned shard is a directory holding both a
+# `pristine` and a `work` mirror, which is what makes it recognisable without
+# matching on a name a `mktemp` chose. Reported rather than deleted: this script
+# does not know whose they are.
+# `|| true` for the reason this file already gives further down: `find` exits
+# non-zero on a directory it cannot read, `pipefail` fails the assignment, and
+# `set -e` then kills the script before it says anything. Written without it,
+# this line made `--check-only` exit 1 in silence on both /tmp and /var/tmp,
+# which is the crash-instead-of-failure shape the suite below exists to stop.
+STALE=$( { find "$TMP_DIR" -mindepth 2 -maxdepth 2 -type d -name work 2>/dev/null \
+           || true; } | wc -l)
+if [ "$STALE" -gt 0 ]; then
+    echo "  note: $STALE abandoned shard mirror(s) in $TMP_DIR, from a run that" \
+         "was killed. They count against the space above."
+fi
+
 echo "$SHARDS shards on $CPUS processors, $N perturbations, lock $LOCK"
 echo "  scratch $TMP_DIR: $((FREE_KB / 1024)) MB free, about $((NEED_KB / 1024)) MB wanted"
 [ "$CHECK_ONLY" -eq 1 ] && { echo "check only, nothing launched"; exit 0; }

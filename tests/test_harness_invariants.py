@@ -6988,6 +6988,72 @@ class APlanCheckMustCatchACorruptedPlan(unittest.TestCase):
                       "the changelog quotes a corruption count this file does not have")
 
 
+class ScratchOnTmpfsIsMemoryNotSpace(unittest.TestCase):
+    """`df` on a tmpfs reports a size limit, which is not what RAM can back.
+
+    `bench/run_data_mutations.sh` gives each shard two mirrors of the tree in
+    TMPDIR and checked only `df`. Two gate runs were killed at that step on a
+    16 GB tmpfs that df called 5.6 GB free, on a host with no swap and 13 GB of
+    mirrors abandoned by the runs before them. The check passed both times and
+    the kernel killed the process group, which from outside is a run that stopped
+    for no reason: no failing step, no message, and an exit status that came from
+    the signal rather than from anything the script decided.
+
+    So on tmpfs the comparison has to be against MemAvailable, and a run killed
+    mid-way has to be visible to the next one, because its mirrors are still
+    there and they are still memory.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+    SH = "bench/run_data_mutations.sh"
+
+    def _body(self):
+        return (self.ROOT / self.SH).read_text(encoding="utf-8")
+
+    def test_it_asks_what_filesystem_the_scratch_is_on(self):
+        self.assertIn('findmnt -no FSTYPE --target "$TMP_DIR"', self._body(),
+                      "the script does not ask whether TMPDIR is tmpfs, so its "
+                      "df check is the only check and df is the wrong question")
+
+    def test_it_compares_against_memory_when_it_is_tmpfs(self):
+        b = self._body()
+        self.assertIn("MemAvailable", b,
+                      "nothing reads MemAvailable, so a tmpfs that df calls free "
+                      "is accepted and the kernel decides instead")
+        self.assertIn("SwapTotal", b,
+                      "swap is not counted, so a host with swap would be refused "
+                      "work it could do")
+        self.assertRegex(
+            b, r'\[ "\$\(\(AVAIL_KB \+ SWAP_KB\)\)" -lt "\$NEED_KB" \]',
+            "the memory comparison is not against what the mirrors need")
+
+    def test_it_names_the_remedy(self):
+        self.assertIn("TMPDIR=/var/tmp", self._body(),
+                      "a refusal that does not say where to put the scratch sends "
+                      "the reader back to the same tmpfs")
+
+    def test_it_reports_mirrors_a_killed_run_left(self):
+        b = self._body()
+        self.assertIn('-type d -name work', b,
+                      "abandoned shard mirrors are not detected, so each killed "
+                      "run makes the next one more likely to be killed")
+        self.assertIn("abandoned shard mirror", b, "the note has no text")
+
+    def test_the_stale_count_cannot_kill_the_script(self):
+        """`find | wc -l` under pipefail is how this script exits 1 in silence.
+
+        It happened while writing the check: `find` returns non-zero on a
+        directory it cannot read, `pipefail` fails the assignment, and `set -e`
+        ends the script before a single line is printed. `--check-only` exited 1
+        on both /tmp and /var/tmp with no output at all.
+        """
+        b = self._body()
+        self.assertRegex(
+            b, r'STALE=\$\(\s*\{[^}]*find[^}]*\|\|\s*true;\s*\}\s*\|\s*wc -l\)',
+            "the stale-mirror count is not guarded against pipefail, so a "
+            "TMPDIR holding one unreadable directory kills the launcher silently")
+
+
 class AShardedJobMustCoverItsWholeList(unittest.TestCase):
     """A matrix one leg short skips that fraction of the work and stays green.
 

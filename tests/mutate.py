@@ -637,6 +637,30 @@ MUTATIONS = [
      "            return True",
      "tests.test_harness_invariants.TheVerificationSuitesMustRefuseAMeasuringHost"
      ".test_detection_is_positional_not_a_substring"),
+    # --- scratch on tmpfs is memory, not space -------------------------------
+    # Two gate runs were killed at the data-perturbation step: df called the
+    # tmpfs free, the mirrors were RAM, there was no swap, and the exit status
+    # came from a signal rather than from anything the script decided.
+    ("the launcher stops asking what filesystem the scratch is on",
+     "bench/run_data_mutations.sh",
+     'findmnt -no FSTYPE --target "$TMP_DIR"',
+     'stat -f -c %T "$TMP_DIR"',
+     "tests.test_harness_invariants.ScratchOnTmpfsIsMemoryNotSpace.test_it_asks_what_filesystem_the_scratch_is_on"),
+    ("the memory comparison stops being against what the mirrors need",
+     "bench/run_data_mutations.sh",
+     '[ "$((AVAIL_KB + SWAP_KB))" -lt "$NEED_KB" ]',
+     '[ "$AVAIL_KB" -lt 1 ]',
+     "tests.test_harness_invariants.ScratchOnTmpfsIsMemoryNotSpace.test_it_compares_against_memory_when_it_is_tmpfs"),
+    ("mirrors a killed run left behind stop being reported",
+     "bench/run_data_mutations.sh",
+     '-mindepth 2 -maxdepth 2 -type d -name work',
+     '-mindepth 9 -maxdepth 9 -type d -name zzz',
+     "tests.test_harness_invariants.ScratchOnTmpfsIsMemoryNotSpace.test_it_reports_mirrors_a_killed_run_left"),
+    ("the stale count loses its pipefail guard and can kill the launcher",
+     "bench/run_data_mutations.sh",
+     '|| true; } | wc -l)',
+     '; } | wc -l)',
+     "tests.test_harness_invariants.ScratchOnTmpfsIsMemoryNotSpace.test_the_stale_count_cannot_kill_the_script"),
     # --- the gate stops running a copy of itself -----------------------------
     # Found by running it: an edit to this file while the gate was executing it
     # made bash resume at its saved byte offset in the new text, so two steps
