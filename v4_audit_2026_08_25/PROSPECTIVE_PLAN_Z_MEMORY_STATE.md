@@ -128,6 +128,27 @@ Layer A does **not** separate memory temperature from core temperature. It does
 not need to: what is being excluded is the thermal channel as a whole, and a
 bound that covers both is stronger than one that covers either.
 
+**Which card, and which index.** The slope is the transferable half of this and the
+range is not, so it matters which card each is measured on. The bench host's card is
+`GPU-f9db9841`, bare metal, 350 W. The box these sessions run on holds a second
+RTX 3090, `GPU-f71a8f68`, in a KVM guest at 420 W: the same GA102 and the same
+memory, a different cooler and a wider power envelope. A slope measured there is
+evidence about the mechanism and **not a coefficient that transfers**, because board
+designs differ in how the back-side memory modules are cooled and the onset
+temperature can differ with them. The asymmetry is what makes a pilot worth running:
+a slope indistinguishable from zero across forty degrees would be strong evidence
+against the mechanism as a class and would end this plan cheaply, and a non-zero one
+would have to be re-measured on the card A16's step happened on.
+
+On that second card the memory temperature **cannot be read at all**:
+`CONFIG_IO_STRICT_DEVMEM=y` makes the kernel refuse to map any IO region a driver
+has claimed, the `nvidia` driver claims BAR0, and both routes fail with what look
+like two unrelated errors, `EINVAL` through the card's own `resource0` and `EPERM`
+through `/dev/mem`. `iomem=relaxed` on the kernel command line disables that check;
+it needs a reboot and weakens a hardening, and this plan does not ask for it. The
+thermal index there is the core temperature `nvidia-smi` reports everywhere, which
+is what the paragraph above already licenses.
+
 **Pre-registered reading.** Let *R* be the change in achieved bandwidth across
 the full reachable range, idle to plateau, read as a fraction of the cold value.
 
@@ -216,9 +237,11 @@ has already paid for once, in the form the payment took.
    register, beside the core temperature it already records. The reader exists,
    as `bench/vram_temp.py`, and returns the reason rather than raising when it
    cannot map the BAR, which is the shape `bench/retest_runner.py` already uses
-   for `nvidia-smi`. What is missing is the runner calling it: mapping a PCI BAR
-   needs root and the runner does not have it, so this is a `sudo -n` invocation
-   whose failure has to be recorded rather than swallowed.
+   for `nvidia-smi`. **Landed on 2026-10-02**: the runner calls it through
+   `sudo -n`, with a timeout so a measurement cannot stall on an instrument, and
+   records the reading or the reason. Mapping a PCI BAR needs root, so the reason
+   is the usual case off the bench host, and the reader explains a refusal now
+   rather than reporting an errno.
 4. ~~**A bandwidth microbenchmark in this repository**, reporting a time series
    rather than one aggregate~~ **Landed on 2026-10-02 as
    `bench/vram_bandwidth.cu`**, which emits a csv row per window with a wall-clock
@@ -230,6 +253,15 @@ has already paid for once, in the form the payment took.
    temperature and a slope needs the scatter it is fitted through, so that plateau
    measurement is a prerequisite in its own right and nothing may be claimed from
    this tool until it is published.
+
+   **First readings, 2026-10-02, on the pilot card.** It compiles clean under
+   `nvcc 13.3` with `-Wall -Wextra`, sustains **828.4** to **828.7 GB/s** at the
+   documented four gibibyte buffers, which is the same figure the bench host gives
+   and is the two cards hitting the same specification at the same efficiency, and
+   its window-to-window spread over four consecutive windows is **0.036 %**. That is
+   two orders of magnitude below the step this plan is about, so the instrument has
+   the resolution. Four windows is not a noise floor; a plateau of thirty, with its
+   spread published, is.
 5. **A derivation script for every table either layer publishes**, wired into the
    claims job, as `analysis/plan_z_power.py` is for this document. Run Y's result
    table was hand-computed and three of its columns were wrong.

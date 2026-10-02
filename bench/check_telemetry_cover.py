@@ -28,7 +28,16 @@ MIN_FRACTION = 0.5
 # only ISO, so it failed on EVERY trace this repository holds, including the
 # one for the run it was written to guard -- and nothing noticed, because it
 # had no test and the driver looked for a filename that no longer existed.
-_FORMATS = ("%Y/%m/%d %H:%M:%S.%f", "%Y/%m/%d %H:%M:%S")
+#
+# The same defect, found a second time on 2026-10-02 and by the same route, a
+# test over the traces rather than over an example: EIGHT of the eighteen traces
+# here spell it `2026/08/2601:47:50.693`, with no space between the date and the
+# time, and this read ten of eighteen. An older version of
+# `bench/gpu_telemetry.sh`'s compact schema stripped every space from the row --
+# the separators, the units, and the one inside the timestamp -- so the spelling
+# is in the committed data and cannot be corrected there. It is read here.
+_FORMATS = ("%Y/%m/%d %H:%M:%S.%f", "%Y/%m/%d %H:%M:%S",
+            "%Y/%m/%d%H:%M:%S.%f", "%Y/%m/%d%H:%M:%S")
 
 
 def _stamp(row: dict, tz: dt.timezone) -> float | None:

@@ -3159,11 +3159,21 @@ class TheRerunScriptsMustBehaveWithAFakeRunner(unittest.TestCase):
         server.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
         server.chmod(0o755)
         (bench / "retest_runner.py").write_text(runner_body, encoding="utf-8")
-        # exits at once: a stub that sleeps inherits stdout and holds the pipe
-        # open, so `capture_output` waits for it and the test hangs rather than
-        # testing anything. The driver's trap tolerates an already-dead sampler.
+        # It used to exit at once, for a real reason: a stub that sleeps inherits
+        # stdout and holds the pipe open, so `capture_output` waits for it and the
+        # test hangs. But a sampler that exits at once is the DEFECT the drivers now
+        # refuse -- a run whose telemetry went nowhere and said nothing -- so a stub
+        # that does it tests the opposite of what is wanted. It behaves like a
+        # sampler instead: writes the trace the driver named, then closes the
+        # inherited pipe with `exec` before sleeping, so nothing waits on it.
         (bench / "gpu_telemetry.sh").write_text(
-            "#!/bin/sh\necho stub telemetry\n", encoding="utf-8")
+            "#!/bin/sh\n"
+            'if [ -n "${BENCH_TELEMETRY_OUT:-}" ]; then\n'
+            '  printf \'ts,stub\\n1,2\\n\' > "$BENCH_TELEMETRY_OUT"\n'
+            "fi\n"
+            "echo stub telemetry\n"
+            "exec >/dev/null 2>&1\n"
+            "sleep 120\n", encoding="utf-8")
         return bench
 
     def _run(self, script: str, bench: Path, env_extra=None):
@@ -7895,3 +7905,380 @@ class TheInstrumentsBehindA16sAddendumMustBeInTheTree(unittest.TestCase):
         self.assertIn('open(_sysfs(pci) / "resource0", "rb")', src)
         for bad in ("PROT_WRITE", "ACCESS_WRITE", '"r+b"', '"wb"'):
             self.assertNotIn(bad, src, f"the reader can write to the card: {bad}")
+
+
+class AnArmRunMustBeJoinableToATrace(unittest.TestCase):
+    """Run T4's complete trace cannot be attributed to any arm-run.
+
+    Arm-runs time their requests with `time.perf_counter()`, whose origin is
+    arbitrary, and the sampler writes wall clock. Nothing bridged them, so the only
+    anchor run T4 offers is its manifest's `created` against the first request,
+    which assumes no server launch precedes it -- one does. Reconstructed that way
+    the window LENGTHS come back to 924 s against 924 s of recorded request spans
+    and the alignment is still wrong, which `analysis/plan_z_power.py` demonstrates
+    on the arms' own VRAM footprints. The thermal profile across ERRATA A16's step
+    is therefore not recoverable from what that run recorded.
+
+    A join has two sides and this checks both.
+
+    The ARM-RUN side is unambiguous: an epoch float, and an ISO-8601 string with an
+    offset for a reader. Not nvidia-smi's spelling, because the eighteen traces here
+    carry THREE spellings and emitting one of them would suggest a string
+    comparison that silently matches nothing for twelve of them.
+
+    The TRACE side is one parser, in `bench/check_telemetry_cover.py`, required here
+    to read every row of every committed trace. It read ten of eighteen until
+    2026-10-02, and the file's own history records the first version reading none --
+    both times because it was tested against an example instead of against the data.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+    # ISO-8601, milliseconds, with an offset. `fromisoformat` reads it.
+    ISO = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}[+-]\d{4}$")
+
+    def _rr(self):
+        import importlib.util
+        os.environ.setdefault("LLAMA_SERVER_BIN", "/bin/true")
+        os.environ.setdefault("MODEL_TARGET", "/dev/null")
+        spec = importlib.util.spec_from_file_location(
+            "rr_join", self.ROOT / "bench" / "retest_runner.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def _parser(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "ctc_join", self.ROOT / "bench" / "check_telemetry_cover.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def test_one_parser_reads_every_row_of_every_committed_trace(self):
+        """Against the DATA, not an example. That is what was missing twice."""
+        import csv
+        import datetime as dt
+        m = self._parser()
+        tz = dt.timezone(dt.timedelta(hours=8))
+        traces = sorted(self.ROOT.glob("*/data/gpu_telemetry_*.csv"))
+        self.assertGreaterEqual(len(traces), 18, f"{len(traces)} traces found")
+        spellings, unparsed, total = set(), [], 0
+        for p in traces:
+            with p.open(encoding="utf-8") as fh:
+                rd = csv.reader(fh)
+                hdr = [h.strip() for h in next(rd)]
+                for row in rd:
+                    if not row:
+                        continue
+                    total += 1
+                    d = {h: v.strip() for h, v in zip(hdr, row)}
+                    if (m._stamp(d, tz) is None
+                            and m._stamp({"timestamp": row[0].strip()}, tz) is None):
+                        unparsed.append(f"{p.name}: {row[0].strip()!r}")
+            spellings.add(" " in traces[0].read_text(encoding="utf-8")
+                          .splitlines()[1].split(",")[0])
+        self.assertEqual(unparsed[:4], [],
+                         f"{len(unparsed)} of {total} rows do not parse")
+        self.assertGreater(total, 10000, f"only {total} rows read")
+
+    def test_the_arm_run_side_is_iso_and_epoch(self):
+        rr = self._rr()
+        off = rr._wall_offset()
+        rows = [{"t_start": 100.0, "t_end": 103.5},
+                {"t_start": 103.5, "t_end": 107.25}]
+        w = rr._wall_window(rows, off, off)
+        self.assertEqual(w["offset_drift_s"], 0.0)
+        self.assertAlmostEqual(w["requests_started_unix"], 100.0 + off, places=6)
+        self.assertAlmostEqual(w["requests_ended_unix"], 107.25 + off, places=6)
+        for k in ("requests_started", "requests_ended"):
+            self.assertRegex(w[k], self.ISO, f"{k} is {w[k]!r}")
+        # and the string is the float, so a reader and a joiner cannot disagree
+        import datetime as dt
+        self.assertAlmostEqual(
+            dt.datetime.fromisoformat(w["requests_started"]).timestamp(),
+            w["requests_started_unix"], places=3)
+
+    def test_the_millisecond_carry(self):
+        """Rounding the fraction on its own printed `.1000`, which is four digits.
+
+        The defect was in the first version of this, and a value a ten-thousandth
+        under the second is all it takes.
+        """
+        iso = self._rr()._iso
+        self.assertIn("T07:28:24.000", iso(1790897303.9996))
+        self.assertIn("T07:28:23.999", iso(1790897303.9994))
+        for u in (1790897303.0, 1790897303.0005, 1790897303.5, 1790897303.99999):
+            self.assertRegex(iso(u), self.ISO, f"{u} formats wrong")
+
+    def test_the_offset_converts_a_monotonic_time(self):
+        rr = self._rr()
+        got = rr._iso(time.perf_counter() + rr._wall_offset())
+        # to the second, because the two reads are not simultaneous
+        self.assertEqual(got[:19], time.strftime("%Y-%m-%dT%H:%M:%S"),
+                         f"the offset does not convert: {got!r}")
+
+    def test_a_crashed_arm_run_has_offsets_and_no_window(self):
+        """A window over no requests would be a window over nothing, and a reader
+        cannot tell that from a window over one instant."""
+        rr = self._rr()
+        w = rr._wall_window([], 1.0, 2.0)
+        self.assertEqual(w["offset_drift_s"], 1.0)
+        for k in ("requests_started", "requests_started_unix"):
+            self.assertNotIn(k, w)
+        self.assertNotIn("requests_started",
+                         rr._wall_window([{"tag": "x"}], 1.0, 1.0))
+
+    def test_the_memory_instrument_records_the_reason_it_could_not_read(self):
+        """An instrument the run could not reach is a field that says why.
+
+        This box's kernel refuses to map the register at all, so the call fails
+        here, and failing is the case worth testing: a measurement must not be able
+        to stall or die on an instrument.
+        """
+        got = self._rr().vram_temp()
+        self.assertTrue(isinstance(got, (float, str)), type(got))
+        if isinstance(got, str):
+            self.assertTrue(got.startswith("unavailable: "), got)
+        src = (self.ROOT / "bench" / "retest_runner.py").read_text(encoding="utf-8")
+        self.assertIn('["sudo", "-n", sys.executable, _vram_temp_tool()]', src,
+                      "the reading no longer goes through sudo -n, so it either "
+                      "cannot work or can wait on a prompt")
+        self.assertIn("timeout=20", src.split("def vram_temp")[1].split("def ")[0],
+                      "no timeout, so a measurement can stall on an instrument")
+
+
+class ASamplerMustNotBeAbleToWriteNothing(unittest.TestCase):
+    """A run whose telemetry silently went nowhere has happened twice here.
+
+    Once a driver passed a FILE PATH where a schema was expected, the sampler
+    rejected it and exited, and the eight-session crossover ran with no telemetry
+    at all. Once a driver looked for the trace under a name the sampler had not
+    used, so a complete trace was reported missing. On 2026-10-02 a third route was
+    found by running it: `$HOME/bench` was hardcoded with no override and no
+    writability check, so on a host without that directory the sampler printed
+    `TELEMETRY=...`, the line a driver takes as confirmation, and then failed on
+    every tick for the length of the run.
+
+    All three have the same outcome and the same cause, which is that nothing
+    looked at the sampler after starting it. `run_w_williams.sh` learned it and the
+    four drivers beside it did not, which is the shape this repository keeps
+    finding: a check that was right where it was written and was never moved.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+    SAMPLER = "bench/gpu_telemetry.sh"
+
+    def _drivers(self):
+        """Every script that starts the sampler, found rather than listed."""
+        out = {}
+        for p in sorted((self.ROOT / "bench").glob("run_*.sh")):
+            src = p.read_text(encoding="utf-8")
+            if 'bash "$TELE_SH"' in src:
+                out[f"bench/{p.name}"] = src
+        return out
+
+    def test_there_are_drivers_to_check(self):
+        self.assertGreaterEqual(len(self._drivers()), 5,
+                                f"found {sorted(self._drivers())}")
+
+    def test_every_driver_names_the_trace_it_will_check(self):
+        """The sampler stamps the file with its own clock otherwise, and a driver
+        that guesses the name is a driver that can miss by one second."""
+        for rel, src in self._drivers().items():
+            with self.subTest(driver=rel):
+                self.assertIn('TELE_CSV="$BENCH/gpu_telemetry_', src,
+                              "does not name the trace")
+                self.assertIn('BENCH_TELEMETRY_OUT="$TELE_CSV" bash "$TELE_SH"', src,
+                              "does not tell the sampler the name it will check")
+
+    def test_every_driver_checks_the_sampler_survived_startup(self):
+        for rel, src in self._drivers().items():
+            with self.subTest(driver=rel):
+                self.assertIn('kill -0 "$TELE_PID"', src,
+                              "starts the sampler and never looks at it again")
+
+    def test_every_driver_requires_the_trace_to_hold_samples(self):
+        """Existing is not enough: a sampler that dies leaves the header it made."""
+        for rel, src in self._drivers().items():
+            with self.subTest(driver=rel):
+                self.assertTrue(
+                    'tele_rows' in src or "BENCH_ROOT_TELECHECK" in src,
+                    "never checks that the trace holds more than its header")
+
+    def test_the_sampler_refuses_rather_than_sampling_into_nothing(self):
+        """Run for real, with a path it cannot create. No GPU is needed: the
+        refusal happens before the first sample."""
+        bad = "/proc/self/cannot/be/created/trace.csv"
+        env = dict(os.environ, BENCH_TELEMETRY_OUT=bad)
+        r = subprocess.run(["bash", str(self.ROOT / self.SAMPLER), "compact", "1", "X"],
+                           capture_output=True, text=True, timeout=60, env=env)
+        self.assertNotEqual(r.returncode, 0,
+                            "the sampler accepted a path it cannot write")
+        out = r.stdout + r.stderr
+        self.assertIn("cannot create", out, out[:300])
+        self.assertNotIn("TELEMETRY=", r.stdout,
+                         "it printed the line a driver reads as confirmation")
+
+    def test_its_header_counts_the_traces_this_tree_holds(self):
+        """The counts went stale when run Y added the fifth raw trace.
+
+        Attribution is by HEADER, because two schemas now share a timestamp
+        spelling and the filename says nothing about the schema.
+        """
+        kinds = {"wall_iso,ts,": "full", "ts,util,": "compact", "timestamp,": "raw"}
+        seen = {v: 0 for v in kinds.values()}
+        traces = sorted(self.ROOT.glob("*/data/gpu_telemetry_*.csv"))
+        self.assertTrue(traces, "no committed traces to count")
+        for t in traces:
+            head = t.read_text(encoding="utf-8").splitlines()[0]
+            for prefix, name in kinds.items():
+                if head.startswith(prefix):
+                    seen[name] += 1
+                    break
+            else:
+                self.fail(f"{t.name} has a header no schema writes: {head[:50]!r}")
+        src = (self.ROOT / self.SAMPLER).read_text(encoding="utf-8")
+        words = ("zero", "one", "two", "three", "four", "five", "six", "seven",
+                 "eight", "nine", "ten", "eleven", "twelve", "thirteen")
+        for name, n in seen.items():
+            with self.subTest(schema=name):
+                self.assertLess(n, len(words), f"{n} is beyond what this spells")
+                self.assertRegex(
+                    src, rf"{words[n]} traces?\b|One trace\b" if name == "full"
+                    else rf"{words[n]} traces\b",
+                    f"the sampler's header does not say {name} is {words[n]}, "
+                    f"and this tree holds {n}")
+
+
+class EveryMeasurementMustNameItsCard(unittest.TestCase):
+    """Three physically distinct RTX 3090s, and nothing could tell them apart.
+
+    Until 2026-10-02 the only card identifier any committed run recorded was
+    `name`, which is "NVIDIA GeForce RTX 3090" on every one of them: not a uuid, not
+    a serial, in any arm-run, any manifest, or any document. `BENCHMARK_ENV.md`
+    shows the v1 host had TWO of them, and the bench host is a third, so the gap was
+    always there -- it only became load-bearing when a pilot measurement on a second
+    card was about to be taken deliberately.
+
+    A bandwidth figure, a thermal range and a power limit are properties of one
+    card and its cooling. A figure that cannot name its card can be attributed to
+    the wrong one for ever, and no later check can undo that.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+    # The cards measurements here may come from, by the eight hex digits that
+    # distinguish them. An UNDECLARED card fails: one nobody has written down is one
+    # that can be mistaken for any of the others.
+    CARDS = {
+        "f9db9841": "the `3090` bench host's card, bare metal, 350 W. Every "
+                    "published round was measured on this one",
+        "f71a8f68": "the dev box's card, a KVM guest, 420 W. Pilot work only: its "
+                    "thermal range is its own cooler's, and its kernel refuses to "
+                    "map the memory temperature register because "
+                    "CONFIG_IO_STRICT_DEVMEM is set and the nvidia driver claims "
+                    "BAR0",
+    }
+    PUBLISHED = "f9db9841"
+
+    def _runner(self):
+        import importlib.util
+        os.environ.setdefault("LLAMA_SERVER_BIN", "/bin/true")
+        os.environ.setdefault("MODEL_TARGET", "/dev/null")
+        spec = importlib.util.spec_from_file_location(
+            "rr_card", self.ROOT / "bench" / "retest_runner.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def test_the_runner_records_which_card(self):
+        fields = [f.strip() for f in self._runner().GPU_FIELDS.split(",")]
+        self.assertIn("uuid", fields,
+                      "the snapshot records no card identity, so two identical "
+                      "3090s produce indistinguishable data")
+        self.assertIn("name", fields)
+
+    def test_every_card_is_declared_with_what_it_is(self):
+        for k, why in self.CARDS.items():
+            self.assertRegex(k, r"^[0-9a-f]{8}$", f"{k!r} is not a uuid prefix")
+            self.assertGreater(len(why), 40, f"{k} is declared without saying what")
+        self.assertIn(self.PUBLISHED, self.CARDS)
+
+    def _offences(self, root: Path):
+        """Run directories whose arm-runs disagree on the card, name an undeclared
+        one, or carry a pilot card without saying so in the directory name."""
+        bad = []
+        for d in sorted(root.glob("*/data/*/")) + sorted(root.glob("*/data/*")):
+            if not d.is_dir():
+                continue
+            man = d / "manifest.json"
+            if not man.is_file():
+                continue
+            try:
+                fields = [f.strip() for f in str(json.loads(
+                    man.read_text(encoding="utf-8")).get("gpu_fields", "")).split(",")]
+            except Exception:                                    # noqa: BLE001
+                continue
+            if "uuid" not in fields:
+                continue                      # predates the field; nothing to check
+            i = fields.index("uuid")
+            seen = set()
+            for f in sorted(d.glob("*__rep*.json")):
+                j = json.loads(f.read_text(encoding="utf-8"))
+                for which in ("gpu_before", "gpu_after"):
+                    cells = [c.strip() for c in str(j.get(which, "")).split(",")]
+                    if len(cells) > i and cells[i].startswith("GPU-"):
+                        seen.add(cells[i])
+            if not seen:
+                continue
+            if len(seen) > 1:
+                bad.append(f"{d.name}: arm-runs disagree on the card: {sorted(seen)}")
+                continue
+            uuid = sorted(seen)[0]
+            prefix = uuid[len("GPU-"):len("GPU-") + 8]
+            if prefix not in self.CARDS:
+                bad.append(f"{d.name}: measured on {uuid}, which is not a declared "
+                           f"card. Declare it, or this figure can be attributed to "
+                           f"any 3090 here")
+            # a TOKEN, not a substring: `matrix_notpilot_...` contains "pilot"
+            # and is not a pilot. This repository has recorded a grep satisfied by
+            # another occurrence ten times, and the tenth was in this line.
+            elif prefix != self.PUBLISHED and "pilot" not in d.name.split("_"):
+                bad.append(f"{d.name}: measured on {uuid}, which is not the bench "
+                           f"host's card, and the directory name does not say pilot")
+        return bad
+
+    def test_no_committed_run_is_on_an_undeclared_or_mislabelled_card(self):
+        self.assertEqual(self._offences(self.ROOT), [])
+
+    def test_the_rule_is_not_vacuous(self):
+        """Committed runs predate the field, so the rule is exercised on a
+        constructed one. Three ways to be wrong, each required to fail."""
+        fields = self._runner().GPU_FIELDS
+        i = [f.strip() for f in fields.split(",")].index("uuid")
+
+        def snap(uuid):
+            cells = ["x"] * len(fields.split(","))
+            cells[i] = uuid
+            return ",".join(cells)
+
+        with tempfile.TemporaryDirectory() as t:
+            for name, uuids, want in (
+                    ("matrix_ok", ["GPU-f9db9841-0-0-0-0"], False),
+                    ("matrix_pilot_z", ["GPU-f71a8f68-0-0-0-0"], False),
+                    ("matrix_notpilot", ["GPU-f71a8f68-0-0-0-0"], True),
+                    ("matrix_plain_z", ["GPU-f71a8f68-0-0-0-0"], True),
+                    ("matrix_unknown", ["GPU-deadbeef-0-0-0-0"], True),
+                    ("matrix_two_cards", ["GPU-f9db9841-0-0-0-0",
+                                          "GPU-f71a8f68-0-0-0-0"], True)):
+                d = Path(t) / "v9_x" / "data" / name
+                d.mkdir(parents=True)
+                (d / "manifest.json").write_text(
+                    json.dumps({"gpu_fields": fields}), encoding="utf-8")
+                for k, u in enumerate(uuids):
+                    (d / f"arm__rep{k}.json").write_text(
+                        json.dumps({"gpu_before": snap(u), "gpu_after": snap(u)}),
+                        encoding="utf-8")
+                got = bool([b for b in self._offences(Path(t)) if name in b])
+                with self.subTest(case=name):
+                    self.assertEqual(got, want,
+                                     f"{name}: offence={got}, expected {want}")

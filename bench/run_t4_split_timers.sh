@@ -105,9 +105,21 @@ unset BENCH_IGNORE_EOS BENCH_HARDCAP_SUFFIX || true
 # gpu_telemetry.sh takes [schema] [interval] [label] and names its own file
 TELE_SCHEMA="${BENCH_TELEMETRY_SCHEMA:-compact}"
 TELE_INTERVAL="${BENCH_TELEMETRY_INTERVAL:-5}"
-bash "$TELE_SH" "$TELE_SCHEMA" "$TELE_INTERVAL" "T4" &
+# The driver names the trace so it can check THAT file. The sampler stamps it with
+# its OWN `date`, and `bench/run_w_williams.sh` looked for the driver's `$STAMP`,
+# which is the same second only if the two calls do not straddle one. Naming it
+# here also makes the convention true rather than probable: the trace and the
+# matrix directory share a stamp because one variable sets both.
+TELE_CSV="$BENCH/gpu_telemetry_T4_$STAMP.csv"
+BENCH_TELEMETRY_OUT="$TELE_CSV" bash "$TELE_SH" "$TELE_SCHEMA" "$TELE_INTERVAL" "T4" &
 TELE_PID=$!
 trap 'kill "$TELE_PID" 2>/dev/null || true; restore' EXIT
+# Started and never looked at again. A sampler that dies in the first second
+# leaves a one-line trace and the run still reports success, so the one record of
+# what the card was doing is missing exactly when it is wanted. This check was in
+# `run_w_williams.sh` and in none of the four drivers beside it.
+sleep 2
+kill -0 "$TELE_PID" 2>/dev/null || { echo "FAIL: telemetry died at startup" >&2; exit 1; }
 
 OUT="$BENCH/matrix_T4_split_$STAMP"
 echo "=== measuring -> $(basename "$OUT")  $(date -Is) ==="
@@ -116,6 +128,11 @@ test -f "$OUT/RUN_COMPLETE.json" || { echo "T4 did not complete" >&2; exit 1; }
 echo "=== T4 done $(date -Is) ==="
 # `restore` runs from the EXIT trap after this, so surface its verdict rather
 # than letting a failed rebuild leave a green run behind an instrumented tree
+# and the trace has to hold SAMPLES, not just the header it was created with
+tele_rows=0
+[ -s "$TELE_CSV" ] && tele_rows=$(( $(wc -l < "$TELE_CSV") - 1 ))
+echo "telemetry rows:$tele_rows"
+[ "$tele_rows" -ge 1 ] || { echo "FAIL: $TELE_CSV holds no samples" >&2; exit 1; }
 if [ "${RESTORE_FAILED:-0}" -ne 0 ]; then
     echo "!!! the llama.cpp tree was NOT restored to stock" >&2
     exit 1

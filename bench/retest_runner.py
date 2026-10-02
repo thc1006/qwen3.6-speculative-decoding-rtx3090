@@ -782,7 +782,18 @@ GPU_FIELDS = (
     "clocks.current.graphics,clocks.max.graphics,"
     "clocks.current.sm,clocks.current.memory,clocks.max.memory,"
     "power.draw,power.limit,power.default_limit,power.max_limit,"
-    "temperature.gpu,pstate,clocks_throttle_reasons.active"
+    "temperature.gpu,pstate,clocks_throttle_reasons.active,"
+    # WHICH CARD. Appended on 2026-10-02, and not cosmetic: this repository holds
+    # measurements from at least three physically distinct RTX 3090s -- the v1 host
+    # had two of them and the bench host is a third -- and the only card identifier
+    # any committed run recorded was `name`, which is "NVIDIA GeForce RTX 3090" on
+    # every one. Nothing in the tree could say which card produced any figure, and
+    # a bandwidth or a temperature is a property of one card and its cooling.
+    #
+    # Appended rather than inserted: both consumers read this snapshot through the
+    # manifest's own `gpu_fields` by NAME, so position does not matter to them, and
+    # appending cannot move a field for anything that reads by index.
+    "uuid"
 )
 
 
@@ -793,6 +804,101 @@ def nvidia_smi() -> str:
             text=True, timeout=20).strip()
     except Exception as e:  # noqa: BLE001
         return f"unavailable: {e}"
+
+
+# `bench/vram_temp.py`, which reads the GDDR6X temperature NVML does not expose.
+# Beside this file so a run cannot be measured with a copy the repository does not
+# hold: that is the shape ERRATA A16's addendum was in for a day.
+def _vram_temp_tool() -> str:
+    """Beside this file, resolved when needed rather than at import.
+
+    `Path(__file__)` at module level broke a test that execs this module's prelude
+    to read a constant out of it, because that context has no `__file__`. A harness
+    whose prelude cannot be read without being a file on disk is a harness its own
+    tests cannot inspect.
+    """
+    return str(Path(__file__).resolve().parent / "vram_temp.py")
+
+
+def vram_temp() -> float | str:
+    """The GDDR6X temperature, or the reason there is none.
+
+    Through `sudo -n`, because mapping a PCI BAR needs `CAP_SYS_RAWIO` and this
+    process does not have it. `-n` so a host without passwordless sudo fails at
+    once instead of waiting on a prompt no one will answer, and a timeout as well,
+    because a measurement must not be able to stall on an instrument.
+
+    Same shape as `nvidia_smi()`: an instrument the run could not reach is recorded
+    as the REASON it could not. A missing field and a field that says why are not
+    the same evidence, and ERRATA A16 is an entry about a quantity nothing
+    recorded.
+    """
+    try:
+        out = subprocess.check_output(
+            ["sudo", "-n", sys.executable, _vram_temp_tool()],
+            text=True, timeout=20, stderr=subprocess.STDOUT)
+        return float(out.strip())
+    except Exception as e:                                        # noqa: BLE001
+        return f"unavailable: {e}"
+
+
+def _wall_offset() -> float:
+    """Seconds to add to a `time.perf_counter()` value to get a Unix timestamp.
+
+    `perf_counter`'s origin is arbitrary, so a row's `t_start` means nothing to
+    anything outside this process. The sampler writes nvidia-smi's wall clock, and
+    run T4's complete five-second trace therefore cannot be attributed to any
+    arm-run: the thermal profile across ERRATA A16's step is not recoverable from
+    what that run recorded, which is the first prerequisite
+    `PROSPECTIVE_PLAN_Z_MEMORY_STATE.md` lists.
+    """
+    return time.time() - time.perf_counter()
+
+
+def _iso(unix: float) -> str:
+    """A Unix timestamp as ISO-8601 with an offset, to milliseconds.
+
+    NOT nvidia-smi's spelling. The eighteen traces this repository holds carry
+    THREE: `2026-08-25T20:57:07+08:00` from the full schema's wall prefix,
+    `2026/08/26 20:32:51.659` from nvidia-smi, and `2026/08/2601:47:50.693` from an
+    older compact schema that stripped every space in the row. Emitting one of them
+    here would suggest a join is a string comparison, and it would be a string
+    comparison that silently matches nothing for two thirds of the traces.
+
+    So the arm-run side is unambiguous -- an epoch float beside this, and
+    `bench/check_telemetry_cover.py` holds the one parser that reads all three on
+    the trace side. This spelling is the manifest's own, which `fromisoformat`
+    reads.
+    """
+    whole, ms = divmod(int(round(unix * 1000)), 1000)
+    return (time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(whole))
+            + f".{ms:03d}" + time.strftime("%z", time.localtime(whole)))
+
+
+def _wall_window(rows: list, off_before: float, off_after: float) -> dict:
+    """What a trace needs to be joined to this arm-run.
+
+    Both offsets, because the wall clock can be slewed under a run and a reader is
+    entitled to see whether it was; `offset_drift_s` is their difference and is the
+    size of that correction. The window is the REQUEST window, from the first
+    request to start to the last to finish, because that is the interval a sample
+    either falls in or does not.
+    """
+    out = {"monotonic_offset_before": off_before,
+           "monotonic_offset_after": off_after,
+           "offset_drift_s": off_after - off_before}
+    timed = [r for r in rows
+             if isinstance(r.get("t_start"), (int, float))
+             and isinstance(r.get("t_end"), (int, float))]
+    if timed:
+        t0 = min(r["t_start"] for r in timed) + off_before
+        t1 = max(r["t_end"] for r in timed) + off_after
+        # the epoch floats are what a join uses; the strings are for a reader
+        out["requests_started_unix"] = t0
+        out["requests_ended_unix"] = t1
+        out["requests_started"] = _iso(t0)
+        out["requests_ended"] = _iso(t1)
+    return out
 
 
 def port_is_free(port: int) -> bool:
@@ -1388,6 +1494,7 @@ def run_arm(arm: str, rep: int) -> dict:
     # 100 % utilisation. The continuous trace from bench/gpu_telemetry.sh is the
     # authority for GPU state; these two snapshots are a convenience.
     gpu_before = nvidia_smi()
+    vram_before = vram_temp()
     mem_before = gpu_mem_used_mib()
     proc = start_server(extra, log_path, args_of_arm=extra, cpus=arm_cpus(arm))
     try:
@@ -1398,6 +1505,8 @@ def run_arm(arm: str, rep: int) -> dict:
             return {"arm": arm, "repeat": rep, "ready_s": None,
                     "argv": proc._cmd,  # type: ignore[attr-defined]
                     "gpu_before": gpu_before, "gpu_after": nvidia_smi(),
+                    "vram_temp_before": vram_before,
+                    "vram_temp_after": vram_temp(),
                     "server_log": str(log_path.relative_to(OUT)),
                     "crashed": {"tag": "__startup__", "error": f"{type(e).__name__}: {e}",
                                 "returncode": proc.poll()},
@@ -1423,11 +1532,15 @@ def run_arm(arm: str, rep: int) -> dict:
             return {"arm": arm, "repeat": rep, "ready_s": ready_s,
                     "argv": proc._cmd,  # type: ignore[attr-defined]
                     "gpu_before": gpu_before, "gpu_after": nvidia_smi(),
+                    "vram_temp_before": vram_before,
+                    "vram_temp_after": vram_temp(),
                     "server_log": str(log_path.relative_to(OUT)),
                     "crashed": {"tag": "__warmup__", "error": f"{type(e).__name__}: {e}",
                                 "returncode": proc.poll()},
                     "rows": []}
+        off_before = _wall_offset()
         rows, crashed, wall_s = run_prompt_set(arm, rep, proc)
+        off_after = _wall_offset()
         n_tok = sum(r["predicted_n"] for r in rows)
         agg = n_tok / wall_s if wall_s > 0 else float("nan")
         peak = max_client_requests_in_flight(rows)
@@ -1464,6 +1577,12 @@ def run_arm(arm: str, rep: int) -> dict:
             "max_in_flight": peak,  # deprecated alias, runs A-R used this name
             "argv": proc._cmd,  # type: ignore[attr-defined]
             "gpu_before": gpu_before, "gpu_after": nvidia_smi(),
+            "vram_temp_before": vram_before,
+            "vram_temp_after": vram_temp(),
+            # What a sampler trace needs to be joined to this arm-run. Rows
+            # carry `t_start` and `t_end` from `time.perf_counter()`, whose
+            # origin is arbitrary; add an offset to get a Unix timestamp.
+            "wall_clock": _wall_window(rows, off_before, off_after),
             "server_log": str(log_path.relative_to(OUT)),
             "crashed": crashed,
             "rows": rows,

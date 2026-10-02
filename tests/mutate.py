@@ -461,8 +461,10 @@ MUTATIONS = [
 
     ("a run script starts the telemetry sampler with a path again",
      "bench/run_v2_crossover.sh",
-     'bash "$TELE_SH" "$TELE_SCHEMA" "$TELE_INTERVAL" "V2" &',
-     'bash "$TELE_SH" "$BENCH/gpu_telemetry_V2.csv" &',
+     'BENCH_TELEMETRY_OUT="$TELE_CSV" bash "$TELE_SH" "$TELE_SCHEMA" '
+     '"$TELE_INTERVAL" "V2" &',
+     'BENCH_TELEMETRY_OUT="$TELE_CSV" bash "$TELE_SH" '
+     '"$BENCH/gpu_telemetry_V2.csv" &',
      "tests.test_harness_invariants.ARunScriptMustSetEveryFieldItClaimsToReproduce"),
 
     # --- W2's pre-registered boundary sensitivity -------------------------
