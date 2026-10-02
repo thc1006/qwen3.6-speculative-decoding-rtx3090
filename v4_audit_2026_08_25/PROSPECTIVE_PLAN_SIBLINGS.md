@@ -1,8 +1,10 @@
 # Plan S: what shares a core with the main thread
 
-**This cannot be executed yet.** Five things have to exist first and they are the
-last section. Written 2026-10-02, before any measurement it describes, and every
-figure it quotes about data already committed is derived by
+**This cannot be executed yet.** Four of the five items in the last section are
+still open, and two of them changed shape after the flags were traced through the
+pinned commit's own sources rather than master's. Written 2026-10-02, before any
+measurement it describes, and every figure it quotes about data already committed
+is derived by
 [`../analysis/plan_siblings_power.py`](../analysis/plan_siblings_power.py).
 
 ## Why this plan exists, and why the previous reading was wrong
@@ -33,11 +35,18 @@ physical core with the main thread**.
 
 ## The candidate, stated before it is tested
 
-`--poll` defaults to **50**, so llama.cpp's idle workers spin rather than sleep. A
-worker spinning on the main thread's hyperthread sibling takes issue slots from it.
-Whether the scheduler puts one there is drawn afresh at every server launch, and
-every published run here passes no affinity at all — which is exactly a bimodal,
+`--poll` defaults to **50**, and that is not a nominal amount of spinning:
+`ggml_graph_compute_poll_for_work` turns it into 6,553,600 `PAUSE` iterations per
+worker per wait before the worker falls back to a condvar sleep. A worker spinning
+on the main thread's hyperthread sibling takes issue slots from it. Whether the
+scheduler puts one there is drawn afresh at every server launch, and every
+published run here passes no affinity at all, which is exactly a bimodal,
 per-invocation, unrecorded variable.
+
+One asymmetry to carry into the reading, because it bounds what the third arm can
+show: `--poll` reaches the target context's threadpool and not the drafter's. The
+drafter's context is built without an attached pool and takes the library default
+whatever the flag says. Prerequisite 2 has the lines that show it.
 
 **This is an inference and nothing here has measured it.** No run in this
 repository records which processor any llama.cpp thread ran on, so the placement
@@ -71,12 +80,12 @@ Each differs from the one above it in exactly one thing.
 |---|---|---|
 | `distinct` | `0,2,4,6,8,10,12,14` | eight distinct physical cores. Run Y's fast condition |
 | `packed` | `0,1,2,3,4,5,6,7` | four physical cores, both siblings of each |
-| `packed-nopoll` | `0,1,2,3,4,5,6,7` | and `--poll 0`, so the idle workers sleep |
+| `packed-nopoll` | `0,1,2,3,4,5,6,7` | and `--poll 0`, so the target pool's idle workers sleep |
 
 Same binary, same model, same prompts, same thread count, all three on performance
 cores. `packed` against `distinct` is the hyperthread question. `packed-nopoll`
-against `packed` asks whether the cost is the spinning, and if it is, that flag is
-not only a diagnosis but a remedy.
+against `packed` asks whether the cost is the target pool's spinning, and if it is,
+that flag is a remedy for the part of the spinning the flag reaches.
 
 ## The design
 
@@ -111,14 +120,19 @@ Primary: the `packed` against `distinct` ratio.
   core rather than sharing it, and the reading would be about that instead.
 
 Secondary: `packed-nopoll` against `packed`. If it removes the cost, the spinning
-worker is the mechanism and `--poll 0` is the remedy. If it does not, the sharing
-costs something that is not the spin, and the main thread is contending with
-whatever else the scheduler put there, which the next run would have to name.
+worker is the mechanism and `--poll 0` is the remedy. If it does not, the reading
+is weaker than it looks: the flag quiets the target context's pool and the
+drafter's workers keep spinning either way, so a null says the target pool's spin
+is not the whole cost. It does not say spinning is innocent. The run that could
+say that is one which places the drafter's threads as well, and today the only
+instrument that reaches them is `taskset` with the placement recorded.
 
 I expect `packed` to lose two to five per cent of the decode rate against
-`distinct`, and `--poll 0` to recover most of it. Writing that here is the point: if
-`packed` comes back inside one per cent, this plan was wrong and the step is not
-about hyperthread sharing.
+`distinct`, and `--poll 0` to recover part of that. How large a part I will not
+predict, because the drafter's pool is outside the flag's reach and what share of
+the spinning is the drafter's has not been measured. Writing the first number here
+is the point: if `packed` comes back inside one per cent, this plan was wrong and
+the step is not about hyperthread sharing.
 
 ## What this cannot do
 
@@ -139,19 +153,47 @@ about hyperthread sharing.
 
 ## Prerequisites
 
-1. **`--poll` has to reach the server and be recorded.** The runner passes neither
-   it nor `--cpu-strict`, and both have defaults that are not neutral: 50 and 0. So
-   every published run here has two unrecorded threadpool parameters.
-2. **The affinity should be llama.cpp's own, not `taskset`.** `taskset` sets one
-   mask for every thread and the kernel places within it; `-C/--cpu-mask` with
-   `--cpu-strict 1` walks the mask and gives worker N the Nth bit. For run Y the two
-   were equivalent, eight threads into eight processors. For a mask with more
-   processors than threads they are not, and the arms above need the strict form to
-   mean what they say.
-3. **The sibling topology has to be recorded.** Nothing in this repository says
-   which processors share a physical core, so the masks above rest on a claim the
-   tree cannot check. `/sys/devices/system/cpu/cpu*/topology/thread_siblings_list`
-   is what says it.
-4. **The pinned build has to accept the flags.** They are in upstream master; this
-   repository pins `3737e4137` and nothing here has checked that build's own help.
+The flags were traced through the pinned commit's own sources before this list
+was written, and two of the five items changed shape because of what that found.
+Every line number below is `3737e4137`'s.
+
+1. **`--poll` and `--cpu-strict` have to be passed and recorded.** The runner
+   passes neither, and neither default is neutral: `ggml_threadpool_params_init`
+   in `ggml/src/ggml.c` sets `poll = 50` and `strict_cpu = false`, so every
+   published run here carries both unrecorded. The 50 is not a small thing.
+   `ggml_graph_compute_poll_for_work`, `ggml/src/ggml-cpu/ggml-cpu.c:3172`, spins
+   `1024 * 128 * poll` times, so **6,553,600 `PAUSE` iterations** per worker per
+   wait before it falls back to a condvar sleep. At `--poll 0` it is zero rounds
+   and the worker sleeps at once.
+2. **`taskset` stays, and the native flags are added beside it.** This item said
+   the opposite first, that the affinity should be llama.cpp's own instead, and
+   that was wrong in a way that would have removed control rather than added it.
+   The server's TARGET context gets a threadpool built from `params.cpuparams`:
+   `tools/server/server-context.cpp:1051` calls `common_init_from_params`, whose
+   constructor at `common/common.cpp:1290` calls `threadpools.init` at 1408, and
+   that attaches a pool made from the mask, the strict flag and the poll level at
+   1826. The DRAFTER context does not. `common/speculative.cpp` builds it with
+   `llama_init_from_model` directly, 2412 and 2424, copying only the thread
+   count, so no pool is attached and `ggml_graph_compute` makes a disposable one
+   from the library defaults. `taskset` is a process-wide affinity the kernel
+   applies to every thread including the drafter's; `--cpu-mask --cpu-strict 1`
+   places the target pool alone. Dropping `taskset` for it would lose the
+   drafter's threads, which is why run Y's instrument was the broader one.
+3. **The sibling topology has to be recorded, and it decides where this can run.**
+   Nothing in this repository says which processors share a physical core, so the
+   masks above rest on a claim the tree cannot check.
+   `/sys/devices/system/cpu/cpu*/topology/thread_siblings_list` is what says it,
+   one line per processor. The development box this was written on reports eight
+   processors and eight distinct entries, because it is a KVM guest and the
+   hypervisor gives it no siblings to pack: `packed` and `distinct` would be the
+   same arm there. So this is a bench-host run or no run, and no test here asserts
+   the topology, because a test that reads `/sys` is green on the machine it was
+   written on and red on a runner.
+4. **The built binary's own help still has to be read.** The flags are defined in
+   the pinned commit: `common/arg.cpp` gives `-C/--cpu-mask` at 1534,
+   `-Cr/--cpu-range` at 1548, `--cpu-strict` at 1554 and `--poll` at 1571, and
+   none of them carries a `.set_examples(...)` restricting it to one binary, so
+   the server accepts all four. That is the source, not the artefact. What is on
+   the bench host is a build, and whether it was configured and linked the way
+   those lines assume is a question only `--help` from that file answers.
 5. **A derivation script**, which exists, and the claims job has to run it.

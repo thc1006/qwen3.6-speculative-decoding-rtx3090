@@ -7899,6 +7899,28 @@ class PlanSsArmsMustDifferInOneThingEach(unittest.TestCase):
                       "the ordering of three figures; a plan that does not say "
                       "so reads as a finding")
 
+    def test_it_states_which_pool_the_flag_reaches(self):
+        """`--poll 0` is a partial intervention, and a null would read as total.
+
+        At the pinned commit the server's target context gets a threadpool built
+        from `params.cpuparams`, so the flag reaches it. The drafter's context is
+        built by `llama_init_from_model` with no pool attached, so it takes the
+        library default whatever the flag says. A plan that did not say this would
+        let a null second arm read as "spinning is not the mechanism" when what it
+        showed was "the half of the spinning the flag reaches is not the whole
+        cost". That is the false exclusion this file exists to stop.
+        """
+        doc = self._doc()
+        self.assertIn("reaches the target context's threadpool and not the drafter's",
+                      doc, "the plan does not say the flag's reach is partial")
+        self.assertIn("does not say spinning is innocent", doc,
+                      "the secondary reading does not say what a null fails to "
+                      "exclude")
+        self.assertIn("server-context.cpp:1051", doc,
+                      "the reach is asserted without the line that shows it")
+        self.assertIn("common/speculative.cpp", doc,
+                      "the drafter's context is named without its source")
+
     def test_the_prerequisites_are_still_unsatisfied(self):
         """Each prerequisite exists because of a fact about this tree."""
         tracked = subprocess.run(["git", "ls-files", "-z"], cwd=self.ROOT,
