@@ -8003,11 +8003,26 @@ class AnArmRunMustBeJoinableToATrace(unittest.TestCase):
 
         The defect was in the first version of this, and a value a ten-thousandth
         under the second is all it takes.
+
+        Asserted by ROUND TRIP and not against a wall-clock hour. The first version
+        of this test checked for `T07:28:24.000`, which is that instant in +0800 and
+        not in UTC, and the CI reproduction runs with `TZ=UTC`:
+        `bench/check_telemetry_cover.py` carries a docstring about exactly this --
+        "a verifier whose verdict depends on `TZ` is not a verifier" -- and the
+        test written a day later had the same defect.
         """
+        import datetime as dt
         iso = self._rr()._iso
-        self.assertIn("T07:28:24.000", iso(1790897303.9996))
-        self.assertIn("T07:28:23.999", iso(1790897303.9994))
-        for u in (1790897303.0, 1790897303.0005, 1790897303.5, 1790897303.99999):
+        for unix, want in ((1790897303.9996, 1790897304.000),
+                           (1790897303.9994, 1790897303.999),
+                           (1790897303.0, 1790897303.000),
+                           (1790897303.5, 1790897303.500)):
+            got = iso(unix)
+            self.assertRegex(got, self.ISO, f"{unix} formats as {got!r}")
+            self.assertAlmostEqual(
+                dt.datetime.fromisoformat(got).timestamp(), want, places=3,
+                msg=f"{unix} -> {got!r}, which is not {want}")
+        for u in (1790897303.0005, 1790897303.99999):
             self.assertRegex(iso(u), self.ISO, f"{u} formats wrong")
 
     def test_the_offset_converts_a_monotonic_time(self):
