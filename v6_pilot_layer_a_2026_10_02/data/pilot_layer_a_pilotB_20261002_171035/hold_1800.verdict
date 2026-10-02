@@ -1,0 +1,8 @@
+hold_1800.csv: 62 samples
+  sm       min 1800 max 1800 mean 1800.0 sd 0.00
+  mem      min 9501 max 9501 mean 9501.0 sd 0.00
+  temp     min 65 max 68 mean 67.8 sd 0.66
+  power    min 125 max 255 mean 247.9 sd 28.27
+  sm held at 1800 MHz for all 62 samples
+  mem held at 9501 MHz for all 62 samples
+  throttle 0x0000000000000001 in 3 of 62 samples

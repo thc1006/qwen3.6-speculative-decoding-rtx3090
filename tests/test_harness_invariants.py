@@ -60,6 +60,12 @@ sys.path.insert(0, str(ROOT / "analysis"))
 _PORT_SEQ = itertools.count()
 
 
+# 20000 to 31999: BELOW the kernel's ephemeral floor, which is 32768 on this host
+# and 32768 by default everywhere. `_free_port_range_is_below_the_ephemeral_floor`
+# checks that against /proc rather than against this comment.
+_PORT_LO, _PORT_SPAN = 20000, 12000
+
+
 def free_port() -> str:
     """A free port, disjoint from any other process running this suite.
 
@@ -67,13 +73,21 @@ def free_port() -> str:
     server could not bind and the first run's requests reached the wrong
     process. Binding port 0 and closing it does not fix that either - the kernel
     can hand the same ephemeral port to the other process in the window before
-    the stub binds it, and with two suites running that happened often enough to
-    hang both. So: a base derived from this process's PID, outside the ephemeral
-    range, plus a counter, with the port confirmed unused before it is returned.
+    the stub binds it. So: a base derived from this process's PID, plus a counter,
+    with the port confirmed unused before it is returned.
+
+    And BELOW the ephemeral range, which the previous version said it was and was
+    not: it returned ports in [20000, 59999] while the kernel assigns [32768,
+    60999] to outbound connections, so 68 % of what it handed out could be taken by
+    any connection -- including the suite's own requests to the stub it was about to
+    start. The confirm-then-return window cannot be closed by checking harder; it is
+    closed by picking from a range the kernel will not assign. The symptom was one
+    test failing about one run in three under concurrent load, with a bare
+    `assertEqual(returncode, 0)` that printed nothing.
     """
-    base = 20000 + (os.getpid() * 97) % 30000
+    base = (os.getpid() * 97) % _PORT_SPAN
     for _ in range(200):
-        port = 20000 + (base + next(_PORT_SEQ)) % 40000
+        port = _PORT_LO + (base + next(_PORT_SEQ)) % _PORT_SPAN
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sk:
             sk.settimeout(0.3)
             if sk.connect_ex(("127.0.0.1", port)) != 0:
@@ -1564,7 +1578,13 @@ class BothModesMustFitInOneInvocation(unittest.TestCase):
     def test_the_capped_arm_runs_the_base_arms_flags(self):
         with tempfile.TemporaryDirectory() as t:
             out = Path(t) / "flags"
-            self.assertEqual(self._run(out, "baseline,baseline-cap").returncode, 0)
+            r = self._run(out, "baseline,baseline-cap")
+            # the output, because this assertion carried no message and a failure
+            # printed nothing: it took a loop under load to find out that the port
+            # the suite had just confirmed free had been taken by an outbound
+            # connection from the suite itself
+            self.assertEqual(r.returncode, 0, (r.stdout or "")[-1200:]
+                             + (r.stderr or "")[-1200:])
             man = json.loads((out / "manifest.json").read_text())
             self.assertEqual(man["arms"]["baseline-cap"], man["arms"]["baseline"])
             self.assertEqual(man["hardcap_suffix"], "-cap")
@@ -8297,3 +8317,141 @@ class EveryMeasurementMustNameItsCard(unittest.TestCase):
                 with self.subTest(case=name):
                     self.assertEqual(got, want,
                                      f"{name}: offence={got}, expected {want}")
+
+
+class TheClockLockGuardsMustNotBeDead(unittest.TestCase):
+    """`bench/run_z_layer_a.sh`'s "already locked" check never fired.
+
+    It looked for `ApplicationsClocksSetting` inside `nvidia-smi -q -d CLOCK`. Two
+    things were wrong at once: the event reasons are not in `-d CLOCK`, and
+    `Applications Clocks` is a different and deprecated mechanism that reads
+    "Requested functionality has been deprecated" on this driver. So the guard
+    matched nothing, on every run, and nothing said so.
+
+    It was found when an ad-hoc command timed out before its own restore and left
+    the card locked at 1800/9501 for twenty minutes. `clocks.max.sm` still read its
+    default 2130 -- that field is not what `-lgc` changes -- so a check on it said
+    "already restored" while the card sat at a locked clock. There is NO field that
+    reports a `-lgc` lock: what a lock looks like is an idle card whose clocks are
+    above idle, 1800 MHz and 118 W against 210 MHz and 36 W on this card.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+    DRIVER = "bench/run_z_layer_a.sh"
+
+    def _src(self):
+        return (self.ROOT / self.DRIVER).read_text(encoding="utf-8")
+
+    def test_it_does_not_look_for_the_deprecated_mechanism(self):
+        src = self._src()
+        code = "\n".join(l for l in src.splitlines()
+                         if not l.lstrip().startswith("#"))
+        self.assertNotIn("ApplicationsClocksSetting", code,
+                         "the driver tests a deprecated field that reads "
+                         "'deprecated' on this driver, so the check is dead")
+        self.assertNotIn("-q -d CLOCK", code,
+                         "the clocks event reasons are not in `-d CLOCK`, so a "
+                         "check that greps it matches nothing")
+
+    def test_it_detects_a_lock_by_what_a_lock_looks_like(self):
+        src = self._src()
+        for want in ("--query-gpu=utilization.gpu", "--query-compute-apps=pid",
+                     "--query-gpu=clocks.sm", "IDLE_SM_MAX"):
+            self.assertIn(want, src,
+                          f"the inherited-lock check does not read {want}, so it "
+                          f"cannot tell an idle locked card from an idle one")
+
+    def test_it_clears_an_inherited_lock_before_it_locks(self):
+        """Detecting is not enough: a run must not inherit a treatment."""
+        src = self._src().splitlines()
+        note = next(i for i, l in enumerate(src) if l.strip() == "inherited_lock_note")
+        clear = next(i for i, l in enumerate(src) if l.strip() == "unlock" and i > note)
+        first_lock = next(i for i, l in enumerate(src)
+                          if l.strip().startswith("lock ") and i > note)
+        self.assertLess(clear, first_lock,
+                        "the driver locks before clearing whatever was there")
+
+    def test_the_restore_is_on_every_exit_path(self):
+        src = self._src()
+        self.assertRegex(src, r"trap '[^']*restore[^']*' EXIT INT TERM",
+                         "the restore is not trapped on all three, so a timeout or "
+                         "an interrupt leaves the card locked -- which is how this "
+                         "defect was found")
+
+
+class ThePortAllocatorMustNotRaceTheKernel(unittest.TestCase):
+    """One test failed about one run in three under load, and printed nothing.
+
+    `free_port()` confirms a port unused and returns it; the stub binds it a moment
+    later. That window cannot be closed by checking harder, only by picking from a
+    range the kernel will not assign to anything else. Its docstring said the base
+    was outside the ephemeral range and the arithmetic put it inside: it returned
+    ports in [20000, 59999] while this kernel assigns [32768, 60999] to outbound
+    connections, so 68 % of what it handed out could be taken by any connection --
+    including the suite's own requests to the stub it was about to start.
+
+    Checked against `/proc` and not against a number written here, because the floor
+    is a kernel setting: a host configured lower would make this suite flaky again
+    and the test has to notice rather than agree with its own comment.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+    RANGE = Path("/proc/sys/net/ipv4/ip_local_port_range")
+
+    def _kernel_floor(self):
+        if not self.RANGE.is_file():
+            self.skipTest(f"{self.RANGE} is absent, so the floor cannot be read")
+        lo, _hi = (int(x) for x in self.RANGE.read_text().split())
+        return lo
+
+    def test_every_port_it_hands_out_is_below_the_kernel_floor(self):
+        floor = self._kernel_floor()
+        ports = {int(free_port()) for _ in range(300)}
+        self.assertEqual(len(ports), 300, "it handed out a port twice")
+        self.assertLess(max(ports), floor,
+                        f"it returned {max(ports)}, at or above the {floor} this "
+                        f"kernel assigns to outbound connections, so a port it just "
+                        f"confirmed free can be taken before the stub binds it")
+
+    def test_the_whole_declared_range_is_below_it(self):
+        """Not just the draws taken: the range itself, so a different PID cannot
+        land above the floor on a machine where this passed once."""
+        # the constants directly: they are module-level in this file, and importing
+        # it by bare name fails when it is loaded as `tests.test_harness_invariants`
+        floor = self._kernel_floor()
+        top = _PORT_LO + _PORT_SPAN - 1
+        self.assertLessEqual(top, floor - 1,
+                             f"the range tops out at {top}, not below {floor}")
+        self.assertGreater(_PORT_SPAN, 1000,
+                           "too few ports for concurrent suites to stay disjoint")
+
+    def test_the_assertion_that_hid_this_now_carries_the_output(self):
+        """A failing `assertEqual(returncode, 0)` with no message is a failure that
+        says nothing, and this one took a loop under load to diagnose.
+
+        Scoped to the CLASS that had it, by AST. The first version searched the whole
+        file and failed on its own source, because the string it forbids appears in
+        the test that forbids it -- which is the shape recorded a few hundred lines
+        up as "a grep for a phrase is satisfied by another occurrence", arriving from
+        the other side.
+        """
+        import ast as _ast
+        src = (self.ROOT / "tests" / "test_harness_invariants.py").read_text(
+            encoding="utf-8")
+        tree = _ast.parse(src)
+        cls = next((c for c in _ast.walk(tree) if isinstance(c, _ast.ClassDef)
+                    and c.name == "BothModesMustFitInOneInvocation"), None)
+        self.assertIsNotNone(cls, "the class this is about is gone")
+        body = _ast.get_source_segment(src, cls) or ""
+        self.assertTrue(body, "its source did not parse")
+        bare = 0
+        for call in _ast.walk(_ast.parse(body.strip())):
+            if not (isinstance(call, _ast.Call)
+                    and getattr(call.func, "attr", "") == "assertEqual"):
+                continue
+            # two arguments is a comparison with no message
+            if len(call.args) == 2 and "returncode" in _ast.unparse(call.args[0]):
+                bare += 1
+        self.assertEqual(bare, 0,
+                         "a returncode assertion there carries no message, so a "
+                         "failure prints nothing again")

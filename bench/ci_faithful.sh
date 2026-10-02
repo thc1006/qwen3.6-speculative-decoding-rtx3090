@@ -171,6 +171,7 @@ run load_run_power -- python3 analysis/load_run_power.py --check
 # mean log ratio printed as a percentage.
 run rederive_run_y -- python3 analysis/rederive_run_y.py
 run plan_z_power -- python3 analysis/plan_z_power.py
+run layer_a_slope -- python3 analysis/layer_a_slope.py --check v6_pilot_layer_a_2026_10_02/data/pilot_layer_a_pilotB_20261002_171035
 run past_threshold -- python3 analysis/past_threshold_fit.py
 # The sixth step of that job, which this script did not have either: every run
 # directory carrying RUN_COMPLETE.json has to aggregate under `--strict`, and the

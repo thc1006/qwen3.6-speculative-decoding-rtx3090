@@ -163,6 +163,39 @@ observed between the two levels is under two degrees and has the wrong sign. If
 This is deliberately generous to the hypothesis. It grants the maximum possible
 elasticity and the maximum possible divergence.
 
+### What the pilot read, and what it does not yet settle
+
+Layer A ran on 2026-10-02 on the pilot card, published as
+[`../v6_pilot_layer_a_2026_10_02/`](../v6_pilot_layer_a_2026_10_02/) and derived by
+[`../analysis/layer_a_slope.py`](../analysis/layer_a_slope.py), which also reads that
+round's README back row by row. Clocks locked at 1800 and 9501 MHz and held for all
+2358 telemetry samples at a spread of zero; the calibration flat to 0.205 % across
+five core clocks, so the load was memory bound; the control executed, with nine
+temperatures visited by both phases. Across 51.6 to 69.0 °C, **R is 0.014 %**.
+
+So the rule above fires: the hypothesis is excluded for A16's step and layer B is
+not run. Put against A16's own figures rather than an invented divergence, its two
+levels differ by 1.67 °C, so the sensitivity would have to be 2.35 % per °C, which
+is 1,678 times the upper bound measured. A16's own thermal record also has the
+faster level as the hotter one.
+
+**That reading is on `GPU-f71a8f68` and the step is on `GPU-f9db9841`.** By the
+paragraph above, a null on the pilot card is strong evidence about GA102 with
+GDDR6X as a class and is NOT the bench card's number: board designs differ in how
+the back-side memory modules are cooled, so the onset temperature can differ with
+them. **Repeating layer A on the bench host is what converts this from evidence
+about the class into the exclusion for A16**, and until that runs the exclusion is
+asserted of the class and not of the card the step happened on. It is about an hour
+and it is the only GPU work this plan still needs.
+
+Two things that repeat should carry. The control ran but cannot attribute: the two
+phases agree to 0.022 % at matched temperatures and they are two separate
+invocations of the load, so a constant offset across every bin is what run-to-run
+variation looks like -- seven invocations at a flat plateau spread 0.013 %, about
+the same size. Attribution needs replicated pairs, or both phases inside one
+process. And the memory register IS readable on the bench host, so that repeat can
+index thermal state by the memory temperature rather than by the core's.
+
 ## Layer B, only if layer A does not end it
 
 **How much of the decode rate rides on memory bandwidth?**
@@ -216,6 +249,11 @@ appear in a run that measures it.
 - It cannot test thread displacement, which run Y made the leading candidate.
 - It cannot separate memory temperature from core temperature, by design.
 - It cannot reproduce A16's step. Nothing can, on demand.
+- It bounds the BANDWIDTH channel only. A thermal effect acting through memory
+  LATENCY rather than streaming throughput is untouched: the load is a pure stream,
+  and a decode step's KV-cache access is scattered, where row-buffer behaviour and
+  latency matter rather than peak throughput. That is a different hypothesis, this
+  plan does not test it, and the exclusion above does not reach it.
 - It says nothing about any card but this one. The register offset is per
   architecture and the thermal range is this cooler and this case.
 

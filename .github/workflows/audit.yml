@@ -236,6 +236,12 @@ jobs:
         # no value. This derives the table from the arm-runs and compares both
         # copies of it cell by cell.
         run: python analysis/rederive_run_y.py
+      - name: layer A's pilot still reads what its round says it reads
+        # Five premises as conditions, not notes: both clocks held for every sample,
+        # the load was memory bound, the control executed, and the round's README
+        # quotes the figures this derives. A pre-registered reading whose premises
+        # are not checked is a number with a sentence next to it.
+        run: python analysis/layer_a_slope.py --check v6_pilot_layer_a_2026_10_02/data/pilot_layer_a_pilotB_20261002_171035
       - name: plan Z's premises and design table are what the committed data says
         # A pre-registration that quotes the recorded state on both sides of A16's
         # step, and the reason run T4's trace cannot be attributed to an arm-run,
