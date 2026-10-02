@@ -93,6 +93,14 @@ EXCLUDED = {
         "by presence, because R appears twice in that document, and not by "
         "forbidding adjacent values, because the run-to-run spread it also quotes is "
         "one step from R and that produced a false failure",
+    "v4_audit_2026_08_25/PROSPECTIVE_PLAN_SIBLINGS.md":
+        "not censused while v4.2 stands, for the reason the plans beside it give: "
+        "verify_claims.py pins len(DOCS) and the decimal prose census and is bound "
+        "to that tag, and this document quotes decimals from run Y and from its own "
+        "design table. What guards that table is analysis/plan_siblings_power.py, "
+        "which derives every row from run Y's own spread and its own per-arm-run "
+        "cost and compares them by row label, and which forbids the values one step "
+        "either side of each prose figure because the displacement is quoted twice",
     "v4_audit_2026_08_25/PROSPECTIVE_PLAN_Z_MEMORY_STATE.md":
         "not censused while v4.2 stands, for the reason the two plans beside it "
         "give: verify_claims.py pins len(DOCS) and the decimal prose census and is "

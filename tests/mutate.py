@@ -637,6 +637,62 @@ MUTATIONS = [
      "            return True",
      "tests.test_harness_invariants.TheVerificationSuitesMustRefuseAMeasuringHost"
      ".test_detection_is_positional_not_a_substring"),
+    # --- the gate stops running a copy of itself -----------------------------
+    # Found by running it: an edit to this file while the gate was executing it
+    # made bash resume at its saved byte offset in the new text, so two steps
+    # never ran and it exited 0.
+    ("the gate executes itself again, so an edit mid-run can corrupt the run",
+     "bench/ci_faithful.sh",
+     '    bash "$_self" "$@"',
+     '    bash "$0" "$@"',
+     "tests.test_harness_invariants.TheLocalGateMustRunEveryStepTheWorkflowDoes.test_it_runs_a_copy_of_itself"),
+    ("the copy is used unchecked, so a copy that raced an edit still runs",
+     "bench/ci_faithful.sh",
+     '    if ! bash -n "$_self"; then',
+     '    if false; then',
+     "tests.test_harness_invariants.TheLocalGateMustRunEveryStepTheWorkflowDoes.test_it_runs_a_copy_of_itself"),
+    ("the gate drops the exit status of the copy it ran",
+     "bench/ci_faithful.sh",
+     '    exit "$_rc"',
+     '    exit 0',
+     "tests.test_harness_invariants.TheLocalGateMustRunEveryStepTheWorkflowDoes.test_it_runs_a_copy_of_itself"),
+    # --- plan S, the three-arm siblings pre-registration ---------------------
+    # A pre-registration is the one artefact whose errors cannot be corrected
+    # later without voiding it, so its guards are mutated with the rest. Three
+    # of these perturb the DOCUMENT rather than code, which is the point: the
+    # document is the design.
+    ("the packed arm stops packing, so two arms differ in nothing",
+     "v4_audit_2026_08_25/PROSPECTIVE_PLAN_SIBLINGS.md",
+     "| `packed` | `0,1,2,3,4,5,6,7` |",
+     "| `packed` | `0,2,4,6,8,10,12,14` |",
+     "tests.test_harness_invariants.PlanSsArmsMustDifferInOneThingEach"
+     ".test_the_masks_are_one_sibling_each_and_both_siblings_each"),
+    ("the third arm loses the flag that makes it a one-thing contrast",
+     "v4_audit_2026_08_25/PROSPECTIVE_PLAN_SIBLINGS.md",
+     "and `--poll 0`, so the idle workers sleep",
+     "and a quieter threadpool, so the idle workers sleep",
+     "tests.test_harness_invariants.PlanSsArmsMustDifferInOneThingEach"
+     ".test_the_third_arm_differs_from_the_second_by_the_flag_alone"),
+    ("a design cell drifts from what run Y's spread gives",
+     "v4_audit_2026_08_25/PROSPECTIVE_PLAN_SIBLINGS.md",
+     "| 18 | 54 | 0.75 | 0.38 % | 10 |",
+     "| 18 | 54 | 0.75 | 0.39 % | 10 |",
+     "tests.test_harness_invariants.PlanSsArmsMustDifferInOneThingEach.test_the_design_table_matches_the_data"),
+    ("the plan stops saying its mechanism was never measured",
+     "v4_audit_2026_08_25/PROSPECTIVE_PLAN_SIBLINGS.md",
+     "nothing here has measured it",
+     "nothing here has quantified it",
+     "tests.test_harness_invariants.PlanSsArmsMustDifferInOneThingEach.test_it_says_the_mechanism_has_not_been_measured"),
+    ("a driver starts passing --poll, so prerequisite 1 is silently satisfied",
+     "bench/run_y_core_pinning.sh",
+     "set -euo pipefail",
+     "set -euo pipefail\n# a note mentioning --poll 0",
+     "tests.test_harness_invariants.PlanSsArmsMustDifferInOneThingEach.test_the_prerequisites_are_still_unsatisfied"),
+    ("the local gate stops deriving the design table",
+     "bench/ci_faithful.sh",
+     "run plan_siblings -- python3 analysis/plan_siblings_power.py\n",
+     "",
+     "tests.test_harness_invariants.PlanSsArmsMustDifferInOneThingEach.test_the_local_gate_invokes_it_too"),
 ]
 
 

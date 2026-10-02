@@ -3535,6 +3535,7 @@ class TheSuiteMustRunOnAStockInterpreter(unittest.TestCase):
         # table's own anchors, which needs the table.
         allowed = stdlib | {"host_guard", "publish_pr_body", "carryover",
                             "length_mode", "paired_blocks", "plan_z_power",
+                            "plan_siblings_power",
                             "rederive_run_y", "rr_under_test", "vram_temp",
                             "rederive_from_logs", "past_threshold_fit",
                             "verify_claims", "extract_checkpoint_timers",
@@ -7619,8 +7620,62 @@ class TheLocalGateMustRunEveryStepTheWorkflowDoes(unittest.TestCase):
         self.assertEqual(named, [],
                          "the gate names a home-directory checkout in code, so "
                          "running it from one repository can attest another")
-        self.assertIn('SRC=$(cd "$(dirname "$0")/.." && pwd)', gate,
+        src = [l.strip() for l in code if l.startswith("SRC=")]
+        self.assertEqual(len(src), 1, f"expected one SRC= line, got {src}")
+        # Two acceptable sources and no third. `dirname $0` is the checkout while
+        # the script runs in place; once it re-execs a copy in TMPDIR so a mid-run
+        # edit cannot corrupt the run, `dirname $0` is that temp directory, so the
+        # origin it exports is the other. Anything else -- a written-down path, a
+        # bare `pwd` -- is the wrong-copy defect coming back.
+        self.assertIn('$(cd "$(dirname "$0")/.." && pwd)', src[0],
                       "SRC is not derived from the script's own location")
+        # If SRC takes an override at all, it has to be one THIS script sets.
+        # Pinning the name `CI_FAITHFUL_ORIGIN` would pass for any other name, so
+        # the name is read out of the line and the export is required for it --
+        # otherwise an environment variable from outside picks the checkout, which
+        # is the written-down path again with a different door.
+        m = re.fullmatch(r'SRC=\$\{([A-Za-z_][A-Za-z0-9_]*):-(.+)\}', src[0])
+        if m:
+            var, default = m.groups()
+            self.assertEqual(default, '$(cd "$(dirname "$0")/.." && pwd)',
+                             "the default is not the script's own location")
+            self.assertRegex(
+                gate, r'(?m)^\s*export ' + re.escape(var) + r'=',
+                f"SRC can be overridden by ${var}, which this script never sets, "
+                f"so the environment chooses which checkout gets attested")
+        else:
+            self.assertEqual(
+                src[0], 'SRC=$(cd "$(dirname "$0")/.." && pwd)',
+                "SRC is neither the script's own location nor a default for it")
+
+    def test_it_runs_a_copy_of_itself(self):
+        """Because bash reads a script by byte offset while it executes it.
+
+        An in-place edit of this gate during a run made bash resume at that offset
+        in the new text: a fragment of the file ran as a command, one step ran
+        twice, the last two steps did not run, and it exited 0. Nothing in the
+        gate noticed, and a gate whose verdict survives being half-run is worse
+        than no gate at all, because it is believed.
+
+        So the gate copies itself and runs the copy. Removing that restores a
+        silent failure mode, and the only thing that would show it is this.
+        """
+        gate = (self.ROOT / self.GATE).read_text(encoding="utf-8")
+        code = "\n".join(l for l in gate.splitlines()
+                         if not l.lstrip().startswith("#"))
+        self.assertIn('cat "$0" > "$_self"', code,
+                      "the gate no longer copies itself, so an edit during a run "
+                      "can make bash resume mid-line in the new text")
+        self.assertIn('bash "$_self" "$@"', code,
+                      "the gate copies itself and then does not run the copy")
+        self.assertIn('bash -n "$_self"', code,
+                      "the copy is not checked for syntax, and `cat` can itself "
+                      "race an edit: a mangled copy is the same failure again")
+        self.assertRegex(code, r'(?m)^\s*rm -f "\$_self"',
+                         "the copy is never removed")
+        self.assertIn('exit "$_rc"', code,
+                      "the gate discards the copy's exit status, which is the "
+                      "whole verdict")
 
     def test_the_unit_step_runs_on_a_runners_processor_count(self):
         """The one difference this gate used to hope about rather than eliminate.
@@ -7729,6 +7784,180 @@ class ThePushGuardMustBeInTheRepositoryToo(unittest.TestCase):
         """The comment that named a guard the tree did not hold now names a path."""
         self.assertIn("bench/hooks/pre-push.sh", self._gate(),
                       "the gate mentions a pre-push hook without saying where it is")
+
+
+class PlanSsArmsMustDifferInOneThingEach(unittest.TestCase):
+    """A three-arm design is only an experiment if the arms differ by one thing.
+
+    Plan S asks what shares a physical core with llama.cpp's main thread. Its
+    first arm takes one hyperthread from each of eight physical cores, its second
+    takes both hyperthreads of four, and its third adds `--poll 0` to the second.
+    If the second arm's mask ever stopped being a packed one, or the third ever
+    differed from the second in more than that flag, the document would still
+    read as a controlled contrast while measuring something else. The masks are
+    the design, so they are asserted here.
+
+    The document also makes four claims ABOUT THIS TREE, and each is the reason a
+    prerequisite exists: that nothing passes `--poll` or `--cpu-strict`, that no
+    manifest records either, and that no file says which processors share a core.
+    A prerequisite that quietly became satisfied, or quietly became false, would
+    leave the plan describing a repository that is not this one.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+    DOC = "v4_audit_2026_08_25/PROSPECTIVE_PLAN_SIBLINGS.md"
+
+    def _mod(self):
+        sys.path.insert(0, str(self.ROOT / "analysis"))
+        import plan_siblings_power
+        return plan_siblings_power
+
+    def _doc(self):
+        return (self.ROOT / self.DOC).read_text(encoding="utf-8")
+
+    def test_a_job_invokes_it(self):
+        wf = (self.ROOT / ".github" / "workflows" / "audit.yml").read_text(
+            encoding="utf-8")
+        self.assertIn("run: python analysis/plan_siblings_power.py",
+                      [l.strip() for l in wf.splitlines()],
+                      "no job derives the design table, so its hours and half "
+                      "widths are guarded by nothing")
+
+    def test_the_local_gate_invokes_it_too(self):
+        g = (self.ROOT / "bench" / "ci_faithful.sh").read_text(encoding="utf-8")
+        self.assertIn("analysis/plan_siblings_power.py", g,
+                      "the gate reproduces the claims job and this step is "
+                      "missing from it, which is the defect that let three "
+                      "workflow steps run only in CI")
+
+    def test_the_design_table_matches_the_data(self):
+        m = self._mod()
+        inp = m.inputs()
+        self.assertEqual(m.check_doc(inp, m.design(inp)), [])
+
+    def _arms(self):
+        """The arm table, by its own row labels.
+
+        Asserting that a mask STRING is somewhere in the document is not enough:
+        the packed mask appears in two rows, so changing one of them leaves the
+        string present and the check green. The rows are what the design is.
+        """
+        arms = {}
+        for line in self._doc().splitlines():
+            if not line.startswith("| `"):
+                continue
+            c = [x.strip().strip("`") for x in line.strip().strip("|").split("|")]
+            if len(c) == 3 and re.fullmatch(r"[\d,]+", c[1].strip("`")):
+                arms[c[0]] = (c[1].strip("`"), c[2])
+        return arms
+
+    def test_the_masks_are_one_sibling_each_and_both_siblings_each(self):
+        """Arm one must share no physical core; arm two must share every one."""
+        arms = self._arms()
+        self.assertEqual(sorted(arms), ["distinct", "packed", "packed-nopoll"],
+                         f"the arms are not the three the plan names: {arms}")
+        distinct = [int(c) for c in arms["distinct"][0].split(",")]
+        packed = [int(c) for c in arms["packed"][0].split(",")]
+        self.assertEqual(packed, [int(c) for c in arms["packed-nopoll"][0].split(",")],
+                         "the two packed arms no longer share a mask")
+        # On x86 with two threads per core the kernel numbers siblings n and n+1
+        # within a core, so n >> 1 is the physical core. This is the topology the
+        # document says is unrecorded, which is why it is a prerequisite and not
+        # an assertion about the hardware: what is asserted is that the two masks
+        # are opposites UNDER that numbering, which is what makes them a contrast.
+        self.assertEqual(len({c >> 1 for c in distinct}), len(distinct),
+                         "the distinct arm shares a physical core with itself")
+        self.assertEqual(len({c >> 1 for c in packed}), len(packed) // 2,
+                         "the packed arm does not pack")
+        self.assertEqual(len(distinct), len(packed),
+                         "the arms do not use the same number of threads, so "
+                         "they differ in two things")
+
+    def test_the_third_arm_differs_from_the_second_by_the_flag_alone(self):
+        doc = self._doc()
+        rows = [l for l in doc.splitlines()
+                if l.startswith("| `packed")]
+        self.assertEqual(len(rows), 2, f"expected two packed arms, got {rows}")
+        cells = [[c.strip() for c in r.strip("|").split("|")] for r in rows]
+        self.assertEqual(cells[0][1], cells[1][1],
+                         "the two packed arms do not share an affinity, so the "
+                         "third arm is not a one-flag contrast")
+        self.assertIn("--poll 0", cells[1][2])
+        self.assertNotIn("--poll", cells[0][2])
+
+    def test_it_predicts_a_size_before_the_run(self):
+        """A pre-registration that cannot be wrong is a description."""
+        doc = self._doc()
+        self.assertIn("I expect", doc,
+                      "no stated expectation, so no outcome can refute it")
+        self.assertIn("this plan was wrong", doc,
+                      "no stated refutation condition")
+
+    def test_it_says_the_mechanism_has_not_been_measured(self):
+        self.assertIn("nothing here has measured it", self._doc(),
+                      "the candidate is an inference from upstream source and "
+                      "the ordering of three figures; a plan that does not say "
+                      "so reads as a finding")
+
+    def test_the_prerequisites_are_still_unsatisfied(self):
+        """Each prerequisite exists because of a fact about this tree."""
+        tracked = subprocess.run(["git", "ls-files", "-z"], cwd=self.ROOT,
+                                 capture_output=True, text=True, timeout=300)
+        self.assertEqual(tracked.returncode, 0, tracked.stderr)
+        paths = [q for q in tracked.stdout.split("\0") if q]
+        body = {}
+        me = Path(__file__).resolve().relative_to(self.ROOT).as_posix()
+        for q in paths:
+            # Documents SHOULD discuss the flags -- ERRATA, plan Y's and v5's
+            # readings all name `--poll`, and that is the corrected reasoning,
+            # not a driver passing it. What a prerequisite is about is executable
+            # code. This file is executable code and searching it would match the
+            # flag names in these very assertions, which is how this test failed
+            # the first time it ran.
+            if q in (me, "analysis/plan_siblings_power.py",
+                     "tests/mutate.py", "tests/data_mutate.py"):
+                continue
+            if not q.endswith((".py", ".sh", ".json")):
+                continue
+            try:
+                body[q] = (self.ROOT / q).read_text(encoding="utf-8")
+            except (UnicodeDecodeError, OSError):
+                continue
+
+        # 1 and 2: the threadpool flags and their record. `--poll` is checked as a
+        # whole token: a substring search for "poll" matches "polling" and
+        # "pollute", and a search of this file's own source would match the
+        # strings above, which is why this file is excluded from `body`.
+        for flag in ("--poll", "--cpu-strict", "--cpu-mask"):
+            hits = sorted(q for q, t in body.items()
+                          if re.search(re.escape(flag) + r"(?![\w-])", t))
+            self.assertEqual(
+                hits, [],
+                f"{flag} now appears in the executable files {hits}. If a "
+                f"driver passes it, plan S's prerequisite 1 is satisfied and the "
+                f"document has to stop saying it is not")
+        # Prerequisite 2 is about the MANIFESTS, so a `.py` naming the key does
+        # not falsify it -- what would is a recorded run carrying it. The search
+        # is every tracked json, which is every manifest and registry here.
+        jsons = [q for q in body if q.endswith(".json")]
+        self.assertGreater(len(jsons), 20,
+                           f"only {len(jsons)} json files searched; a check that "
+                           f"reads almost nothing passes for the wrong reason")
+        for key in ('"poll"', '"cpu_strict"'):
+            hits = sorted(q for q in jsons if key in body[q])
+            self.assertEqual(
+                hits, [],
+                f"{key} is now recorded in {hits}, so plan S's prerequisite 2 is "
+                f"satisfied and the document has to stop calling it unrecorded")
+
+        # 3: the topology. `sibling` alone is no use here -- every hit in this
+        # tree is the SIBLING REPOSITORY, qwen3.6-vllm-2x3090 -- so the token is
+        # the file the kernel exposes it in.
+        hits = sorted(q for q, t in body.items() if "thread_siblings" in t)
+        self.assertEqual(
+            hits, [],
+            f"the sibling topology is now recorded in {hits}, so plan S's "
+            f"prerequisite 3 is satisfied and the masks rest on a checkable fact")
 
 
 class PlanZsPremisesMustBeWhatTheDataSays(unittest.TestCase):

@@ -242,6 +242,12 @@ jobs:
         # quotes the figures this derives. A pre-registered reading whose premises
         # are not checked is a number with a sentence next to it.
         run: python analysis/layer_a_slope.py --check v6_pilot_layer_a_2026_10_02/data/pilot_layer_a_pilotB_20261002_171035
+      - name: plan S's design table is what run Y measured
+        # A pre-registration whose power table nothing derives is a table of
+        # estimates. This one reuses run Y's own within-invocation spread and its own
+        # per-arm-run cost, so the hours and the half widths are measured rather than
+        # guessed, and the script compares them to the document row by row.
+        run: python analysis/plan_siblings_power.py
       - name: plan Z's premises and design table are what the committed data says
         # A pre-registration that quotes the recorded state on both sides of A16's
         # step, and the reason run T4's trace cannot be attributed to an arm-run,
