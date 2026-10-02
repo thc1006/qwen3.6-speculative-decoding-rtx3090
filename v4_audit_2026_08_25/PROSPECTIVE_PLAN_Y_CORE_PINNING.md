@@ -230,7 +230,27 @@ happened, so run X is warranted, and the section of that plan which recommended
 this run first is corrected rather than left standing.
 
 It does not settle A16. A16's step is 3.93 %, which is 0.27 of a full
-displacement, or roughly two of the eight threads landing on efficiency cores.
+displacement.
+
+A displacement cannot be read as a count of threads. Every target and drafter
+layer is on the card, so llama.cpp's eight CPU threads do no arithmetic while
+decoding and are not on the critical path: what a displacement moves is the MAIN
+thread's work. And even if they were on it, a barrier over statically split work
+takes its slowest thread's time, so displacing one thread would cost what
+displacing eight does and no linear interpolation between them exists.
+
+What is left that is bimodal, drawn fresh at every server launch, and of this
+size is what shares a physical core with the main thread. `--poll` defaults to
+50, so the idle workers SPIN; a worker spinning on the main thread's
+hyperthread sibling takes issue slots from it, and whether the scheduler puts one
+there is a coin toss per launch. A sibling under a full compute load would cost
+far more than this step; a `PAUSE` spin costs about this much. That is the
+successor, pre-registered in
+[`PROSPECTIVE_PLAN_SIBLINGS.md`](PROSPECTIVE_PLAN_SIBLINGS.md), and it is an
+inference from the offload and the spin, not a measurement.
+
+The sentences below are what this plan said before that was worked out, and the
+reasoning they rest on is the one corrected above.
 Every published run here passes no thread count and no affinity, llama.cpp chooses
 eight threads of the thirty-two logical processors, and each arm-run starts a
 fresh server and therefore draws its own placement. That is A16's shape, per

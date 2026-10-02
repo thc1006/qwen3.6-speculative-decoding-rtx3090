@@ -99,10 +99,26 @@ difference. About half of a token's time is host work that scales with processor
 clock.
 
 Not established, and the reason the next run exists: that this explains A16. A16
-names a 3.93 % step, which is 0.27 of a full displacement, or roughly two of
-eight threads landing on efficiency cores. Every published run here passes no
-thread count and no affinity, llama.cpp chooses `n_threads = 8` of the thirty-two
-logical processors, and each arm-run starts a fresh server and so draws its own
-placement. That is the right shape and the right order of magnitude, and it is an
-arithmetic coincidence until a run sets the number of displaced threads and
-measures the response.
+names a 3.93 % step, which is 0.27 of a full displacement. The right order of
+magnitude, and the right place: the host.
+
+**That fraction is not a count of threads**, which an earlier version of this
+section read it as. Every target and drafter layer is on the card, so llama.cpp's
+CPU threads do no arithmetic while decoding and are not on the critical path --
+what this run displaced was the MAIN thread's work. And a barrier over statically
+split work takes its slowest thread's time, so displacing one thread would cost
+what displacing eight does, with nothing linear in between.
+
+Every published run here passes no thread count and no affinity. llama.cpp chooses
+`n_threads = 8` of the thirty-two logical processors, which is its count of
+performance cores: `common_cpu_get_num_math` pins itself to each processor in turn
+to find the efficiency ones, counts the rest, and then restores its affinity
+without placing anything. Each arm-run starts a fresh server and the kernel draws
+the placement again, which is what "nothing recorded distinguishes them" is.
+
+So the successor is not a sweep over how many threads are slow. It asks what shares
+a physical core with the main thread: `--poll` defaults to 50, the idle workers
+spin, and a worker spinning on that thread's hyperthread sibling takes issue slots
+from it. It is pre-registered in
+[`../v4_audit_2026_08_25/PROSPECTIVE_PLAN_SIBLINGS.md`](../v4_audit_2026_08_25/PROSPECTIVE_PLAN_SIBLINGS.md),
+and until it runs this is an inference and not a measurement.

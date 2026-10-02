@@ -165,7 +165,7 @@ design gains a reason it did not have: CPU contention is a channel this workload
 demonstrably rides on, rather than one this plan hoped to bound away.
 
 It also changes what run X has to control. Applying load changes which processors
-are free, and a displacement of two of eight threads is worth about 4 % here, so
+are free, and a quarter of a full displacement is worth about 4 % here, so
 the pinning this plan already mandates is not a precaution but the difference
 between a measurement and a confound.
 

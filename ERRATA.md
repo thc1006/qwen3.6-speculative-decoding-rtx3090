@@ -1504,14 +1504,14 @@ same as one this platform lacks; the second addendum below records reading it.
 > which are efficiency cores, and every arm-run starts a fresh server and so
 > draws its own placement.
 >
-> So placement is a candidate for this entry with the right shape and the right
-> order of magnitude: the step this entry is about is **just over a quarter** of
-> a full displacement, or roughly **two of eight** threads landing slow. **It is
-> arithmetic and not evidence** until a run sets the number of displaced threads
-> and measures the response, which is pre-registered as the successor. The entry
-> is not retracted and nothing above it is withdrawn; what changes is that
-> "nothing recorded distinguishes them" now has a named, measured quantity that
-> nothing recorded.
+> So placement is a candidate for this entry with the right order of magnitude:
+> the step is **just over a quarter** of a full displacement. It may not be read
+> as a count of threads, which an earlier version of this addendum did: every
+> target and drafter layer sits on the card, so those threads do no arithmetic
+> while decoding and are not on the critical path, and a barrier over statically
+> split work is set by its slowest thread, so displacing one costs what eight do.
+> The entry is not retracted and nothing above it is withdrawn; what changes is
+> that "nothing recorded distinguishes them" has a named, measured quantity now.
 >
 > The figures are in `v5_pinning_2026_09_26/`, a round of its own: the
 > run-directory count under this archive is pinned in a file bound to the `v4.2`

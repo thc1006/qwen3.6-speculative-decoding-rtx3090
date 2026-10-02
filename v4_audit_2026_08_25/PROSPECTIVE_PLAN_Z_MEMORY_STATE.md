@@ -15,12 +15,15 @@ temperature, and page-cache or allocator state.
 
 Run Y settled the size of the first. A full move to the eight efficiency cores
 costs **14.42 %** of the decode rate, so A16's step is **0.27** of a full
-displacement, or roughly two of eight threads landing slow. That is the right
-shape and the right order of magnitude, and it is arithmetic until a run sets the
-number of displaced threads and measures the response. That successor is the
-leading candidate, run Y's own outcome section names it, and nothing has listed it
-as an item yet; `RETEST_TODO.md` carries the page-cache hypothesis as the
-successor to run X and not this one.
+displacement: the right order of magnitude, and the host rather than the card.
+
+That fraction is **not** a count of threads, and
+[`PROSPECTIVE_PLAN_SIBLINGS.md`](PROSPECTIVE_PLAN_SIBLINGS.md) gives the reason:
+every layer is on the card, so those threads do no arithmetic while decoding and
+are not on the critical path, and a barrier takes its slowest thread's time either
+way. What the host variable actually is, that plan pre-registers: what shares a
+physical core with the main thread, which is the leading candidate and is three
+arms of thirty minutes rather than a sweep.
 
 This plan is about the second quantity, and the reason to spend anything on it
 now is that it became measurable on 2026-10-01. A16 said the junction temperature
