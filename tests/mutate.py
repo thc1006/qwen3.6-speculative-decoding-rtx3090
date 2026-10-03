@@ -637,6 +637,28 @@ MUTATIONS = [
      "            return True",
      "tests.test_harness_invariants.TheVerificationSuitesMustRefuseAMeasuringHost"
      ".test_detection_is_positional_not_a_substring"),
+    # --- the topology figures, which nothing derived until they were wrong ---
+    ("the script stops deriving the topology figures it publishes",
+     "analysis/plan_siblings_power.py",
+     "    bad = check_doc(inp, rows) + check_topology(\n"
+     '        (ROOT / DOC).read_text(encoding="utf-8"))',
+     "    bad = check_doc(inp, rows)",
+     "tests.test_harness_invariants.PlanSsArmsMustDifferInOneThingEach.test_the_derivation_is_actually_called"),
+    ("the derivation stops requiring the two core tiers to be separated",
+     "analysis/plan_siblings_power.py",
+     "        if min(fav) <= max(other_p):",
+     "        if False:",
+     "tests.test_harness_invariants.PlanSsArmsMustDifferInOneThingEach.test_the_two_performance_tiers_must_be_separated_in_the_run"),
+    ("a quoted sibling band drifts from the run it cites",
+     "v4_audit_2026_08_25/PROSPECTIVE_PLAN_SIBLINGS.md",
+     "sibling pairs measuring 0.492 to 0.496 of their two",
+     "sibling pairs measuring 0.491 to 0.496 of their two",
+     "tests.test_harness_invariants.PlanSsArmsMustDifferInOneThingEach.test_the_topology_figures_are_derived_from_the_recorded_runs"),
+    ("the recorded run stops reporting how many pairs agreed",
+     "v4_audit_2026_08_25/topology/topology_3090_20261003.txt",
+     "measurement agrees with /sys on all 15 pair(s)",
+     "measurement looks consistent with /sys",
+     "tests.test_harness_invariants.PlanSsArmsMustDifferInOneThingEach.test_both_recorded_runs_are_present_and_parse"),
     # --- the runner's threadpool knobs, and its validators ------------------
     # A validator with an over-escaped pattern refuses every valid value and looks
     # exactly like one that works. That happened to BENCH_THREADS while BENCH_POLL

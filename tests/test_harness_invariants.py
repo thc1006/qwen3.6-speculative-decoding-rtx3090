@@ -7987,6 +7987,84 @@ class PlanSsArmsMustDifferInOneThingEach(unittest.TestCase):
                       "missing from it, which is the defect that let three "
                       "workflow steps run only in CI")
 
+    def test_the_topology_figures_are_derived_from_the_recorded_runs(self):
+        """Seven figures were quoted from two runs and nothing derived any.
+
+        Four of the seven were wrong, each by one unit in the last place, because
+        the prose was written from an interactive run and a later run was
+        committed beside it as the evidence. Both readings were honest and they
+        were of different runs, which is exactly how a number and its cited
+        artefact come apart without anybody noticing.
+        """
+        m = self._mod()
+        doc = (self.ROOT / self.DOC).read_text(encoding="utf-8")
+        self.assertEqual(m.check_topology(doc), [])
+
+    def test_the_two_performance_tiers_must_be_separated_in_the_run(self):
+        """FAVOURED is named, not inferred, so a run that contradicts it must fail.
+
+        The derivation quotes `max` of the favoured set, and `max` is insensitive
+        to one of the four dropping out: a deliberate corruption that pushed cpu 8
+        down to a non-favoured rate left the quoted figure matching, because three
+        others were still above it. What the masks balance on is that the SET is
+        separated, so that is asserted. Fed synthetic rates here rather than a
+        file, because the condition cannot be produced on real hardware on demand
+        and a test that cannot reach its own branch is decoration.
+        """
+        m = self._mod()
+        def rec(solo):
+            return {"rel": "synthetic", "solo": solo,
+                    "pairs": [(0, 1, 0.5, "shared")], "control_cpu": 0,
+                    "control": 0.5, "agreed": 1}
+        separated = {c: 163700.0 for c in range(8)}
+        separated.update({c: 172500.0 for c in (8, 9, 10, 11)})
+        separated.update({c: 163700.0 for c in (12, 13, 14, 15)})
+        figs = m.topology_figures(rec(separated))
+        self.assertGreater(figs["fav_margin"], 0.0)
+        for broken, what in (
+            ({**separated, 8: 163000.0}, "a favoured processor drops out of the tier"),
+            ({**separated, 0: 173000.0}, "a non-favoured processor rises into it"),
+            ({**separated, 8: 163700.0}, "a favoured processor merely ties"),
+        ):
+            with self.subTest(case=what):
+                with self.assertRaises(SystemExit, msg=what) as cm:
+                    m.topology_figures(rec(broken))
+                self.assertIn("not separated", str(cm.exception))
+
+    def test_both_recorded_runs_are_present_and_parse(self):
+        m = self._mod()
+        for key, rel in m.TOPOLOGY.items():
+            with self.subTest(run=key):
+                self.assertTrue((self.ROOT / rel).is_file(),
+                                f"{rel} is cited by the document and is not here")
+                rec = m.read_topology(rel)
+                self.assertGreaterEqual(
+                    len(rec["solo"]), 8,
+                    f"{rel} records {len(rec['solo'])} solo rates; a run that "
+                    f"measured almost nothing would still pass a presence check")
+                self.assertEqual(
+                    rec["agreed"], len(rec["pairs"]),
+                    f"{rel} claims agreement on a different number of pairs than "
+                    f"it lists")
+
+    def test_the_derivation_is_actually_called(self):
+        """`check_doc` is called by a test; `check_topology` has to be called by
+        the script, because the claims job runs the script and not the test."""
+        src = (self.ROOT / "analysis" / "plan_siblings_power.py").read_text(
+            encoding="utf-8")
+        tree = ast.parse(src)
+        main = next((n for n in tree.body
+                     if isinstance(n, ast.FunctionDef) and n.name == "main"), None)
+        self.assertIsNotNone(main, "plan_siblings_power.py has no main()")
+        called = {ast.unparse(n.func) for n in ast.walk(main)
+                  if isinstance(n, ast.Call)}
+        self.assertIn("check_topology", called,
+                      "main() does not call check_topology, so the figures it "
+                      "derives are compared against nothing when the claims job "
+                      "runs the script")
+        self.assertIn("check_doc", called,
+                      "main() does not call check_doc either")
+
     def test_the_design_table_matches_the_data(self):
         m = self._mod()
         inp = m.inputs()

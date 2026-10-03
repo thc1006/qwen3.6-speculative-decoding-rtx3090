@@ -95,7 +95,7 @@ host's processors one at a time, which is what
 [`../bench/cpu_siblings.py`](../bench/cpu_siblings.py) does and
 [`topology/topology_3090_20261003.txt`](topology/topology_3090_20261003.txt)
 records, found that `8`, `9`, `10` and `11` run about five per cent faster than the
-other twelve performance-core threads: 172.4 against 163.7 thousand blocks per
+other twelve performance-core threads: 172.6 against 163.7 thousand blocks per
 second, four processors each way, with every processor's own three repeats inside
 two tenths of a per cent. Those are the two cores Turbo Boost Max 3.0 favours.
 
@@ -255,16 +255,16 @@ Every line number below is `3737e4137`'s.
    instead and then compared.
    [`topology/topology_3090_20261003.txt`](topology/topology_3090_20261003.txt) is
    that run: 32 processors, 24 physical cores, the eight performance cores pairing
-   as `0+1` through `14+15` and the sixteen efficiency cores alone. All fifteen
-   pairs agree with `/sys`, sibling pairs measuring 0.491 to 0.496 of their two
-   solo rates and distinct pairs 0.949 to 1.001, against a same-processor control
-   at 0.500. So the masks above are a checked claim rather than an assumed one.
+   as `0+1` through `14+15` and the sixteen efficiency cores alone. All 15
+   pairs agree with `/sys`, sibling pairs measuring 0.492 to 0.496 of their two
+   solo rates and distinct pairs 0.950 to 1.001, against a same-processor control
+   at 0.501. So the masks above are a checked claim rather than an assumed one.
 
    It also decides where this can run. The development box these documents are
    written on reports eight processors and eight distinct entries, because it is a
    KVM guest and the hypervisor gives it no siblings to pack: `packed` and
    `distinct` would be the same arm there, and measuring it confirmed that, all 28
-   of its pairs landing between 0.994 and 1.001. This is a bench-host run or no
+   of its pairs landing between 0.989 and 1.002. This is a bench-host run or no
    run. No test here asserts the topology, because a test that reads `/sys` or
    times a processor is green on the machine it was written on and red on a runner;
    what the suite asserts is the arithmetic that turns rates into a verdict.
