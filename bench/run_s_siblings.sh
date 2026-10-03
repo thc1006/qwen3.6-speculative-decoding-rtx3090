@@ -151,7 +151,14 @@ export BENCH_PIN_ALT_CPUS="${BENCH_PIN_ALT_CPUS:-0,1,2,3,4,5,8,9}"
 export BENCH_THREADS="${BENCH_THREADS:-8}"
 export BENCH_ARMS="spec-dflash-n2,spec-dflash-n2-packed,spec-dflash-n2-nopoll-packed"
 export BENCH_REPEATS=12
-export BENCH_ORDER=mirrored
+# `latin`, not `mirrored`. This driver was written from run Y's, which has FOUR
+# arms, and reversing an even-length order gives each arm two positions. Plan S
+# has three: reversing leaves the middle one fixed, and the first attempt at this
+# run was stopped four blocks in with `spec-dflash-n2-packed` at position 2 in
+# every block, measured from the arm-runs rather than inferred. `latin` over
+# twelve repeats puts each of the three arms in each of the three positions four
+# times, and the runner validates that before it spends any GPU time.
+export BENCH_ORDER=latin
 export BENCH_MAX_TOKENS=300
 export BENCH_THINK=on
 export BENCH_CTX=8192

@@ -14,6 +14,7 @@ from __future__ import annotations
 import ast
 import math as _math
 import re
+from collections import Counter
 import importlib.util
 import itertools
 import json
@@ -7221,6 +7222,149 @@ class PlanSsMasksMustBeCheckedAgainstTheHost(unittest.TestCase):
             self.assertNotIn(phrase, code,
                              f"{phrase!r} is still spelled out in the driver, so "
                              f"there are two copies of that refusal")
+
+class TheArmOrderMustNotPinOneArmToOnePosition(unittest.TestCase):
+    """Reversing an odd-length order leaves the middle element where it was.
+
+    Found by stopping a run four blocks in and rebuilding the order from the
+    arm-runs rather than reading the manifest's label: two arms at positions
+    {1: 6, 3: 6} and the third at {2: 12}. `BENCH_ORDER=mirrored` was copied from
+    run Y's driver, which has FOUR arms, where reversing gives each arm two
+    positions. Plan S has three.
+
+    Mean position is still balanced, (1 + 3) / 2 being 2, so a linear drift
+    within a block cancels for every arm. A first-position effect does not: the
+    outer arms take it half the time each and the middle one never, and the arms
+    are then not exchangeable. This repository has already discarded a run for
+    the same class of defect -- RETEST_TODO P1-3, where every freerun block ran
+    before every hard-cap block -- so it is disqualifying rather than a caveat.
+
+    `is_position_balanced` has said so all along and was only ever asked under
+    `latin`. That is the gap.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+    RUNNER = "bench/retest_runner.py"
+    S_ARMS = ["spec-dflash-n2", "spec-dflash-n2-packed",
+              "spec-dflash-n2-nopoll-packed"]
+    Y_ARMS = ["spec-dflash-n2", "spec-dflash-n2-ecore", "baseline",
+              "baseline-ecore"]
+
+    def _mod(self):
+        os.environ.setdefault("LLAMA_SERVER_BIN", "/bin/true")
+        spec = importlib.util.spec_from_file_location(
+            "rr_order", self.ROOT / self.RUNNER)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    @staticmethod
+    def _positions(sched):
+        pos = {}
+        for row in sched:
+            for i, a in enumerate(row, 1):
+                pos.setdefault(a, Counter())[i] += 1
+        return pos
+
+    def test_mirrored_with_an_odd_number_of_arms_is_refused(self):
+        m = self._mod()
+        with self.assertRaises(SystemExit) as cm:
+            m.build_schedule(list(self.S_ARMS), 12, "mirrored")
+        msg = str(cm.exception)
+        self.assertIn("pins the middle one", msg)
+        self.assertIn(self.S_ARMS[1], msg,
+                      "the refusal does not name the arm that would be pinned")
+        self.assertIn("latin", msg, "the refusal does not name the remedy")
+
+    def test_run_ys_four_arm_mirrored_design_still_builds(self):
+        """The guard must not reach back and invalidate a published run.
+
+        Mirroring balances mean position and carryover direction, not occupancy:
+        with four arms the first never reaches the middle positions, so
+        `is_position_balanced` calls that unbalanced too. Generalising the
+        refusal to every unbalanced mirrored schedule would have refused run Y's
+        own configuration, which is why it is specifically about an odd count.
+        """
+        m = self._mod()
+        sched = m.build_schedule(list(self.Y_ARMS), 12, "mirrored")
+        self.assertEqual(len(sched), 12)
+        pos = self._positions(sched)
+        self.assertEqual(sorted(pos[self.Y_ARMS[0]]), [1, 4],
+                         "run Y's first arm no longer alternates between the ends")
+
+    def test_latin_balances_position_and_first_in_block_for_three_arms(self):
+        m = self._mod()
+        sched = m.build_schedule(list(self.S_ARMS), 12, "latin")
+        pos = self._positions(sched)
+        for arm in self.S_ARMS:
+            with self.subTest(arm=arm):
+                self.assertEqual(
+                    dict(sorted(pos[arm].items())), {1: 4, 2: 4, 3: 4},
+                    f"{arm} does not hold every position the same number of "
+                    f"times: {dict(pos[arm])}")
+        first = Counter(row[0] for row in sched)
+        self.assertEqual(dict(first), {a: 4 for a in self.S_ARMS},
+                         "being first in a block is not balanced, which is the "
+                         "part a drift that is not linear loads onto")
+
+    def test_latin_is_refused_when_it_cannot_balance(self):
+        m = self._mod()
+        with self.assertRaises(SystemExit) as cm:
+            m.build_schedule(list(self.S_ARMS), 10, "latin")
+        self.assertIn("position-balanced", str(cm.exception))
+
+    def test_the_residual_latin_leaves_is_the_one_the_plan_states(self):
+        """Each arm has exactly one predecessor, and the plan says so.
+
+        A cyclic rotation balances position and first-in-block and leaves the
+        ordered adjacent pairs one-directional: distinct is always followed by
+        packed, packed by nopoll, nopoll by distinct, and the reverses never
+        occur. `williams` would balance that too and requires one block per arm,
+        which is three blocks and an interval far wider than this design needs.
+        Pinned here so that a schedule of a different shape makes the plan's
+        stated residual false and this test say so.
+        """
+        m = self._mod()
+        sched = m.build_schedule(list(self.S_ARMS), 12, "latin")
+        pred = Counter()
+        for row in sched:
+            for i in range(1, len(row)):
+                pred[(row[i - 1], row[i])] += 1
+        for arm in self.S_ARMS:
+            befores = {a for (a, b) in pred if b == arm}
+            with self.subTest(arm=arm):
+                self.assertEqual(
+                    len(befores), 1,
+                    f"{arm} has {len(befores)} different predecessors; the plan "
+                    f"states exactly one and argues why that is immaterial")
+        # The content, not a word. A presence test for "predecessor" passes on a
+        # document that merely uses the word, and the first version of this
+        # checked the lower-case spelling against a heading that is upper-case,
+        # which is the other half of why presence is not a check.
+        plan = (self.ROOT / "v4_audit_2026_08_25"
+                / "PROSPECTIVE_PLAN_SIBLINGS.md").read_text(encoding="utf-8")
+        flat = " ".join(plan.replace("**", " ").replace("`", "").split()).lower()
+        for phrase, what in (
+            ("always followed by", "that the pairs are one-directional"),
+            ("williams", "what would balance it"),
+            ("three blocks", "why williams is not available at this precision"),
+            ("identical gpu work", "the argument that it is immaterial"),
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, flat,
+                              f"the plan does not state {what}, so the residual "
+                              f"this schedule leaves is unstated rather than "
+                              f"accepted")
+
+    def test_the_driver_asks_for_latin(self):
+        sh = (self.ROOT / "bench" / "run_s_siblings.sh").read_text(
+            encoding="utf-8")
+        code = [l.strip() for l in sh.splitlines()
+                if not l.lstrip().startswith("#")]
+        orders = [l for l in code if l.startswith("export BENCH_ORDER=")]
+        self.assertEqual(orders, ["export BENCH_ORDER=latin"],
+                         f"the driver's order mode is {orders}, and three arms "
+                         f"under anything but latin is not position-balanced")
 
 class PlanSsThreeArmsMustFitInOneInvocation(unittest.TestCase):
     """A16's step is BETWEEN invocations, so the arms cannot be in three of them.

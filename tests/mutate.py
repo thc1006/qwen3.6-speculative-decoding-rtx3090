@@ -702,6 +702,30 @@ MUTATIONS = [
      "from cpu_siblings import validate_masks",
      "validate_masks = None",
      "tests.test_harness_invariants.PlanSsMasksMustBeCheckedAgainstTheHost.test_the_driver_calls_it_rather_than_holding_a_second_copy"),
+    # --- the arm order must not pin one arm to one position ------------------
+    # Reversing an odd-length order leaves the middle element where it was.
+    # Measured on a run that was stopped four blocks in: two arms at positions
+    # {1: 6, 3: 6} and the third at {2: 12}.
+    ("the odd-arm guard goes and three arms may run mirrored again",
+     "bench/retest_runner.py",
+     "        if n % 2 == 1:",
+     "        if False:",
+     "tests.test_harness_invariants.TheArmOrderMustNotPinOneArmToOnePosition.test_mirrored_with_an_odd_number_of_arms_is_refused"),
+    ("latin stops validating that it delivered position balance",
+     "bench/retest_runner.py",
+     '    if mode == "latin":\n        pos = position_counts(sched)',
+     '    if False:\n        pos = position_counts(sched)',
+     "tests.test_harness_invariants.TheArmOrderMustNotPinOneArmToOnePosition.test_latin_is_refused_when_it_cannot_balance"),
+    ("the plan S driver asks for an order that is not position-balanced",
+     "bench/run_s_siblings.sh",
+     "export BENCH_ORDER=latin",
+     "export BENCH_ORDER=cyclic",
+     "tests.test_harness_invariants.TheArmOrderMustNotPinOneArmToOnePosition.test_the_driver_asks_for_latin"),
+    ("the plan stops stating the residual the cyclic order leaves",
+     "v4_audit_2026_08_25/PROSPECTIVE_PLAN_SIBLINGS.md",
+     "always followed by",
+     "adjacent to",
+     "tests.test_harness_invariants.TheArmOrderMustNotPinOneArmToOnePosition.test_the_residual_latin_leaves_is_the_one_the_plan_states"),
     # --- plan S's three arms have to fit in one invocation -------------------
     # A16's step is between invocations, so an arm measured in its own invocation
     # is confounded with the variable the plan exists to isolate.

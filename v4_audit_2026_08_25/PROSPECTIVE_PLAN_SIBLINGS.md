@@ -97,6 +97,40 @@ its own invocation is confounded with the variable this plan exists to isolate.
 is an entry in the runner's `ARMS` table, which is where per-arm server flags
 live, and it differs from its base by exactly `--poll 0`.
 
+**The order is `latin`, and the first attempt at this run was stopped for not
+being.** `BENCH_ORDER=mirrored` was copied from run Y's driver, which has four
+arms: reversing an even-length order gives each arm two positions. Three arms
+reverse to leave the middle one where it was, and rebuilding the order from the
+arm-runs of the stopped attempt showed exactly that, two arms at positions
+{1: 6, 3: 6} and `spec-dflash-n2-packed` at {2: 12}. Mean position is still
+balanced, so a linear drift within a block cancels, but a first-position effect
+does not: the outer arms take it half the time each and the middle one never, and
+the arms are then not exchangeable. This repository has discarded a run for the
+same class of defect before, RETEST_TODO P1-3, where every freerun block ran
+before every hard-cap block, so it is disqualifying rather than a caveat. `latin`
+over twelve blocks puts each of the three arms in each of the three positions
+four times and makes each of them first in four blocks, and the runner validates
+that before it spends any GPU time.
+
+What `latin` does not balance is the PREDECESSOR. A cyclic rotation leaves the
+adjacent pairs one-directional: `distinct` is always followed by `packed`,
+`packed` by `nopoll`, `nopoll` by `distinct`, eight times each over the twelve
+blocks, and the reverses never occur. So each arm always has the same arm before
+it. `williams` balances that and requires one block per arm, which is three
+blocks and an interval several times wider than this design needs, so it is not
+available at this precision.
+
+The argument that the residual is immaterial is an argument and not a
+measurement, and it is this: the three arms do identical GPU work. Same model,
+same drafter, same prompts, same draft length, three hundred tokens each. They
+differ in which processors the server may use and in one poll flag, and every
+arm-run starts a fresh server, so nothing of the previous arm's placement
+survives into the next process. What survives is the card's thermal and power
+state, and that is set by the GPU work, which does not differ. If that argument
+is wrong the effect is a constant per arm, which is exactly what the within-block
+contrast cannot separate, so it would have to be addressed by a design and not by
+a correction.
+
 The driver refuses six things before it spends any GPU time, and each is a
 condition the reading depends on: a set that is not the thread count, an
 efficiency core in either set, unequal exposure to the favoured processors, a

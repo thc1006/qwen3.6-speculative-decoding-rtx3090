@@ -1577,6 +1577,35 @@ def build_schedule(arms: list[str], repeats: int, mode: str) -> list[list[str]]:
                      "carryover-balanced; refusing to run under a false label")
         return sched
     if mode == "mirrored":
+        # Reversing an odd-length order leaves the middle element where it was, so
+        # with an odd number of arms one of them holds the same position in every
+        # block while the others alternate between the ends. Measured on a plan S
+        # run that had to be stopped four blocks in: two arms at {1: 6, 3: 6} and
+        # the third at {2: 12}.
+        #
+        # Mean position is still balanced -- (1 + 3) / 2 is 2 -- so a LINEAR drift
+        # within a block cancels for every arm. A first-position effect does not:
+        # the outer arms take it half the time each and the middle one never, and
+        # the arms are then not exchangeable. `is_position_balanced` says this
+        # schedule is unbalanced and was only ever asked under `latin`, which is
+        # the gap this closes.
+        #
+        # Not generalised to "refuse any mirrored schedule that is not
+        # position-balanced": an EVEN arm count is also not balanced by that
+        # definition, because the first arm never reaches the middle positions,
+        # and that is the design run Y published. Mirroring balances mean position
+        # and carryover direction, not occupancy. What is wrong here is the
+        # asymmetry BETWEEN arms, which only an odd count produces.
+        if n % 2 == 1:
+            sys.exit(
+                f"BENCH_ORDER=mirrored with {n} arms pins the middle one: "
+                f"{arms[n // 2]!r} would hold position {n // 2 + 1} in every one "
+                f"of the {repeats} blocks while the others alternate between the "
+                f"ends. Mean position is still balanced, so a linear drift within "
+                f"a block cancels, but a first-position effect does not, and the "
+                f"arms are then not exchangeable. Use BENCH_ORDER=latin: for "
+                f"{n} arms over a multiple of {n} repeats it puts every arm in "
+                f"every position the same number of times.")
         sched = [arms if r % 2 == 0 else list(reversed(arms)) for r in range(repeats)]
     else:
         step = max(1, n // max(1, repeats))
