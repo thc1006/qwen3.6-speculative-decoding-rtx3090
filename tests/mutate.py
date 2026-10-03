@@ -687,10 +687,15 @@ MUTATIONS = [
     # document is the design.
     ("the packed arm stops packing, so two arms differ in nothing",
      "v4_audit_2026_08_25/PROSPECTIVE_PLAN_SIBLINGS.md",
-     "| `packed` | `0,1,2,3,4,5,6,7` |",
+     "| `packed` | `0,1,2,3,4,5,8,9` |",
      "| `packed` | `0,2,4,6,8,10,12,14` |",
      "tests.test_harness_invariants.PlanSsArmsMustDifferInOneThingEach"
      ".test_the_masks_are_one_sibling_each_and_both_siblings_each"),
+    ("the packed arm goes back to the mask with no favoured core in it",
+     "v4_audit_2026_08_25/PROSPECTIVE_PLAN_SIBLINGS.md",
+     "| `packed` | `0,1,2,3,4,5,8,9` |",
+     "| `packed` | `0,1,2,3,4,5,6,7` |",
+     "tests.test_harness_invariants.PlanSsArmsMustDifferInOneThingEach.test_the_arms_have_equal_exposure_to_the_favoured_cores"),
     ("the third arm loses the flag that makes it a one-thing contrast",
      "v4_audit_2026_08_25/PROSPECTIVE_PLAN_SIBLINGS.md",
      "and `--poll 0`, so the target pool's idle workers sleep",

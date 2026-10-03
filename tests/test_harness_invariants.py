@@ -7939,6 +7939,43 @@ class PlanSsArmsMustDifferInOneThingEach(unittest.TestCase):
                          "the arms do not use the same number of threads, so "
                          "they differ in two things")
 
+    def test_the_arms_have_equal_exposure_to_the_favoured_cores(self):
+        """Two of this processor's performance cores are faster, so masks differ.
+
+        Measured on the bench host and recorded in
+        `v4_audit_2026_08_25/topology/topology_3090_20261003.txt`: processors 8, 9,
+        10 and 11 run about five per cent faster than the other twelve
+        performance-core threads, which is Turbo Boost Max 3.0 favouring their two
+        cores. That is not a hardware detail this test reads from the machine -- it
+        is a constant from a recorded measurement, which is why asserting it is
+        safe on a runner that has four processors and no such cores.
+
+        The first version of this design used `0,1,2,3,4,5,6,7` for `packed`,
+        which touches none of them, against a `distinct` mask that puts two of its
+        eight threads on them. Those two masks differ in sharing AND in clock, the
+        expected difference from the clock alone is larger than the one per cent
+        band the document pre-registers for "not the mechanism", and a confound
+        bigger than the smallest effect the design would call real is a different
+        experiment rather than a caveat.
+        """
+        FAVOURED = {8, 9, 10, 11}
+        arms = self._arms()
+        exposure = {}
+        for name, (mask, _) in arms.items():
+            cpus = {int(c) for c in mask.split(",")}
+            exposure[name] = len(cpus & FAVOURED)
+        got = sorted(set(exposure.values()))
+        self.assertEqual(
+            len(got), 1,
+            f"the arms do not have equal exposure to the favoured processors "
+            f"{sorted(FAVOURED)}: {exposure}. They differ in clock as well as in "
+            f"sharing, and the clock difference is larger than the band the "
+            f"document reserves for a null")
+        self.assertGreater(
+            exposure["distinct"], 0,
+            "no arm touches a favoured processor, which is only reachable by "
+            "dropping to six threads; if that is the design now, say so here")
+
     def test_the_third_arm_differs_from_the_second_by_the_flag_alone(self):
         doc = self._doc()
         rows = [l for l in doc.splitlines()
@@ -8038,14 +8075,30 @@ class PlanSsArmsMustDifferInOneThingEach(unittest.TestCase):
                 f"{key} is now recorded in {hits}, so plan S's prerequisite 2 is "
                 f"satisfied and the document has to stop calling it unrecorded")
 
-        # 3: the topology. `sibling` alone is no use here -- every hit in this
-        # tree is the SIBLING REPOSITORY, qwen3.6-vllm-2x3090 -- so the token is
-        # the file the kernel exposes it in.
-        hits = sorted(q for q, t in body.items() if "thread_siblings" in t)
-        self.assertEqual(
-            hits, [],
-            f"the sibling topology is now recorded in {hits}, so plan S's "
-            f"prerequisite 3 is satisfied and the masks rest on a checkable fact")
+        # 3 is CLOSED and the assertion is inverted. It used to require that
+        # nothing read `thread_siblings`, because the document said the tree could
+        # not check the topology. On 2026-10-03 it was measured, so what has to
+        # hold now is that the instrument and its record are both still here: a
+        # closed prerequisite whose evidence was deleted is an open one that reads
+        # as closed. `sibling` alone would be no use for either direction -- every
+        # other hit in this tree is the SIBLING REPOSITORY, qwen3.6-vllm-2x3090.
+        reads_topology = sorted(q for q, t in body.items()
+                                if "thread_siblings" in t)
+        self.assertIn(
+            "bench/cpu_siblings.py", reads_topology,
+            "nothing reads the sibling topology any more, so plan S's masks are "
+            "back to resting on a claim the tree cannot check")
+        evidence = self.ROOT / "v4_audit_2026_08_25" / "topology" / \
+            "topology_3090_20261003.txt"
+        self.assertTrue(evidence.is_file(),
+                        f"{evidence.name} is gone, and the document cites it as "
+                        f"what closed prerequisite 3")
+        rec = evidence.read_text(encoding="utf-8")
+        self.assertIn("agrees with /sys on all 15 pair(s)", rec,
+                      "the recorded run no longer reports agreement, so the "
+                      "document's claim about the masks is not what it cites")
+        self.assertIn("13th Gen Intel(R) Core(TM) i9-13900K", rec,
+                      "the record is not from the processor the plan is about")
 
 
 class PlanZsPremisesMustBeWhatTheDataSays(unittest.TestCase):

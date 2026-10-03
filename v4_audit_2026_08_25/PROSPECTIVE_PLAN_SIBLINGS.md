@@ -1,8 +1,10 @@
 # Plan S: what shares a core with the main thread
 
-**This cannot be executed yet.** Four of the five items in the last section are
-still open, and two of them changed shape after the flags were traced through the
-pinned commit's own sources rather than master's. Written 2026-10-02, before any
+**This cannot be executed yet.** Three of the six items in the last section are
+still open. Two changed shape after the flags were traced through the pinned
+commit's own sources rather than master's, two were closed on 2026-10-03 by going
+to the bench host and measuring rather than reading, and the sixth exists because
+of what that visit found about the binary. Written 2026-10-02, before any
 measurement it describes, and every figure it quotes about data already committed
 is derived by
 [`../analysis/plan_siblings_power.py`](../analysis/plan_siblings_power.py).
@@ -78,14 +80,56 @@ Each differs from the one above it in exactly one thing.
 
 | arm | affinity | and |
 |---|---|---|
-| `distinct` | `0,2,4,6,8,10,12,14` | eight distinct physical cores. Run Y's fast condition |
-| `packed` | `0,1,2,3,4,5,6,7` | four physical cores, both siblings of each |
-| `packed-nopoll` | `0,1,2,3,4,5,6,7` | and `--poll 0`, so the target pool's idle workers sleep |
+| `distinct` | `0,2,4,6,8,10,12,14` | one thread from each of the eight performance cores. Run Y's fast condition |
+| `packed` | `0,1,2,3,4,5,8,9` | four performance cores, both threads of each |
+| `packed-nopoll` | `0,1,2,3,4,5,8,9` | and `--poll 0`, so the target pool's idle workers sleep |
 
 Same binary, same model, same prompts, same thread count, all three on performance
 cores. `packed` against `distinct` is the hyperthread question. `packed-nopoll`
 against `packed` asks whether the cost is the target pool's spinning, and if it is,
 that flag is a remedy for the part of the spinning the flag reaches.
+
+**`packed` is not the obvious mask, and the measurement is why.** The obvious one
+is `0,1,2,3,4,5,6,7`, which is what this document said first. Measuring the bench
+host's processors one at a time, which is what
+[`../bench/cpu_siblings.py`](../bench/cpu_siblings.py) does and
+[`topology/topology_3090_20261003.txt`](topology/topology_3090_20261003.txt)
+records, found that `8`, `9`, `10` and `11` run about five per cent faster than the
+other twelve performance-core threads: 172.4 against 163.7 thousand blocks per
+second, four processors each way, with every processor's own three repeats inside
+two tenths of a per cent. Those are the two cores Turbo Boost Max 3.0 favours.
+
+The measurement confirmed this rather than discovering it, and that is the part
+worth recording against myself. `BENCHMARK_ENV.md`'s CPU addendum has said since
+2026-09-17 that four of the thirty two logical processors reach 5800 MHz while
+twelve reach 5500, which is the same fact: that ratio is a twentieth, and the
+throughput ratio measured here matches it to a fraction of a per cent, which is
+also what says this kernel is limited by clock rather than by cache. What the
+addendum did not say is WHICH four, so these masks were first written from the
+plausible assumption that the eight performance-core threads are interchangeable.
+They are not, the tree already held the reason, and reading it would have been
+cheaper than measuring it.
+
+`0,2,4,6,8,10,12,14` puts two of its eight threads on favoured processors.
+`0,1,2,3,4,5,6,7` puts none there. So those two masks differ in hyperthread sharing
+AND in clock, the main thread lands on a favoured processor a quarter of the time
+in one arm and never in the other, and the expected difference from that alone is
+about one and a third per cent. The band this document pre-registers for "not the
+mechanism" is one per cent. A confound larger than the smallest effect the design
+would call real is not a caveat, it is a different experiment.
+
+`0,1,2,3,4,5,8,9` is four cores with both threads of each, and two of its eight
+threads on favoured processors, the same as `distinct`. One thing differs: how many
+physical cores the eight threads span, four against eight.
+
+One asymmetry is left and it is worth naming because the direction matters.
+`distinct` loads one thread of each favoured core, so both of them are busy;
+`packed` loads both threads of one, so the other is idle. Two favoured cores
+running together lose about five per cent against either alone, which the same
+measurement shows at `8 + 10`. That makes `distinct` the slower arm by a little,
+which works against finding a cost in `packed` rather than for it. A residual that
+biases toward the null is one this plan can carry; the one it replaced biased the
+other way.
 
 ## The design
 
@@ -179,21 +223,59 @@ Every line number below is `3737e4137`'s.
    applies to every thread including the drafter's; `--cpu-mask --cpu-strict 1`
    places the target pool alone. Dropping `taskset` for it would lose the
    drafter's threads, which is why run Y's instrument was the broader one.
-3. **The sibling topology has to be recorded, and it decides where this can run.**
-   Nothing in this repository says which processors share a physical core, so the
-   masks above rest on a claim the tree cannot check.
-   `/sys/devices/system/cpu/cpu*/topology/thread_siblings_list` is what says it,
-   one line per processor. The development box this was written on reports eight
-   processors and eight distinct entries, because it is a KVM guest and the
-   hypervisor gives it no siblings to pack: `packed` and `distinct` would be the
-   same arm there. So this is a bench-host run or no run, and no test here asserts
-   the topology, because a test that reads `/sys` is green on the machine it was
-   written on and red on a runner.
-4. **The built binary's own help still has to be read.** The flags are defined in
-   the pinned commit: `common/arg.cpp` gives `-C/--cpu-mask` at 1534,
-   `-Cr/--cpu-range` at 1548, `--cpu-strict` at 1554 and `--poll` at 1571, and
-   none of them carries a `.set_examples(...)` restricting it to one binary, so
-   the server accepts all four. That is the source, not the artefact. What is on
-   the bench host is a build, and whether it was configured and linked the way
-   those lines assume is a question only `--help` from that file answers.
+3. **CLOSED on 2026-10-03: the topology is measured and recorded.**
+   `/sys/devices/system/cpu/cpu*/topology/thread_siblings_list` states it, but on a
+   virtual machine it states what the hypervisor chose to say, so it was measured
+   instead and then compared.
+   [`topology/topology_3090_20261003.txt`](topology/topology_3090_20261003.txt) is
+   that run: 32 processors, 24 physical cores, the eight performance cores pairing
+   as `0+1` through `14+15` and the sixteen efficiency cores alone. All fifteen
+   pairs agree with `/sys`, sibling pairs measuring 0.491 to 0.496 of their two
+   solo rates and distinct pairs 0.949 to 1.001, against a same-processor control
+   at 0.500. So the masks above are a checked claim rather than an assumed one.
+
+   It also decides where this can run. The development box these documents are
+   written on reports eight processors and eight distinct entries, because it is a
+   KVM guest and the hypervisor gives it no siblings to pack: `packed` and
+   `distinct` would be the same arm there, and measuring it confirmed that, all 28
+   of its pairs landing between 0.994 and 1.001. This is a bench-host run or no
+   run. No test here asserts the topology, because a test that reads `/sys` or
+   times a processor is green on the machine it was written on and red on a runner;
+   what the suite asserts is the arithmetic that turns rates into a verdict.
+4. **CLOSED on 2026-10-03: the binary the runs used accepts the flags.** The
+   source says so at the pinned commit, `common/arg.cpp` giving `-C/--cpu-mask` at
+   1534, `-Cr/--cpu-range` at 1548, `--cpu-strict` at 1554 and `--poll` at 1571
+   with no `.set_examples(...)` restricting any of them. The artefact now says so
+   too. Seventy seven of the seventy eight committed runs record
+   `server_sha256` `b6a5c490bb932ffa`, run T4 and run Y among them, and the file
+   with that hash on the bench host is built from `3737e41370da1830a44c663f9929a0f27591ffa6`.
+   Its own help prints `--cpu-strict <0|1>` with `default: 0` and
+   `--poll <0...100>` with `default: 50`, which is what the library's
+   `ggml_threadpool_params_init` sets and what makes those two values a property of
+   every run here rather than a guess about one.
+
+   **And it prints a trap.** The same help lists `--spec-draft-poll`,
+   `--spec-draft-cpu-mask`, `--spec-draft-cpu-strict` and their batch variants, so
+   a reader would reasonably try `--poll-draft 0` for the drafter's workers. On this
+   code path those flags land nowhere. `common_base_params_to_speculative` copies
+   exactly two fields out of the draft's `cpuparams`, `n_threads` and
+   `cpuparams_batch.n_threads` at `common/speculative.cpp` 2335 and 2336, so the
+   mask, the strict flag and the poll level never cross; and the draft context is
+   built by `llama_init_from_model` at 2412, while the only call to
+   `common_threadpools::init` anywhere in `common/` is `common.cpp:1408` inside
+   `common_init_result`'s constructor, which the draft context never goes through.
+   The flags are accepted and silently ineffective. That is worse than their
+   absence, and it is the reason item 2 says `taskset` stays.
 5. **A derivation script**, which exists, and the claims job has to run it.
+6. **The binary cannot start on the bench host as it stands.** It needs
+   `libcudart.so.12` and `libcublas.so.12`, its `RUNPATH` is only its own build
+   directory, and there is no CUDA toolkit installed on that host at all: no
+   `/usr/local/cuda*`, no `nvcc`, nothing `ldconfig` knows. The only copies of
+   those two libraries on the machine are pip wheels inside unrelated Python
+   virtual environments, `~/colabfold_venv` and a PyTorch project's `.venv`. So
+   every published run here was launched with a library path that nothing in this
+   repository records: the manifests carry `server_lib_sha256` for the three
+   `libggml` objects and nothing for the CUDA runtime. Before an arm-run of this
+   plan, that path has to be chosen deliberately and written into the manifest,
+   because otherwise the three arms could differ in their CUDA runtime and the
+   manifest would look identical.

@@ -505,3 +505,33 @@ them, no run in this repository records which one anything ran on, and no
 committed arm-run carries a thread count: the server invocation passes no
 thread flag, so llama.cpp chooses, and what it chose is in the server log, which
 is a release asset rather than a file in this tree.
+
+## Which processors, and what starts the binary, 2026-10-03
+
+The addendum above records that four of the thirty two logical processors run at
+5800 MHz and twelve at 5500. It does not say which four, and it does not say which
+processors share a physical core, and a plan whose arms are affinity masks needs
+both. Measured on the host rather than read from it, because `/sys` on a virtual
+machine states what the hypervisor chose to say:
+[`v4_audit_2026_08_25/topology/topology_3090_20261003.txt`](v4_audit_2026_08_25/topology/topology_3090_20261003.txt)
+is the run and [`bench/cpu_siblings.py`](bench/cpu_siblings.py) is the instrument.
+
+The eight performance cores carry two threads each and pair as processors zero and
+one, two and three, and so on to fourteen and fifteen. The sixteen efficiency cores
+have one thread each, processors sixteen to thirty one. The favoured four are
+processors eight, nine, ten and eleven, which is the two cores Turbo Boost Max
+favours, and the throughput ratio measured between them and the other twelve
+performance-core threads matches the ratio of those two clock ceilings to within a
+fraction of a per cent. That agreement is also what says the instrument is
+measuring clock rather than cache or memory.
+
+**The published binary does not start on this host as it stands.** It wants
+`libcudart.so.12` and `libcublas.so.12`, its `RUNPATH` names only its own build
+directory, and the host has no CUDA toolkit: no `/usr/local/cuda` of any version,
+no `nvcc`, and nothing `ldconfig` knows about either library. The only copies on
+the machine are pip wheels inside two unrelated Python virtual environments. So
+every run recorded here was launched with a library path that this repository does
+not name: the manifests carry a hash for each of the three `libggml` objects and
+none for the CUDA runtime under them. Reproducing a run therefore needs a fact that
+is not in the tree, and two runs could differ in that fact while their manifests
+matched.

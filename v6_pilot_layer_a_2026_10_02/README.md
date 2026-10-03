@@ -81,6 +81,30 @@ wrong as well.
 - The range is 17.4 °C, not the whole span the card can reach. Below about 51 °C the
   load heats the card faster than a window can resolve, so starting colder adds
   nothing.
+- **A processor was fully occupied throughout and the run does not record it.**
+  Found on 2026-10-03, the day after: pid 123072, `python3 -` with its working
+  directory in `~/.codex`, started 2026-09-25 09:20 and orphaned to init when its
+  parent died. Its own accounting is what establishes the condition rather than an
+  impression of a busy machine: 197.4 hours of CPU time over 197.5 hours of
+  elapsed time, so at most about six minutes of idleness in total across the whole
+  period, and it began 175.8 hours before this pilot started. One of the host's
+  eight processors was therefore busy for all of it.
+
+  The reading survives, and the reason is the shape of the estimand rather than
+  the size of the load. What is estimated here is a SLOPE against card
+  temperature, and a load that is constant cannot create or remove a slope; it was
+  constant to within those six minutes. What it can do is inflate the scatter, and
+  that widens the bound rather than narrowing it, which is the direction that makes
+  the exclusion harder rather than easier. The required sensitivity is 1678 times
+  the bound, so the margin absorbs a long way more inflation than a single busy
+  processor can produce.
+
+  What this does establish is the gap
+  [`PROSPECTIVE_PLAN_X_HOST_LOAD.md`](../v4_audit_2026_08_25/PROSPECTIVE_PLAN_X_HOST_LOAD.md)
+  exists for. `bench/host_guard.py --sample` has been able to record host load
+  since the commit that added the guard, and no driver in this repository calls
+  it, so no run here carries it. Had any of them recorded it, this would have been
+  a column rather than a discovery.
 
 ## What is here
 
