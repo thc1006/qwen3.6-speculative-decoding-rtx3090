@@ -637,6 +637,31 @@ MUTATIONS = [
      "            return True",
      "tests.test_harness_invariants.TheVerificationSuitesMustRefuseAMeasuringHost"
      ".test_detection_is_positional_not_a_substring"),
+    # --- the runner's threadpool knobs, and its validators ------------------
+    # A validator with an over-escaped pattern refuses every valid value and looks
+    # exactly like one that works. That happened to BENCH_THREADS while BENCH_POLL
+    # was being added next to it, and four hundred and fifty five tests passed
+    # over it because every one of them used a good value.
+    ("the runner's thread-count pattern is over-escaped again",
+     "bench/retest_runner.py",
+     'if THREADS and not re.fullmatch(r"\\d+", THREADS):',
+     'if THREADS and not re.fullmatch(r"\\\\d+", THREADS):',
+     "tests.test_harness_invariants.TheRunnersEnvironmentValidatorsMustActuallyValidate.test_a_good_value_is_not_refused"),
+    ("the polling level loses its range check",
+     "bench/retest_runner.py",
+     'if POLL and not (re.fullmatch(r"\\d+", POLL) and 0 <= int(POLL) <= 100):',
+     'if POLL and not re.fullmatch(r"\\d+", POLL):',
+     "tests.test_harness_invariants.TheRunnersEnvironmentValidatorsMustActuallyValidate.test_a_bad_value_is_refused_by_name"),
+    ("strict placement stops being refused while no mask is passed",
+     "bench/retest_runner.py",
+     'if CPU_STRICT == "1":',
+     'if CPU_STRICT == "9":',
+     "tests.test_harness_invariants.TheRunnersEnvironmentValidatorsMustActuallyValidate.test_strict_placement_is_refused_while_no_mask_is_passed"),
+    ("the runner stops putting --poll into argv",
+     "bench/retest_runner.py",
+     '        cmd += ["--poll", POLL]',
+     '        pass',
+     "tests.test_harness_invariants.PlanSsArmsMustDifferInOneThingEach.test_the_prerequisites_are_still_unsatisfied"),
     # --- scratch on tmpfs is memory, not space -------------------------------
     # Two gate runs were killed at the data-perturbation step: df called the
     # tmpfs free, the mirrors were RAM, there was no swap, and the exit status

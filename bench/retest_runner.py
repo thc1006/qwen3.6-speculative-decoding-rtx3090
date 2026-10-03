@@ -195,6 +195,32 @@ for _n, _v in (("BENCH_PIN_CPUS", PIN_CPUS), ("BENCH_PIN_ALT_CPUS", PIN_ALT_CPUS
         sys.exit(f"{_n}={_v!r} is not a taskset cpu list")
 if THREADS and not re.fullmatch(r"\d+", THREADS):
     sys.exit(f"BENCH_THREADS={THREADS!r} is not a thread count")
+# The threadpool's other two parameters, which this runner could not express until
+# 2026-10-03 and which have defaults that are not neutral. `llama-server --help`
+# from the build the runs record, 3737e413, prints `--poll <0...100>` with
+# default 50 and `--cpu-strict <0|1>` with default 0, and `ggml_threadpool_params_init`
+# is where those come from. 50 is 1024 * 128 * 50 `PAUSE` iterations per worker per
+# wait before it sleeps, so "unset" is a loud condition rather than a quiet one.
+# They are recorded whether or not they are passed: an absent named field is what
+# makes the absence visible, and argv alone never prompted anyone to look.
+POLL = os.environ.get("BENCH_POLL", "").strip()
+CPU_STRICT = os.environ.get("BENCH_CPU_STRICT", "").strip()
+if POLL and not (re.fullmatch(r"\d+", POLL) and 0 <= int(POLL) <= 100):
+    sys.exit(f"BENCH_POLL={POLL!r} is not a polling level in 0..100")
+if CPU_STRICT and CPU_STRICT not in ("0", "1"):
+    sys.exit(f"BENCH_CPU_STRICT={CPU_STRICT!r} is not 0 or 1")
+if CPU_STRICT == "1":
+    # Refused, and not because of taskset. Strict placement walks
+    # `params.cpuparams.cpumask`, which only `--cpu-mask` fills; `taskset` sets the
+    # PROCESS affinity and leaves that mask all zero. In ggml,
+    # `ggml_thread_cpumask_is_valid` (ggml-cpu.c:2682) is true only if some bit is
+    # set, and affinity is applied only when it is (3211), so with no `--cpu-mask`
+    # the strict branch has nothing to walk and the flag is a complete no-op. This
+    # runner passes no `--cpu-mask`, so accepting 1 would record a treatment that
+    # did not happen, which is the defect this file exists to remove. The knob is
+    # here so the VALUE is recorded; raising it needs `--cpu-mask` first.
+    sys.exit("BENCH_CPU_STRICT=1 does nothing without --cpu-mask, which this "
+             "runner does not pass: it would be recorded as on and have no effect")
 if (PIN_CPUS or PIN_ALT_CPUS) and not THREADS:
     sys.exit("pinning without BENCH_THREADS would change the cpu set and the "
              "thread count in one step, so the contrast would name neither")
@@ -1022,6 +1048,14 @@ def start_server(extra: list[str], log_path: Path,
         SERVER, "-m", TARGET, "--host", "127.0.0.1", "--port", str(PORT)]
     if THREADS:
         cmd += ["-t", THREADS, "-tb", THREADS]
+    # After `-t`, because these are the same threadpool's parameters and argv
+    # should show them together. Passed only when asked for: a run that does not
+    # set them is recorded as not setting them, and the null in the record is what
+    # says the library default applied.
+    if POLL:
+        cmd += ["--poll", POLL]
+    if CPU_STRICT:
+        cmd += ["--cpu-strict", CPU_STRICT]
     if FIT and FIT_TARGET:
         cmd += ["--fit-target", FIT_TARGET]
     if CONCURRENCY > 1:
@@ -1562,6 +1596,13 @@ def run_arm(arm: str, rep: int) -> dict:
             "cpus_requested": arm_cpus(arm) or None,
             "cpus_allowed": _cpus_allowed(proc.pid),
             "threads": int(THREADS) if THREADS else None,
+            # The same threadpool's other two parameters. A null means the
+            # flag was absent and the library default applied, 50 for poll
+            # and 0 for cpu_strict on the build these runs use; an absent
+            # FIELD meant nobody had considered it, which is what the first
+            # seventy eight runs in this repository look like.
+            "poll": int(POLL) if POLL else None,
+            "cpu_strict": int(CPU_STRICT) if CPU_STRICT else None,
             "server_identity": dict(server_identity(log_path), props=props),
             # Taken per arm-run, not once per run: the run-level hash cannot
             # see a binary replaced between two arms.
@@ -1744,6 +1785,8 @@ def main() -> None:
         # launcher records nothing about the code that answered the requests, so
         # every shared object in the same directory is hashed too.
         "server_lib_sha256": _server_lib_hashes(),
+        "poll": int(POLL) if POLL else None,
+        "cpu_strict": int(CPU_STRICT) if CPU_STRICT else None,
         "target": TARGET, "target_sha256": sha256(TARGET),
         "draft": DRAFT or None,
         "draft_sha256": sha256(DRAFT) if DRAFT else None,

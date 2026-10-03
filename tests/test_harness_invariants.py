@@ -6988,6 +6988,97 @@ class APlanCheckMustCatchACorruptedPlan(unittest.TestCase):
                       "the changelog quotes a corruption count this file does not have")
 
 
+class TheRunnersEnvironmentValidatorsMustActuallyValidate(unittest.TestCase):
+    """A validator with a broken pattern refuses everything and nothing notices.
+
+    `bench/retest_runner.py` screens its environment at import: a cpu list that is
+    not a cpu list, a thread count that is not a number, a polling level outside
+    the range the flag accepts. Those checks are the only thing between a typo and
+    a treatment that the manifest describes wrongly.
+
+    Added because one of them was broken while another was added beside it. An
+    over-escaped pattern turned `re.fullmatch(r"\\d+", THREADS)` into a match
+    against a literal backslash, so `BENCH_THREADS=8` was refused as "not a thread
+    count" and every arm-run would have failed to start. Four hundred and fifty
+    five tests passed over it, because every one of them checked what the runner
+    does with a GOOD value and none fed it a bad one, and a validator that refuses
+    everything looks exactly like a validator that is working.
+
+    So both ends, for every knob: a value that must be accepted and a value that
+    must be refused, with the refusal naming the variable.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+    RUNNER = "bench/retest_runner.py"
+
+    CASES = (
+        # variable, accepted, refused
+        ("BENCH_THREADS", "8", "abc"),
+        ("BENCH_POLL", "0", "101"),
+        ("BENCH_POLL", "50", "x"),
+        ("BENCH_CPU_STRICT", "0", "2"),
+        ("BENCH_PIN_CPUS", "0,2,4", "zero-two"),
+        ("BENCH_PIN_SUFFIX", "alt", "a b"),
+    )
+
+    def _run(self, var, value):
+        env = {"PATH": "/usr/bin:/bin", "TZ": "UTC",
+               "LLAMA_SERVER_BIN": "/bin/true", var: value}
+        # BENCH_PIN_CPUS on its own is refused for a different and correct reason,
+        # that pinning without a thread count moves two things at once, so the
+        # thread count rides along wherever a cpu list is the subject.
+        if var.startswith("BENCH_PIN"):
+            env["BENCH_THREADS"] = "8"
+        if var == "BENCH_PIN_SUFFIX":
+            env["BENCH_PIN_CPUS"] = "0,2"
+            env["BENCH_PIN_ALT_CPUS"] = "1,3"
+        return subprocess.run(
+            [sys.executable, str(self.ROOT / self.RUNNER), "--help"],
+            capture_output=True, text=True, env=env, timeout=120, cwd=self.ROOT)
+
+    def test_a_good_value_is_not_refused(self):
+        for var, good, _bad in self.CASES:
+            with self.subTest(var=var, value=good):
+                r = self._run(var, good)
+                both = r.stdout + r.stderr
+                self.assertNotIn(
+                    f"{var}={good!r}", both,
+                    f"{var}={good} was refused, so the check rejects valid input "
+                    f"and every run using it fails to start")
+
+    def test_a_bad_value_is_refused_by_name(self):
+        for var, _good, bad in self.CASES:
+            with self.subTest(var=var, value=bad):
+                r = self._run(var, bad)
+                both = r.stdout + r.stderr
+                self.assertIn(
+                    var, both,
+                    f"{var}={bad} was not refused, or the refusal does not name "
+                    f"the variable, so a typo reaches the server as a treatment")
+
+    def test_strict_placement_is_refused_while_no_mask_is_passed(self):
+        """It is a no-op without `--cpu-mask`, and this runner passes none.
+
+        `ggml_thread_cpumask_is_valid` is true only if a bit is set, and ggml
+        applies affinity only when it is, so strict placement with an all-zero
+        mask walks nothing. `taskset` does not fill that mask: it sets the process
+        affinity and leaves `cpuparams.cpumask` empty. Accepting 1 here would put
+        a treatment in the manifest that did not happen.
+        """
+        # The QUOTED flag, which is how it would appear as an argv element. A bare
+        # `--cpu-mask` is all over this file in the comment and the refusal that
+        # explain why it is not passed, and matching that would make the assertion
+        # fail on its own documentation.
+        src = (self.ROOT / self.RUNNER).read_text(encoding="utf-8")
+        passed = [l.strip() for l in src.splitlines() if '"--cpu-mask"' in l]
+        self.assertEqual(passed, [],
+                         "the runner passes --cpu-mask now, so strict placement "
+                         "is no longer a no-op and this refusal has to go")
+        r = self._run("BENCH_CPU_STRICT", "1")
+        self.assertIn("does nothing without --cpu-mask", r.stdout + r.stderr,
+                      "BENCH_CPU_STRICT=1 is accepted while nothing passes a mask")
+
+
 class ScratchOnTmpfsIsMemoryNotSpace(unittest.TestCase):
     """`df` on a tmpfs reports a size limit, which is not what RAM can back.
 
@@ -8049,21 +8140,31 @@ class PlanSsArmsMustDifferInOneThingEach(unittest.TestCase):
             except (UnicodeDecodeError, OSError):
                 continue
 
-        # 1 and 2: the threadpool flags and their record. `--poll` is checked as a
-        # whole token: a substring search for "poll" matches "polling" and
-        # "pollute", and a search of this file's own source would match the
-        # strings above, which is why this file is excluded from `body`.
-        for flag in ("--poll", "--cpu-strict", "--cpu-mask"):
-            hits = sorted(q for q, t in body.items()
-                          if re.search(re.escape(flag) + r"(?![\w-])", t))
-            self.assertEqual(
-                hits, [],
-                f"{flag} now appears in the executable files {hits}. If a "
-                f"driver passes it, plan S's prerequisite 1 is satisfied and the "
-                f"document has to stop saying it is not")
-        # Prerequisite 2 is about the MANIFESTS, so a `.py` naming the key does
-        # not falsify it -- what would is a recorded run carrying it. The search
-        # is every tracked json, which is every manifest and registry here.
+        # 1 was CLOSED for the runner on 2026-10-03 and is still open for the
+        # corpus, and those are two different assertions. `--poll` is matched as a
+        # whole token: a substring search for "poll" takes "polling" and
+        # "pollute", and this file's own source would match the strings here,
+        # which is why it is excluded from `body`.
+        runner = body.get("bench/retest_runner.py", "")
+        self.assertTrue(runner, "the runner is not in the searched set")
+        for flag in ('"--poll"', '"--cpu-strict"'):
+            self.assertIn(
+                flag, runner,
+                f"the runner no longer passes {flag}, so plan S's third arm "
+                f"cannot be expressed and the parameter goes back to being "
+                f"unrecorded")
+        # Still NOT passed, and the refusal in the runner says why: strict
+        # placement reads a mask that only this flag fills, so raising
+        # BENCH_CPU_STRICT needs it first.
+        self.assertNotIn('"--cpu-mask"', runner,
+                         "the runner passes --cpu-mask now, so the plan's item 2 "
+                         "has to say what that changes about taskset")
+        # And the CORPUS is still without them, which is a different fact from the
+        # runner being able to record them. No committed manifest carries either
+        # key, so no published run here can be compared with a plan-S arm on this
+        # axis, and the document says so. When a run made with the new runner is
+        # committed this assertion has to be narrowed to the runs before it rather
+        # than deleted, because the old ones never will carry it.
         jsons = [q for q in body if q.endswith(".json")]
         self.assertGreater(len(jsons), 20,
                            f"only {len(jsons)} json files searched; a check that "
@@ -8072,8 +8173,9 @@ class PlanSsArmsMustDifferInOneThingEach(unittest.TestCase):
             hits = sorted(q for q in jsons if key in body[q])
             self.assertEqual(
                 hits, [],
-                f"{key} is now recorded in {hits}, so plan S's prerequisite 2 is "
-                f"satisfied and the document has to stop calling it unrecorded")
+                f"{key} is now recorded in {hits}. A run made after the runner "
+                f"learned to record it has been committed, so narrow this to the "
+                f"earlier runs and say in the plan which ones carry it")
 
         # 3 is CLOSED and the assertion is inverted. It used to require that
         # nothing read `thread_siblings`, because the document said the tree could

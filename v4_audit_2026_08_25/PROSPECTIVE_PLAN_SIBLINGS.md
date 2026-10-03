@@ -1,6 +1,6 @@
 # Plan S: what shares a core with the main thread
 
-**This cannot be executed yet.** Three of the six items in the last section are
+**This cannot be executed yet.** Two of the six items in the last section are
 still open. Two changed shape after the flags were traced through the pinned
 commit's own sources rather than master's, two were closed on 2026-10-03 by going
 to the bench host and measuring rather than reading, and the sixth exists because
@@ -201,17 +201,43 @@ The flags were traced through the pinned commit's own sources before this list
 was written, and two of the five items changed shape because of what that found.
 Every line number below is `3737e4137`'s.
 
-1. **`--poll` and `--cpu-strict` have to be passed and recorded.** The runner
-   passes neither, and neither default is neutral: `ggml_threadpool_params_init`
-   in `ggml/src/ggml.c` sets `poll = 50` and `strict_cpu = false`, so every
-   published run here carries both unrecorded. The 50 is not a small thing.
-   `ggml_graph_compute_poll_for_work`, `ggml/src/ggml-cpu/ggml-cpu.c:3172`, spins
-   `1024 * 128 * poll` times, so **6,553,600 `PAUSE` iterations** per worker per
-   wait before it falls back to a condvar sleep. At `--poll 0` it is zero rounds
-   and the worker sleeps at once.
-2. **`taskset` stays, and the native flags are added beside it.** This item said
-   the opposite first, that the affinity should be llama.cpp's own instead, and
-   that was wrong in a way that would have removed control rather than added it.
+1. **CLOSED on 2026-10-03 for the runner, and permanently open for the corpus.**
+   Neither default is neutral: `ggml_threadpool_params_init` in `ggml/src/ggml.c`
+   sets `poll = 50` and `strict_cpu = false`, and the binary's own help prints the
+   same two values, so they are a property of every run here rather than a guess.
+   The 50 is not a small thing. `ggml_graph_compute_poll_for_work`,
+   `ggml/src/ggml-cpu/ggml-cpu.c:3172`, spins `1024 * 128 * poll` times, so
+   **6,553,600 `PAUSE` iterations** per worker per wait before it falls back to a
+   condvar sleep. At `--poll 0` it is zero rounds and the worker sleeps at once.
+
+   `bench/retest_runner.py` now takes `BENCH_POLL` and `BENCH_CPU_STRICT`, screens
+   them, puts `--poll` into argv beside `-t`, and records `poll` and `cpu_strict`
+   in the arm-run record and in the run manifest. They are recorded whether or not
+   they are passed, because a **null field** is what makes the absence visible and
+   argv alone never prompted anyone to look.
+
+   `BENCH_CPU_STRICT=1` is refused, and the reason is not `taskset`. Strict
+   placement reads `params.cpuparams.cpumask`, which only `--cpu-mask` fills;
+   `taskset` sets the process affinity and leaves that mask empty.
+   `ggml_thread_cpumask_is_valid` is true only if some bit is set,
+   `ggml-cpu.c:2682`, and ggml applies affinity only when it is, 3211, so with no
+   `--cpu-mask` the strict branch walks nothing. Accepting 1 would put a treatment
+   in the manifest that did not happen, so the knob exists to record the value and
+   raising it needs `--cpu-mask` first.
+
+   The seventy eight committed runs will never carry either field. That is why no
+   arm of this plan can be compared with them on this axis, and why the contrast
+   lives inside the plan's own blocks.
+2. **`taskset` is the instrument, and it is not a compromise.** This item said the
+   opposite first, that the affinity should be llama.cpp's own instead, and that
+   was wrong in two ways rather than one. It would have removed control rather
+   than adding it, and `--cpu-strict` without `--cpu-mask` does nothing at all,
+   which item 1 now records with the lines that show it. The arms above are
+   realised by `taskset` alone, and they do not need a mask flag: in `packed`
+   every processor in the set is a sibling of another one in it, so sharing
+   happens wherever the kernel puts a thread, and in `distinct` no two are, so it
+   cannot. The placement within the set is the kernel's and the contrast does not
+   depend on it.
    The server's TARGET context gets a threadpool built from `params.cpuparams`:
    `tools/server/server-context.cpp:1051` calls `common_init_from_params`, whose
    constructor at `common/common.cpp:1290` calls `threadpools.init` at 1408, and
@@ -268,14 +294,29 @@ Every line number below is `3737e4137`'s.
    absence, and it is the reason item 2 says `taskset` stays.
 5. **A derivation script**, which exists, and the claims job has to run it.
 6. **The binary cannot start on the bench host as it stands.** It needs
-   `libcudart.so.12` and `libcublas.so.12`, its `RUNPATH` is only its own build
-   directory, and there is no CUDA toolkit installed on that host at all: no
-   `/usr/local/cuda*`, no `nvcc`, nothing `ldconfig` knows. The only copies of
-   those two libraries on the machine are pip wheels inside unrelated Python
-   virtual environments, `~/colabfold_venv` and a PyTorch project's `.venv`. So
-   every published run here was launched with a library path that nothing in this
-   repository records: the manifests carry `server_lib_sha256` for the three
-   `libggml` objects and nothing for the CUDA runtime. Before an arm-run of this
-   plan, that path has to be chosen deliberately and written into the manifest,
-   because otherwise the three arms could differ in their CUDA runtime and the
-   manifest would look identical.
+   `libcudart.so.12` and `libcublas.so.12`, and its `RUNPATH` is only its own
+   build directory. The DRIVER is installed and `ldconfig` knows it:
+   `libcuda.so.1` resolves to `libcuda.so.580.178.04`. The TOOLKIT is not. There
+   is no `/usr/local/cuda` of any version, no `nvcc`, and `ldconfig` has no entry
+   for `libcudart`, `libcublas` or `libnvrtc`. The only copies of the two the
+   binary wants are pip wheels inside unrelated Python virtual environments,
+   `~/colabfold_venv` and a PyTorch project's `.venv`, and that distinction
+   matters: a driver library is a property of the machine, while a wheel in
+   somebody else's environment is a file that can be removed by `pip uninstall`
+   in a project that has nothing to do with this one.
+
+   So every published run here was launched with a library path that nothing in
+   this repository records. The manifests carry `server_lib_sha256` for the
+   `libggml` and `libllama` objects beside the executable and nothing for the CUDA
+   runtime underneath them, so two runs could differ in it while their manifests
+   matched.
+
+   What would close this is recording what the process actually MAPPED rather than
+   what it was offered, read from `/proc/<pid>/maps` after the server is healthy;
+   the runner already reads `/proc/<pid>/status` for the allowed cpu set, so it is
+   the same access. Hashing them per arm-run is not the way: `libcublasLt.so.12`
+   alone is 714 MiB and the set is 815, which over thirty six arm-runs is 28 GiB
+   of hashing inside a measurement, and CPU work inside a measurement is what the
+   host guard exists to refuse. Identity per arm-run from `stat`, hashes once at
+   run start, and a stated residual that a replacement identical in size, mtime
+   and inode would pass.
