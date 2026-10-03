@@ -6989,6 +6989,107 @@ class APlanCheckMustCatchACorruptedPlan(unittest.TestCase):
                       "the changelog quotes a corruption count this file does not have")
 
 
+class AMeasurementMustAnnounceItselfWithTheLock(unittest.TestCase):
+    """`host_guard.lock_held()` has been searching for a file nobody wrote.
+
+    The guard has two halves. The process half works and is what refused a
+    mutation suite that was started during a gate. The lock half is for the other
+    case: verification work started on the machine that is MEASURING, which no
+    process list on another machine can see. It searched three paths, nothing in
+    this repository ever created any of them, and one of the three named the
+    SIBLING repository `qwen3.8-...`, which does not exist on the bench host,
+    while this repository's own path -- the one `bench/cpu_siblings.py` reads --
+    was absent. Two readers of one lock in one repository looked in different
+    places and neither had anything to find.
+
+    `bench/run_s_siblings.sh` is the first driver here to take it. These tests are
+    about that: the path the guard searches, and the driver asking first, taking
+    it after a read-only check would have returned, and releasing it on every exit.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+    DRIVER = "bench/run_s_siblings.sh"
+
+    def test_the_guard_searches_this_repository_not_the_sibling(self):
+        sys.path.insert(0, str(self.ROOT / "bench"))
+        import host_guard
+        paths = [str(p) for p in host_guard._DEFAULT_LOCKS]
+        self.assertTrue(
+            any("qwen3.6-speculative-decoding-rtx3090" in p for p in paths),
+            f"the guard does not search this repository's own lock path: {paths}")
+        self.assertFalse(
+            any("qwen3.8" in p for p in paths),
+            f"the guard still searches the sibling repository, which does not "
+            f"exist on the bench host: {paths}")
+        # And there must be only ONE reader. cpu_siblings used to carry its own
+        # checkout-relative LOCK, and the assertion here was that the two
+        # coincided -- which passed in the working tree and failed in the gate's
+        # clean clone, correctly: a clone under ~/ci_repro is not a measurement
+        # host. Two notions of where a lock lives can only agree at one path, so
+        # the fix is that cpu_siblings asks the guard instead of holding a path.
+        src = (self.ROOT / "bench" / "cpu_siblings.py").read_text(encoding="utf-8")
+        # Code, not comments. The comment that replaced the old assignment names
+        # it on purpose, and a test that forbids naming a defect forbids
+        # explaining it -- which is the same trap this file documents beside the
+        # gate's SRC check.
+        code = "\n".join(l for l in src.splitlines()
+                         if not l.lstrip().startswith("#"))
+        self.assertNotIn('LOCK = ROOT / ".gpu-in-use.lock"', code,
+                         "cpu_siblings has its own lock path again, so there are "
+                         "two notions of where the lock is")
+        self.assertIn("host_guard.lock_held()", code,
+                      "cpu_siblings does not ask the guard, so its refusal and "
+                      "the guard's can disagree")
+
+    def test_the_driver_refuses_to_start_while_a_lock_is_held(self):
+        """Exercised, not asserted about: it is the first thing the driver does."""
+        with tempfile.TemporaryDirectory() as td:
+            lock = Path(td) / "held.lock"
+            lock.write_text("pretend measurement\npid 1\nhost test\n",
+                            encoding="utf-8")
+            r = subprocess.run(
+                ["bash", str(self.ROOT / self.DRIVER), "--check"],
+                capture_output=True, text=True, timeout=180, cwd=self.ROOT,
+                env={"PATH": "/usr/bin:/bin", "HOME": td, "TZ": "UTC",
+                     "BENCH_GPU_LOCK": str(lock)})
+            both = r.stdout + r.stderr
+            self.assertNotEqual(r.returncode, 0,
+                                "the driver started while a lock was held")
+            self.assertIn("a measurement is already running", both,
+                          f"refused for some other reason: {both[:300]}")
+            self.assertIn("pretend measurement", both,
+                          "the refusal does not show whose lock it is, so the "
+                          "reader cannot tell what to wait for")
+
+    def test_a_read_only_check_does_not_announce_a_measurement(self):
+        """`--check` must not create the lock: nothing is measuring."""
+        sh = (self.ROOT / self.DRIVER).read_text(encoding="utf-8")
+        lines = sh.splitlines()
+        i_create = next(k for k, l in enumerate(lines)
+                        if l.startswith("printf 'plan S siblings, pid"))
+        i_checkexit = next(k for k, l in enumerate(lines)
+                           if 'if [ "$CHECK_ONLY" -eq 1 ]; then' in l)
+        self.assertLess(
+            i_checkexit, i_create,
+            "the lock is created before --check would have returned, so a "
+            "read-only check announces a measurement that is not happening")
+        i_test = next(k for k, l in enumerate(lines)
+                      if 'if [ -e "$GPU_LOCK" ]; then' in l)
+        self.assertLess(
+            i_test, i_checkexit,
+            "the driver does not ask whether a measurement is already running "
+            "until after --check returns, so --check cannot answer it")
+
+    def test_the_lock_is_released_on_every_exit(self):
+        sh = (self.ROOT / self.DRIVER).read_text(encoding="utf-8")
+        traps = [l.strip() for l in sh.splitlines()
+                 if l.strip().startswith("trap ") and "EXIT" in l]
+        self.assertTrue(traps, "the driver sets no EXIT trap")
+        self.assertTrue(
+            any('rm -f "$GPU_LOCK"' in t for t in traps),
+            f"no EXIT trap removes the lock, so a run that dies leaves the host "
+            f"looking busy forever: {traps}")
+
 class PlanSsMasksMustBeCheckedAgainstTheHost(unittest.TestCase):
     """The driver's refusals have to live where CI can execute them.
 

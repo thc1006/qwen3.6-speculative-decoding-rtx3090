@@ -64,7 +64,15 @@ import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 KERNEL = ROOT / "bench" / "cpu_ilp.c"
-LOCK = ROOT / ".gpu-in-use.lock"
+
+# The lock is NOT asked about here. This file used to carry
+# `LOCK = ROOT / ".gpu-in-use.lock"`, which is checkout-relative, while
+# `bench/host_guard.py` searches absolute paths: two readers of one lock in one
+# repository with two notions of where it is, and they could only ever agree at
+# one location. A test that asserted they coincided passed in the working tree
+# and failed in the gate's clean clone, which is the honest answer -- a clone
+# under `~/ci_repro` is not a measurement host. So there is one reader now, and
+# it is the guard.
 
 # A pair at or below SHARED_MAX shares something that costs this much; a pair at
 # or above DISTINCT_MIN shares nothing that this kernel can see. Between them is
@@ -299,11 +307,15 @@ def parse_pairs(spec: str, cpus: list[int]) -> list[tuple[int, int]]:
 
 
 def refuse_if_busy() -> None:
-    if LOCK.exists():
+    sys.path.insert(0, str(ROOT / "bench"))
+    import host_guard                                        # noqa: E402
+
+    held = host_guard.lock_held()
+    if held is not None:
         raise SystemExit(
-            f"FAIL: {LOCK.name} exists, so a GPU measurement is in progress. "
-            f"This saturates every processor it is given and would land in that "
-            f"run as host load.")
+            f"FAIL: {held} exists, so a GPU measurement is in progress. This "
+            f"saturates every processor it is given and would land in that run "
+            f"as host load.")
     try:
         one_minute = float(pathlib.Path("/proc/loadavg").read_text().split()[0])
     except (OSError, ValueError, IndexError):

@@ -52,10 +52,25 @@ _THREAD_VARS = ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
                 "NUMEXPR_NUM_THREADS", "VECLIB_MAXIMUM_THREADS")
 
 # A measurement announces itself with a lock file. `BENCH_GPU_LOCK` overrides
-# the search; otherwise these are the paths the machines here actually use.
+# the search; otherwise these are the paths a measurement on these machines may
+# use.
+#
+# This list was wrong in two ways until 2026-10-03 and the second one is worse.
+# It named `qwen3.8-speculative-decoding-rtx3090`, which is the SIBLING
+# repository and does not exist on the bench host at all, while THIS
+# repository's own `.gpu-in-use.lock` -- the path `bench/cpu_siblings.py` reads
+# and the path its drivers write -- was absent. Two readers of the same lock in
+# one repository looked in different places.
+#
+# And nothing wrote any of them. `lock_held()` has been searching for a file no
+# driver and no runner ever created, so for every measurement in this repository
+# the lock half of this guard has had nothing to detect. The process-detection
+# half works, which is what refused a mutation suite during a gate; the lock is
+# what protects a measurement running on ANOTHER machine's behalf, and
+# `bench/run_s_siblings.sh` is the first driver here to take it.
 _DEFAULT_LOCKS = (
     "~/.gpu-in-use.lock",
-    "~/dev/qwen3.8-speculative-decoding-rtx3090/.gpu-in-use.lock",
+    "~/dev/qwen3.6-speculative-decoding-rtx3090/.gpu-in-use.lock",
     "~/bench/.gpu-in-use.lock",
 )
 

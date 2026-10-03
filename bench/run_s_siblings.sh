@@ -75,6 +75,19 @@ fi
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BENCH="${BENCH_ROOT:-$HOME/bench}"
 
+# Asked first, before anything is read or launched, because "is a measurement
+# already running on this card" does not depend on any of it and because
+# `--check` should be able to answer it too. The lock is CREATED further down,
+# after `--check` would have returned: a read-only check must not announce a
+# measurement that is not happening.
+GPU_LOCK="${BENCH_GPU_LOCK:-$HOME/.gpu-in-use.lock}"
+if [ -e "$GPU_LOCK" ]; then
+    echo "FAIL: $GPU_LOCK exists, so a measurement is already running here:" >&2
+    sed -n '1,3p' "$GPU_LOCK" | sed 's/^/      /' >&2
+    echo "      Two measurements on one card measure each other." >&2
+    exit 1
+fi
+
 RUNNER="${BENCH_RUNNER:-}"
 for cand in "$RUNNER" "$HERE/retest_runner.py" "$BENCH/retest_runner.py"; do
     [ -n "$cand" ] && [ -f "$cand" ] && { RUNNER="$cand"; break; }
@@ -218,10 +231,20 @@ if [ "$CHECK_ONLY" -eq 1 ]; then
     exit 0
 fi
 
+# The lock, which is the thing that tells any verification work on this host to
+# stay off the processors for the next half hour. `bench/host_guard.py` has
+# searched for it since it was written and no driver here has ever created it, so
+# for every measurement in this repository that half of the guard had nothing to
+# detect. Taken at the machine level, `~/.gpu-in-use.lock`, which is the first
+# path the guard looks at, and removed on every exit path by the trap.
+printf 'plan S siblings, pid %s, started %s\nhost %s\narms %s\n' \
+    "$$" "$(date -Is)" "$(hostname)" "$BENCH_ARMS" > "$GPU_LOCK"
+echo "lock      $GPU_LOCK"
+
 TELE_CSV="$BENCH/gpu_telemetry_S_$STAMP.csv"
 BENCH_TELEMETRY_OUT="$TELE_CSV" bash "$TELE_SH" "$TELE_SCHEMA" "$TELE_INTERVAL" "S" &
 TELE_PID=$!
-trap 'kill "$TELE_PID" 2>/dev/null || true' EXIT
+trap 'kill "$TELE_PID" 2>/dev/null || true; rm -f "$GPU_LOCK"' EXIT
 sleep 2
 kill -0 "$TELE_PID" 2>/dev/null || { echo "FAIL: telemetry died at startup" >&2; exit 1; }
 

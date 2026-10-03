@@ -637,6 +637,36 @@ MUTATIONS = [
      "            return True",
      "tests.test_harness_invariants.TheVerificationSuitesMustRefuseAMeasuringHost"
      ".test_detection_is_positional_not_a_substring"),
+    # --- the measurement lock, which nothing wrote for seventy eight runs ----
+    # host_guard.lock_held() searched three paths. No driver and no runner ever
+    # created any of them, and one of the three named the SIBLING repository,
+    # which does not exist on the bench host, while this repository's own path
+    # was absent.
+    ("the guard stops searching this repository's own lock path",
+     "bench/host_guard.py",
+     '    "~/dev/qwen3.6-speculative-decoding-rtx3090/.gpu-in-use.lock",\n',
+     "",
+     "tests.test_harness_invariants.AMeasurementMustAnnounceItselfWithTheLock.test_the_guard_searches_this_repository_not_the_sibling"),
+    ("the guard searches the sibling repository again",
+     "bench/host_guard.py",
+     '    "~/dev/qwen3.6-speculative-decoding-rtx3090/.gpu-in-use.lock",',
+     '    "~/dev/qwen3.8-speculative-decoding-rtx3090/.gpu-in-use.lock",',
+     "tests.test_harness_invariants.AMeasurementMustAnnounceItselfWithTheLock.test_the_guard_searches_this_repository_not_the_sibling"),
+    ("the driver stops asking whether a measurement is already running",
+     "bench/run_s_siblings.sh",
+     'if [ -e "$GPU_LOCK" ]; then',
+     "if false; then",
+     "tests.test_harness_invariants.AMeasurementMustAnnounceItselfWithTheLock.test_the_driver_refuses_to_start_while_a_lock_is_held"),
+    ("the trap stops releasing the lock, so a dead run leaves the host busy",
+     "bench/run_s_siblings.sh",
+     """trap 'kill "$TELE_PID" 2>/dev/null || true; rm -f "$GPU_LOCK"' EXIT""",
+     """trap 'kill "$TELE_PID" 2>/dev/null || true' EXIT""",
+     "tests.test_harness_invariants.AMeasurementMustAnnounceItselfWithTheLock.test_the_lock_is_released_on_every_exit"),
+    ("the refusal stops showing whose lock it is",
+     "bench/run_s_siblings.sh",
+     "    sed -n '1,3p' \"$GPU_LOCK\" | sed 's/^/      /' >&2",
+     "    :",
+     "tests.test_harness_invariants.AMeasurementMustAnnounceItselfWithTheLock.test_the_driver_refuses_to_start_while_a_lock_is_held"),
     # --- the masks have to be checked against the host, in CI ----------------
     # The driver's six refusals cannot run on a runner: no cpufreq, no siblings,
     # four processors. So the logic is a pure function and the driver supplies
