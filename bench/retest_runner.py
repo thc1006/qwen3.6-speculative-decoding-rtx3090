@@ -546,6 +546,17 @@ ARMS: dict[str, list[str]] = {
     "spec-dflash-n8":  _dflash(8),
     "spec-dflash-n16": _dflash(16),
 
+    # Plan S's third arm. The threadpool's idle workers spin for
+    # 1024 * 128 * poll PAUSE iterations before they sleep, and poll defaults to
+    # 50, so an arm that sets it to zero is the test of whether that spinning
+    # costs the main thread anything and the remedy if it does. It lives in this
+    # table rather than in an environment variable because the three arms have to
+    # be inside ONE invocation: A16's step is between invocations, so an arm
+    # measured in its own invocation is confounded with the variable the plan is
+    # about. `BENCH_POLL` is per-invocation and cannot express it; a per-arm
+    # server flag can, which is what this table is for.
+    "spec-dflash-n2-nopoll": _dflash(2) + ["--poll", "0"],
+
     # p_min truncates a draft once the drafter's confidence drops below it. The
     # default CHANGED between the binaries this repository has used:
     #   9789512 / bcb5eeb64 -> 0.75   (every archived v1/v2/v3 number)
@@ -1824,6 +1835,17 @@ def main() -> None:
         print(f"  note: {', '.join(AMBIGUOUS_ARMS)} are real arms whose names "
               f"also read as '<arm>{HARDCAP_SUFFIX}'; each runs as ITSELF, and "
               f"the manifest records that under `ambiguous_arms`.", flush=True)
+    # A global BENCH_POLL and an arm whose own flags carry `--poll` would both
+    # reach argv. llama.cpp takes the last one, and the record would name the
+    # other: a manifest that says poll 50 for a server that ran at 0. Refused
+    # rather than resolved, because the resolution would be invisible.
+    _poll_arms = sorted(a for a in arms
+                        if "--poll" in ARMS.get(arm_base(a), []))
+    if POLL and _poll_arms:
+        sys.exit(f"BENCH_POLL={POLL} is set and these arms carry --poll in their "
+                 f"own flags: {', '.join(_poll_arms)}. argv would hold it twice and the "
+                 f"recorded value would be whichever this runner wrote rather than "
+                 f"the one the server used. Set one or the other.")
     dupes = sorted({a for a in arms if arms.count(a) > 1})
     if dupes:
         # Two entries write the same `<arm>__rep<n>.json`, so the second

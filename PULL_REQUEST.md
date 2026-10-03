@@ -586,11 +586,11 @@ review:
 python analysis/rederive_from_logs.py bench   # raw logs -> four audit files
 python analysis/verify_claims.py          # 3844 assertions, re-derived
 python analysis/check_data_integrity.py   # structure of all 77 run directories
-python -m unittest discover tests         # 466 regressions for defects shipped here
+python -m unittest discover tests         # 475 regressions for defects shipped here
 python tests/mutate.py                    # break each fix, require its test to fail
 python tests/data_mutate.py               # perturb a measurement or a published
                                           #   figure, require the checker to fail
-                                          #  122 code and 84 data perturbations,
+                                          #  132 code and 84 data perturbations,
                                           #   with a clean-mirror re-check after
                                           #   the last restore
 python analysis/plot_v4_runs.py --check   # charts still match the data

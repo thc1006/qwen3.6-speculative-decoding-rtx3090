@@ -107,6 +107,82 @@ def classify(rate_i: float, rate_j: float, rate_pair: float) -> tuple[str, float
     return "refused: between the bands", ratio
 
 
+def validate_masks(distinct: set, packed: set, threads: int,
+                   ceiling: dict, sibling: dict) -> tuple[list, dict]:
+    """Pure. Why these two masks are not plan S's two conditions, and what they are.
+
+    Separated from the driver for the same reason `classify` is separated from the
+    timing: this part is host-INDEPENDENT and can therefore be tested, while
+    reading `/sys` cannot. A runner has four processors, no `cpufreq` and no
+    siblings it will admit to, so a check that lives only inside
+    `bench/run_s_siblings.sh` is a check CI never executes. The driver reads the
+    host and calls this; the suite calls it with topologies it builds.
+
+    `ceiling` maps every processor ON THE HOST to its maximum clock in MHz, and
+    `sibling` maps each processor to the set sharing its physical core. The host
+    rather than the selection, because the clock TIERS are a property of the part:
+    this one has three, 4300 for the efficiency cores, 5500 for the performance
+    cores and 5800 for the two the turbo favours. The first version of this took
+    the maximum over the SELECTION and called everything below ninety five per
+    cent of it an efficiency core, which reported nine ordinary performance-core
+    threads as efficiency cores, because 5500 over 5800 is 0.948. A threshold
+    cannot separate three tiers. They have to be enumerated.
+    """
+    bad = []
+    tiers = sorted(set(ceiling.values()))
+    sel = sorted(distinct | packed)
+    missing = [c for c in sel if c not in ceiling or c not in sibling]
+    if missing:
+        return ([f"processors {missing} are not in the host's own topology, so "
+                 f"these masks name processors this machine does not have"],
+                {"tiers": tiers})
+
+    for name, s_ in (("distinct", distinct), ("packed", packed)):
+        if len(s_) != threads:
+            bad.append(f"the {name} set has {len(s_)} processors and the thread "
+                       f"count is {threads}: the contrast would change the thread "
+                       f"count too")
+
+    if len(tiers) > 1:
+        slow = sorted(c for c in sel if ceiling[c] == tiers[0])
+        if slow:
+            bad.append(f"processors {slow} are on this host's lowest clock tier "
+                       f"({tiers[0]} MHz of {tiers}), so at least one set holds an "
+                       f"efficiency core; that is run Y's contrast, not this one")
+
+    fav = {c for c in sel if ceiling[c] == tiers[-1]}
+    if len(tiers) > 1:
+        n_d, n_p = len(distinct & fav), len(packed & fav)
+        if n_d != n_p:
+            bad.append(f"the distinct set holds {n_d} of the favoured processors "
+                       f"{sorted(fav)} and the packed set holds {n_p}. They would "
+                       f"differ in clock as well as in sharing, and the clock "
+                       f"difference alone is larger than the band the plan "
+                       f"reserves for deciding the mechanism is absent")
+
+    d_cores = {frozenset(sibling[c]) for c in distinct} if distinct else set()
+    if distinct and len(d_cores) != len(distinct):
+        bad.append(f"the distinct set spans {len(d_cores)} physical cores for "
+                   f"{len(distinct)} processors, so two of them share one and it "
+                   f"is not the no-sharing condition")
+    for c in sorted(packed):
+        partners = sibling[c] - {c}
+        if not (partners & packed):
+            bad.append(f"cpu{c} is in the packed set and none of its siblings "
+                       f"{sorted(partners) or 'none'} is, so it shares its core "
+                       f"with nothing and the set is not fully packed")
+            break
+    p_cores = {frozenset(sibling[c]) for c in packed} if packed else set()
+    if distinct and packed and len(p_cores) >= len(d_cores):
+        bad.append(f"the packed set spans {len(p_cores)} physical cores and the "
+                   f"distinct set {len(d_cores)}: packing has to span fewer or "
+                   f"the two are the same condition written twice")
+    return bad, {"tiers": tiers, "favoured": sorted(fav),
+                 "favoured_in_distinct": len(distinct & fav),
+                 "favoured_in_packed": len(packed & fav),
+                 "distinct_cores": len(d_cores), "packed_cores": len(p_cores)}
+
+
 def online_cpus() -> list[int]:
     try:
         return sorted(os.sched_getaffinity(0))

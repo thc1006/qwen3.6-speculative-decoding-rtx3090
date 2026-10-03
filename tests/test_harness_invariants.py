@@ -3536,7 +3536,7 @@ class TheSuiteMustRunOnAStockInterpreter(unittest.TestCase):
         # table's own anchors, which needs the table.
         allowed = stdlib | {"host_guard", "publish_pr_body", "carryover",
                             "length_mode", "paired_blocks", "plan_z_power",
-                            "plan_siblings_power",
+                            "plan_siblings_power", "cpu_siblings",
                             "rederive_run_y", "rr_under_test", "vram_temp",
                             "rederive_from_logs", "past_threshold_fit",
                             "verify_claims", "extract_checkpoint_timers",
@@ -6987,6 +6987,237 @@ class APlanCheckMustCatchACorruptedPlan(unittest.TestCase):
         doc = (self.ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
         self.assertIn(f"{n} of {n} corruptions", " ".join(doc.split()),
                       "the changelog quotes a corruption count this file does not have")
+
+
+class PlanSsMasksMustBeCheckedAgainstTheHost(unittest.TestCase):
+    """The driver's refusals have to live where CI can execute them.
+
+    `bench/run_s_siblings.sh` reads `/sys` and refuses six conditions before it
+    spends half an hour of GPU time. None of those refusals can run on a runner,
+    which has four processors, no `cpufreq` and no siblings it will admit to. So
+    the logic is `validate_masks` in `bench/cpu_siblings.py` and the driver only
+    supplies the readings: the suite calls it with topologies it builds, and the
+    driver was exercised against the real host separately.
+
+    The fixture is not invented. Its sibling pairing is cross-checked against the
+    `/sys` dump inside the recorded topology run, and its clock tiers against the
+    three `BENCHMARK_ENV.md` records for this part.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+    RECORD = "v4_audit_2026_08_25/topology/topology_3090_20261003.txt"
+    DISTINCT = frozenset({0, 2, 4, 6, 8, 10, 12, 14})
+    PACKED = frozenset({0, 1, 2, 3, 4, 5, 8, 9})
+
+    def _mod(self):
+        sys.path.insert(0, str(self.ROOT / "bench"))
+        import cpu_siblings
+        return cpu_siblings
+
+    def _bench_host(self):
+        """The i9-13900K: eight P cores of two threads, sixteen E cores of one."""
+        ceiling, sibling = {}, {}
+        for c in range(16):
+            ceiling[c] = 5800 if c in (8, 9, 10, 11) else 5500
+            sibling[c] = {c & ~1, (c & ~1) + 1}
+        for c in range(16, 32):
+            ceiling[c] = 4300
+            sibling[c] = {c}
+        return ceiling, sibling
+
+    def test_the_fixture_is_the_pairing_the_recorded_run_read(self):
+        """Otherwise every case below is about a machine nobody measured."""
+        _ceiling, sibling = self._bench_host()
+        text = (self.ROOT / self.RECORD).read_text(encoding="utf-8")
+        found = {}
+        for m in re.finditer(r"cpu(\d+)\s+siblings=(\S+)", text):
+            got = set()
+            for part in m[2].split(","):
+                if "-" in part:
+                    lo, hi = part.split("-", 1)
+                    got |= set(range(int(lo), int(hi) + 1))
+                else:
+                    got.add(int(part))
+            found[int(m[1])] = got
+        self.assertEqual(len(found), 32,
+                         f"the record holds {len(found)} processors and the "
+                         f"fixture assumes 32")
+        self.assertEqual(found, sibling,
+                         "the fixture's pairing is not the one the recorded run "
+                         "read from /sys, so these cases are about a different "
+                         "machine")
+
+    def test_the_design_passes(self):
+        m = self._mod()
+        ceiling, sibling = self._bench_host()
+        bad, info = m.validate_masks(set(self.DISTINCT), set(self.PACKED), 8,
+                                     ceiling, sibling)
+        self.assertEqual(bad, [], f"the plan's own masks are refused: {bad}")
+        self.assertEqual(info["tiers"], [4300, 5500, 5800])
+        self.assertEqual(info["favoured_in_distinct"],
+                         info["favoured_in_packed"],
+                         "the design's own masks are not balanced on the "
+                         "favoured processors")
+        self.assertEqual((info["distinct_cores"], info["packed_cores"]), (8, 4))
+
+    def test_every_refusal_fires_on_its_own_condition(self):
+        m = self._mod()
+        ceiling, sibling = self._bench_host()
+        cases = (
+            ({0, 1, 2, 3, 4, 5, 6, 7}, 8, "favoured processors",
+             "the obvious packed mask, unbalanced on clock"),
+            ({0, 1, 2, 3, 4, 5, 8, 16}, 8, "lowest clock tier",
+             "an efficiency core in the packed set"),
+            ({0, 1, 2, 3, 4, 8, 9, 14}, 8, "fully packed",
+             "a processor in the packed set with no sibling in it"),
+            (set(self.DISTINCT), 8, "fully packed",
+             "packed equal to distinct"),
+            ({0, 1, 2, 3}, 8, "thread count",
+             "a set that is not the thread count"),
+            ({0, 1, 2, 3, 4, 5, 8, 99}, 8, "does not have",
+             "a processor this host does not have"),
+        )
+        for packed, threads, needle, what in cases:
+            with self.subTest(case=what):
+                bad, _info = m.validate_masks(set(self.DISTINCT), set(packed),
+                                              threads, ceiling, sibling)
+                self.assertTrue(bad, f"{what} was accepted")
+                self.assertTrue(
+                    any(needle in b for b in bad),
+                    f"{what} was refused for the wrong reason: {bad}")
+
+    def test_a_distinct_set_that_shares_a_core_is_refused(self):
+        m = self._mod()
+        ceiling, sibling = self._bench_host()
+        bad, _ = m.validate_masks({0, 1, 4, 6, 8, 10, 12, 14},
+                                  set(self.PACKED), 8, ceiling, sibling)
+        self.assertTrue(any("no-sharing condition" in b for b in bad),
+                        f"a distinct set holding two siblings was accepted: {bad}")
+
+    def test_a_single_tier_host_has_no_balance_to_check(self):
+        """A part with one clock tier must not be refused for lacking a top one."""
+        m = self._mod()
+        ceiling = {c: 5000 for c in range(16)}
+        sibling = {c: {c & ~1, (c & ~1) + 1} for c in range(16)}
+        bad, info = m.validate_masks(set(self.DISTINCT), set(self.PACKED), 8,
+                                     ceiling, sibling)
+        self.assertEqual(bad, [],
+                         f"a single-tier host was refused: {bad}")
+        self.assertEqual(info["tiers"], [5000])
+
+    def test_the_driver_calls_it_rather_than_holding_a_second_copy(self):
+        sh = (self.ROOT / "bench" / "run_s_siblings.sh").read_text(encoding="utf-8")
+        self.assertIn("from cpu_siblings import validate_masks", sh,
+                      "the driver does not import the shared check")
+        self.assertIn("validate_masks(distinct, packed, threads", sh,
+                      "the driver imports the check and does not call it")
+        # The refusal TEXTS must not be in the driver's code: two copies of a
+        # check drift, and this repository has removed that defect twice.
+        code = "\n".join(l for l in sh.splitlines()
+                          if not l.lstrip().startswith("#"))
+        for phrase in ("lowest clock tier", "fully packed",
+                       "no-sharing condition"):
+            self.assertNotIn(phrase, code,
+                             f"{phrase!r} is still spelled out in the driver, so "
+                             f"there are two copies of that refusal")
+
+class PlanSsThreeArmsMustFitInOneInvocation(unittest.TestCase):
+    """A16's step is BETWEEN invocations, so the arms cannot be in three of them.
+
+    Plan S contrasts three conditions on one arm: eight distinct physical cores,
+    four cores with both threads of each, and that second mask with the idle
+    workers' spinning turned off. The first two are two cpu sets, which
+    `BENCH_PIN_CPUS` and `BENCH_PIN_ALT_CPUS` already express. The third needs a
+    different `--poll` for one arm, and `BENCH_POLL` is per invocation: using it
+    would put that arm in its own invocation and confound it with the one variable
+    the plan exists to isolate.
+
+    So the third arm is an entry in `ARMS`, which is the table of per-arm server
+    flags, and it carries the mask through the ordinary pin suffix. These tests
+    assert that the three names resolve the way the plan needs, because the plan
+    is executable only if they do.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+    RUNNER = "bench/retest_runner.py"
+    BASE = "spec-dflash-n2"
+    TWIN = "spec-dflash-n2-nopoll"
+
+    def _mod(self, **env):
+        keep = {k: os.environ.get(k) for k in env}
+        os.environ.update({k: v for k, v in env.items()})
+        os.environ.setdefault("LLAMA_SERVER_BIN", "/bin/true")
+        try:
+            spec = importlib.util.spec_from_file_location(
+                "rr_arms_" + "_".join(sorted(env)), self.ROOT / self.RUNNER)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            return mod
+        finally:
+            for k, v in keep.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+
+    def test_the_third_arm_is_the_second_plus_one_flag(self):
+        m = self._mod()
+        self.assertIn(self.BASE, m.ARMS)
+        self.assertIn(self.TWIN, m.ARMS,
+                      "the no-poll arm is gone, so plan S's third condition "
+                      "cannot be run inside the same invocation as the others")
+        self.assertEqual(
+            m.ARMS[self.TWIN], m.ARMS[self.BASE] + ["--poll", "0"],
+            "the no-poll arm differs from its base by something other than the "
+            "one flag, so the contrast would name two changes")
+
+    def test_the_three_names_resolve_to_two_cpu_sets(self):
+        distinct, packed = "0,2,4,6,8,10,12,14", "0,1,2,3,4,5,8,9"
+        m = self._mod(BENCH_PIN_SUFFIX="-alt", BENCH_PIN_CPUS=distinct,
+                      BENCH_PIN_ALT_CPUS=packed, BENCH_THREADS="8")
+        want = {self.BASE: distinct,
+                f"{self.BASE}-alt": packed,
+                f"{self.TWIN}-alt": packed}
+        for arm, cpus in want.items():
+            with self.subTest(arm=arm):
+                self.assertEqual(
+                    m.arm_cpus(arm), cpus,
+                    f"{arm} would run on {m.arm_cpus(arm)!r} and the plan needs "
+                    f"{cpus!r}")
+        self.assertEqual(
+            m.arm_base(f"{self.TWIN}-alt"), self.TWIN,
+            "the suffixed no-poll arm does not resolve to the no-poll flags, so "
+            "it would run as the base arm on the packed mask and the third "
+            "condition would be the second measured twice")
+
+    def test_a_global_poll_and_a_per_arm_poll_are_refused(self):
+        """Both would reach argv and only one would be recorded."""
+        with tempfile.TemporaryDirectory() as td:
+            tgt = Path(td) / "t.gguf"
+            tgt.write_bytes(b"")
+            dfl = Path(td) / "d.gguf"
+            dfl.write_bytes(b"")
+            env = {"PATH": "/usr/bin:/bin", "TZ": "UTC",
+                   "LLAMA_SERVER_BIN": "/bin/true",
+                   "MODEL_TARGET": str(tgt), "MODEL_DFLASH": str(dfl),
+                   "BENCH_OUT": str(Path(td) / "out"),
+                   "BENCH_ARMS": self.TWIN}
+            clash = subprocess.run(
+                [sys.executable, str(self.ROOT / self.RUNNER)],
+                capture_output=True, text=True, timeout=180,
+                env={**env, "BENCH_POLL": "25"}, cwd=self.ROOT)
+            both = clash.stdout + clash.stderr
+            self.assertIn("argv would hold it twice", both,
+                          f"a global --poll alongside a per-arm one was not "
+                          f"refused: {both[:300]}")
+            env["BENCH_OUT"] = str(Path(td) / "out2")
+            ok = subprocess.run(
+                [sys.executable, str(self.ROOT / self.RUNNER)],
+                capture_output=True, text=True, timeout=180, env=env,
+                cwd=self.ROOT)
+            self.assertNotIn("argv would hold it twice", ok.stdout + ok.stderr,
+                             "the arm is refused even without BENCH_POLL, so the "
+                             "check fires on the wrong condition")
 
 
 class WhatTheServerLoadedMustBeRecordedNotInferred(unittest.TestCase):

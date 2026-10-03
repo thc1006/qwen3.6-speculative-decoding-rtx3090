@@ -87,6 +87,27 @@ Each differs from the one above it in exactly one thing.
 | `packed` | `0,1,2,3,4,5,8,9` | four performance cores, both threads of each |
 | `packed-nopoll` | `0,1,2,3,4,5,8,9` | and `--poll 0`, so the target pool's idle workers sleep |
 
+[`../bench/run_s_siblings.sh`](../bench/run_s_siblings.sh) is the driver, and
+those three names are conditions rather than the runner's. It runs them as
+`spec-dflash-n2`, `spec-dflash-n2-packed` and `spec-dflash-n2-nopoll-packed`,
+twelve blocks of three in mirrored order, all in ONE invocation. That last part
+is not a convenience: A16's step is BETWEEN invocations, so an arm measured in
+its own invocation is confounded with the variable this plan exists to isolate.
+`BENCH_POLL` is per invocation and could not express the third condition, so it
+is an entry in the runner's `ARMS` table, which is where per-arm server flags
+live, and it differs from its base by exactly `--poll 0`.
+
+The driver refuses six things before it spends any GPU time, and each is a
+condition the reading depends on: a set that is not the thread count, an
+efficiency core in either set, unequal exposure to the favoured processors, a
+distinct set where two processors share a core, a packed set where one does not,
+and the two sets spanning the same number of cores. The logic is
+`validate_masks` in [`../bench/cpu_siblings.py`](../bench/cpu_siblings.py) rather
+than in the driver, because a runner has four processors, no `cpufreq` and no
+siblings it will admit to: a refusal that lives only in the shell script is one
+CI never executes. `bash bench/run_s_siblings.sh --check` runs all six against
+the host without touching the card.
+
 Same binary, same model, same prompts, same thread count, all three on performance
 cores. `packed` against `distinct` is the hyperthread question. `packed-nopoll`
 against `packed` asks whether the cost is the target pool's spinning, and if it is,
