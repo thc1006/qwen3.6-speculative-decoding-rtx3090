@@ -14,6 +14,7 @@ from __future__ import annotations
 import ast
 import math as _math
 import re
+import importlib.util
 import itertools
 import json
 import os
@@ -6986,6 +6987,134 @@ class APlanCheckMustCatchACorruptedPlan(unittest.TestCase):
         doc = (self.ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
         self.assertIn(f"{n} of {n} corruptions", " ".join(doc.split()),
                       "the changelog quotes a corruption count this file does not have")
+
+
+class WhatTheServerLoadedMustBeRecordedNotInferred(unittest.TestCase):
+    """Hashing a directory answers what is there, not what was loaded.
+
+    `server_lib_sha256` lists the shared objects beside the binary. On the bench
+    host that misses the ones that decide the arithmetic: the server needs
+    `libcudart.so.12` and `libcublas.so.12`, no CUDA toolkit is installed there,
+    its `RUNPATH` names only its own build directory, and the only copies on the
+    machine are pip wheels inside two unrelated Python virtual environments. So
+    the CUDA runtime under all seventy eight published runs came from a library
+    path that nothing recorded, and no listing of a directory could have shown it.
+
+    `/proc/<pid>/maps` answers the other question. The tests here are about the
+    properties that make the answer trustworthy rather than about any particular
+    library, because the libraries differ per host and a runner has none of them.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+    RUNNER = "bench/retest_runner.py"
+
+    def _mod(self):
+        os.environ.setdefault("LLAMA_SERVER_BIN", "/bin/true")
+        spec = importlib.util.spec_from_file_location(
+            "rr_mapped", self.ROOT / self.RUNNER)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def test_it_reads_what_was_mapped_and_hashes_it(self):
+        m = self._mod()
+        proc = subprocess.Popen([sys.executable, "-c",
+                                 "import ssl, zlib, time; time.sleep(8)"])
+        try:
+            deadline = time.time() + 5.0
+            got = {}
+            while time.time() < deadline:
+                got = m._mapped_objects(proc.pid)
+                if "error" not in got and len(got) >= 3:
+                    break
+            self.assertNotIn("error", got, f"could not read the map: {got}")
+            self.assertGreaterEqual(
+                len(got), 3,
+                "fewer than three shared objects for a process that imported ssl "
+                "and zlib, so the parse is dropping most of what it reads")
+            for path, info in got.items():
+                self.assertTrue(path.startswith("/"), path)
+                self.assertIn(".so", Path(path).name,
+                              f"{path} is not a shared object; the model is "
+                              f"mmapped too and must not be in here")
+                self.assertRegex(info["sha256"], r"^[0-9a-f]{64}$")
+                for field in ("size", "mtime_ns", "inode"):
+                    self.assertIn(field, info,
+                                  f"{path} has no {field}, so a swap between two "
+                                  f"arms could not be detected cheaply")
+        finally:
+            proc.terminate()
+            proc.wait()
+
+    def test_an_unreadable_map_is_an_error_and_not_an_empty_dict(self):
+        """An empty dict reads as "nothing was mapped", which is never true."""
+        m = self._mod()
+        proc = subprocess.Popen([sys.executable, "-c", "pass"])
+        proc.wait()
+        got = m._mapped_objects(proc.pid)
+        self.assertIn("error", got,
+                      "a dead pid produced something other than an error, so a "
+                      "failure to read would be recorded as an absence")
+        self.assertNotEqual(got, {})
+
+    def test_the_hash_cache_is_keyed_on_identity_not_on_path(self):
+        """A library swapped between two arms has to be hashed again.
+
+        There is no run-level moment to hash the set, because the server starts
+        per arm-run, so the first one pays and the rest reuse. Keyed on path, a
+        swapped file would keep the first hash and the record would say nothing
+        changed, which is the whole defect this is here to catch.
+        """
+        m = self._mod()
+        # End to end, against a file this test maps itself. The version this
+        # replaced read the cache-key line out of the source and then checked that
+        # `os.stat` notices a rewrite, which is a property of the kernel rather
+        # than of this code: it never called `_mapped_objects` at all, and
+        # pyflakes found it only because the module it imported went unused.
+        with tempfile.TemporaryDirectory() as td:
+            lib = Path(td) / "libfake.so.1"
+            child = ("import mmap, sys, time\n"
+                     "f = open(sys.argv[1], 'rb')\n"
+                     "mm = mmap.mmap(f.fileno(), 0, prot=mmap.PROT_READ)\n"
+                     "sys.stdout.write('up\\n'); sys.stdout.flush()\n"
+                     "time.sleep(20)\n")
+
+            def mapped_hash(body: bytes) -> str:
+                lib.write_bytes(body)
+                proc = subprocess.Popen(
+                    [sys.executable, "-c", child, str(lib)],
+                    stdout=subprocess.PIPE, text=True)
+                try:
+                    self.assertEqual(proc.stdout.readline().strip(), "up",
+                                     "the child did not map the file")
+                    got = m._mapped_objects(proc.pid)
+                    self.assertIn(str(lib), got,
+                                  f"a mapped .so was not reported: {list(got)[:4]}")
+                    return got[str(lib)]["sha256"]
+                finally:
+                    proc.terminate()
+                    proc.wait()
+                    if proc.stdout is not None:
+                        proc.stdout.close()
+
+            first = mapped_hash(b"first content")
+            cached = len(m._MAPPED_SHA)
+            again = mapped_hash(b"a second content, of a different length")
+            self.assertNotEqual(
+                first, again,
+                "the file was rewritten and the recorded hash did not change, so "
+                "a library swapped between two arm-runs would be reported as the "
+                "one the first arm-run used")
+            self.assertGreater(
+                len(m._MAPPED_SHA), cached,
+                "the rewritten file reused its cache entry, which is what keying "
+                "on the path alone does")
+
+    def test_the_arm_run_record_carries_it(self):
+        src = (self.ROOT / self.RUNNER).read_text(encoding="utf-8")
+        self.assertIn('"server_mapped": _mapped_objects(proc.pid),', src,
+                      "the arm-run record does not carry what the server mapped, "
+                      "so the function exists and nothing calls it")
 
 
 class TheRunnersEnvironmentValidatorsMustActuallyValidate(unittest.TestCase):

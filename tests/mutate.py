@@ -637,6 +637,31 @@ MUTATIONS = [
      "            return True",
      "tests.test_harness_invariants.TheVerificationSuitesMustRefuseAMeasuringHost"
      ".test_detection_is_positional_not_a_substring"),
+    # --- what the server loaded, not what sat beside it ---------------------
+    # Seventy eight runs recorded a hash for every object in the binary's own
+    # directory and nothing for the CUDA runtime underneath, which came from a
+    # pip wheel in an unrelated virtual environment. A directory listing cannot
+    # see that; /proc/<pid>/maps can.
+    ("the arm-run record stops carrying what the server mapped",
+     "bench/retest_runner.py",
+     '            "server_mapped": _mapped_objects(proc.pid),',
+     '            "server_mapped_disabled": None,',
+     "tests.test_harness_invariants.WhatTheServerLoadedMustBeRecordedNotInferred.test_the_arm_run_record_carries_it"),
+    ("the mapped-object cache is keyed on path, so a swap keeps its old hash",
+     "bench/retest_runner.py",
+     "        key = (path, st.st_size, st.st_mtime_ns, st.st_ino, st.st_dev)",
+     "        key = (path,)",
+     "tests.test_harness_invariants.WhatTheServerLoadedMustBeRecordedNotInferred.test_the_hash_cache_is_keyed_on_identity_not_on_path"),
+    ("an unreadable map is recorded as an absence instead of an error",
+     "bench/retest_runner.py",
+     '        return {"error": f"/proc/{pid}/maps unreadable: {e}"}',
+     "        return {}",
+     "tests.test_harness_invariants.WhatTheServerLoadedMustBeRecordedNotInferred.test_an_unreadable_map_is_an_error_and_not_an_empty_dict"),
+    ("the shared-object filter goes and the mmapped model comes with it",
+     "bench/retest_runner.py",
+     '        if ".so" not in Path(path).name:',
+     "        if False:",
+     "tests.test_harness_invariants.WhatTheServerLoadedMustBeRecordedNotInferred.test_it_reads_what_was_mapped_and_hashes_it"),
     # --- the topology figures, which nothing derived until they were wrong ---
     ("the script stops deriving the topology figures it publishes",
      "analysis/plan_siblings_power.py",

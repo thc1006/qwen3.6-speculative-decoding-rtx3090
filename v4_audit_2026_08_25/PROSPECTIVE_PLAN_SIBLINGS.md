@@ -1,7 +1,10 @@
 # Plan S: what shares a core with the main thread
 
-**This cannot be executed yet.** Two of the six items in the last section are
-still open. Two changed shape after the flags were traced through the pinned
+**One item in the last section is still open, and it is not a blocker.** It is
+the first, and only its second half: the seventy eight runs already committed will
+never carry the two threadpool parameters, which is a permanent fact about the
+corpus rather than something to be done. Everything the arms below need now
+exists. Two changed shape after the flags were traced through the pinned
 commit's own sources rather than master's, two were closed on 2026-10-03 by going
 to the bench host and measuring rather than reading, and the sixth exists because
 of what that visit found about the binary. Written 2026-10-02, before any
@@ -311,12 +314,32 @@ Every line number below is `3737e4137`'s.
    runtime underneath them, so two runs could differ in it while their manifests
    matched.
 
-   What would close this is recording what the process actually MAPPED rather than
-   what it was offered, read from `/proc/<pid>/maps` after the server is healthy;
-   the runner already reads `/proc/<pid>/status` for the allowed cpu set, so it is
-   the same access. Hashing them per arm-run is not the way: `libcublasLt.so.12`
-   alone is 714 MiB and the set is 815, which over thirty six arm-runs is 28 GiB
-   of hashing inside a measurement, and CPU work inside a measurement is what the
-   host guard exists to refuse. Identity per arm-run from `stat`, hashes once at
-   run start, and a stated residual that a replacement identical in size, mtime
-   and inode would pass.
+   **CLOSED for future runs on 2026-10-03.** `bench/retest_runner.py` records
+   `server_mapped` in every arm-run record: every shared object the process has
+   actually mapped, read from `/proc/<pid>/maps`, with its size, mtime in
+   nanoseconds, inode and sha256. The runner already read `/proc/<pid>/status` for
+   the allowed cpu set, so it is the same access.
+
+   Three decisions in it are load-bearing. **Shared objects only**, because
+   llama.cpp mmaps the model by default and a 21 GiB gguf is a file-backed mapping
+   too; its hash is already `target_sha256` and hashing it here would add twenty
+   one gigabytes per arm-run to a measurement. **Hashes cached on identity, not on
+   path**, because there is no run-level moment at which to take them -- the server
+   starts per arm-run and nothing is mapped before it -- so the first arm-run pays
+   for the set and the rest pay nothing, while a library swapped between two arms
+   gets a new key and is hashed again. Keyed on path it would have served the first
+   hash and reported a swap as no change, which is the defect this exists to catch.
+   And **a failure is an error, not an empty dict**: an empty one reads as "nothing
+   was mapped", which is false of any dynamically linked process and is exactly the
+   invisible absence that let the CUDA runtime go unrecorded for seventy eight runs.
+
+   Per arm-run that is a few dozen `stat` calls. The cost was measured before the
+   design was chosen: `libcublasLt.so.12` alone is 714 MiB and the mapped CUDA set
+   is 815, so hashing it per arm-run would be 28 GiB over thirty six of them,
+   inside a measurement, and CPU work inside a measurement is what the host guard
+   exists to refuse.
+
+   The residual is stated rather than closed: a replacement identical in size,
+   mtime and inode would reuse the cached hash. That is not a realistic accident.
+   And the seventy eight runs already committed carry none of this, which is why
+   the arms of this plan compare against each other and not against them.

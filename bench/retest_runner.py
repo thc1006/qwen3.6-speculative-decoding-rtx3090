@@ -788,6 +788,70 @@ def _server_lib_hashes() -> dict:
     return seen
 
 
+# Keyed on IDENTITY, not on path. There is no run-level moment at which to hash
+# the mapped set: the server starts per arm-run and nothing is mapped before it.
+# So the first arm-run pays for the whole set and the rest pay nothing, while a
+# library swapped between two arms gets a new key and is hashed again. Keying on
+# path alone would have kept the first hash and reported a swap as no change,
+# which is the defect this exists to catch.
+_MAPPED_SHA: dict[tuple, str] = {}
+
+
+def _mapped_objects(pid: int) -> dict:
+    """Every shared object the process has actually mapped, with its identity.
+
+    `server_lib_sha256` hashes the directory beside the binary, which answers what
+    is THERE and not what was LOADED. On this bench host the two differ in a way
+    that matters: the server needs `libcudart.so.12` and `libcublas.so.12`, no
+    CUDA toolkit is installed, its `RUNPATH` names only its own build directory,
+    and the only copies of those two on the machine are pip wheels inside
+    unrelated Python virtual environments. The CUDA runtime under every published
+    run here therefore came from a library path nothing recorded, and no listing
+    of a directory could have shown it.
+
+    Shared objects only. llama.cpp mmaps the model by default, so a 21 GiB gguf is
+    a file-backed mapping as well; its hash is already `target_sha256` and hashing
+    it here would add twenty one gigabytes per arm-run to a measurement.
+
+    On failure this returns a dict with an `error` key rather than an empty one. An
+    empty dict reads as "nothing was mapped", which is false for any dynamically
+    linked process and is exactly the invisible absence that let the CUDA runtime
+    go unrecorded for seventy eight runs.
+    """
+    try:
+        raw = Path(f"/proc/{pid}/maps").read_text(encoding="utf-8")
+    except OSError as e:
+        return {"error": f"/proc/{pid}/maps unreadable: {e}"}
+    out: dict = {}
+    for line in raw.splitlines():
+        parts = line.split()
+        if len(parts) < 6:
+            continue
+        path = parts[5]
+        # `(deleted)` is appended by the kernel when the file is gone; a sixth
+        # field that is not an absolute path is a pseudo-mapping like [heap].
+        if not path.startswith("/") or path.endswith("(deleted)"):
+            continue
+        if ".so" not in Path(path).name:
+            continue
+        if path in out:
+            continue
+        try:
+            st = os.stat(path)
+        except OSError as e:
+            out[path] = {"error": f"stat failed: {e}"}
+            continue
+        key = (path, st.st_size, st.st_mtime_ns, st.st_ino, st.st_dev)
+        if key not in _MAPPED_SHA:
+            _MAPPED_SHA[key] = sha256(path)
+        out[path] = {"size": st.st_size, "mtime_ns": st.st_mtime_ns,
+                     "inode": st.st_ino, "sha256": _MAPPED_SHA[key]}
+    if not out:
+        return {"error": f"no shared object mapped by pid {pid}, which cannot be "
+                         f"true of a dynamically linked process"}
+    return out
+
+
 def sha256(path: str) -> str:
     h = hashlib.sha256()
     with open(path, "rb") as fh:
@@ -1607,6 +1671,12 @@ def run_arm(arm: str, rep: int) -> dict:
             # Taken per arm-run, not once per run: the run-level hash cannot
             # see a binary replaced between two arms.
             "server_lib_sha256": _server_lib_hashes(),
+            # And what it ACTUALLY mapped, which is a different question.
+            # The line above hashes the directory beside the binary; this
+            # one reads /proc/<pid>/maps, so it sees the CUDA runtime that
+            # came from somewhere else entirely and that no manifest in
+            # this repository has ever recorded.
+            "server_mapped": _mapped_objects(proc.pid),
             "server_loaded_commit": server_identity(log_path).get("commit"),
             # `server_log_sha256` is filled in by the driver after the server is
             # stopped: hashing it here would hash a file still being written.
