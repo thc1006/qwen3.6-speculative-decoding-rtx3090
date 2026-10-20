@@ -128,7 +128,7 @@ _BENCH_EXE = ("llama-server", "llama-bench")
 _BENCH_SCRIPTS = ("bench.py", "retest_runner.py")
 
 
-def _benchmark_name(argv: list[str]) -> str | None:
+def _benchmark_name(argv: list[str], cwd: str | None = None) -> str | None:
     """The benchmark this argv *is*, or None. Position, not keyword.
 
     `"bench.py" in cmdline` matches an editor with the file open, a grep for
@@ -147,12 +147,30 @@ def _benchmark_name(argv: list[str]) -> str | None:
         # `python3 -u harness/bench.py ...` - the script is an argument near the
         # front, compared whole, not searched for inside a longer string
         for a in argv[1:4]:
-            if os.path.basename(a) in _BENCH_SCRIPTS and not _in_scratch(a):
+            # `cwd` is the OTHER process's working directory, because a relative
+            # argv is relative to the process that was started with it. Resolving
+            # it against ours read as a mirror copy whenever this ran from a
+            # directory under the temporary one, and the failure was silent.
+            if (os.path.basename(a) in _BENCH_SCRIPTS
+                    and not _in_scratch(a, cwd)):
                 return os.path.basename(a)
     return None
 
 
-def _in_scratch(path: str) -> bool:
+def _proc_cwd(pid: int | str) -> str | None:
+    """The working directory of another process, or None if it cannot be read.
+
+    Readable for this user's own processes and `PermissionError` otherwise, which
+    is the None case: a measurement this user did not start is not a mirror copy of
+    ours, and the caller treats an unknown cwd as not-scratch.
+    """
+    try:
+        return os.readlink(f"/proc/{pid}/cwd")
+    except OSError:
+        return None
+
+
+def _in_scratch(path: str, cwd: str | None = None) -> bool:
     """A harness copy under a throwaway mirror is a test, not a measurement.
 
     `tests/mutate.py` and `tests/data_mutate.py` each copy `bench/` into a
@@ -164,6 +182,21 @@ def _in_scratch(path: str) -> bool:
     temporary directory, and a copy of the harness running there is the suite
     that tests it.
     """
+    if not os.path.isabs(path):
+        if cwd is None:
+            # NOT our own cwd. `os.path.realpath` resolves a relative path against
+            # the CALLER's directory, and the caller here is the verification
+            # suite, which runs from wherever it was launched -- including, during
+            # the CI reproduction, a clone under the temporary directory. A real
+            # measurement started as `python3 bench/retest_runner.py` was then read
+            # as a mirror copy and not detected at all.
+            #
+            # The two errors are not symmetric. Calling a mirror copy a measurement
+            # delays a verification run; calling a measurement a mirror copy lets
+            # CPU work start during it, which is what this guard exists to stop. So
+            # an unresolvable relative path is NOT in scratch.
+            return False
+        path = os.path.join(cwd, path)
     try:
         real = os.path.realpath(path)
     except OSError:
@@ -190,7 +223,7 @@ def measuring_processes() -> list[str]:
             except OSError:
                 continue
             argv = [a for a in raw.decode("utf-8", "replace").split("\0") if a]
-            if _benchmark_name(argv):
+            if _benchmark_name(argv, _proc_cwd(entry.name)):
                 found.append(f"{entry.name} {' '.join(argv)[:70]}")
     except OSError:
         return []
@@ -372,7 +405,7 @@ def sample(out_path: str, interval: float = 5.0,
                 mode = "root-pid" if alive else "root-gone"
             else:
                 roots = {pid for pid, (_, _c, argv) in proc.items()
-                         if _benchmark_name(argv)}
+                         if _benchmark_name(argv, _proc_cwd(pid))}
                 mode = "by-name"
             own_tree = _descendants(roots) if roots else set()
 

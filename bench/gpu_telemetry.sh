@@ -46,8 +46,17 @@ raw)
     # nvidia-smi writes its own header; no renaming, units left in place
     nvidia-smi --query-gpu=timestamp,index,memory.used,utilization.gpu,clocks.current.graphics,clocks.current.sm,power.draw,temperature.gpu,pstate,clocks_event_reasons.active \
         --format=csv -l "$INTERVAL" > "$OUT" 2>/dev/null &
-    echo "TELEMETRY=$OUT  schema=raw  interval=${INTERVAL}s  pid=$!"
-    wait
+    SMI=$!
+    echo "TELEMETRY=$OUT  schema=raw  interval=${INTERVAL}s  pid=$SMI"
+    # `-l` is nvidia-smi's OWN loop, so this shell has a CHILD that outlives
+    # it. Every driver here stops its sampler by killing this shell, which for
+    # the other two schemas is enough because they loop in bash -- and for this
+    # one was not: run Y on 2026-09-26 left two of these sampling at one hertz
+    # for four days, reparented to init, and neither a GPU-lock check nor a load
+    # average would have named them. Without this trap the only schema that
+    # records per-second state is the only one that cannot be turned off.
+    trap 'kill "$SMI" 2>/dev/null || true' EXIT INT TERM
+    wait "$SMI"
     exit 0
     ;;
 *)

@@ -73,6 +73,45 @@ DOCS = ["README.md", "ERRATA.md", "CHANGELOG.md", "RETEST_TODO.md",
 # document that is in neither would escape the count silently, which is the
 # failure this whole file exists to stop.
 EXCLUDED = {
+    "v5_pinning_2026_09_26/README.md":
+        "a round of its own, kept out of the v4.2 archive because verify_claims.py "
+        "pins the run-directory count under v4_audit_2026_08_25/data and is "
+        "bound to that tag. Censusing it would also move the decimal prose "
+        "census, which the same frozen file pins. What guards its result table "
+        "is analysis/rederive_run_y.py, which re-derives every cell of it from "
+        "the arm-runs and compares both documents that carry it. This entry "
+        "said check_data_integrity.py guarded those tables, and that walks "
+        "directory structure and reads no published value: the whole table was "
+        "unchecked for five days and three of its columns were wrong",
+    "v4_audit_2026_08_25/PROSPECTIVE_PLAN_Z_MEMORY_STATE.md":
+        "not censused while v4.2 stands, for the reason the two plans beside it "
+        "give: verify_claims.py pins len(DOCS) and the decimal prose census and is "
+        "bound to that tag, and this document quotes decimals from A16, from run Y "
+        "and from its own design table. What guards its tables is "
+        "analysis/plan_z_power.py, which derives the thermal state on both sides "
+        "of A16's step, the reason T4's trace cannot be attributed to an arm-run, "
+        "and the design table, all from committed data, and compares every cell "
+        "against this document. It joins DOCS if run Z lands, which re-cuts the "
+        "binding anyway",
+    "v4_audit_2026_08_25/PROSPECTIVE_PLAN_Y_CORE_PINNING.md":
+        "the same as the plan beside it and for the same reason: verify_claims.py "
+        "pins len(DOCS) and the decimal prose census and is bound to the v4.2 "
+        "tag. It quotes decimals from A16 and from its own power arithmetic. "
+        "It joins DOCS when run Y lands, which re-cuts the binding anyway "
+        "because the evidence manifest is bound too",
+    "v4_audit_2026_08_25/PROSPECTIVE_PLAN_X_HOST_LOAD.md":
+        "not censused while v4.2 stands, and NOT because it is a plan: the three "
+        "other prospective plans here are censused, one of them with no outcome "
+        "section and no data. verify_claims.py pins len(DOCS) and the decimal "
+        "prose census, it is bound to the v4.2 tag, and this document quotes "
+        "decimals from A16. It joins DOCS when run X lands, which re-cuts the "
+        "binding anyway because the evidence manifest is bound too. Excluded "
+        "means the cell probe does not perturb its four tables, so the "
+        "substitute is analysis/load_run_power.py --check, which the claims "
+        "job runs: it covers the power table, the cross-arm table, the three "
+        "chi-squares, the three corpus correlations, the four measured inputs "
+        "and the wall clock, and NOT the hazard interval, its sensitivity "
+        "rows, the washout table or the D values",
     "v2_3090_followup/README.md": "archived artefact; ERRATA quotes it, it is not re-derived",
     "v2_3090_followup/SUMMARY.md": "archived artefact; ERRATA quotes it, it is not re-derived",
     "v3_dflash_2026_05_07/README.md": "archived artefact; ERRATA quotes it, it is not re-derived",
