@@ -257,6 +257,15 @@ jobs:
         # verdict from seven fields and read a packed arm three per cent FASTER
         # as support for the hypothesis.
         run: python analysis/rederive_run_s.py
+      - name: every prose figure outside the census is derived or accounted for
+        # The documents outside the decimal census carried figures no derivation
+        # checked: a sweep that changed one at a time caught eight of twenty-six.
+        # This asks each derivation what it compares and requires every other
+        # prose decimal to be entered with a kind and a reason, verified where it
+        # can be, so an edited figure is a value nothing accounts for. Its first
+        # run found plan X still quoting run Y's log-ratio defect, corrected in
+        # the two documents that carry the table and missed in the third.
+        run: python analysis/figure_registry.py --strict
       - name: plan Z's premises and design table are what the committed data says
         # A pre-registration that quotes the recorded state on both sides of A16's
         # step, and the reason run T4's trace cannot be attributed to an arm-run,

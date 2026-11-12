@@ -164,6 +164,17 @@ def assumed_sd_pct() -> float:
     return load_run_power.measured()["adjacent_diff_sd"]
 
 
+def assumed_effect_sd_pct() -> float:
+    """The design's second spread: run Y's own twelve within-block log ratios.
+
+    `plan_z_power` derives it and the plan's design table carries it beside the
+    null spread, because a real effect widens the spread. Printed beside the
+    observed spread so a reader sees which of the two the run resembled.
+    """
+    import plan_z_power                                            # noqa: E402
+    return plan_z_power.design()[1]["sd_effect_pct"]
+
+
 def bands() -> list:
     """The pre-registered reading, parsed out of the plan.
 
@@ -530,7 +541,8 @@ def derive(run: pathlib.Path | None = None) -> dict:
             "verdict_primary": verdict(primary["change_pct"], table),
             "interval_reaches": reached(primary["ci_lo_pct"],
                                         primary["ci_hi_pct"], table),
-            "assumed_sd_pct": assumed_sd_pct(), **info}
+            "assumed_sd_pct": assumed_sd_pct(),
+            "assumed_effect_sd_pct": assumed_effect_sd_pct(), **info}
 
 
 def main() -> int:
@@ -569,8 +581,8 @@ def main() -> int:
               f"[{_pct(r['ci_lo_pct'])}, {_pct(r['ci_hi_pct'])}]")
         print(f"     {r['blocks']} blocks, df {r['df']}, half width "
               f"{_pct(r['half_width_pct'])}, within-block sd "
-              f"{r['sd_pct']:.3f} % against the {out['assumed_sd_pct']:.3f} % the "
-              f"design assumed")
+              f"{r['sd_pct']:.3f} % against the {out['assumed_sd_pct']:.3f} % and "
+              f"{out['assumed_effect_sd_pct']:.3f} % the design was computed on")
     p = out["rows"][0]
     print(f"\n  primary, packed against distinct: {_pct(p['change_pct'])}")
     print(f"  pre-registered reading: {out['verdict_primary']}")

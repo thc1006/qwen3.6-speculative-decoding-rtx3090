@@ -35,9 +35,15 @@ from paired_blocks import t_critical_975                           # noqa: E402
 DOC = "v4_audit_2026_08_25/PROSPECTIVE_PLAN_SIBLINGS.md"
 BLOCK_COUNTS = (6, 12, 18)
 ARMS = 3
-# A16's step, which this run is about, and which `analysis/plan_z_power.py` derives
-# from run T4's own arm-runs.
-A16_STEP_PCT = 3.93
+
+
+def a16_step_pct() -> float:
+    """A16's step, which this run is about, from `analysis/plan_z_power.py`.
+
+    It was a literal here, 3.93, beside a comment saying that file derives it.
+    """
+    import plan_z_power                                            # noqa: E402
+    return plan_z_power.a16_quoted()["step_pct"]
 
 
 def inputs() -> dict:
@@ -53,9 +59,17 @@ def inputs() -> dict:
     blocks = len([b for b in rederive_run_y.load_blocks(rederive_run_y.RUN)])
     per_arm_run_h = pp["observed_span_hours"] / (blocks * 4)
     full = abs(y[0]["change_pct"])
-    return {"sd_pct": sd, "per_arm_run_h": per_arm_run_h,
-            "full_displacement_pct": full,
-            "share": A16_STEP_PCT / full,
+    step = a16_step_pct()
+    # Run Y's own within-block spread, the one plan Z carries beside the null
+    # spread because a real effect widens it. Taken from plan Z's derivation so
+    # the two plans quote one number, and this plan carries it because it did
+    # not, which left its table stating only the optimistic precision.
+    import plan_z_power                                            # noqa: E402
+    sd_effect = plan_z_power.design()[1]["sd_effect_pct"]
+    return {"sd_pct": sd, "sd_effect_pct": sd_effect,
+            "per_arm_run_h": per_arm_run_h,
+            "full_displacement_pct": full, "a16_step_pct": step,
+            "share": step / full,
             "blocks_measured": blocks}
 
 
@@ -64,11 +78,14 @@ def design(inp: dict) -> list[dict]:
     for n in BLOCK_COUNTS:
         df = n - 1
         half = t_critical_975(df) * inp["sd_pct"] / math.sqrt(n)
+        half_e = t_critical_975(df) * inp["sd_effect_pct"] / math.sqrt(n)
         out.append({"blocks": n,
                     "arm_runs": n * ARMS,
                     "hours": n * ARMS * inp["per_arm_run_h"],
                     "half_width_pct": half,
-                    "step_in_half_widths": A16_STEP_PCT / half})
+                    "step_in_half_widths": inp["a16_step_pct"] / half,
+                    "half_width_effect_pct": half_e,
+                    "step_in_effect_half_widths": inp["a16_step_pct"] / half_e})
     return out
 
 
@@ -76,12 +93,33 @@ def _split(line: str) -> list[str]:
     return [c.strip().replace("**", "") for c in line.strip().strip("|").split("|")]
 
 
+EFFECT_COL = "under run Y's spread"
+
+
 def cells(r: dict) -> dict:
     return {"blocks": str(r["blocks"]),
             "arm-runs": str(r["arm_runs"]),
             "hours": f"{r['hours']:.2f}",
             "95 % half width": f"{r['half_width_pct']:.2f} %",
-            "the step in half widths": f"{r['step_in_half_widths']:.0f}"}
+            "the step in half widths": f"{r['step_in_half_widths']:.0f}",
+            EFFECT_COL: f"{r['half_width_effect_pct']:.2f} %",
+            "the step in those": f"{r['step_in_effect_half_widths']:.0f}"}
+
+
+def prose_figures(inp: dict) -> dict:
+    """The prose figures `check_doc` compares, as the document writes them.
+
+    One function with two callers: `check_doc`, and `checked_figures`, which is
+    what `analysis/figure_registry.py` asks. A figure added here is checked and
+    counted as covered; one removed stops being both.
+    """
+    return {
+        "the full displacement": f"{inp['full_displacement_pct']:.2f} %",
+        "A16's step": f"{inp['a16_step_pct']:.2f} %",
+        "the share": f"{inp['share']:.2f}",
+        "the within-invocation spread": f"{inp['sd_pct']:.3f} %",
+        "run Y's own block spread": f"{inp['sd_effect_pct']:.3f} %",
+    }
 
 
 def check_doc(inp: dict, rows: list[dict]) -> list[str]:
@@ -113,13 +151,7 @@ def check_doc(inp: dict, rows: list[dict]) -> list[str]:
     # the prose, each figure with the values one step away forbidden: a presence
     # check is weak where a figure is quoted twice, which this plan's own
     # displacement is
-    figures = {
-        "the full displacement": f"{inp['full_displacement_pct']:.2f} %",
-        "A16's step": f"{A16_STEP_PCT} %",
-        "the share": f"{inp['share']:.2f}",
-        "the within-invocation spread": f"{inp['sd_pct']:.3f} %",
-    }
-    for what, v in figures.items():
+    for what, v in prose_figures(inp).items():
         if v not in text:
             bad.append(f"{DOC}: does not carry {v} as {what}")
             continue
@@ -219,6 +251,33 @@ def topology_figures(rec: dict) -> dict:
     return out
 
 
+def topology_quoted() -> dict:
+    """The topology figures the document quotes, formatted as it writes them.
+
+    `check_topology` builds its patterns from these and `checked_figures` reports
+    them, so the set compared and the set reported cannot differ.
+    """
+    b = topology_figures(read_topology(TOPOLOGY["bench"]))
+    d = topology_figures(read_topology(TOPOLOGY["devbox"]))
+    return {"fav_k": f"{b['fav_k']:.1f}", "other_k": f"{b['other_k']:.1f}",
+            "shared_lo": f"{b['shared_lo']:.3f}", "shared_hi": f"{b['shared_hi']:.3f}",
+            "distinct_lo": f"{b['distinct_lo']:.3f}",
+            "distinct_hi": f"{b['distinct_hi']:.3f}",
+            "control": f"{b['control']:.3f}", "agreed": f"{b['agreed']}",
+            "dev_n_distinct": f"{d['n_distinct']}",
+            "dev_distinct_lo": f"{d['distinct_lo']:.3f}",
+            "dev_distinct_hi": f"{d['distinct_hi']:.3f}"}
+
+
+def checked_figures() -> dict:
+    """Every prose figure this file compares, keyed by document, for the registry."""
+    inp = inputs()
+    table = {f"{r['blocks']} blocks {k}": v for r in design(inp)
+             for k, v in cells(r).items()}
+    return {DOC: {**table, **prose_figures(inp),
+                  **{f"topology {k}": v for k, v in topology_quoted().items()}}}
+
+
 def check_topology(doc: str) -> list:
     """Anchored, one pattern per figure. Presence would not be a check: 0.496 is
     both a sibling ratio and, one unit away, something else, and the document
@@ -232,22 +291,22 @@ def check_topology(doc: str) -> list:
     can read.
     """
     bad = []
-    b = topology_figures(read_topology(TOPOLOGY["bench"]))
-    d = topology_figures(read_topology(TOPOLOGY["devbox"]))
+    q = topology_quoted()
+    e = {k: re.escape(v) for k, v in q.items()}
     wants = [
-        (rf"{b['fav_k']:.1f} against {b['other_k']:.1f} thousand blocks per",
+        (rf"{e['fav_k']} against {e['other_k']} thousand blocks per",
          "the bench host's favoured and other performance-core rates"),
-        (rf"sibling pairs measuring {b['shared_lo']:.3f} to {b['shared_hi']:.3f}",
+        (rf"sibling pairs measuring {e['shared_lo']} to {e['shared_hi']}",
          "the bench host's sibling band"),
-        (rf"distinct pairs {b['distinct_lo']:.3f} to {b['distinct_hi']:.3f}",
+        (rf"distinct pairs {e['distinct_lo']} to {e['distinct_hi']}",
          "the bench host's distinct band"),
-        (rf"same-processor control\s+at {b['control']:.3f}",
+        (rf"same-processor control\s+at {e['control']}",
          "the bench host's same-processor control"),
-        (rf"all {d['n_distinct']}\s+of its pairs landing between "
-         rf"{d['distinct_lo']:.3f} and {d['distinct_hi']:.3f}",
+        (rf"all {e['dev_n_distinct']}\s+of its pairs landing between "
+         rf"{e['dev_distinct_lo']} and {e['dev_distinct_hi']}",
          "the development box's pairs"),
-        (rf"{b['agreed']} pairs? agree with `/sys`|"
-         rf"All {b['agreed']} pairs agree with `/sys`",
+        (rf"{e['agreed']} pairs? agree with `/sys`|"
+         rf"All {e['agreed']} pairs agree with `/sys`",
          "how many pairs agreed on the bench host"),
     ]
     flat = " ".join(doc.replace("**", " ").split())
@@ -268,16 +327,20 @@ def main() -> int:
     inp = inputs()
     rows = design(inp)
     print(f"run Y measured: a full displacement costs "
-          f"{inp['full_displacement_pct']:.2f} %, so A16's {A16_STEP_PCT} % step is "
+          f"{inp['full_displacement_pct']:.2f} %, so A16's {inp['a16_step_pct']:.2f} % step is "
           f"{inp['share']:.2f} of one")
     print(f"  within-invocation spread {inp['sd_pct']:.3f} %, "
           f"per arm-run {inp['per_arm_run_h'] * 3600:.0f} s over "
           f"{inp['blocks_measured']} blocks of four")
-    print(f"  {'blocks':>6} {'arm-runs':>9} {'hours':>6} {'+-':>8} {'step in +-':>11}")
+    print(f"  and run Y's own block spread {inp['sd_effect_pct']:.3f} %, which a "
+          f"real effect would bring")
+    print(f"  {'blocks':>6} {'arm-runs':>9} {'hours':>6} {'+-':>8} {'step in +-':>11}"
+          f" {'+- under Y':>11} {'step in it':>11}")
     for r in rows:
         c = cells(r)
         print(f"  {c['blocks']:>6} {c['arm-runs']:>9} {c['hours']:>6} "
-              f"{c['95 % half width']:>8} {c['the step in half widths']:>11}")
+              f"{c['95 % half width']:>8} {c['the step in half widths']:>11}"
+              f" {c[EFFECT_COL]:>11} {c['the step in those']:>11}")
     if show:
         return 0
     bad = check_doc(inp, rows) + check_topology(

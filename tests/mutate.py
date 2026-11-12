@@ -915,8 +915,8 @@ MUTATIONS = [
      ".test_the_third_arm_differs_from_the_second_by_the_flag_alone"),
     ("a design cell drifts from what run Y's spread gives",
      "v4_audit_2026_08_25/PROSPECTIVE_PLAN_SIBLINGS.md",
-     "| 18 | 54 | 0.75 | 0.38 % | 10 |",
-     "| 18 | 54 | 0.75 | 0.39 % | 10 |",
+     "| 18 | 54 | 0.75 | 0.38 % | 10 | 1.04 % | 4 |",
+     "| 18 | 54 | 0.75 | 0.39 % | 10 | 1.04 % | 4 |",
      "tests.test_harness_invariants.PlanSsArmsMustDifferInOneThingEach.test_the_design_table_matches_the_data"),
     ("the plan stops saying the flag reaches only one of the two pools",
      "v4_audit_2026_08_25/PROSPECTIVE_PLAN_SIBLINGS.md",
@@ -1090,6 +1090,185 @@ MUTATIONS = [
      '    if per != int(per) or per < 1:',
      '    if per != int(per) or per < 2:',
      'tests.test_harness_invariants.OneDefinitionOfAPositionBalancedSchedule'),
+    ("plan S's precision under an effect is computed on the null spread",
+     "analysis/plan_siblings_power.py",
+     '        half_e = t_critical_975(df) * inp["sd_effect_pct"] / math.sqrt(n)',
+     "        half_e = half",
+     "tests.test_harness_invariants.PlanSsArmsMustDifferInOneThingEach."
+     "test_the_design_table_matches_the_data"),
+    ("plan S's reading quotes the effect spread as a literal",
+     "analysis/rederive_run_s.py",
+     '    return plan_z_power.design()[1]["sd_effect_pct"]',
+     "    return 2.089",
+     "tests.test_harness_invariants.PlanSsReadingMustVerifyTheDesignBeforeItReads."
+     "test_the_assumed_spread_is_derived_and_not_a_literal"),
+    ("the PR body's second quote of the suite sizes goes unchecked again",
+     "PULL_REQUEST.md",
+     "data and document perturbations",
+     "data and doc perturbations",
+     "tests.test_harness_invariants.BothQuotesOfTheSuiteSizesAreTheSuites"),
+    ("run Y's outputs are compared by their sums again",
+     "analysis/rederive_run_y.py",
+     "        res[fast] = (sum(1 for k in a if a[k] == b.get(k)), len(a), len(b))",
+     "        res[fast] = (len(a), len(a), len(b))",
+     "tests.test_harness_invariants.RunYsOutputIsIdenticalToTheTokenAndThatIsChecked."
+     "test_one_changed_token_is_refused"),
+    ("a run Y output that differs between conditions is accepted",
+     "analysis/rederive_run_y.py",
+     "        if not n_fast or n_same != n_fast or n_fast != n_slow:",
+     "        if False:",
+     "tests.test_harness_invariants.RunYsOutputIsIdenticalToTheTokenAndThatIsChecked."
+     "test_one_changed_token_is_refused"),
+    ("run Y's derivation stops comparing outputs token by token",
+     "analysis/rederive_run_y.py",
+     "    bad_out = check_outputs(same)",
+     "    bad_out = []",
+     "tests.test_harness_invariants.RunYsOutputIsIdenticalToTheTokenAndThatIsChecked."
+     "test_main_runs_the_check"),
+    # --- the figure registry, and the derivations it asks -------------------
+    # A sweep changed one prose decimal at a time outside the census and the
+    # claims job caught eight of twenty-six. The registry's first run found
+    # plan X quoting run Y's log-ratio defect. Each mutation below breaks one
+    # thing the registry relies on, or one derivation's promise that what it
+    # reports is what it checks.
+    ('an edited figure is no longer reported bare',
+     'analysis/figure_registry.py',
+     '                row["bare"].add(v)\n',
+     '                pass\n',
+     'tests.test_harness_invariants.EveryProseFigureOutsideTheCensusIsAccountedFor.'
+     'test_an_edited_figure_is_a_value_nothing_accounts_for'),
+    ('a cross-document quote stops being held to its derivation',
+     'analysis/figure_registry.py',
+     '                elif v not in anywhere[why]:',
+     '                elif False:',
+     'tests.test_harness_invariants.EveryProseFigureOutsideTheCensusIsAccountedFor.'
+     'test_a_cross_document_quote_follows_the_derivation'),
+    ('a quote is accepted without its source carrying it',
+     'analysis/figure_registry.py',
+     '                elif v not in DEC.findall(src.read_text(encoding="utf-8")):',
+     '                elif False:',
+     'tests.test_harness_invariants.EveryProseFigureOutsideTheCensusIsAccountedFor.'
+     'test_a_quote_must_still_be_in_its_source'),
+    ('an entry for a figure the document dropped is kept silently',
+     'analysis/figure_registry.py',
+     '            if v not in decs:\n',
+     '            if False:\n',
+     'tests.test_harness_invariants.EveryProseFigureOutsideTheCensusIsAccountedFor.'
+     'test_a_stale_or_redundant_entry_is_a_problem'),
+    ('an entry for a figure a derivation reports is kept silently',
+     'analysis/figure_registry.py',
+     '            elif v in here:\n',
+     '            elif False:\n',
+     'tests.test_harness_invariants.EveryProseFigureOutsideTheCensusIsAccountedFor.'
+     'test_a_stale_or_redundant_entry_is_a_problem'),
+    ('strict exits zero whatever it found',
+     'analysis/figure_registry.py',
+     '    return 1 if (strict and failed) else 0',
+     '    return 0',
+     'tests.test_harness_invariants.EveryProseFigureOutsideTheCensusIsAccountedFor.'
+     'test_strict_fails_on_what_it_reports'),
+    ('the registry covers part of the excluded documents',
+     'analysis/figure_registry.py',
+     '    return sorted(table_coverage.EXCLUDED)',
+     '    return sorted(table_coverage.EXCLUDED)[:4]',
+     'tests.test_harness_invariants.EveryProseFigureOutsideTheCensusIsAccountedFor.'
+     'test_the_tree_is_clean_and_the_scope_is_the_census_exclusions'),
+    ('the claims job stops running the registry',
+     '.github/workflows/audit.yml',
+     '        run: python analysis/figure_registry.py --strict\n',
+     '',
+     'tests.test_harness_invariants.EveryProseFigureOutsideTheCensusIsAccountedFor.'
+     'test_the_claims_job_and_the_gate_run_it_strict'),
+    ('the gate stops running the registry',
+     'bench/ci_faithful.sh',
+     'run figure_registry -- python3 analysis/figure_registry.py --strict\n',
+     '',
+     'tests.test_harness_invariants.EveryProseFigureOutsideTheCensusIsAccountedFor.'
+     'test_the_claims_job_and_the_gate_run_it_strict'),
+    ("plan Z's check stops comparing what it reports",
+     'analysis/plan_z_power.py',
+     '    figures = prose_figures()',
+     '    figures = {}',
+     'tests.test_harness_invariants.EachDerivationChecksWhatItReports.'
+     'test_plan_z'),
+    ("plan Z stops checking its quote of layer A's spread",
+     'analysis/plan_z_power.py',
+     '        "layer A\'s calibration spread": f"{_layer_a()[\'spread\']:.3f} %",\n',
+     '',
+     'tests.test_harness_invariants.EveryProseFigureOutsideTheCensusIsAccountedFor.'
+     'test_the_tree_is_clean_and_the_scope_is_the_census_exclusions'),
+    ("plan S's check stops comparing what it reports",
+     'analysis/plan_siblings_power.py',
+     '    for what, v in prose_figures(inp).items():',
+     '    for what, v in {}.items():',
+     'tests.test_harness_invariants.EachDerivationChecksWhatItReports.'
+     'test_plan_siblings'),
+    ("run Y's check stops comparing the telemetry it reports",
+     'analysis/rederive_run_y.py',
+     '    for what, v in tel_figures(tel).items():',
+     '    for what, v in {}.items():',
+     'tests.test_harness_invariants.EachDerivationChecksWhatItReports.'
+     'test_run_y'),
+    ("plan X's prose check stops comparing what it reports",
+     'analysis/load_run_power.py',
+     '    for what, v in (figures or prose_figures()).items():',
+     '    for what, v in (figures or {}).items():',
+     'tests.test_harness_invariants.EachDerivationChecksWhatItReports.'
+     'test_plan_x'),
+    ("plan X's --check stops running the prose check",
+     'analysis/load_run_power.py',
+     '                   + check_prose(txt))',
+     '                   )',
+     'tests.test_harness_invariants.EachDerivationChecksWhatItReports.'
+     'test_plan_x'),
+    ("plan X's prose check matches inside a longer number",
+     'analysis/load_run_power.py',
+     '        if not re.search(r"(?<![\\w.])" + re.escape(v) + r"(?![\\w])", flat):',
+     '        if v not in flat:',
+     'tests.test_harness_invariants.EachDerivationChecksWhatItReports.'
+     'test_plan_x_reads_a_number_whole'),
+    ("plan Y's hours column is compared for the chosen row only",
+     'analysis/rederive_run_y.py',
+     '        if got_h != want_h:',
+     '        if False:',
+     'tests.test_harness_invariants.EachDerivationChecksWhatItReports.'
+     'test_plan_y_hours_column'),
+    ("layer A's README prose stops being compared",
+     'analysis/layer_a_slope.py',
+     '        for what, want in want_prose.items():',
+     '        for what, want in {}.items():',
+     'tests.test_harness_invariants.LayerAsReadingHasTestsOfItsOwn.'
+     'test_a_changed_prose_figure_fails'),
+    ("layer A's README rows stop being compared",
+     'analysis/layer_a_slope.py',
+     '            ok = got == v',
+     '            ok = True',
+     'tests.test_harness_invariants.LayerAsReadingHasTestsOfItsOwn.'
+     'test_a_changed_row_fails'),
+    ("A16's step is a literal in its derivation",
+     'analysis/plan_z_power.py',
+     '    return {"step_pct": round(s["gap_pct"], 2),',
+     '    return {"step_pct": 3.93,',
+     'tests.test_harness_invariants.A16HasOneSource.'
+     'test_the_derivation_follows_the_data'),
+    ("plan S's A16 step is a literal again",
+     'analysis/plan_siblings_power.py',
+     '    return plan_z_power.a16_quoted()["step_pct"]',
+     '    return 3.93',
+     'tests.test_harness_invariants.A16HasOneSource.'
+     'test_every_consumer_follows_it'),
+    ("run Y's A16 step is a literal again",
+     'analysis/rederive_run_y.py',
+     '    return plan_z_power.a16_quoted()["step_pct"]',
+     '    return 3.93',
+     'tests.test_harness_invariants.A16HasOneSource.'
+     'test_every_consumer_follows_it'),
+    ("layer A's A16 figures are literals again",
+     'analysis/layer_a_slope.py',
+     '    return q["step_pct"], q["divergence_c"]',
+     '    return 3.93, 1.67',
+     'tests.test_harness_invariants.A16HasOneSource.'
+     'test_every_consumer_follows_it'),
 ]
 
 

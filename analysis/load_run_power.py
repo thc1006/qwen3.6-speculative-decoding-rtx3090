@@ -37,6 +37,7 @@ import json
 import math
 import pathlib
 import random
+import re
 import statistics as st
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -408,6 +409,8 @@ def wall_clock(nblocks: int = 24, washout: float = WASHOUT) -> dict:
     pairs = nblocks * len(ARMS)
     return {"overhead_per_arm_run": overhead, "arm_runs": arm_runs,
             "pairs": pairs, "washout": washout,
+            "span_s": (t1 - t0).total_seconds(), "recorded_s": total,
+            "washout_h": pairs * washout / 3600.0,
             "measured_h": measured / 3600.0,
             "with_overhead_h": (measured + overhead * arm_runs) / 3600.0,
             "total_h": (measured + overhead * arm_runs + pairs * washout) / 3600.0}
@@ -559,6 +562,101 @@ def power(m: dict, hazard_s: float | None = None, trials: int = TRIALS,
     for name, lab, row in results:
         out.setdefault(name, {})[lab] = row
     return out
+
+
+NORMALISER_KEYS = ("per_token", "per_forward", "per_target_step")
+
+
+def prose_figures() -> dict:
+    """The plan's prose figures that run T4 answers without simulating anything.
+
+    Each is formatted as the plan writes it. `check_prose` compares them and
+    `checked_figures` reports them, so what is checked and what the registry
+    counts as derived are one list. The simulated ones -- the power table, the
+    hazard interval's ends, the washout rows -- stay with `check_plan`, which
+    the claims job runs, because they take minutes.
+    """
+    m = measured()
+    reps = {a: [pooled(a, i) for i in range(6)] for a in ARMS}
+    means = {a: st.mean(v) for a, v in reps.items()}
+    ms = {a: 1000.0 / x for a, x in means.items()}
+    wc = wall_clock()
+    nz = normalisers()
+    out = {f"spec-dflash-n2 repeat {i}": f"{x:.3f}"
+           for i, x in enumerate(reps["spec-dflash-n2"])}
+    out.update({"the low level": f"{m['levels'][0]:.3f}",
+                "the high level": f"{m['levels'][1]:.3f}",
+                "the gap": f"{m['gap']:.2f} %",
+                "the residual": f"{m['residual']:.3f} %",
+                "the adjacent-difference SD": f"{m['adjacent_diff_sd']:.3f} %",
+                "the block CV": f"{m['block_cv']:.3f} %",
+                "hypot(gap / 2, residual)": f"{m['combined']:.3f} %",
+                "the spread of ms per token":
+                    f"{max(ms.values()) / min(ms.values()):.2f} times",
+                "the 1 % chi-square critical value on 2 df": f"{_chi2inv(0.99, 2):.2f}",
+                "overhead per arm-run": f"{wc['overhead_per_arm_run']:.2f} s per arm-run",
+                "recorded time in T4": f"{wc['recorded_s']:.1f} s",
+                "run X with overhead": f"{wc['with_overhead_h']:.2f} hours",
+                "the washout's hours": f"{wc['washout_h']:.2f}",
+                "run X in total": f"{wc['total_h']:.2f} hours"})
+    for a in ARMS:
+        out[f"{a} pooled mean"] = f"{means[a]:.3f}"
+        out[f"{a} ms per token"] = f"{ms[a]:.3f}"
+        out[f"{a} arm-run duration"] = f"{m['durations'][a]:.1f}"
+    for a in ("baseline", "spec-draft-n8"):
+        v = reps[a]
+        out[f"{a} block CV"] = f"{100.0 * st.stdev(v) / st.mean(v):.2f} %"
+    for (x, y), (r, _n) in corpus_correlation()["r"].items():
+        out[f"the corpus correlation of {x} and {y}"] = f"{r:+.3f}"
+    # The block spread the first power model implied: T4's block CV, which
+    # already holds the step, with a telegraph of half the gap added on top.
+    out["the block spread the first model implied"] = (
+        f"{math.hypot(m['block_cv'], m['gap'] / 2.0):.3f} %")
+    for a in ("spec-dflash-n2", "spec-draft-n8"):
+        out[f"{a} acceptance by the drafter's own count"] = (
+            f"{100.0 * nz[a]['acceptance_drafter']:.2f} %")
+    w = nz["spec-draft-n8"]
+    out["drafted per round under the server's round count"] = (
+        f"{w['drafted'] / (w['tokens'] - w['accepted_server']):.3f}")
+    # D, spec-dflash-n2 minus spec-draft-n8 in ms per token, over T4's slow
+    # blocks (0 to 2) and its fast ones (3 to 5), and the Welch t between them.
+    dd = [1000.0 / pooled("spec-dflash-n2", i) - 1000.0 / pooled("spec-draft-n8", i)
+          for i in range(6)]
+    slow, fast = dd[:3], dd[3:]
+    se = math.sqrt(st.variance(slow) / 3 + st.variance(fast) / 3)
+    out.update({"D over the slow blocks": f"{st.mean(slow):.3f}",
+                "D over the fast blocks": f"{st.mean(fast):.3f}",
+                "D, slow minus fast": f"{st.mean(slow) - st.mean(fast):.3f} ms per token",
+                "its Welch t": f"Welch t of {(st.mean(slow) - st.mean(fast)) / se:.2f}"})
+    for key in NORMALISER_KEYS:
+        c = (ms["spec-dflash-n2"] * (1 / 0.98 - 1)) / nz["spec-dflash-n2"][key]
+        out[f"D {key}"] = (f"{c * nz['spec-dflash-n2'][key] - c * nz['spec-draft-n8'][key]:+.3f}")
+        out[f"spec-draft-n8 under {key}"] = (
+            f"{100 * (ms['spec-draft-n8'] / (ms['spec-draft-n8'] + c * nz['spec-draft-n8'][key]) - 1):+.2f}")
+    return out
+
+
+def _flat(txt: str) -> str:
+    return " ".join(txt.replace("**", " ").replace("\u2212", "-").split())
+
+
+def check_prose(txt: str, figures: dict | None = None) -> list[str]:
+    """Each prose figure is in the plan as a whole number, not inside a longer one.
+
+    Bounded the way the decimal census reads a number, so "0.12" is not found
+    inside "10.12" or "0.120".
+    """
+    flat = _flat(txt)
+    bad = []
+    for what, v in (figures or prose_figures()).items():
+        if not re.search(r"(?<![\w.])" + re.escape(v) + r"(?![\w])", flat):
+            bad.append(f"{what} is {v} and the plan does not carry it")
+    return bad
+
+
+def checked_figures() -> dict:
+    """Every prose figure this file compares without simulating, for the registry."""
+    return {str(PLAN.relative_to(ROOT)): prose_figures()}
 
 
 def check_plan(txt, m, p_table, ms, nz, keys, dl, sg, cc, wc, ends, washouts):
@@ -765,8 +863,10 @@ def main() -> None:
     print("  A shared host cost of any denominator would put these near one.")
 
     if args.check:
-        missing = check_plan(PLAN.read_text(encoding="utf-8"), m, p_table,
-                             ms, nz, keys, dl, sg, cc, wc, ends, washouts)
+        txt = PLAN.read_text(encoding="utf-8")
+        missing = (check_plan(txt, m, p_table, ms, nz, keys, dl, sg, cc, wc, ends,
+                              washouts)
+                   + check_prose(txt))
         print("\n  plan check: " + ("OK" if not missing
                                     else "MISMATCH\n    "
                                     + "\n    ".join(missing)))

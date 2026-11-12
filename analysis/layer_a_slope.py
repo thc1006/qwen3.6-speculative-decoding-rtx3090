@@ -49,12 +49,22 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "analysis"))
 from paired_blocks import t_critical_975                          # noqa: E402
 
-A16_STEP_PCT = 3.93
-# the core-temperature divergence between A16's two levels, from
-# `analysis/plan_z_power.py`, which derives it from run T4's own snapshots. The
-# faster level is the HOTTER one, so this is used as a magnitude and its sign is
-# against the hypothesis rather than for it.
-A16_DIVERGENCE_C = 1.67
+
+
+def a16() -> tuple[float, float]:
+    """A16's step and the core-temperature divergence between its two levels.
+
+    Both from `analysis/plan_z_power.py`, which derives them from run T4's own
+    snapshots, at the two decimals the documents quote. They were literals here,
+    3.93 and 1.67, beside a comment naming that file. The faster level is the
+    HOTTER one, so the divergence is used as a magnitude and its sign is against
+    the hypothesis rather than for it.
+    """
+    import plan_z_power                                            # noqa: E402
+    q = plan_z_power.a16_quoted()
+    return q["step_pct"], q["divergence_c"]
+
+
 # the control needs temperatures both phases visited; fewer than this and it did
 # not run, whatever else the run produced
 MIN_SHARED_BINS = 3
@@ -167,34 +177,30 @@ def ols(xs, ys):
             "resid_sd": math.sqrt(s2), "lag1": num / den if den else float("nan")}
 
 
-def main() -> int:
-    argv = sys.argv[1:]
-    check_only = "--check" in argv
-    argv = [a for a in argv if a != "--check"]
-    if len(argv) != 1:
-        print(__doc__, file=sys.stderr)
-        return 2
-    d = pathlib.Path(argv[0])
-    if not d.is_dir():
-        print(f"no such directory: {d}", file=sys.stderr)
-        return 2
-    print((d / "manifest.txt").read_text(encoding="utf-8").rstrip()
-          if (d / "manifest.txt").is_file() else "(no manifest)")
+def derive(d: pathlib.Path, say=print) -> dict:
+    """Sections 1 to 6: every quantity the reading and the README rest on.
+
+    `main` prints as it goes and `checked_figures` needs the same numbers without
+    the printing, so the computation lives here once and `say` decides whether it
+    is heard. Two copies of it -- one printing, one returning -- would be the
+    defect this repository keeps removing, one level down.
+    """
+    step, div_c = a16()
     tname, tz, tel = telemetry(d)
 
-    print("\n1. was it a measurement of memory")
+    say("\n1. was it a measurement of memory")
     cal = [l.split(",") for l in (d / "calibrate.csv").read_text().split() if l]
     vals = {int(a): float(b) for a, b in cal}
     for c in sorted(vals):
-        print(f"   core {c:5d} MHz -> {vals[c]:7.1f} GB/s")
+        say(f"   core {c:5d} MHz -> {vals[c]:7.1f} GB/s")
     spread = 100.0 * (max(vals.values()) - min(vals.values())) / max(vals.values())
-    print(f"   spread across the calibrated clocks: {spread:.3f} % "
+    say(f"   spread across the calibrated clocks: {spread:.3f} % "
           f"-> {'memory bound' if spread < 1.0 else 'NOT clearly memory bound'}")
 
-    print("\n2. did the clocks hold")
+    say("\n2. did the clocks hold")
     for k in ("sm", "mem"):
         v = [s[k] for s in tel if s[k] is not None]
-        print(f"   {k:4s} min {min(v):.0f} max {max(v):.0f} "
+        say(f"   {k:4s} min {min(v):.0f} max {max(v):.0f} "
               f"sd {st.stdev(v) if len(v) > 1 else 0.0:.3f}  n={len(v)}")
     thr = {}
     for s in tel:
@@ -202,7 +208,7 @@ def main() -> int:
         if t and t not in ("0x0000000000000000",):
             thr[t] = thr.get(t, 0) + 1
     for t, n in sorted(thr.items(), key=lambda x: -x[1])[:4]:
-        print(f"   throttle {t} in {n} of {len(tel)} samples")
+        say(f"   throttle {t} in {n} of {len(tel)} samples")
 
     phases = {}
     for phase in ("ascending", "descending"):
@@ -212,30 +218,30 @@ def main() -> int:
                      f"wall clock and one side did not line up.")
         phases[phase] = w
 
-    print("\n3. the slope, per phase")
+    say("\n3. the slope, per phase")
     for phase, w in phases.items():
         temps = [r["temp"] for r in w]
         bws = [r["bw"] for r in w]
         fit = ols(temps, bws)
-        print(f"   {phase}: {len(w)} windows, "
+        say(f"   {phase}: {len(w)} windows, "
               f"{min(r['n_samples'] for r in w)}-{max(r['n_samples'] for r in w)} "
               f"telemetry samples each")
-        print(f"     temperature {min(temps):.1f} to {max(temps):.1f} C "
+        say(f"     temperature {min(temps):.1f} to {max(temps):.1f} C "
               f"(range {max(temps) - min(temps):.1f})")
-        print(f"     bandwidth   {min(bws):.1f} to {max(bws):.1f} GB/s "
+        say(f"     bandwidth   {min(bws):.1f} to {max(bws):.1f} GB/s "
               f"(range {100 * (max(bws) - min(bws)) / max(bws):.3f} %)")
         if fit:
             per_c = 100.0 * fit["slope"] / st.fmean(bws)
             half_c = 100.0 * fit["half"] / st.fmean(bws)
-            print(f"     slope {fit['slope']:+.3f} GB/s per C "
+            say(f"     slope {fit['slope']:+.3f} GB/s per C "
                   f"= {per_c:+.4f} % per C, 95 % +-{half_c:.4f}")
-            print(f"     residual sd {fit['resid_sd']:.3f} GB/s, "
+            say(f"     residual sd {fit['resid_sd']:.3f} GB/s, "
                   f"lag-1 autocorrelation {fit['lag1']:+.2f}")
             phases[phase] = (w, fit, per_c, half_c)
         else:
             phases[phase] = (w, None, None, None)
 
-    print("\n4. temperature or time: the two phases in one-degree bins")
+    say("\n4. temperature or time: the two phases in one-degree bins")
     bins = {}
     for phase, (w, *_rest) in phases.items():
         for r in w:
@@ -243,7 +249,7 @@ def main() -> int:
     both = sorted(b for b, v in bins.items() if len(v) == 2)
     mean_off = None
     if not both:
-        print("   no temperature is visited by both phases, so this cannot separate"
+        say("   no temperature is visited by both phases, so this cannot separate"
               " temperature from time. The descending phase did not reach the"
               " ascending one's range.")
     else:
@@ -253,12 +259,12 @@ def main() -> int:
             c = st.fmean(bins[b]["descending"])
             diff = 100.0 * (c - a) / a
             worst = max(worst, abs(diff))
-            print(f"   {b:3d} C  ascending {a:7.1f}  descending {c:7.1f}  "
+            say(f"   {b:3d} C  ascending {a:7.1f}  descending {c:7.1f}  "
                   f"{diff:+.3f} %")
         mean_off = st.fmean(
             [100.0 * (st.fmean(bins[b]["descending"]) - st.fmean(bins[b]["ascending"]))
              / st.fmean(bins[b]["ascending"]) for b in both])
-        print(f"   largest disagreement {worst:.3f} %, mean offset "
+        say(f"   largest disagreement {worst:.3f} %, mean offset "
               f"{mean_off:+.3f} % over {len(both)} shared bins")
         # What this offset can and cannot be. The two phases are two separate
         # INVOCATIONS of the load, so a constant offset between them is exactly what
@@ -273,23 +279,23 @@ def main() -> int:
         # explanation: five-second and ten-second windows differ by 0.006 % at a
         # flat plateau, inside the scatter, so the two phases' different window
         # lengths do not account for it either.
-        print("   NOT attributable from one pair: the phases are two invocations, a")
-        print("   constant offset is what run-to-run variation looks like, and seven")
-        print("   invocations at a flat plateau spread 0.013 % -- about this size.")
-        print("   Attribution needs replicated pairs, or both phases in one process.")
+        say("   NOT attributable from one pair: the phases are two invocations, a")
+        say("   constant offset is what run-to-run variation looks like, and seven")
+        say("   invocations at a flat plateau spread 0.013 % -- about this size.")
+        say("   Attribution needs replicated pairs, or both phases in one process.")
 
-    print("\n5. the noise floor, at the thermal plateau")
+    say("\n5. the noise floor, at the thermal plateau")
     asc = phases["ascending"][0]
     hot = max(r["temp"] for r in asc)
     plateau = [r["bw"] for r in asc if r["temp"] >= hot - 1.0]
     if len(plateau) > 2:
-        print(f"   {len(plateau)} windows within one degree of {hot:.1f} C: "
+        say(f"   {len(plateau)} windows within one degree of {hot:.1f} C: "
               f"mean {st.fmean(plateau):.1f}, sd {st.stdev(plateau):.3f} GB/s "
               f"= {100 * st.stdev(plateau) / st.fmean(plateau):.4f} %")
     else:
-        print(f"   only {len(plateau)} windows at the plateau; not a floor")
+        say(f"   only {len(plateau)} windows at the plateau; not a floor")
 
-    print("\n6. the pre-registered reading")
+    say("\n6. the pre-registered reading")
     allw = [r for w in (phases[p][0] for p in phases) for r in w]
     temps = [r["temp"] for r in allw]
     bws = [r["bw"] for r in allw]
@@ -301,27 +307,96 @@ def main() -> int:
     mean_bw = st.fmean(bws)
     B = 100.0 * pooled["slope"] / mean_bw if pooled else 0.0
     B_hi = abs(B) + (100.0 * pooled["half"] / mean_bw if pooled else 0.0)
-    print(f"   thermal range traversed: {lo:.1f} to {hi:.1f} C = {hi - lo:.1f}")
-    print(f"   bandwidth cold {cold:.1f} -> hot {hot_bw:.1f} GB/s, R = {R:+.3f} %")
-    print(f"   pooled slope B = {B:+.5f} % per C, 95 % upper bound on |B| "
+    say(f"   thermal range traversed: {lo:.1f} to {hi:.1f} C = {hi - lo:.1f}")
+    say(f"   bandwidth cold {cold:.1f} -> hot {hot_bw:.1f} GB/s, R = {R:+.3f} %")
+    say(f"   pooled slope B = {B:+.5f} % per C, 95 % upper bound on |B| "
           f"= {B_hi:.5f}")
-    print(f"   plan Z excludes the hypothesis for A16's step if R is below "
-          f"{A16_STEP_PCT} %: {'EXCLUDED' if abs(R) < A16_STEP_PCT else 'NOT excluded'}")
+    say(f"   plan Z excludes the hypothesis for A16's step if R is below "
+          f"{step} %: {'EXCLUDED' if abs(R) < step else 'NOT excluded'}")
     # Against A16's OWN divergence rather than an invented one. Dividing the step by
     # a near-zero B gives a number like 70,000 C, which is arithmetic rather than an
     # argument; the question a reader has is what sensitivity the step would need.
-    need_B = A16_STEP_PCT / A16_DIVERGENCE_C
-    print(f"   to make {A16_STEP_PCT} % from A16's own {A16_DIVERGENCE_C} C "
+    need_B = step / div_c
+    say(f"   to make {step} % from A16's own {div_c} C "
           f"divergence, at the memory-bound elasticity ceiling of {E_CEILING:.0f},")
-    print(f"   the sensitivity would have to be {need_B:.2f} % per C, which is "
+    say(f"   the sensitivity would have to be {need_B:.2f} % per C, which is "
           f"{need_B / B_hi:,.0f}x the upper bound here")
-    print(f"   or, at that upper bound, the memory would have to diverge "
-          f"{A16_STEP_PCT / B_hi:,.0f} C between the two levels")
+    say(f"   or, at that upper bound, the memory would have to diverge "
+          f"{step / B_hi:,.0f} C between the two levels")
     floor = (100.0 * st.stdev(plateau) / st.fmean(plateau)
              if len(plateau) > 2 else float("nan"))
     if floor == floor:
-        print(f"   and {A16_STEP_PCT} % is {A16_STEP_PCT / floor:,.0f} noise floors "
+        say(f"   and {step} % is {step / floor:,.0f} noise floors "
               f"away from zero")
+    return {"tel": tel, "spread": spread, "both": both, "mean_off": mean_off,
+            "plateau": plateau, "lo": lo, "hi": hi, "R": R, "B": B, "B_hi": B_hi,
+            "need_B": need_B, "floor": floor, "step": step, "div_c": div_c}
+
+
+def readme_figures(v: dict) -> tuple[dict, dict]:
+    """What the round's README must carry: its two-column rows, and two prose figures.
+
+    One function with two callers, the README check in `main` and
+    `checked_figures`, so what is compared and what the registry counts as
+    derived cannot drift apart.
+    """
+    rows = {
+        "the thermal range": f"{v['lo']:.1f} to {v['hi']:.1f} C",
+        "R, the bandwidth change across it": f"{abs(v['R']):.3f} %",
+        "the slope B": f"{v['B']:+.5f} % per C".replace("+", ""),
+        "the 95 % upper bound on its magnitude": f"{v['B_hi']:.5f} % per C",
+        f"the noise floor, {len(v['plateau'])} windows at the plateau":
+            f"{v['floor']:.4f} %",
+        "the shared bins the control used": f"{len(v['both'])}",
+        "the mean phase offset in them":
+            (f"{v['mean_off']:+.3f} %".replace("+", "") if v["mean_off"] is not None
+             else None),
+    }
+    sds = []
+    for k in ("sm", "mem"):
+        xs = [x[k] for x in v["tel"] if x[k] is not None]
+        sds.append(st.stdev(xs) if len(xs) > 1 else 0.0)
+    prose = {"the required sensitivity": f"{v['need_B']:.2f} % per C",
+             "the ratio to the bound": f"{v['need_B'] / v['B_hi']:,.0f}",
+             "how far either clock moved": f"sd {max(sds):.3f}",
+             "the range traversed": f"The range is {v['hi'] - v['lo']:.1f} C"}
+    return rows, prose
+
+
+def pilot_dir() -> pathlib.Path:
+    """The one committed layer A pilot, found rather than written down."""
+    found = sorted(ROOT.glob("v*_pilot_layer_a_*/data/pilot_layer_a_*"))
+    found = [f for f in found if f.is_dir()]
+    if len(found) != 1:
+        raise SystemExit(f"{len(found)} layer A pilot directories, expected one: "
+                         f"{[f.name for f in found]}")
+    return found[0]
+
+
+def checked_figures() -> dict:
+    """The README's rows and prose figures, keyed by document, for the registry."""
+    d = pilot_dir()
+    v = derive(d, say=lambda *a, **k: None)
+    rows, prose = readme_figures(v)
+    doc = str((d.parent.parent / "README.md").relative_to(ROOT))
+    return {doc: {**{k: x for k, x in rows.items() if x is not None}, **prose}}
+
+
+def main() -> int:
+    argv = sys.argv[1:]
+    check_only = "--check" in argv
+    argv = [a for a in argv if a != "--check"]
+    if len(argv) != 1:
+        print(__doc__, file=sys.stderr)
+        return 2
+    d = pathlib.Path(argv[0])
+    if not d.is_dir():
+        print(f"no such directory: {d}", file=sys.stderr)
+        return 2
+    print((d / "manifest.txt").read_text(encoding="utf-8").rstrip()
+          if (d / "manifest.txt").is_file() else "(no manifest)")
+    v = derive(d)
+    tel, spread, both = v["tel"], v["spread"], v["both"]
 
     # resolved, so a relative DIR on the command line does not break the
     # relative_to below -- the one in the message, not the lookup
@@ -348,18 +423,7 @@ def main() -> int:
             cells = [c.strip() for c in line.strip().strip("|").split("|")]
             if len(cells) == 2 and not cells[0].startswith("---"):
                 rows[cells[0]] = cells[1]
-        want_rows = {
-            "the thermal range": f"{lo:.1f} to {hi:.1f} C",
-            "R, the bandwidth change across it": f"{abs(R):.3f} %",
-            "the slope B": f"{B:+.5f} % per C".replace("+", ""),
-            "the 95 % upper bound on its magnitude": f"{B_hi:.5f} % per C",
-            f"the noise floor, {len(plateau)} windows at the plateau":
-                f"{floor:.4f} %",
-            "the shared bins the control used": f"{len(both)}",
-            "the mean phase offset in them":
-                (f"{mean_off:+.3f} %".replace("+", "") if mean_off is not None
-                 else None),
-        }
+        want_rows, want_prose = readme_figures(v)
         bad = []
         for k, v in want_rows.items():
             if v is None:
@@ -371,10 +435,9 @@ def main() -> int:
             if not ok:
                 bad.append(k)
         # and the two the prose carries, which are distinctive enough to find
-        for what, v in (("the required sensitivity", f"{need_B:.2f} % per C"),
-                        ("the ratio to the bound", f"{need_B / B_hi:,.0f}")):
-            ok = v in text
-            print(f"    {'ok     ' if ok else 'MISSING'} {what}: {v}")
+        for what, want in want_prose.items():
+            ok = want in text
+            print(f"    {'ok     ' if ok else 'MISSING'} {what}: {want}")
             if not ok:
                 bad.append(what)
         checks_readme = not bad

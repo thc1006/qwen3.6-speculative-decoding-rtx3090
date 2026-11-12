@@ -148,8 +148,11 @@ EXCLUDED = {
     "v4_audit_2026_08_25/patches/README.md": "provenance note; hashes, not measurements",
     # marked DO NOT POST at the top and never sent: it is a record of claims
     # this repository retracted, and every number in it is quoted from ERRATA
-    # beside the finding that refutes it
-    "pr_comment.md": "a retracted draft, never posted; its numbers are ERRATA's",
+    # beside the finding that refutes it -- except two, the TPOT of 7.620 and
+    # 5.976 ms it quotes from the upstream reporter, which
+    # `analysis/figure_registry.py` found are in no censused document
+    "pr_comment.md": "a retracted draft, never posted; its numbers are ERRATA's, "
+                     "apart from two it quotes from the upstream thread",
 }
 # Each reader is bound to one document, so a header literal only covers a table
 # in THAT document. Matching on the header alone counted a duplicated table in

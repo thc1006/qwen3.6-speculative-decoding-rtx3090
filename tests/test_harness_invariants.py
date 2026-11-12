@@ -16,6 +16,7 @@ import math as _math
 import re
 from collections import Counter
 import importlib.util
+import io
 import itertools
 import json
 import os
@@ -9854,6 +9855,7 @@ class PlanSsReadingMustVerifyTheDesignBeforeItReads(unittest.TestCase):
             # the JSON is strict JSON: no Infinity for the open bands
             json.loads(json.dumps(out, allow_nan=False))
             self.assertAlmostEqual(out["assumed_sd_pct"], 0.760, places=3)
+            self.assertAlmostEqual(out["assumed_effect_sd_pct"], 2.089, places=3)
 
     def test_a_packed_arm_that_is_FASTER_does_not_read_as_support(self):
         m = self._mod()
@@ -10097,6 +10099,15 @@ class PlanSsReadingMustVerifyTheDesignBeforeItReads(unittest.TestCase):
                              "is a second copy of a derived figure")
         finally:
             load_run_power.measured = real
+        import plan_z_power
+        real_d = plan_z_power.design
+        try:
+            plan_z_power.design = lambda: ([], {"sd_effect_pct": 6.789})
+            self.assertEqual(m.assumed_effect_sd_pct(), 6.789,
+                             "the design's second spread did not follow plan Z's "
+                             "derivation of it")
+        finally:
+            plan_z_power.design = real_d
 
     def test_with_no_run_committed_it_exits_zero_and_still_checks_the_plan(self):
         r = subprocess.run([sys.executable, str(self.ROOT / "analysis" /
@@ -10208,3 +10219,400 @@ class TheScheduleIsNotRebuiltAroundACrash(unittest.TestCase):
             self._write(run, "b", 0, 1.0)
             with self.assertRaises(SystemExit):
                 pb.observed_schedule(run)
+
+
+def _analysis(name):
+    """Import an analysis module by name, with `analysis/` on the path."""
+    root = Path(__file__).resolve().parents[1]
+    if str(root / "analysis") not in sys.path:
+        sys.path.insert(0, str(root / "analysis"))
+    return importlib.import_module(name)
+
+
+class EveryProseFigureOutsideTheCensusIsAccountedFor(unittest.TestCase):
+    """`analysis/figure_registry.py --strict` is the guard for the excluded documents.
+
+    A sweep on 2026-10-03 changed one prose decimal at a time outside the census
+    and caught eight of twenty-six. The registry's first run then found plan X
+    quoting run Y's log-ratio defect, fixed in two documents and missed in a
+    third. Every test here breaks one thing the registry is for and requires it
+    to say so, after asserting the unbroken tree is clean.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    @classmethod
+    def setUpClass(cls):
+        cls.fr = _analysis("figure_registry")
+        cls.rep = cls.fr.reported()
+
+    def _tree(self, tmp, edit=None):
+        """A copy of every document in scope and every censused one, edited."""
+        tc = _analysis("table_coverage")
+        for rel in set(self.fr.scope()) | set(tc.DOCS):
+            dst = Path(tmp) / rel
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            dst.write_text((self.ROOT / rel).read_text(encoding="utf-8"),
+                           encoding="utf-8")
+        if edit:
+            rel, old, new = edit
+            p = Path(tmp) / rel
+            t = p.read_text(encoding="utf-8")
+            self.assertEqual(t.count(old), 1, f"{old!r} is not unique in {rel}")
+            p.write_text(t.replace(old, new), encoding="utf-8")
+        return Path(tmp)
+
+    def _audit(self, tmp, **kw):
+        real = self.fr.ROOT
+        try:
+            self.fr.ROOT = tmp
+            return self.fr.audit(kw.pop("rep", self.rep), **kw)
+        finally:
+            self.fr.ROOT = real
+
+    def test_the_tree_is_clean_and_the_scope_is_the_census_exclusions(self):
+        tc = _analysis("table_coverage")
+        self.assertEqual(self.fr.scope(), sorted(tc.EXCLUDED))
+        res = self.fr.audit(self.rep)
+        self.assertEqual(res["problems"], [])
+        bare = {d: r["bare"] for d, r in res["rows"].items() if r["bare"]}
+        self.assertEqual(bare, {})
+        n = sum(len(r["derived"]) for r in res["rows"].values())
+        self.assertGreater(n, 80, f"only {n} figures derived; a registry that "
+                                  f"asks no derivation anything passes vacuously")
+
+    def test_an_edited_figure_is_a_value_nothing_accounts_for(self):
+        with tempfile.TemporaryDirectory() as t:
+            root = self._tree(t, ("v4_audit_2026_08_25/PROSPECTIVE_PLAN_Y_CORE_PINNING.md",
+                                  "Six blocks is 0.34 and", "Six blocks is 0.35 and"))
+            res = self._audit(root)
+        self.assertIn("0.35", res["rows"][
+            "v4_audit_2026_08_25/PROSPECTIVE_PLAN_Y_CORE_PINNING.md"]["bare"])
+
+    def test_an_archived_figure_edited_is_caught_too(self):
+        with tempfile.TemporaryDirectory() as t:
+            root = self._tree(t, ("pr_comment.md", "7.620 ms", "7.621 ms"))
+            res = self._audit(root)
+        self.assertIn("7.621", res["rows"]["pr_comment.md"]["bare"])
+
+    def test_a_cross_document_quote_follows_the_derivation(self):
+        """Plan X's 14.42 is held to rederive_run_y, not to a string."""
+        rep = {m: {d: set(v) for d, v in docs.items()} for m, docs in self.rep.items()}
+        for d in rep["rederive_run_y"].values():
+            d.discard("14.42")
+        for d in rep["plan_siblings_power"].values():
+            d.discard("14.42")
+        res = self.fr.audit(rep)
+        self.assertTrue(any("14.42" in p and "PLAN_X" in p for p in res["problems"]),
+                        f"a quote whose source stopped deriving it was accepted: "
+                        f"{res['problems'][:3]}")
+
+    def test_a_quote_must_still_be_in_its_source(self):
+        acc = {d: dict(v) for d, v in self.fr.ACCOUNTED.items()}
+        acc["v4_audit_2026_08_25/PROSPECTIVE_PLAN_X_HOST_LOAD.md"]["3.5"] = (
+            "quote", "BENCHMARK_ENV.md")
+        res = self.fr.audit(self.rep, acc)
+        self.assertTrue(any("3.5" in p and "does not carry it" in p
+                            for p in res["problems"]), res["problems"][:3])
+
+    def test_a_stale_or_redundant_entry_is_a_problem(self):
+        acc = {d: dict(v) for d, v in self.fr.ACCOUNTED.items()}
+        x = "v4_audit_2026_08_25/PROSPECTIVE_PLAN_X_HOST_LOAD.md"
+        acc[x]["15.6"] = ("underived", "the log-ratio defect's value")
+        acc[x]["139.359"] = ("underived", "a value a derivation already reports")
+        res = self.fr.audit(self.rep, acc)
+        joined = " | ".join(res["problems"])
+        self.assertIn("no longer carries", joined)
+        self.assertIn("already reports", joined)
+
+    def test_strict_fails_on_what_it_reports(self):
+        real = self.fr.audit
+        try:
+            self.fr.audit = lambda *a, **k: {
+                "rows": {"x.md": {"derived": set(), "bare": {"1.23"}}},
+                "problems": []}
+            old_argv = sys.argv
+            sys.argv = ["figure_registry.py", "--strict"]
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(self.fr.main(), 1)
+            sys.argv = ["figure_registry.py"]
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(self.fr.main(), 0)
+        finally:
+            self.fr.audit = real
+            sys.argv = old_argv
+
+    def test_the_claims_job_and_the_gate_run_it_strict(self):
+        wf = (self.ROOT / ".github" / "workflows" / "audit.yml").read_text(
+            encoding="utf-8")
+        self.assertIn("run: python analysis/figure_registry.py --strict",
+                      [l.strip() for l in wf.splitlines()])
+        g = (self.ROOT / "bench" / "ci_faithful.sh").read_text(encoding="utf-8")
+        self.assertIn("python3 analysis/figure_registry.py --strict", g)
+
+
+class EachDerivationChecksWhatItReports(unittest.TestCase):
+    """`checked_figures()` must be what each derivation's own check compares.
+
+    The registry trusts it, so a derivation that reported one list and checked
+    another would make a covered figure guarded by nothing. Each test adds a value
+    the document does not carry to the function both callers share, and requires
+    the derivation's own check to fail on it.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+    WRONG = "9.876 %"
+
+    def _patched(self, mod, fn_name, extra):
+        real = getattr(mod, fn_name)
+
+        def fake(*a, **k):
+            out = dict(real(*a, **k))
+            out["a figure the document does not carry"] = extra
+            return out
+        return real, fake
+
+    def test_plan_z(self):
+        m = _analysis("plan_z_power")
+        real, fake = self._patched(m, "prose_figures", self.WRONG)
+        try:
+            m.prose_figures = fake
+            self.assertTrue(any(self.WRONG in b for b in m.check_doc()))
+            self.assertIn(self.WRONG, m.checked_figures()[m.DOC].values())
+        finally:
+            m.prose_figures = real
+
+    def test_plan_siblings(self):
+        m = _analysis("plan_siblings_power")
+        real, fake = self._patched(m, "prose_figures", self.WRONG)
+        try:
+            m.prose_figures = fake
+            inp = m.inputs()
+            self.assertTrue(any(self.WRONG in b for b in m.check_doc(inp, m.design(inp))))
+            self.assertIn(self.WRONG, m.checked_figures()[m.DOC].values())
+        finally:
+            m.prose_figures = real
+
+    def test_run_y(self):
+        m = _analysis("rederive_run_y")
+        real, fake = self._patched(m, "tel_figures", "9.9")
+        try:
+            m.tel_figures = fake
+            bad = m.check_doc(m.DOCS[1], m.derive(), m.telemetry())
+            self.assertTrue(any("9.9" in b for b in bad), bad[:3])
+            self.assertIn("9.9", m.checked_figures()[m.DOCS[1]].values())
+        finally:
+            m.tel_figures = real
+
+    def test_plan_x(self):
+        m = _analysis("load_run_power")
+        real, fake = self._patched(m, "prose_figures", self.WRONG)
+        try:
+            m.prose_figures = fake
+            bad = m.check_prose(m.PLAN.read_text(encoding="utf-8"))
+            self.assertTrue(any(self.WRONG in b for b in bad), bad)
+            doc = str(m.PLAN.relative_to(m.ROOT))
+            self.assertIn(self.WRONG, m.checked_figures()[doc].values())
+        finally:
+            m.prose_figures = real
+        # and main --check runs it, which a test of the function cannot show
+        src = (self.ROOT / "analysis" / "load_run_power.py").read_text(encoding="utf-8")
+        tree = ast.parse(src)
+        main = next(n for n in tree.body
+                    if isinstance(n, ast.FunctionDef) and n.name == "main")
+        self.assertIn("check_prose(txt)", ast.unparse(main))
+
+    def test_plan_x_reads_a_number_whole(self):
+        m = _analysis("load_run_power")
+        self.assertEqual(m.check_prose("held at 10.12 % and 0.120 %",
+                                       {"x": "0.12 %"}),
+                         ["x is 0.12 % and the plan does not carry it"])
+        self.assertEqual(m.check_prose("held at 0.12 % here", {"x": "0.12 %"}), [])
+        self.assertEqual(m.check_prose("D is −25.309 here", {"d": "-25.309"}), [])
+
+    def test_plan_y_hours_column(self):
+        m = _analysis("rederive_run_y")
+        pp = m.plan_power()
+        self.assertEqual({n: f"{h:.2f}" for n, h in pp["predicted_hours"].items()},
+                         {6: "0.34", 12: "0.68", 18: "1.02"})
+        doc = self.ROOT / m.DOCS[1]
+        text = doc.read_text(encoding="utf-8")
+        old = "| 6 | 0.34 |"
+        self.assertEqual(text.count(old), 1)
+        real = m.ROOT
+        with tempfile.TemporaryDirectory() as t:
+            p = Path(t) / m.DOCS[1]
+            p.parent.mkdir(parents=True)
+            p.write_text(text.replace(old, "| 6 | 0.35 |"), encoding="utf-8")
+            try:
+                m.ROOT = Path(t)
+                bad = m.check_plan_power(pp)
+            finally:
+                m.ROOT = real
+        self.assertTrue(any("hours for 6 blocks" in b for b in bad), bad)
+
+
+class LayerAsReadingHasTestsOfItsOwn(unittest.TestCase):
+    """`analysis/layer_a_slope.py` had none, in the unit job or the mutations.
+
+    The claims job ran its `--check`, so a broken README row would have failed
+    there; nothing showed the check was not decorative. These run it against the
+    committed pilot and against a README with one figure changed.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    def _run(self, readme_edit=None):
+        m = _analysis("layer_a_slope")
+        pilot = m.pilot_dir()
+        with tempfile.TemporaryDirectory() as t:
+            # the pilot directory and its README, at the same relative depth
+            dst = Path(t) / pilot.relative_to(self.ROOT)
+            shutil.copytree(pilot, dst)
+            readme = self.ROOT / pilot.parent.parent / "README.md"
+            text = readme.read_text(encoding="utf-8")
+            if readme_edit:
+                old, new = readme_edit
+                self.assertEqual(text.count(old), 1, f"{old!r} is not unique")
+                text = text.replace(old, new)
+            (dst.parent.parent / "README.md").write_text(text, encoding="utf-8")
+            return subprocess.run(
+                [sys.executable, str(self.ROOT / "analysis" / "layer_a_slope.py"),
+                 "--check", str(dst)], capture_output=True, text=True, timeout=300)
+
+    def test_the_committed_pilot_holds_every_premise(self):
+        r = self._run()
+        self.assertEqual(r.returncode, 0, r.stdout[-1200:] + r.stderr[-600:])
+        self.assertIn("every premise holds", r.stdout)
+
+    def test_a_changed_row_fails(self):
+        r = self._run(("| R, the bandwidth change across it | 0.014 % |",
+                       "| R, the bandwidth change across it | 0.015 % |"))
+        self.assertEqual(r.returncode, 1, r.stdout[-800:])
+        self.assertIn("WRONG", r.stdout)
+
+    def test_a_changed_prose_figure_fails(self):
+        r = self._run(("The range is 17.4 °C", "The range is 17.5 °C"))
+        self.assertEqual(r.returncode, 1, r.stdout[-800:])
+        self.assertIn("MISSING", r.stdout)
+
+    def test_what_it_reports_is_what_it_checks(self):
+        m = _analysis("layer_a_slope")
+        v = m.derive(m.pilot_dir(), say=lambda *a, **k: None)
+        rows, prose = m.readme_figures(v)
+        got = next(iter(m.checked_figures().values()))
+        self.assertEqual(got, {**{k: x for k, x in rows.items() if x is not None},
+                               **prose})
+
+
+class A16HasOneSource(unittest.TestCase):
+    """A16's step and divergence were literals in three scripts, 3.93 and 1.67.
+
+    Each had a comment naming `plan_z_power.py` as the derivation. They ask it now,
+    at the precision every document quotes, so a change in the data reaches all
+    three and a literal reintroduced in any of them is visible here.
+    """
+
+    def test_the_derivation_gives_the_quoted_values(self):
+        z = _analysis("plan_z_power")
+        self.assertEqual(z.a16_quoted(), {"step_pct": 3.93, "divergence_c": 1.67})
+
+    def test_every_consumer_follows_it(self):
+        z = _analysis("plan_z_power")
+        real = z.a16_quoted
+        try:
+            z.a16_quoted = lambda: {"step_pct": 9.99, "divergence_c": 2.5}
+            self.assertEqual(_analysis("plan_siblings_power").a16_step_pct(), 9.99)
+            self.assertEqual(_analysis("rederive_run_y").a16_step_pct(), 9.99)
+            self.assertEqual(_analysis("layer_a_slope").a16(), (9.99, 2.5))
+        finally:
+            z.a16_quoted = real
+
+    def test_the_derivation_follows_the_data(self):
+        z = _analysis("plan_z_power")
+        real = z.step_thermal_state
+        try:
+            z.step_thermal_state = lambda: {"gap_pct": 4.444, "after_delta_c": 0.777}
+            self.assertEqual(z.a16_quoted(), {"step_pct": 4.44, "divergence_c": 0.78})
+        finally:
+            z.step_thermal_state = real
+
+
+class BothQuotesOfTheSuiteSizesAreTheSuites(unittest.TestCase):
+    """The PR body quotes the mutation counts twice, and only one was checked.
+
+    `verify_claims.py` holds "N code and M data perturbations" to the two suites,
+    and is bound to the release tag, so it cannot grow a second assertion. The
+    other quote, "N code and M data and document perturbations", went stale at 73
+    once while the data suite grew to 84, was fixed, and then sat at 94 while the
+    code suite grew past 190. This holds it the way the bound checker holds the
+    first.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    @staticmethod
+    def _n(rel):
+        tree = ast.parse((Path(__file__).resolve().parents[1] / rel).read_text(
+            encoding="utf-8"))
+        for node in tree.body:
+            if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                    and getattr(node.targets[0], "id", None) == "MUTATIONS"):
+                return len(node.value.elts)
+        return None
+
+    def test_both_quotes(self):
+        body = " ".join((self.ROOT / "PULL_REQUEST.md").read_text(
+            encoding="utf-8").split())
+        code, data = self._n("tests/mutate.py"), self._n("tests/data_mutate.py")
+        self.assertGreater(code, 100)
+        for form in (f"{code} code and {data} data perturbations",
+                     f"{code} code and {data} data and document perturbations"):
+            with self.subTest(form=form):
+                self.assertIn(form, body)
+        # and no other count is quoted in either form
+        quoted = set(re.findall(r"(\d+) code and (\d+) data (?:and document )?"
+                                r"perturbations", body))
+        self.assertEqual(quoted, {(str(code), str(data))}, quoted)
+
+
+class RunYsOutputIsIdenticalToTheTokenAndThatIsChecked(unittest.TestCase):
+    """Both run Y documents say the output is identical to the token.
+
+    What checked it was three sums per arm, which two different outputs of the
+    same length can share. The derivation now compares every request's content,
+    reasoning and token ids across the two conditions, and refuses on one
+    difference.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    def test_every_request_matches_in_the_committed_run(self):
+        m = _analysis("rederive_run_y")
+        same = m.outputs_identical()
+        self.assertEqual(set(same), {f for f, _s in m.CONTRASTS})
+        for fast, (n_same, n_fast, n_slow) in same.items():
+            with self.subTest(arm=fast):
+                self.assertEqual((n_same, n_fast, n_slow), (120, 120, 120))
+        self.assertEqual(m.check_outputs(same), [])
+
+    def test_one_changed_token_is_refused(self):
+        m = _analysis("rederive_run_y")
+        with tempfile.TemporaryDirectory() as t:
+            dst = Path(t) / m.RUN.name
+            shutil.copytree(m.RUN, dst)
+            f = dst / "baseline-ecore__rep3.json"
+            j = json.loads(f.read_text(encoding="utf-8"))
+            j["rows"][0]["tokens"] = list(j["rows"][0]["tokens"])
+            j["rows"][0]["tokens"][-1] += 1
+            f.write_text(json.dumps(j), encoding="utf-8")
+            same = m.outputs_identical(dst)
+        self.assertEqual(same["baseline"][0], 119)
+        bad = m.check_outputs(same)
+        self.assertTrue(bad and "baseline" in bad[0], bad)
+
+    def test_main_runs_the_check(self):
+        src = (self.ROOT / "analysis" / "rederive_run_y.py").read_text(encoding="utf-8")
+        main = next(n for n in ast.parse(src).body
+                    if isinstance(n, ast.FunctionDef) and n.name == "main")
+        self.assertIn("check_outputs(same)", ast.unparse(main))

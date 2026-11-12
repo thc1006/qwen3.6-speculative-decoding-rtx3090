@@ -198,15 +198,31 @@ and a Student t interval, which is the estimator run Y used and
 **0.760 %**, and the cost per arm-run is run Y's own: its twelve blocks of four
 arm-runs over the span it recorded.
 
-| blocks | arm-runs | hours | 95 % half width | the step in half widths |
-|---|---:|---:|---:|---:|
-| 6 | 18 | 0.25 | 0.80 % | 5 |
-| **12** | **36** | **0.50** | **0.48 %** | **8** |
-| 18 | 54 | 0.75 | 0.38 % | 10 |
+| blocks | arm-runs | hours | 95 % half width | the step in half widths | under run Y's spread | the step in those |
+|---|---:|---:|---:|---:|---:|---:|
+| 6 | 18 | 0.25 | 0.80 % | 5 | 2.19 % | 2 |
+| **12** | **36** | **0.50** | **0.48 %** | **8** | **1.33 %** | **3** |
+| 18 | 54 | 0.75 | 0.38 % | 10 | 1.04 % | 4 |
 
 Twelve is the choice. Half an hour, and an effect the size of A16's step would be
 eight half widths from zero; six blocks would still see it at five, and eighteen
 buys a tenth of a per cent for another quarter hour.
+
+**The last two columns were added on 2026-11-13, and they are the less
+comfortable reading.** The first three were computed on one spread, the 0.760 %
+run T4's adjacent arm-runs give, which is the right one when the two arms do not
+differ. Plan Z, written the same week, carries a second beside it, because a real
+effect widens the spread and the precision under an effect is the one that
+matters: run Y's own twelve within-block log ratios spread 2.089 %. This plan did
+not, so its table stated only the optimistic precision. Under run Y's spread
+twelve blocks give 1.33 %, the step is three half widths from zero rather than
+eight, and the interval is wider than the null band, so a point estimate inside
+it would come with an interval reaching both neighbours, which the reading section
+reports as reaching them rather than resolving. Twelve stays the choice, because
+it was registered before the first attempt ran and the reading does not depend on
+which spread holds; what twelve buys under each is stated so that a reader does
+not have to work it out, and the derivation reports the observed spread beside
+both.
 
 ## The pre-registered reading
 
