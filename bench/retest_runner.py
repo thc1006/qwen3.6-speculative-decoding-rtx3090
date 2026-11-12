@@ -1155,6 +1155,22 @@ def start_server(extra: list[str], log_path: Path,
     return proc
 
 
+def _argv_int(cmd: list, flag: str) -> int | None:
+    """The integer `flag` takes in `cmd`, or None when `flag` is absent.
+
+    The LAST occurrence, because that is the one llama.cpp's parser keeps. The
+    runner refuses an invocation that would put `--poll` in argv twice, so in
+    practice there is one; reading the last anyway means this reports what the
+    server used even if that refusal is ever removed.
+    """
+    if flag not in cmd:
+        return None
+    i = len(cmd) - 1 - cmd[::-1].index(flag)
+    if i + 1 >= len(cmd):
+        raise ValueError(f"{flag} is the last element of argv and has no value")
+    return int(cmd[i + 1])
+
+
 def _cpus_allowed(pid: int) -> str | None:
     """`Cpus_allowed_list` from the kernel, so the mask is verified not assumed."""
     try:
@@ -1705,8 +1721,14 @@ def run_arm(arm: str, rep: int) -> dict:
             # and 0 for cpu_strict on the build these runs use; an absent
             # FIELD meant nobody had considered it, which is what the first
             # seventy eight runs in this repository look like.
-            "poll": int(POLL) if POLL else None,
-            "cpu_strict": int(CPU_STRICT) if CPU_STRICT else None,
+            # Read out of the argv this server was started with, not out of
+            # BENCH_POLL. Plan S's third arm carries `--poll 0` in its OWN
+            # flags, because BENCH_POLL is per invocation and cannot express
+            # it, and the first version recorded the invocation's value: null
+            # for that arm, which by the definition above says the default of
+            # 50 applied to a server that ran at 0.
+            "poll": _argv_int(proc._cmd, "--poll"),  # type: ignore[attr-defined]
+            "cpu_strict": _argv_int(proc._cmd, "--cpu-strict"),  # type: ignore[attr-defined]
             "server_identity": dict(server_identity(log_path), props=props),
             # Taken per arm-run, not once per run: the run-level hash cannot
             # see a binary replaced between two arms.
@@ -1906,6 +1928,9 @@ def main() -> None:
         # launcher records nothing about the code that answered the requests, so
         # every shared object in the same directory is hashed too.
         "server_lib_sha256": _server_lib_hashes(),
+        # The INVOCATION's setting, BENCH_POLL and BENCH_CPU_STRICT. An arm that
+        # carries its own `--poll` shows it under `arms` below, and each arm-run
+        # records the value its server's argv actually held.
         "poll": int(POLL) if POLL else None,
         "cpu_strict": int(CPU_STRICT) if CPU_STRICT else None,
         "target": TARGET, "target_sha256": sha256(TARGET),

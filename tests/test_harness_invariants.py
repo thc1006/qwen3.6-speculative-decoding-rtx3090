@@ -7496,6 +7496,91 @@ class PlanSsThreeArmsMustFitInOneInvocation(unittest.TestCase):
                              "the arm is refused even without BENCH_POLL, so the "
                              "check fires on the wrong condition")
 
+    def _records(self, out, arms, extra=None):
+        env = dict(os.environ)
+        for k in ("BENCH_POLL", "BENCH_CPU_STRICT", "BENCH_PIN_SUFFIX"):
+            env.pop(k, None)
+        env.update({"LLAMA_SERVER_BIN": str(self.ROOT / "tests" / "fake_llama_server.py"),
+                    "MODEL_TARGET": "/dev/null", "MODEL_DFLASH": "/dev/null",
+                    "BENCH_ARMS": arms, "BENCH_REPEATS": "1",
+                    "BENCH_ORDER": "cyclic", "BENCH_OUT": str(out),
+                    "BENCH_PORT": free_port(), "BENCH_MAX_TOKENS": "8",
+                    "BENCH_FIT": "off"})
+        env.update(extra or {})
+        r = subprocess.run([sys.executable, str(self.ROOT / self.RUNNER)],
+                           env=env, capture_output=True, text=True, timeout=600)
+        self.assertEqual(r.returncode, 0, r.stdout[-1500:] + r.stderr[-1500:])
+        return {j["arm"]: j for j in
+                (json.loads(f.read_text(encoding="utf-8"))
+                 for f in sorted(Path(out).glob("*__rep*.json")))}
+
+    def test_the_record_names_the_poll_the_server_was_given(self):
+        """Read out of the arm-run's argv, never out of BENCH_POLL.
+
+        The record took `int(POLL) if POLL else None`, the invocation's value.
+        The no-poll arm carries `--poll 0` in its own flags precisely because
+        BENCH_POLL cannot express it, so its record said null -- which this
+        runner defines as "the flag was absent and the default of 50 applied" --
+        for a server that ran at 0. Plan S's third condition would have been
+        recorded as its second.
+        """
+        with tempfile.TemporaryDirectory() as d:
+            got = self._records(Path(d) / "out", f"{self.BASE},{self.TWIN}")
+            self.assertIn("--poll", got[self.TWIN]["argv"])
+            self.assertEqual(got[self.TWIN].get("poll"), 0,
+                             "the no-poll arm ran with --poll 0 and its record "
+                             "does not say so")
+            self.assertNotIn("--poll", got[self.BASE]["argv"])
+            self.assertIsNone(got[self.BASE].get("poll"),
+                              "an arm with no --poll in argv is recorded as "
+                              "having one")
+            self.assertIn("poll", got[self.BASE],
+                          "the field is gone, and an absent field is how the "
+                          "first seventy eight runs hid the parameter")
+        # And the invocation-level knob still reaches the record of a plain
+        # arm, read from the same argv rather than echoed from the setting.
+        with tempfile.TemporaryDirectory() as d:
+            got = self._records(Path(d) / "out", self.BASE, {"BENCH_POLL": "10"})
+            self.assertEqual(got[self.BASE].get("poll"), 10)
+
+
+class ArgvIntReadsWhatTheServerKeeps(unittest.TestCase):
+    """`_argv_int` is what an arm-run record says the threadpool ran at.
+
+    llama.cpp's parser keeps the LAST value a repeated flag is given, so a reader
+    that took the first would report the overridden one. The runner refuses an
+    invocation that would repeat `--poll`, which is why this cannot be shown end
+    to end; it is shown here instead, so that refusal is not the only thing
+    standing between the record and the server.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    def _fn(self):
+        os.environ.setdefault("LLAMA_SERVER_BIN", "/bin/true")
+        spec = importlib.util.spec_from_file_location(
+            "rr_argv_int", self.ROOT / "bench" / "retest_runner.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod._argv_int
+
+    def test_the_last_occurrence_wins(self):
+        f = self._fn()
+        self.assertEqual(f(["s", "--poll", "50", "-t", "8", "--poll", "0"],
+                           "--poll"), 0)
+
+    def test_absent_is_none_and_not_zero(self):
+        f = self._fn()
+        self.assertIsNone(f(["s", "-t", "8"], "--poll"))
+        self.assertIsNone(f(["s", "--polling", "3"], "--poll"),
+                          "a different flag that starts with the same letters "
+                          "was read as this one")
+
+    def test_a_flag_with_no_value_is_an_error(self):
+        f = self._fn()
+        with self.assertRaises(ValueError):
+            f(["s", "--poll"], "--poll")
+
 
 class WhatTheServerLoadedMustBeRecordedNotInferred(unittest.TestCase):
     """Hashing a directory answers what is there, not what was loaded.

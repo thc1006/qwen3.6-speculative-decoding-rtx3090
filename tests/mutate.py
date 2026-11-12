@@ -766,6 +766,16 @@ MUTATIONS = [
      "    if POLL and _poll_arms:",
      "    if False:",
      "tests.test_harness_invariants.PlanSsThreeArmsMustFitInOneInvocation.test_a_global_poll_and_a_per_arm_poll_are_refused"),
+    ("the arm-run records the invocation's poll, so the no-poll arm reads as 50",
+     "bench/retest_runner.py",
+     '            "poll": _argv_int(proc._cmd, "--poll"),',
+     '            "poll": int(POLL) if POLL else None,',
+     "tests.test_harness_invariants.PlanSsThreeArmsMustFitInOneInvocation.test_the_record_names_the_poll_the_server_was_given"),
+    ("the argv reader takes the first --poll, not the one the server keeps",
+     "bench/retest_runner.py",
+     "    i = len(cmd) - 1 - cmd[::-1].index(flag)",
+     "    i = cmd.index(flag)",
+     "tests.test_harness_invariants.ArgvIntReadsWhatTheServerKeeps"),
     # --- what the server loaded, not what sat beside it ---------------------
     # Seventy eight runs recorded a hash for every object in the binary's own
     # directory and nothing for the CUDA runtime underneath, which came from a
