@@ -28,6 +28,15 @@
 # memory, or the disk can still be red there. Such a test has to derive what it
 # needs from the host it is on, and say so when the host cannot supply it.
 #
+# Nor the runner's IMAGE. `ubuntu-latest` moved from 24.04 to 26.04 in October
+# 2026, and there `/bin/sleep` is a link into uutils' multi-call binary, which
+# picks the utility from argv[0]. A test that copied it to a file named
+# `llama-server` passed here and on every 24.04 runner, and failed on the first
+# 26.04 one, which was the merge of #6 into master. Running the unit job in an
+# `ubuntu:26.04` container with the CI's interpreter mounted is how it was
+# reproduced; this script does not do that, so a test that leans on what a system
+# binary does with its own name is not covered by a green run here.
+#
 # What it does NOT reproduce is named at the end rather than left for a reader
 # to notice: the `charts` job, which pins 3.13 and so has to be run separately
 # on a 3.13 interpreter, and the evidence workflow, which needs a published
