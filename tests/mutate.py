@@ -94,6 +94,23 @@ MUTATIONS = [
      "                roots = {pid for pid, (_, cmd, _a) in proc.items()\n"
      "                         if any(n in cmd for n in _own)}",
      "tests.test_harness_invariants.TheTelemetryGapA16NamesMustBeReal"),
+    # The test below had no mutation of its own, and master went red on it when
+    # the runner image changed: its stand-in was a copy of `/bin/sleep`, which
+    # on Ubuntu 26.04 is a multi-call binary that dispatches on argv[0] and so
+    # never ran under the name. A guard whose fixture can silently stop
+    # producing the thing it guards needs a mutation to show it still bites.
+    ("ownership walks from init, so a stranger's llama-server counts as ours",
+     "bench/host_guard.py",
+     "        own, stack = set(), [os.getpid()]",
+     "        own, stack = set(), [1]",
+     "tests.test_harness_invariants.AStrangersBenchmarkIsInterferenceNotOurs"
+     ".test_a_process_that_is_not_a_descendant_is_reported"),
+    ("a stranger's llama-server stops being recognised as a benchmark",
+     "bench/host_guard.py",
+     '_BENCH_EXE = ("llama-server", "llama-bench")',
+     '_BENCH_EXE = ("llama-bench",)',
+     "tests.test_harness_invariants.AStrangersBenchmarkIsInterferenceNotOurs"
+     ".test_a_process_that_is_not_a_descendant_is_reported"),
     ("a probe stopped with SIGTERM leaks its worktree again",
      "analysis/table_coverage.py",
      "    _unwind_on_signal(stack)\n",

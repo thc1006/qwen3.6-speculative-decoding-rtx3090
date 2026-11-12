@@ -4893,59 +4893,91 @@ class AStrangersBenchmarkIsInterferenceNotOurs(unittest.TestCase):
     interference. This pins that, because a guard whose direction is only
     asserted in a docstring is a guard whose direction can flip unnoticed.
 
-    Run with a real executable renamed, not a shell script: a `#!/bin/sh` shim
-    has `sh` as argv[0] and would be missed for a reason that has nothing to do
-    with what is being tested. That mistake was made once while writing this.
+    Run with a real executable under the name, not a shell script: a
+    `#!/bin/sh` shim has `sh` as argv[0] and would be missed for a reason that
+    has nothing to do with what is being tested. That mistake was made once
+    while writing this.
+
+    And not a COPY of `/bin/sleep`, which is what this used until the runner
+    image moved to Ubuntu 26.04 and master went red on it. There `/bin/sleep`
+    is uutils' multi-call binary, which picks the utility from argv[0]'s
+    basename, so a copy named `llama-server` printed `coreutils: unknown
+    program 'llama-server'` and exited 1 before anything looked for it. The
+    failure read "the stand-in process did not start", which was true and
+    looked like a timing flake; it was deterministic. A symlink to this
+    interpreter keeps argv[0] the name under test and has no behaviour that
+    depends on it, and CPython resolves the link to find its own prefix.
     """
 
-    def _fake_server(self, tmp):
-        import shutil
-        exe = Path(tmp) / "llama-server"
-        shutil.copy("/bin/sleep", exe)
-        return exe
+    LIFETIME_S = 15
+    DEADLINE_S = 10
+
+    @staticmethod
+    def _argv0(pid):
+        try:
+            raw = Path(f"/proc/{pid}/cmdline").read_bytes()
+        except OSError:
+            return None
+        return raw.split(b"\0", 1)[0].decode("utf-8", "replace")
+
+    def _strangers_named(self, exe):
+        """Pids whose argv[0] IS `exe`. By position: a substring match also
+        finds the `setsid` that named it, before that has exec'd anything."""
+        return [int(d.name) for d in Path("/proc").iterdir()
+                if d.name.isdigit() and self._argv0(d.name) == str(exe)]
+
+    def _kill_and_wait(self, exe):
+        for pid in self._strangers_named(exe):
+            try:
+                os.kill(pid, 9)
+            except ProcessLookupError:
+                pass
+        # Reparented, so not ours to reap: wait for /proc to drop it instead.
+        # A stand-in that outlives this test is a `llama-server` on the host,
+        # and the host guard in the other end-to-end tests is right to refuse
+        # to measure beside one -- which is how this test made two unrelated
+        # ones fail once.
+        end = time.monotonic() + self.DEADLINE_S
+        while self._strangers_named(exe) and time.monotonic() < end:
+            time.sleep(0.05)
 
     def test_a_process_that_is_not_a_descendant_is_reported(self):
         sys.path.insert(0, str(ROOT / "bench"))
         import host_guard as hg
         with tempfile.TemporaryDirectory() as t:
-            exe = self._fake_server(t)
+            exe = Path(t) / "llama-server"
+            exe.symlink_to(sys.executable)
+            self.addCleanup(self._kill_and_wait, exe)
             # `setsid` so the process is REPARENTED away from this one. A plain
             # Popen child is a descendant, which `_own_pids()` is right to treat
             # as ours -- and a first version of this test used one and read the
-            # correct answer as a failure. `setsid` forks when it is already a
-            # group leader, so the sleep ends up under init and is a stranger.
-            # `--fork`, so the setsid process itself exits at once and the
-            # stand-in is reparented. Without it setsid execs into the stand-in
-            # when it is not already a group leader, stays a child of this test,
-            # and the wait below blocks for the stand-in's whole lifetime.
-            # Five seconds, not twenty. A reparented stand-in that outlives its
-            # test is a `llama-server` on the host, and the host guard in the
-            # other end-to-end tests is right to refuse to measure beside one --
-            # which is how this test made two unrelated ones fail once.
-            subprocess.run(["setsid", "--fork", str(exe), "5"],
+            # correct answer as a failure. `--fork`, so the setsid process
+            # itself exits at once and the stand-in is reparented. Without it
+            # setsid execs into the stand-in when it is not already a group
+            # leader, stays a child of this test, and the run below blocks for
+            # the stand-in's whole lifetime.
+            subprocess.run(["setsid", "--fork", str(exe), "-c",
+                            f"import time; time.sleep({self.LIFETIME_S})"],
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                            timeout=10, check=False)
-            time.sleep(0.6)
-            pid = None
-            for d in Path("/proc").iterdir():
-                if not d.name.isdigit():
-                    continue
-                try:
-                    raw = (d / "cmdline").read_bytes().decode("utf-8", "replace")
-                except OSError:
-                    continue
-                if str(exe) in raw:
-                    pid = int(d.name)
-                    break
-            self.assertIsNotNone(pid, "the stand-in process did not start")
-            try:
-                found = hg.measuring_processes()
-                self.assertIn(str(pid), " ".join(found),
-                              f"a stranger's llama-server was not reported: {found}")
-                self.assertNotIn(pid, hg._own_pids(),
-                                 "a stranger's llama-server was counted as ours")
-            finally:
-                os.kill(pid, 9)
+            # Wait for the exec, not for a fixed interval. The fork exists as
+            # soon as `setsid` returns, but until it execs its argv[0] is
+            # `setsid`, and the guard would be asked about the wrong process.
+            end = time.monotonic() + self.DEADLINE_S
+            pids = self._strangers_named(exe)
+            while not pids and time.monotonic() < end:
+                time.sleep(0.05)
+                pids = self._strangers_named(exe)
+            self.assertEqual(len(pids), 1,
+                             f"expected one stand-in named {exe}, found {pids}")
+            pid = pids[0]
+            found = hg.measuring_processes()
+            # The pid is the first field of each entry. Compared whole: pid
+            # 123 must not be satisfied by an entry for pid 1234.
+            self.assertIn(str(pid), [e.split(" ", 1)[0] for e in found],
+                          f"a stranger's llama-server was not reported: {found}")
+            self.assertNotIn(pid, hg._own_pids(),
+                             "a stranger's llama-server was counted as ours")
 
     def test_own_pids_is_descent_only(self):
         """It must not consult a command line at all."""

@@ -590,7 +590,7 @@ python -m unittest discover tests         # 485 regressions for defects shipped 
 python tests/mutate.py                    # break each fix, require its test to fail
 python tests/data_mutate.py               # perturb a measurement or a published
                                           #   figure, require the checker to fail
-                                          #  141 code and 84 data perturbations,
+                                          #  143 code and 84 data perturbations,
                                           #   with a clean-mirror re-check after
                                           #   the last restore
 python analysis/plot_v4_runs.py --check   # charts still match the data
