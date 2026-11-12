@@ -90,7 +90,7 @@ Each differs from the one above it in exactly one thing.
 [`../bench/run_s_siblings.sh`](../bench/run_s_siblings.sh) is the driver, and
 those three names are conditions rather than the runner's. It runs them as
 `spec-dflash-n2`, `spec-dflash-n2-packed` and `spec-dflash-n2-nopoll-packed`,
-twelve blocks of three in mirrored order, all in ONE invocation. That last part
+twelve blocks of three in `latin` order, all in ONE invocation. That last part
 is not a convenience: A16's step is BETWEEN invocations, so an arm measured in
 its own invocation is confounded with the variable this plan exists to isolate.
 `BENCH_POLL` is per invocation and could not express the third condition, so it
@@ -210,16 +210,50 @@ buys a tenth of a per cent for another quarter hour.
 
 ## The pre-registered reading
 
-Primary: the `packed` against `distinct` ratio.
+Primary: the `packed` against `distinct` ratio, as a signed percentage change
+from `distinct` to `packed`. The edges below are written as digits because
+`../analysis/rederive_run_s.py` parses them out of this section: a band that lives
+both here and in a table inside that script is two copies of one reading, and two
+copies drift.
 
-- **Inside ± one per cent**: hyperthread sharing is not the mechanism, and the host
+The first version of this list gave three bands and no direction, and the script
+that implemented it read a `packed` three per cent FASTER as "the candidate
+stands". A gain refutes the mechanism; the omission was here, not only there.
+
+- **Inside -1 % to +1 %**: hyperthread sharing is not the mechanism, and the host
   variable is something else. That is a real outcome and it would send this back to
   the list, not to a bigger version of the same run.
-- **Between one and six per cent**: the size a yielding spin predicts, and A16's
-  step is inside that band. The candidate stands and the next question is the second
-  arm.
-- **Above ten per cent**: too large for a yielding spin. Something is taking the
-  core rather than sharing it, and the reading would be about that instead.
+- **-6 % to -1 %, packed slower**: the size a yielding spin predicts, and A16's
+  step is inside that band. The candidate stands and the next question is the
+  second arm.
+- **Below -10 %**: too large for a yielding spin. Something is taking the core
+  rather than sharing it, and the reading would be about that instead.
+- **Above +1 %, packed FASTER**: not predicted by anything here. Packing four cores
+  cannot speed the main thread up, so a gain of that size means the arms differ in
+  something this design did not control, and the reading is about finding it rather
+  than about the mechanism.
+- Between -10 % and -6 %: no band was reserved, and this says so rather than
+  rounding into a neighbour.
+
+An edge belongs to the band nearer zero, so exactly -1 % and exactly +1 % read as
+the null band, exactly -6 % as the predicted one and exactly -10 % as the gap.
+The rule is the conservative one: a value on an edge is read as the smaller
+finding. The reading is the band of the point estimate. Its 95 % interval is
+reported beside it with every band the interval reaches, and an interval that
+reaches a second band is reported as reaching it rather than resolved into one.
+
+**When this section was revised, and what had been seen by then.** The bands were
+rewritten with digits and a direction on 2026-10-03, after the first attempt at
+this run had been stopped, and sat uncommitted until 2026-11-13, when they were
+committed together with the edge rule and the interval sentence above; the commit
+date is the one a reader can check. What had been seen of that attempt is exactly
+this: the driver's progress lines for its first arm-run, `spec-dflash-n2` in block
+0, which print each request's decode rate, ten of them; and every arm-run's
+`t_start`, read to rebuild the order. No rate of `spec-dflash-n2-packed` or
+`spec-dflash-n2-nopoll-packed` was displayed and no contrast was computed, so no
+revision here could have been fitted to one. The attempt's fifteen arm-runs stay
+on the bench host beside an `ABANDONED.txt` that says why, and nothing in this
+repository is derived from them.
 
 Secondary: `packed-nopoll` against `packed`. If it removes the cost, the spinning
 worker is the mechanism and `--poll 0` is the remedy. If it does not, the reading
@@ -229,8 +263,8 @@ is not the whole cost. It does not say spinning is innocent. The run that could
 say that is one which places the drafter's threads as well, and today the only
 instrument that reaches them is `taskset` with the placement recorded.
 
-I expect `packed` to lose two to five per cent of the decode rate against
-`distinct`, and `--poll 0` to recover part of that. How large a part I will not
+I expect `packed` to lose 2 % to 5 % of the decode rate against `distinct`, and
+`--poll 0` to recover part of that. How large a part I will not
 predict, because the drafter's pool is outside the flag's reach and what share of
 the spinning is the drafter's has not been measured. Writing the first number here
 is the point: if `packed` comes back inside one per cent, this plan was wrong and
@@ -350,7 +384,22 @@ Every line number below is `3737e4137`'s.
    `common_init_result`'s constructor, which the draft context never goes through.
    The flags are accepted and silently ineffective. That is worse than their
    absence, and it is the reason item 2 says `taskset` stays.
-5. **A derivation script**, which exists, and the claims job has to run it.
+5. **CLOSED on 2026-11-13: the derivation runs in the claims job.**
+   [`../analysis/rederive_run_s.py`](../analysis/rederive_run_s.py) verifies the
+   design out of the arm-runs before it derives either contrast, and refuses on
+   any condition the reading depends on: a mask the plan did not assign or the
+   kernel did not grant, two server builds, two library sets beside the binary
+   or two sets of shared objects actually mapped, one server process answering
+   two arm-runs, a thread count that is not the mask's size, a threadpool flag
+   anywhere but `--poll 0` in the third arm, a model, drafter, draft length or
+   prompt set that differs between arms, a request that stopped short of the
+   token cap, a crashed arm-run, a directory the runner did not attest as
+   complete, or a position count that is not balanced. A field that is absent
+   is a refusal, never a pass. The claims job and the local gate both run it.
+   With no run committed it parses the arms, the masks, the block count and the
+   reading's bands out of this document and checks that the bands partition the
+   line, so it has been guarding the reading since the day it was wired in
+   rather than from the day the data lands.
 6. **The binary cannot start on the bench host as it stands.** It needs
    `libcudart.so.12` and `libcublas.so.12`, and its `RUNPATH` is only its own
    build directory. The DRIVER is installed and `ldconfig` knows it:

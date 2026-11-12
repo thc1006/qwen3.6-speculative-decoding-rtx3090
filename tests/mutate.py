@@ -943,6 +943,153 @@ MUTATIONS = [
      "run plan_siblings -- python3 analysis/plan_siblings_power.py\n",
      "",
      "tests.test_harness_invariants.PlanSsArmsMustDifferInOneThingEach.test_the_local_gate_invokes_it_too"),
+    # --- plan S's reading, which printed a verdict and verified nothing -------
+    # Its first version read a packed arm three per cent FASTER as support, and
+    # its second passed the "one server" checks on records that never carried
+    # the field. Each mutation below restores one of those shapes, or removes
+    # one condition the plan registers, and the test named has to fail.
+    ('the reading drops the sign again, so a gain reads as support',
+     'analysis/rederive_run_s.py',
+     '    hits = [text for lo, hi, text in (table or bands()) if in_band(lo, hi, change_pct)]',
+     '    hits = [text for lo, hi, text in (table or bands()) if in_band(lo, hi, -abs(change_pct))]',
+     'tests.test_harness_invariants.PlanSsReadingMustVerifyTheDesignBeforeItReads.'
+     'test_a_packed_arm_that_is_FASTER_does_not_read_as_support'),
+    ('an edge stops going to the band nearer zero',
+     'analysis/rederive_run_s.py',
+     '    return lo <= x < hi if x < 0 else lo < x <= hi',
+     '    return lo <= x < hi',
+     'tests.test_harness_invariants.PlanSsReadingMustVerifyTheDesignBeforeItReads.'
+     'test_the_bands_are_signed_and_an_edge_goes_to_the_band_nearer_zero'),
+    ('a band with no direction is read again',
+     'analysis/rederive_run_s.py',
+     '        "faster": (r"\\*\\*Above \\+(\\d+) %, packed FASTER\\*\\*",',
+     '        "faster": (r"\\*\\*Above \\+(\\d+) %[^*]*\\*\\*",',
+     'tests.test_harness_invariants.PlanSsReadingMustVerifyTheDesignBeforeItReads.'
+     'test_the_edges_are_read_from_the_plan_not_held_here'),
+    ('overlapping bands are read rather than refused',
+     'analysis/rederive_run_s.py',
+     '    if not (big < pred_lo < pred_hi <= null_lo < 0 < null_hi <= fast):',
+     '    if False:',
+     'tests.test_harness_invariants.PlanSsReadingMustVerifyTheDesignBeforeItReads.'
+     'test_the_edges_are_read_from_the_plan_not_held_here'),
+    ('an absent field passes the one-server check, as {None} has one member',
+     'analysis/rederive_run_s.py',
+     '        if missing:\n            bad.append(f"{len(missing)} arm-run(s) carry no usable {field}',
+     '        if False:\n            bad.append(f"{len(missing)} arm-run(s) carry no usable {field}',
+     'tests.test_harness_invariants.PlanSsReadingMustVerifyTheDesignBeforeItReads.'
+     'test_each_registered_condition_is_refused_when_broken'),
+    ("the mask an arm asked for is not compared with the plan's",
+     'analysis/rederive_run_s.py',
+     '        elif req != d["masks"][arm]:',
+     '        elif False:',
+     'tests.test_harness_invariants.PlanSsReadingMustVerifyTheDesignBeforeItReads.'
+     'test_each_registered_condition_is_refused_when_broken'),
+    ('the mask the kernel applied is not compared with the request',
+     'analysis/rederive_run_s.py',
+     '        elif got != req:',
+     '        elif False:',
+     'tests.test_harness_invariants.PlanSsReadingMustVerifyTheDesignBeforeItReads.'
+     'test_each_registered_condition_is_refused_when_broken'),
+    ('the thread count is not checked',
+     'analysis/rederive_run_s.py',
+     '        if r.get("threads") != d["threads"]:',
+     '        if False:',
+     'tests.test_harness_invariants.PlanSsReadingMustVerifyTheDesignBeforeItReads.'
+     'test_each_registered_condition_is_refused_when_broken'),
+    ('what the server actually mapped is not compared',
+     'analysis/rederive_run_s.py',
+     '    one("server_mapped",\n',
+     '    (lambda *a: None)("server_mapped",\n',
+     'tests.test_harness_invariants.PlanSsReadingMustVerifyTheDesignBeforeItReads.'
+     'test_each_registered_condition_is_refused_when_broken'),
+    ('one server process may answer two arm-runs',
+     'analysis/rederive_run_s.py',
+     '    if None in pids or len(set(pids)) != len(pids):',
+     '    if False:',
+     'tests.test_harness_invariants.PlanSsReadingMustVerifyTheDesignBeforeItReads.'
+     'test_each_registered_condition_is_refused_when_broken'),
+    ('two command lines that differ in a model are accepted',
+     'analysis/rederive_run_s.py',
+     '    if len(shapes) > 1:',
+     '    if False:',
+     'tests.test_harness_invariants.PlanSsReadingMustVerifyTheDesignBeforeItReads.'
+     'test_each_registered_condition_is_refused_when_broken'),
+    ('threadpool flags outside the third arm are not looked for',
+     'analysis/rederive_run_s.py',
+     '    left = [a for a in argv if _pool_flag(a)]',
+     '    left = []',
+     'tests.test_harness_invariants.PlanSsReadingMustVerifyTheDesignBeforeItReads.'
+     'test_each_registered_condition_is_refused_when_broken'),
+    ("the third arm's --poll value is not read",
+     'analysis/rederive_run_s.py',
+     '        if len(at) != 1 or at[0] + 1 >= len(argv) or argv[at[0] + 1] != "0":',
+     '        if len(at) != 1 or at[0] + 1 >= len(argv):',
+     'tests.test_harness_invariants.PlanSsReadingMustVerifyTheDesignBeforeItReads.'
+     'test_each_registered_condition_is_refused_when_broken'),
+    ('the recorded poll is not compared with the design',
+     'analysis/rederive_run_s.py',
+     '        elif r["poll"] != (0 if arm == d["nopoll"] else None):',
+     '        elif False:',
+     'tests.test_harness_invariants.PlanSsReadingMustVerifyTheDesignBeforeItReads.'
+     'test_each_registered_condition_is_refused_when_broken'),
+    ('a request that stopped short of the cap is accepted',
+     'analysis/rederive_run_s.py',
+     '                      for x in rows if x.get("predicted_n") != cap]',
+     '                      for x in rows if False]',
+     'tests.test_harness_invariants.PlanSsReadingMustVerifyTheDesignBeforeItReads.'
+     'test_each_registered_condition_is_refused_when_broken'),
+    ('a run the runner did not attest is read',
+     'analysis/rederive_run_s.py',
+     '    if not (run / "RUN_COMPLETE.json").is_file():',
+     '    if False:',
+     'tests.test_harness_invariants.PlanSsReadingMustVerifyTheDesignBeforeItReads.'
+     'test_each_registered_condition_is_refused_when_broken'),
+    ('an unbalanced order is read',
+     'analysis/rederive_run_s.py',
+     '    if not is_position_balanced(sched):',
+     '    if False:',
+     'tests.test_harness_invariants.PlanSsReadingMustVerifyTheDesignBeforeItReads.'
+     'test_each_registered_condition_is_refused_when_broken'),
+    ('the second and third masks may differ in the plan',
+     'analysis/rederive_run_s.py',
+     '    if masks[packed] != masks[nopoll]:',
+     '    if False:',
+     'tests.test_harness_invariants.PlanSsReadingMustVerifyTheDesignBeforeItReads.'
+     'test_the_design_is_read_from_the_plan_not_held_here'),
+    ('the assumed spread is a literal again',
+     'analysis/rederive_run_s.py',
+     '    return load_run_power.measured()["adjacent_diff_sd"]',
+     '    return 0.760',
+     'tests.test_harness_invariants.PlanSsReadingMustVerifyTheDesignBeforeItReads.'
+     'test_the_assumed_spread_is_derived_and_not_a_literal'),
+    ('the JSON carries Infinity for the open bands',
+     'analysis/rederive_run_s.py',
+     '            "bands": [{"lo": lo if math.isfinite(lo) else None,',
+     '            "bands": [{"lo": lo,',
+     'tests.test_harness_invariants.PlanSsReadingMustVerifyTheDesignBeforeItReads.'
+     'test_the_clean_run_meets_every_condition_and_derives'),
+    ('the claims job stops running the plan S reading',
+     '.github/workflows/audit.yml',
+     '        run: python analysis/rederive_run_s.py\n',
+     '',
+     'tests.test_harness_invariants.PlanSsReadingMustVerifyTheDesignBeforeItReads.'
+     'test_the_claims_job_and_the_gate_run_it'),
+    ('the local gate stops running the plan S reading',
+     'bench/ci_faithful.sh',
+     'run rederive_run_s -- python3 analysis/rederive_run_s.py\n',
+     '',
+     'tests.test_harness_invariants.PlanSsReadingMustVerifyTheDesignBeforeItReads.'
+     'test_the_claims_job_and_the_gate_run_it'),
+    ('the schedule is rebuilt around a crashed arm-run again',
+     'analysis/paired_blocks.py',
+     '        if r.get("crashed"):\n            sys.exit(f"{name}: crashed,',
+     '        if False:\n            sys.exit(f"{name}: crashed,',
+     'tests.test_harness_invariants.TheScheduleIsNotRebuiltAroundACrash'),
+    ("the analysis's balanced drifts from the runner's",
+     'analysis/paired_blocks.py',
+     '    if per != int(per) or per < 1:',
+     '    if per != int(per) or per < 2:',
+     'tests.test_harness_invariants.OneDefinitionOfAPositionBalancedSchedule'),
 ]
 
 

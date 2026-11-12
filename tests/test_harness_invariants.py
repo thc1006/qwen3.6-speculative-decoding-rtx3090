@@ -3532,17 +3532,19 @@ class TheSuiteMustRunOnAStockInterpreter(unittest.TestCase):
     def test_no_test_module_imports_anything_third_party(self):
         import ast as _ast
         stdlib = set(sys.stdlib_module_names)
-        # every name here is a module of this repository, imported by a test
-        # that reads it. `mutate` is one: two invariants check the mutation
-        # table's own anchors, which needs the table.
-        allowed = stdlib | {"host_guard", "publish_pr_body", "carryover",
-                            "length_mode", "paired_blocks", "plan_z_power",
-                            "plan_siblings_power", "cpu_siblings",
-                            "rederive_run_y", "rr_under_test", "vram_temp",
-                            "rederive_from_logs", "past_threshold_fit",
-                            "verify_claims", "extract_checkpoint_timers",
-                            "table_coverage", "mutate", "data_mutate",
-                            "figstyle"}
+        # A module of this repository is never third party, so the set is read
+        # off the tree. It was a list typed by hand, and every derivation added
+        # after it failed this test for being new rather than for being
+        # third party: `rederive_run_s` and `load_run_power` did on 2026-11-13.
+        # Only the four directories a test puts on sys.path, and only their top
+        # level, which is where those imports resolve.
+        own = {p.stem for d in ("analysis", "bench", "tests", "tools")
+               for p in (self.ROOT / d).glob("*.py")}
+        self.assertGreater(len(own), 30,
+                           f"only {len(own)} repository modules found; a set "
+                           f"read from the wrong root would excuse nothing and "
+                           f"pass for that reason")
+        allowed = stdlib | own
         offenders = []
         for f in sorted((self.ROOT / "tests").glob("*.py")):
             tree = _ast.parse(f.read_text(encoding="utf-8"))
@@ -9727,3 +9729,482 @@ class ThePortAllocatorMustNotRaceTheKernel(unittest.TestCase):
         self.assertEqual(bare, 0,
                          "a returncode assertion there carries no message, so a "
                          "failure prints nothing again")
+
+
+class PlanSsReadingMustVerifyTheDesignBeforeItReads(unittest.TestCase):
+    """`analysis/rederive_run_s.py` refuses a run that is not the registered design.
+
+    The first version printed a verdict from seven fields and checked none of the
+    design: a `packed` run on the distinct mask passed it. The second checked the
+    design and passed several conditions on ABSENCE, because a set of values that
+    is `{None}` has one member. And its band table dropped the sign, so a packed
+    arm three per cent faster read as "the candidate stands".
+
+    Every test here starts from one synthetic run that meets every condition the
+    plan registers, and breaks exactly one thing. A refusal that fires on the
+    clean run is as much a failure as one that does not fire on the broken one,
+    so the clean run is asserted to derive before anything is broken.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+    TAGS = ["t%d" % i for i in range(10)]
+    CAP = 300
+
+    def _mod(self):
+        sys.path.insert(0, str(self.ROOT / "analysis"))
+        import rederive_run_s
+        return rederive_run_s
+
+    def _run(self, tmp, effect=0.97, nopoll_effect=0.985, mutate=None, n=None):
+        """Write a complete, valid plan S run under `tmp` and return its path.
+
+        `mutate(records, manifest, run_dir)` may change anything before it is
+        written. Rates: distinct varies by block, packed is `effect` of it and
+        nopoll `nopoll_effect` of it, with a small per-block wobble so the
+        interval has a width.
+        """
+        m = self._mod()
+        d = m.design()
+        arms = list(d["arms"])
+        blocks = n or d["blocks"]
+        run = Path(tmp) / "v9_test" / "data" / "matrix_S_siblings_20991231_000000"
+        run.mkdir(parents=True)
+        mapped = {"/opt/lib/libcudart.so.12": {"size": 1, "mtime_ns": 1,
+                                               "inode": 7, "sha256": "c" * 64},
+                  "/b/libggml-cuda.so": {"size": 2, "mtime_ns": 2,
+                                         "inode": 8, "sha256": "g" * 64}}
+        kernel = {d["distinct"]: "0,2,4,6,8,10,12,14",
+                  d["packed"]: "0-5,8-9", d["nopoll"]: "0-5,8-9"}
+        recs = []
+        pid = 1000
+        for k in range(blocks):
+            order = arms[k % 3:] + arms[:k % 3]
+            base_rate = 160.0 + 3.0 * (k % 4)
+            wobble = 1.0 + 0.002 * ((k * 7) % 5 - 2)
+            for pos, arm in enumerate(order):
+                rate = base_rate * {d["distinct"]: 1.0,
+                                    d["packed"]: effect * wobble,
+                                    d["nopoll"]: nopoll_effect / wobble}[arm]
+                mask = ",".join(str(c) for c in sorted(d["masks"][arm]))
+                argv = (["taskset", "-c", mask, "/b/llama-server", "-m", "/m/t.gguf",
+                         "--port", "18131", "-t", "8", "-tb", "8", "-md", "/m/d.gguf",
+                         "--spec-draft-n-max", "2"]
+                        + (["--poll", "0"] if arm == d["nopoll"] else []))
+                t0 = k * 1000.0 + pos * 100.0
+                pid += 1
+                recs.append({
+                    "arm": arm, "repeat": k, "crashed": None,
+                    "cpus_requested": mask, "cpus_allowed": kernel[arm],
+                    "threads": 8, "poll": 0 if arm == d["nopoll"] else None,
+                    "cpu_strict": None, "server_pid": pid,
+                    "server_loaded_commit": "3737e4137",
+                    "server_lib_sha256": {"libllama.so": "a" * 64},
+                    "server_mapped": json.loads(json.dumps(mapped)),
+                    "argv": argv,
+                    "rows": [{"tag": t, "predicted_n": self.CAP,
+                              "predicted_ms": 1000.0 * self.CAP / rate,
+                              "t_start": t0 + i} for i, t in enumerate(self.TAGS)],
+                })
+        man = {"prompt_tags": list(self.TAGS), "max_tokens": self.CAP,
+               "order_mode": "latin"}
+        if mutate:
+            mutate(recs, man, run)
+        for r in recs:
+            fname = r.pop("_file", None) or f"{r['arm']}__rep{r['repeat']}.json"
+            (run / fname).write_text(json.dumps(r), encoding="utf-8")
+        (run / "manifest.json").write_text(json.dumps(man), encoding="utf-8")
+        if not (run / "NO_COMPLETE").exists():
+            (run / "RUN_COMPLETE.json").write_text("{}", encoding="utf-8")
+        return run
+
+    def _refusal(self, mutate, expect):
+        m = self._mod()
+        with tempfile.TemporaryDirectory() as t:
+            run = self._run(t, mutate=mutate)
+            bad, _info = m.conditions(run)
+            joined = " | ".join(bad)
+            self.assertTrue(bad, f"the broken run passed every condition "
+                                 f"(expected one about {expect!r})")
+            self.assertIn(expect, joined,
+                          f"refused, but not for the reason broken: {joined[:600]}")
+            with self.assertRaises(SystemExit):
+                m.derive(run)
+
+    # -- the clean run, first -------------------------------------------------
+
+    def test_the_clean_run_meets_every_condition_and_derives(self):
+        m = self._mod()
+        with tempfile.TemporaryDirectory() as t:
+            run = self._run(t)
+            bad, info = m.conditions(run)
+            self.assertEqual(bad, [], "the clean fixture is refused, so every "
+                                      "refusal test below would pass vacuously")
+            out = m.derive(run)
+            p = out["rows"][0]
+            self.assertAlmostEqual(p["change_pct"], -3.0, delta=0.1)
+            self.assertLess(p["ci_lo_pct"], p["change_pct"])
+            self.assertGreater(p["ci_hi_pct"], p["change_pct"])
+            self.assertEqual(p["df"], 11)
+            self.assertEqual(out["verdict_primary"],
+                             m.verdict(-3.0), "the reading is not the band of "
+                                              "the point estimate")
+            self.assertIn("candidate stands", out["verdict_primary"])
+            self.assertEqual(out["positions"],
+                             {a: {1: 4, 2: 4, 3: 4} for a in m.design()["arms"]})
+            # the JSON is strict JSON: no Infinity for the open bands
+            json.loads(json.dumps(out, allow_nan=False))
+            self.assertAlmostEqual(out["assumed_sd_pct"], 0.760, places=3)
+
+    def test_a_packed_arm_that_is_FASTER_does_not_read_as_support(self):
+        m = self._mod()
+        with tempfile.TemporaryDirectory() as t:
+            out = m.derive(self._run(t, effect=1.03))
+        self.assertGreater(out["rows"][0]["change_pct"], 2.5)
+        self.assertIn("packed faster", out["verdict_primary"])
+        self.assertNotIn("candidate stands", out["verdict_primary"])
+
+    # -- the bands ------------------------------------------------------------
+
+    def test_the_bands_are_signed_and_an_edge_goes_to_the_band_nearer_zero(self):
+        m = self._mod()
+        table = m.bands()
+        want = {-12.0: "too large", -10.0: "between the bands",
+                -6.0: "candidate stands", -3.0: "candidate stands",
+                -1.0: "null band", 0.0: "null band", 1.0: "null band",
+                1.0001: "packed faster", 3.0: "packed faster",
+                -0.9999: "null band", -1.0001: "candidate stands",
+                -6.0001: "between the bands", -10.0001: "too large"}
+        for x, frag in want.items():
+            with self.subTest(change=x):
+                self.assertIn(frag, m.verdict(x, table))
+        with self.assertRaises(ValueError):
+            m.verdict(float("nan"), table)
+
+    def test_an_interval_that_reaches_a_second_band_says_so(self):
+        m = self._mod()
+        table = m.bands()
+        two = m.reached(-1.4, -0.5, table)
+        self.assertEqual(len(two), 2, two)
+        self.assertIn("candidate stands", two[0])
+        self.assertIn("null band", two[1])
+        self.assertEqual(len(m.reached(-3.2, -2.1, table)), 1)
+        # the gap's text appears twice in no table today, but `reached` goes
+        # by position, so an interval across a repeated text is not shortened
+        span = m.reached(-11.0, 2.0, table)
+        self.assertEqual(len(span), len(table))
+
+    def test_the_edges_are_read_from_the_plan_not_held_here(self):
+        m = self._mod()
+        orig = m.PLAN
+        text = orig.read_text(encoding="utf-8")
+        with tempfile.TemporaryDirectory() as t:
+            p = Path(t) / "PLAN.md"
+            try:
+                m.PLAN = p
+                p.write_text(text.replace("**-6 % to -1 %, packed slower**",
+                                          "**-7 % to -1 %, packed slower**", 1),
+                             encoding="utf-8")
+                self.assertIn("candidate stands", m.verdict(-6.5, m.bands()),
+                              "moving the edge in the plan did not move it here")
+                p.write_text(text.replace("**Inside -1 % to +1 %**",
+                                          "**Inside one per cent**", 1),
+                             encoding="utf-8")
+                with self.assertRaises(SystemExit):
+                    m.bands()
+                p.write_text(text.replace("**Above +1 %, packed FASTER**",
+                                          "**Above +1 %**", 1), encoding="utf-8")
+                with self.assertRaises(SystemExit,
+                                       msg="a band with no direction was read"):
+                    m.bands()
+                p.write_text(text.replace("**Below -10 %**", "**Below -4 %**", 1),
+                             encoding="utf-8")
+                with self.assertRaises(SystemExit, msg="overlapping bands read"):
+                    m.bands()
+            finally:
+                m.PLAN = orig
+
+    def test_the_design_is_read_from_the_plan_not_held_here(self):
+        m = self._mod()
+        orig = m.PLAN
+        text = orig.read_text(encoding="utf-8")
+        d = m.design()
+        self.assertEqual(d["masks"][d["distinct"]],
+                         frozenset({0, 2, 4, 6, 8, 10, 12, 14}))
+        self.assertEqual(d["masks"][d["packed"]], frozenset({0, 1, 2, 3, 4, 5, 8, 9}))
+        self.assertEqual(d["masks"][d["nopoll"]], d["masks"][d["packed"]])
+        self.assertEqual((d["blocks"], d["threads"]), (12, 8))
+        with tempfile.TemporaryDirectory() as t:
+            p = Path(t) / "PLAN.md"
+            try:
+                m.PLAN = p
+                p.write_text(text.replace("| `packed-nopoll` | `0,1,2,3,4,5,8,9` |",
+                                          "| `packed-nopoll` | `0,1,2,3,4,5,6,7` |", 1),
+                             encoding="utf-8")
+                with self.assertRaises(SystemExit):
+                    m.design()
+                p.write_text(text.replace("| **12** | **36** |", "| **12** | **35** |",
+                                          1), encoding="utf-8")
+                with self.assertRaises(SystemExit):
+                    m.design()
+            finally:
+                m.PLAN = orig
+
+    # -- one condition broken at a time -------------------------------------
+
+    def test_each_registered_condition_is_refused_when_broken(self):
+        m = self._mod()
+        d = m.design()
+        D, P, N = d["distinct"], d["packed"], d["nopoll"]
+
+        def first(recs, arm):
+            return next(r for r in recs if r["arm"] == arm)
+
+        def drop(field):
+            def f(recs, man, run):
+                for r in recs:
+                    r.pop(field, None)
+            return f
+
+        def set1(arm, field, value):
+            def f(recs, man, run):
+                first(recs, arm)[field] = value
+            return f
+
+        def argv_swap(arm, old, new):
+            def f(recs, man, run):
+                a = first(recs, arm)["argv"]
+                a[a.index(old)] = new
+            return f
+
+        cases = [
+            ("packed asked for the distinct mask",
+             lambda recs, man, run: [r.update(cpus_requested="0,2,4,6,8,10,12,14",
+                                              cpus_allowed="0,2,4,6,8,10,12,14",
+                                              argv=["taskset", "-c",
+                                                    "0,2,4,6,8,10,12,14"]
+                                              + r["argv"][3:])
+                                     for r in recs if r["arm"] == P],
+             "the plan assigns it"),
+            ("the kernel narrowed a mask", set1(D, "cpus_allowed", "0,2,4,6"),
+             "the kernel gave"),
+            ("cpus_allowed never read back", set1(D, "cpus_allowed", None),
+             "no cpus_allowed"),
+            ("a thread count that is not the mask's size", set1(P, "threads", 7),
+             "threads 7"),
+            ("no server_loaded_commit anywhere", drop("server_loaded_commit"),
+             "no usable server_loaded_commit"),
+            ("two server builds", set1(N, "server_loaded_commit", "deadbeef"),
+             "different values of server_loaded_commit"),
+            ("no library hashes anywhere", drop("server_lib_sha256"),
+             "no usable server_lib_sha256"),
+            ("a library swapped between arms",
+             set1(P, "server_lib_sha256", {"libllama.so": "b" * 64}),
+             "different values of server_lib_sha256"),
+            ("nothing recorded as mapped", drop("server_mapped"),
+             "no usable server_mapped"),
+            ("the mapping could not be read",
+             set1(D, "server_mapped", {"error": "unreadable"}),
+             "no usable server_mapped"),
+            ("a different CUDA runtime mapped in one arm-run",
+             lambda recs, man, run: first(recs, N)["server_mapped"][
+                 "/opt/lib/libcudart.so.12"].update(sha256="d" * 64),
+             "different values of server_mapped"),
+            ("one server answered two arm-runs",
+             lambda recs, man, run: first(recs, P).update(
+                 server_pid=first(recs, D)["server_pid"]),
+             "server_pid is missing or repeats"),
+            ("a different model in one arm-run",
+             argv_swap(P, "/m/t.gguf", "/m/other.gguf"),
+             "different server command lines"),
+            ("a different draft length in one arm-run",
+             argv_swap(D, "2", "3"), "different server command lines"),
+            ("--poll 0 on the packed arm",
+             lambda recs, man, run: first(recs, P)["argv"].extend(["--poll", "0"]),
+             "threadpool flags"),
+            ("the third arm without --poll 0",
+             lambda recs, man, run: [r["argv"].__delitem__(slice(-2, None))
+                                     for r in recs if r["arm"] == N],
+             "must carry `--poll 0` exactly once"),
+            ("the third arm at --poll 1",
+             lambda recs, man, run: [r["argv"].__setitem__(-1, "1")
+                                     for r in recs if r["arm"] == N],
+             "must carry `--poll 0` exactly once"),
+            ("a batch-pool flag nobody registered",
+             lambda recs, man, run: [r["argv"].extend(["--poll-batch", "0"])
+                                     for r in recs],
+             "threadpool flags"),
+            ("the record says 50 for the arm that ran at 0",
+             set1(N, "poll", None), "`poll` is None"),
+            ("no poll field at all", drop("poll"), "no `poll` field"),
+            ("taskset was handed a different mask than recorded",
+             lambda recs, man, run: first(recs, D)["argv"].__setitem__(2, "0,2"),
+             "taskset was given"),
+            ("a prompt missing from one arm-run",
+             lambda recs, man, run: first(recs, D)["rows"].pop(),
+             "against the manifest's"),
+            ("a request that stopped short of the cap",
+             lambda recs, man, run: first(recs, P)["rows"][0].update(predicted_n=287),
+             "did not generate the cap"),
+            ("no token cap in the manifest",
+             lambda recs, man, run: man.pop("max_tokens"),
+             "names no prompt set or token cap"),
+            ("a crashed arm-run",
+             set1(N, "crashed", {"tag": "__startup__", "error": "x"}),
+             "marked crashed"),
+            ("no RUN_COMPLETE.json",
+             lambda recs, man, run: (run / "NO_COMPLETE").write_text(""),
+             "no RUN_COMPLETE.json"),
+            ("the abandoned marker",
+             lambda recs, man, run: (run / "ABANDONED.txt").write_text("stopped"),
+             "ABANDONED.txt"),
+            ("the same order in every block, whatever the label says",
+             lambda recs, man, run: [
+                 x.update(t_start=r["repeat"] * 1000.0
+                          + {D: 0, P: 100, N: 200}[r["arm"]] + i)
+                 for r in recs for i, x in enumerate(r["rows"])],
+             "not balanced"),
+            ("an arm the plan does not name",
+             lambda recs, man, run: first(recs, D).update(arm="baseline"),
+             "the plan's are"),
+            ("a block missing for one arm",
+             lambda recs, man, run: recs.remove(first(recs, P)),
+             "not each of the 12 once"),
+            ("two files claiming one cell",
+             lambda recs, man, run: recs.append(
+                 {**json.loads(json.dumps(first(recs, P))),
+                  "_file": f"{P}__rep0b.json"}),
+             "two files claim one cell"),
+        ]
+        for name, mutate, expect in cases:
+            with self.subTest(name):
+                self._refusal(mutate, expect)
+
+    # -- what it shares with the rest of the repository ---------------------
+
+    def test_the_assumed_spread_is_derived_and_not_a_literal(self):
+        """A literal 0.760 returns the same value as the derivation does today.
+
+        So the value cannot tell them apart. What can is replacing the
+        derivation: a literal ignores it.
+        """
+        m = self._mod()
+        import load_run_power
+        real = load_run_power.measured
+        try:
+            load_run_power.measured = lambda: {"adjacent_diff_sd": 1.2345}
+            self.assertEqual(m.assumed_sd_pct(), 1.2345,
+                             "the spread did not follow load_run_power, so it "
+                             "is a second copy of a derived figure")
+        finally:
+            load_run_power.measured = real
+
+    def test_with_no_run_committed_it_exits_zero_and_still_checks_the_plan(self):
+        r = subprocess.run([sys.executable, str(self.ROOT / "analysis" /
+                                                "rederive_run_s.py")],
+                           capture_output=True, text=True, timeout=120,
+                           cwd=self.ROOT)
+        self.assertEqual(r.returncode, 0, r.stdout[-800:] + r.stderr[-800:])
+        self.assertIn("bands partition the line", r.stdout)
+
+    def test_the_claims_job_and_the_gate_run_it(self):
+        wf = (self.ROOT / ".github" / "workflows" / "audit.yml").read_text(
+            encoding="utf-8")
+        self.assertIn("run: python analysis/rederive_run_s.py",
+                      [l.strip() for l in wf.splitlines()],
+                      "no job runs the plan S reading, so the bands it parses "
+                      "and the design it checks are guarded by nothing")
+        g = (self.ROOT / "bench" / "ci_faithful.sh").read_text(encoding="utf-8")
+        self.assertIn("python3 analysis/rederive_run_s.py", g,
+                      "the gate reproduces the claims job and this step is "
+                      "missing from it")
+
+
+class OneDefinitionOfAPositionBalancedSchedule(unittest.TestCase):
+    """The runner and the analysis each hold `is_position_balanced`.
+
+    The analysis cannot import the runner, which reads its environment at import
+    and refuses without a server binary, so the copy is deliberate. What is not
+    acceptable is two definitions: they disagreed once already, the runner
+    accepting a two-arm, four-repeat schedule as balanced and the analysis
+    reporting it unbalanced, which CHANGELOG records. So the two bodies are
+    compared as code, docstrings aside.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    def _body(self, rel):
+        src = (self.ROOT / rel).read_text(encoding="utf-8")
+        fn = next(n for n in ast.walk(ast.parse(src))
+                  if isinstance(n, ast.FunctionDef)
+                  and n.name == "is_position_balanced")
+        body = fn.body
+        if (body and isinstance(body[0], ast.Expr)
+                and isinstance(getattr(body[0], "value", None), ast.Constant)
+                and isinstance(body[0].value.value, str)):
+            body = body[1:]
+        return [ast.dump(s) for s in body]
+
+    def test_the_two_bodies_are_the_same_code(self):
+        a = self._body("bench/retest_runner.py")
+        b = self._body("analysis/paired_blocks.py")
+        self.assertTrue(a, "the runner's definition is empty or gone")
+        self.assertEqual(a, b, "the runner and the analysis define a balanced "
+                               "schedule differently, so a run the runner "
+                               "accepts can be refused by the reading, or the "
+                               "reverse")
+
+
+class TheScheduleIsNotRebuiltAroundACrash(unittest.TestCase):
+    """`observed_schedule` refuses a crashed arm-run instead of renumbering.
+
+    It skipped an arm-run with no rows and kept a crashed one that had some,
+    while `load_blocks` drops every crashed one: the positions and the rates
+    described two different sets of arm-runs. And skipping is itself wrong, since
+    every arm after the gap moves up a place.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    def _pb(self):
+        sys.path.insert(0, str(self.ROOT / "analysis"))
+        import paired_blocks
+        return paired_blocks
+
+    def _write(self, run, arm, rep, t0, crashed=None, rows=True):
+        rec = {"arm": arm, "repeat": rep, "crashed": crashed,
+               "rows": ([{"predicted_n": 10, "predicted_ms": 100.0,
+                          "t_start": t0}] if rows else [])}
+        (run / f"{arm}__rep{rep}.json").write_text(json.dumps(rec),
+                                                   encoding="utf-8")
+
+    def test_a_clean_run_is_rebuilt(self):
+        pb = self._pb()
+        with tempfile.TemporaryDirectory() as t:
+            run = Path(t)
+            for rep in range(2):
+                for i, arm in enumerate(["a", "b"] if rep == 0 else ["b", "a"]):
+                    self._write(run, arm, rep, rep * 100 + i)
+            pos, n = pb.observed_schedule(run)
+            self.assertEqual(pos, {"a": [1, 2], "b": [2, 1]})
+            self.assertEqual(n, 2)
+
+    def test_a_crash_is_refused_with_or_without_rows(self):
+        pb = self._pb()
+        for rows in (True, False):
+            with self.subTest(rows=rows), tempfile.TemporaryDirectory() as t:
+                run = Path(t)
+                self._write(run, "a", 0, 0.0, crashed={"tag": "__startup__"},
+                            rows=rows)
+                self._write(run, "b", 0, 1.0)
+                with self.assertRaises(SystemExit) as cm:
+                    pb.observed_schedule(run)
+                self.assertIn("a__rep0.json", str(cm.exception))
+
+    def test_a_record_with_no_timestamps_is_refused(self):
+        pb = self._pb()
+        with tempfile.TemporaryDirectory() as t:
+            run = Path(t)
+            self._write(run, "a", 0, 0.0, rows=False)
+            self._write(run, "b", 0, 1.0)
+            with self.assertRaises(SystemExit):
+                pb.observed_schedule(run)

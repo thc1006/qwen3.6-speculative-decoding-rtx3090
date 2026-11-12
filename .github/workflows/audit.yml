@@ -248,6 +248,15 @@ jobs:
         # per-arm-run cost, so the hours and the half widths are measured rather than
         # guessed, and the script compares them to the document row by row.
         run: python analysis/plan_siblings_power.py
+      - name: plan S's reading verifies its design before it reads
+        # The analysis the plan pledged, wired in before its data exists. With
+        # no run committed it parses the plan's bands and checks that they
+        # partition the line; with one it refuses any arm-run whose mask, server,
+        # argv, poll, prompts or position differ from what the plan registered,
+        # and only then derives the two contrasts. Its first version printed a
+        # verdict from seven fields and read a packed arm three per cent FASTER
+        # as support for the hypothesis.
+        run: python analysis/rederive_run_s.py
       - name: plan Z's premises and design table are what the committed data says
         # A pre-registration that quotes the recorded state on both sides of A16's
         # step, and the reason run T4's trace cannot be attributed to an arm-run,
