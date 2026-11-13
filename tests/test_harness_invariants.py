@@ -14,6 +14,9 @@ from __future__ import annotations
 import ast
 import math as _math
 import re
+from collections import Counter
+import importlib.util
+import io
 import itertools
 import json
 import os
@@ -27,6 +30,7 @@ import tarfile
 import tempfile
 import time
 import unittest
+from unittest import mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -60,6 +64,12 @@ sys.path.insert(0, str(ROOT / "analysis"))
 _PORT_SEQ = itertools.count()
 
 
+# 20000 to 31999: BELOW the kernel's ephemeral floor, which is 32768 on this host
+# and 32768 by default everywhere. `_free_port_range_is_below_the_ephemeral_floor`
+# checks that against /proc rather than against this comment.
+_PORT_LO, _PORT_SPAN = 20000, 12000
+
+
 def free_port() -> str:
     """A free port, disjoint from any other process running this suite.
 
@@ -67,13 +77,21 @@ def free_port() -> str:
     server could not bind and the first run's requests reached the wrong
     process. Binding port 0 and closing it does not fix that either - the kernel
     can hand the same ephemeral port to the other process in the window before
-    the stub binds it, and with two suites running that happened often enough to
-    hang both. So: a base derived from this process's PID, outside the ephemeral
-    range, plus a counter, with the port confirmed unused before it is returned.
+    the stub binds it. So: a base derived from this process's PID, plus a counter,
+    with the port confirmed unused before it is returned.
+
+    And BELOW the ephemeral range, which the previous version said it was and was
+    not: it returned ports in [20000, 59999] while the kernel assigns [32768,
+    60999] to outbound connections, so 68 % of what it handed out could be taken by
+    any connection -- including the suite's own requests to the stub it was about to
+    start. The confirm-then-return window cannot be closed by checking harder; it is
+    closed by picking from a range the kernel will not assign. The symptom was one
+    test failing about one run in three under concurrent load, with a bare
+    `assertEqual(returncode, 0)` that printed nothing.
     """
-    base = 20000 + (os.getpid() * 97) % 30000
+    base = (os.getpid() * 97) % _PORT_SPAN
     for _ in range(200):
-        port = 20000 + (base + next(_PORT_SEQ)) % 40000
+        port = _PORT_LO + (base + next(_PORT_SEQ)) % _PORT_SPAN
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sk:
             sk.settimeout(0.3)
             if sk.connect_ex(("127.0.0.1", port)) != 0:
@@ -1111,6 +1129,29 @@ class TheMutationRunnerNeverTouchesTheRealTree(unittest.TestCase):
             self.fail(f"writes into the real tree: {w}")
 
 
+
+    def test_no_perturbation_can_leave_stale_bytecode_for_the_next(self):
+        """One mirror, applied and restored: a cached .pyc must not outlive it.
+
+        Python accepts a .pyc whose recorded source size and whole-second mtime
+        match. A same-size perturbation whose test ends inside the second it was
+        written leaves its bytecode valid for the restored file, so every later
+        test in the run imports the perturbed module. Eleven perturbations here
+        are same-size edits to Python files.
+        """
+        src = (Path(__file__).resolve().parents[1] / "tests" / "mutate.py").read_text(
+            encoding="utf-8")
+        main = next(n for n in ast.parse(src).body
+                    if isinstance(n, ast.FunctionDef) and n.name == "main")
+        body = ast.unparse(main)
+        self.assertIn("PYTHONDONTWRITEBYTECODE='1'", body)
+        run = [n for n in ast.walk(main) if isinstance(n, ast.Call)
+               and ast.unparse(n.func) == "subprocess.run"]
+        self.assertTrue(run)
+        for c in run:
+            self.assertIn("env", [k.arg for k in c.keywords],
+                          "a perturbation's test runs with the parent's environment")
+
 class WhatAnsweredMustHaveLoadedTheRightModel(unittest.TestCase):
     """argv says what was asked for. The manifest recorded that and nothing
     else: the log-line pattern for the model path was `loaded meta data from`,
@@ -1564,7 +1605,13 @@ class BothModesMustFitInOneInvocation(unittest.TestCase):
     def test_the_capped_arm_runs_the_base_arms_flags(self):
         with tempfile.TemporaryDirectory() as t:
             out = Path(t) / "flags"
-            self.assertEqual(self._run(out, "baseline,baseline-cap").returncode, 0)
+            r = self._run(out, "baseline,baseline-cap")
+            # the output, because this assertion carried no message and a failure
+            # printed nothing: it took a loop under load to find out that the port
+            # the suite had just confirmed free had been taken by an outbound
+            # connection from the suite itself
+            self.assertEqual(r.returncode, 0, (r.stdout or "")[-1200:]
+                             + (r.stderr or "")[-1200:])
             man = json.loads((out / "manifest.json").read_text())
             self.assertEqual(man["arms"]["baseline-cap"], man["arms"]["baseline"])
             self.assertEqual(man["hardcap_suffix"], "-cap")
@@ -2274,19 +2321,39 @@ class EveryPerturbationAnchorMustResolve(unittest.TestCase):
             git_tests[c.name] = sorted(
                 f.name for f in c.body
                 if isinstance(f, _ast.FunctionDef) and f.name.startswith("test")
+                # this method names "git" and "ls-files" in order to look for
+                # them, and runs neither
+                and f.name != "test_no_anchor_names_a_class_that_cannot_pass_in_the_mirror"
                 and reads_git(f))
         self.assertTrue(any(git_tests.values()),
                         "no git-reading test found at all; this proves nothing")
+        # The guard is shown to fire first, on a method anchor it once skipped.
+        probe = ("probe", "", "", "", "tests.test_harness_invariants."
+                 "PlanSsArmsMustDifferInOneThingEach.test_the_prerequisites_are_still_unsatisfied")
+        self.assertIn("test_the_prerequisites_are_still_unsatisfied",
+                      git_tests.get("PlanSsArmsMustDifferInOneThingEach", []),
+                      "the probe's method no longer reads git; pick another")
         bad = []
-        for name, _rel, _c, _d, test in mutate.MUTATIONS:
+        for name, _rel, _c, _d, test in [probe, *mutate.MUTATIONS]:
             parts = test.split(".")
             if "test_harness_invariants" not in parts:
                 continue
             rest = parts[parts.index("test_harness_invariants") + 1:]
-            if len(rest) != 1:
+            # A class, or a class and one method. The first version skipped the
+            # second form, which is most of the list, and two mutations anchored
+            # on a git-reading METHOD went on reporting "caught" in a mirror
+            # where that method fails with or without them.
+            if len(rest) == 1:
+                hits = git_tests.get(rest[0], [])
+            elif len(rest) == 2:
+                hits = [rest[1]] if rest[1] in git_tests.get(rest[0], []) else []
+            else:
                 continue
-            for meth in git_tests.get(rest[0], []):
+            for meth in hits:
                 bad.append(f"{name!r} -> {rest[0]}.{meth}")
+        self.assertTrue(bad and bad[0].startswith("'probe'"),
+                        "a mutation anchored on a git-reading method was not seen")
+        bad = bad[1:]
         self.assertEqual(sorted(bad), [],
                          "these mutations anchor on a class holding a test that "
                          "reads git, and the mirror they run in has none, so the "
@@ -3159,11 +3226,21 @@ class TheRerunScriptsMustBehaveWithAFakeRunner(unittest.TestCase):
         server.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
         server.chmod(0o755)
         (bench / "retest_runner.py").write_text(runner_body, encoding="utf-8")
-        # exits at once: a stub that sleeps inherits stdout and holds the pipe
-        # open, so `capture_output` waits for it and the test hangs rather than
-        # testing anything. The driver's trap tolerates an already-dead sampler.
+        # It used to exit at once, for a real reason: a stub that sleeps inherits
+        # stdout and holds the pipe open, so `capture_output` waits for it and the
+        # test hangs. But a sampler that exits at once is the DEFECT the drivers now
+        # refuse -- a run whose telemetry went nowhere and said nothing -- so a stub
+        # that does it tests the opposite of what is wanted. It behaves like a
+        # sampler instead: writes the trace the driver named, then closes the
+        # inherited pipe with `exec` before sleeping, so nothing waits on it.
         (bench / "gpu_telemetry.sh").write_text(
-            "#!/bin/sh\necho stub telemetry\n", encoding="utf-8")
+            "#!/bin/sh\n"
+            'if [ -n "${BENCH_TELEMETRY_OUT:-}" ]; then\n'
+            '  printf \'ts,stub\\n1,2\\n\' > "$BENCH_TELEMETRY_OUT"\n'
+            "fi\n"
+            "echo stub telemetry\n"
+            "exec >/dev/null 2>&1\n"
+            "exec sleep 120\n", encoding="utf-8")
         return bench
 
     def _run(self, script: str, bench: Path, env_extra=None):
@@ -3500,16 +3577,19 @@ class TheSuiteMustRunOnAStockInterpreter(unittest.TestCase):
     def test_no_test_module_imports_anything_third_party(self):
         import ast as _ast
         stdlib = set(sys.stdlib_module_names)
-        # every name here is a module of this repository, imported by a test
-        # that reads it. `mutate` is one: two invariants check the mutation
-        # table's own anchors, which needs the table.
-        allowed = stdlib | {"host_guard", "publish_pr_body", "carryover",
-                            "length_mode", "paired_blocks", "plan_z_power",
-                            "rederive_run_y", "rr_under_test", "vram_temp",
-                            "rederive_from_logs", "past_threshold_fit",
-                            "verify_claims", "extract_checkpoint_timers",
-                            "table_coverage", "mutate", "data_mutate",
-                            "figstyle"}
+        # A module of this repository is never third party, so the set is read
+        # off the tree. It was a list typed by hand, and every derivation added
+        # after it failed this test for being new rather than for being
+        # third party: `rederive_run_s` and `load_run_power` did on 2026-11-13.
+        # Only the four directories a test puts on sys.path, and only their top
+        # level, which is where those imports resolve.
+        own = {p.stem for d in ("analysis", "bench", "tests", "tools")
+               for p in (self.ROOT / d).glob("*.py")}
+        self.assertGreater(len(own), 30,
+                           f"only {len(own)} repository modules found; a set "
+                           f"read from the wrong root would excuse nothing and "
+                           f"pass for that reason")
+        allowed = stdlib | own
         offenders = []
         for f in sorted((self.ROOT / "tests").glob("*.py")):
             tree = _ast.parse(f.read_text(encoding="utf-8"))
@@ -4860,59 +4940,91 @@ class AStrangersBenchmarkIsInterferenceNotOurs(unittest.TestCase):
     interference. This pins that, because a guard whose direction is only
     asserted in a docstring is a guard whose direction can flip unnoticed.
 
-    Run with a real executable renamed, not a shell script: a `#!/bin/sh` shim
-    has `sh` as argv[0] and would be missed for a reason that has nothing to do
-    with what is being tested. That mistake was made once while writing this.
+    Run with a real executable under the name, not a shell script: a
+    `#!/bin/sh` shim has `sh` as argv[0] and would be missed for a reason that
+    has nothing to do with what is being tested. That mistake was made once
+    while writing this.
+
+    And not a COPY of `/bin/sleep`, which is what this used until the runner
+    image moved to Ubuntu 26.04 and master went red on it. There `/bin/sleep`
+    is uutils' multi-call binary, which picks the utility from argv[0]'s
+    basename, so a copy named `llama-server` printed `coreutils: unknown
+    program 'llama-server'` and exited 1 before anything looked for it. The
+    failure read "the stand-in process did not start", which was true and
+    looked like a timing flake; it was deterministic. A symlink to this
+    interpreter keeps argv[0] the name under test and has no behaviour that
+    depends on it, and CPython resolves the link to find its own prefix.
     """
 
-    def _fake_server(self, tmp):
-        import shutil
-        exe = Path(tmp) / "llama-server"
-        shutil.copy("/bin/sleep", exe)
-        return exe
+    LIFETIME_S = 15
+    DEADLINE_S = 10
+
+    @staticmethod
+    def _argv0(pid):
+        try:
+            raw = Path(f"/proc/{pid}/cmdline").read_bytes()
+        except OSError:
+            return None
+        return raw.split(b"\0", 1)[0].decode("utf-8", "replace")
+
+    def _strangers_named(self, exe):
+        """Pids whose argv[0] IS `exe`. By position: a substring match also
+        finds the `setsid` that named it, before that has exec'd anything."""
+        return [int(d.name) for d in Path("/proc").iterdir()
+                if d.name.isdigit() and self._argv0(d.name) == str(exe)]
+
+    def _kill_and_wait(self, exe):
+        for pid in self._strangers_named(exe):
+            try:
+                os.kill(pid, 9)
+            except ProcessLookupError:
+                pass
+        # Reparented, so not ours to reap: wait for /proc to drop it instead.
+        # A stand-in that outlives this test is a `llama-server` on the host,
+        # and the host guard in the other end-to-end tests is right to refuse
+        # to measure beside one -- which is how this test made two unrelated
+        # ones fail once.
+        end = time.monotonic() + self.DEADLINE_S
+        while self._strangers_named(exe) and time.monotonic() < end:
+            time.sleep(0.05)
 
     def test_a_process_that_is_not_a_descendant_is_reported(self):
         sys.path.insert(0, str(ROOT / "bench"))
         import host_guard as hg
         with tempfile.TemporaryDirectory() as t:
-            exe = self._fake_server(t)
+            exe = Path(t) / "llama-server"
+            exe.symlink_to(sys.executable)
+            self.addCleanup(self._kill_and_wait, exe)
             # `setsid` so the process is REPARENTED away from this one. A plain
             # Popen child is a descendant, which `_own_pids()` is right to treat
             # as ours -- and a first version of this test used one and read the
-            # correct answer as a failure. `setsid` forks when it is already a
-            # group leader, so the sleep ends up under init and is a stranger.
-            # `--fork`, so the setsid process itself exits at once and the
-            # stand-in is reparented. Without it setsid execs into the stand-in
-            # when it is not already a group leader, stays a child of this test,
-            # and the wait below blocks for the stand-in's whole lifetime.
-            # Five seconds, not twenty. A reparented stand-in that outlives its
-            # test is a `llama-server` on the host, and the host guard in the
-            # other end-to-end tests is right to refuse to measure beside one --
-            # which is how this test made two unrelated ones fail once.
-            subprocess.run(["setsid", "--fork", str(exe), "5"],
+            # correct answer as a failure. `--fork`, so the setsid process
+            # itself exits at once and the stand-in is reparented. Without it
+            # setsid execs into the stand-in when it is not already a group
+            # leader, stays a child of this test, and the run below blocks for
+            # the stand-in's whole lifetime.
+            subprocess.run(["setsid", "--fork", str(exe), "-c",
+                            f"import time; time.sleep({self.LIFETIME_S})"],
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                            timeout=10, check=False)
-            time.sleep(0.6)
-            pid = None
-            for d in Path("/proc").iterdir():
-                if not d.name.isdigit():
-                    continue
-                try:
-                    raw = (d / "cmdline").read_bytes().decode("utf-8", "replace")
-                except OSError:
-                    continue
-                if str(exe) in raw:
-                    pid = int(d.name)
-                    break
-            self.assertIsNotNone(pid, "the stand-in process did not start")
-            try:
-                found = hg.measuring_processes()
-                self.assertIn(str(pid), " ".join(found),
-                              f"a stranger's llama-server was not reported: {found}")
-                self.assertNotIn(pid, hg._own_pids(),
-                                 "a stranger's llama-server was counted as ours")
-            finally:
-                os.kill(pid, 9)
+            # Wait for the exec, not for a fixed interval. The fork exists as
+            # soon as `setsid` returns, but until it execs its argv[0] is
+            # `setsid`, and the guard would be asked about the wrong process.
+            end = time.monotonic() + self.DEADLINE_S
+            pids = self._strangers_named(exe)
+            while not pids and time.monotonic() < end:
+                time.sleep(0.05)
+                pids = self._strangers_named(exe)
+            self.assertEqual(len(pids), 1,
+                             f"expected one stand-in named {exe}, found {pids}")
+            pid = pids[0]
+            found = hg.measuring_processes()
+            # The pid is the first field of each entry. Compared whole: pid
+            # 123 must not be satisfied by an entry for pid 1234.
+            self.assertIn(str(pid), [e.split(" ", 1)[0] for e in found],
+                          f"a stranger's llama-server was not reported: {found}")
+            self.assertNotIn(pid, hg._own_pids(),
+                             "a stranger's llama-server was counted as ours")
 
     def test_own_pids_is_descent_only(self):
         """It must not consult a command line at all."""
@@ -6957,6 +7069,1206 @@ class APlanCheckMustCatchACorruptedPlan(unittest.TestCase):
                       "the changelog quotes a corruption count this file does not have")
 
 
+class AMeasurementMustAnnounceItselfWithTheLock(unittest.TestCase):
+    """`host_guard.lock_held()` has been searching for a file nobody wrote.
+
+    The guard has two halves. The process half works and is what refused a
+    mutation suite that was started during a gate. The lock half is for the other
+    case: verification work started on the machine that is MEASURING, which no
+    process list on another machine can see. It searched three paths, nothing in
+    this repository ever created any of them, and one of the three named the
+    SIBLING repository `qwen3.8-...`, which does not exist on the bench host,
+    while this repository's own path -- the one `bench/cpu_siblings.py` reads --
+    was absent. Two readers of one lock in one repository looked in different
+    places and neither had anything to find.
+
+    `bench/run_s_siblings.sh` was the first driver here to take it, and
+    `bench/run_z_layer_a.sh` takes it too since 2026-11-13, when a review found
+    that it asked whether a lock was held and never took one. These tests are
+    about that: the path the guard searches, the path each driver writes, the
+    driver asking first, taking it atomically after a read-only check would have
+    returned, and releasing it on every exit and only if it is its own.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+    DRIVER = "bench/run_s_siblings.sh"
+    TAKERS = ("bench/run_s_siblings.sh", "bench/run_z_layer_a.sh")
+
+    def test_every_driver_writes_a_lock_the_guard_searches(self):
+        """Two readers of one lock looked in different places once already.
+
+        The writer is a third party to that. A driver whose default lock path is
+        not in the guard's list takes a lock nothing will ever see.
+        """
+        sys.path.insert(0, str(self.ROOT / "bench"))
+        import host_guard
+        searched = {str(Path(q).expanduser()) for q in host_guard._DEFAULT_LOCKS}
+        for rel in self.TAKERS:
+            with self.subTest(driver=rel):
+                src = (self.ROOT / rel).read_text(encoding="utf-8")
+                m = re.findall(r'^GPU_LOCK="\$\{BENCH_GPU_LOCK:-\$HOME/([^}"]+)\}"$',
+                               src, re.M)
+                self.assertEqual(len(m), 1, f"{rel} does not name its lock once: {m}")
+                self.assertIn(str(Path("~/" + m[0]).expanduser()), searched,
+                              f"{rel} writes ~/{m[0]}, which the guard never "
+                              f"searches")
+                self.assertIn("set -C", src,
+                              f"{rel} does not create the lock atomically")
+
+    def test_the_guard_searches_this_repository_not_the_sibling(self):
+        sys.path.insert(0, str(self.ROOT / "bench"))
+        import host_guard
+        paths = [str(p) for p in host_guard._DEFAULT_LOCKS]
+        self.assertTrue(
+            any("qwen3.6-speculative-decoding-rtx3090" in p for p in paths),
+            f"the guard does not search this repository's own lock path: {paths}")
+        self.assertFalse(
+            any("qwen3.8" in p for p in paths),
+            f"the guard still searches the sibling repository, which does not "
+            f"exist on the bench host: {paths}")
+        # And there must be only ONE reader. cpu_siblings used to carry its own
+        # checkout-relative LOCK, and the assertion here was that the two
+        # coincided -- which passed in the working tree and failed in the gate's
+        # clean clone, correctly: a clone under ~/ci_repro is not a measurement
+        # host. Two notions of where a lock lives can only agree at one path, so
+        # the fix is that cpu_siblings asks the guard instead of holding a path.
+        src = (self.ROOT / "bench" / "cpu_siblings.py").read_text(encoding="utf-8")
+        # Code, not comments. The comment that replaced the old assignment names
+        # it on purpose, and a test that forbids naming a defect forbids
+        # explaining it -- which is the same trap this file documents beside the
+        # gate's SRC check.
+        code = "\n".join(l for l in src.splitlines()
+                         if not l.lstrip().startswith("#"))
+        self.assertNotIn('LOCK = ROOT / ".gpu-in-use.lock"', code,
+                         "cpu_siblings has its own lock path again, so there are "
+                         "two notions of where the lock is")
+        self.assertIn("host_guard.lock_held()", code,
+                      "cpu_siblings does not ask the guard, so its refusal and "
+                      "the guard's can disagree")
+
+    def test_the_driver_refuses_to_start_while_a_lock_is_held(self):
+        """Exercised, not asserted about: it is the first thing the driver does."""
+        with tempfile.TemporaryDirectory() as td:
+            lock = Path(td) / "held.lock"
+            lock.write_text("pretend measurement\npid 1\nhost test\n",
+                            encoding="utf-8")
+            r = subprocess.run(
+                ["bash", str(self.ROOT / self.DRIVER), "--check"],
+                capture_output=True, text=True, timeout=180, cwd=self.ROOT,
+                env={"PATH": "/usr/bin:/bin", "HOME": td, "TZ": "UTC",
+                     "BENCH_GPU_LOCK": str(lock)})
+            both = r.stdout + r.stderr
+            self.assertNotEqual(r.returncode, 0,
+                                "the driver started while a lock was held")
+            self.assertIn("a measurement is already running", both,
+                          f"refused for some other reason: {both[:300]}")
+            self.assertIn("pretend measurement", both,
+                          "the refusal does not show whose lock it is, so the "
+                          "reader cannot tell what to wait for")
+
+    def test_a_read_only_check_does_not_announce_a_measurement(self):
+        """`--check` must not create the lock: nothing is measuring."""
+        sh = (self.ROOT / self.DRIVER).read_text(encoding="utf-8")
+        lines = sh.splitlines()
+        i_create = next(k for k, l in enumerate(lines) if "set -C;" in l)
+        i_checkexit = next(k for k, l in enumerate(lines)
+                           if 'if [ "$CHECK_ONLY" -eq 1 ]; then' in l)
+        self.assertLess(
+            i_checkexit, i_create,
+            "the lock is created before --check would have returned, so a "
+            "read-only check announces a measurement that is not happening")
+        i_test = next(k for k, l in enumerate(lines)
+                      if "host_guard.lock_held()" in l)
+        self.assertLess(
+            i_test, i_checkexit,
+            "the driver does not ask whether a measurement is already running "
+            "until after --check returns, so --check cannot answer it")
+
+    def test_the_lock_is_released_on_every_exit_and_only_by_its_owner(self):
+        """Order, not presence: a trap set after the lock is a window.
+
+        A trap that removes the lock, set on the last line, passes a presence
+        test and leaves the lock behind on every exit before it. And a trap that
+        removes it unconditionally deletes ANOTHER driver's lock when this one
+        exits because that lock was there.
+        """
+        for rel in self.TAKERS:
+            with self.subTest(driver=rel):
+                lines = (self.ROOT / rel).read_text(encoding="utf-8").splitlines()
+                i_trap = next((k for k, l in enumerate(lines)
+                               if l.strip() == "trap cleanup EXIT"), None)
+                i_create = next(k for k, l in enumerate(lines) if "set -C;" in l)
+                i_ours = next((k for k, l in enumerate(lines)
+                               if l.strip() == "LOCK_OURS=1"), None)
+                self.assertIsNotNone(i_trap, "no EXIT trap runs the cleanup")
+                self.assertIsNotNone(i_ours, "nothing records that the lock is ours")
+                self.assertLess(i_trap, i_create,
+                                "the EXIT trap is set after the lock is taken")
+                self.assertGreater(i_ours, i_create)
+                body = "\n".join(lines)
+                self.assertIn('[ "$LOCK_OURS" = 1 ] && rm -f "$GPU_LOCK"', body,
+                              "the cleanup removes the lock whether or not it "
+                              "took it")
+                self.assertRegex(body, r"\ntrap [^\n]*\bINT\b[^\n]*\bTERM\b|"
+                                       r"\ntrap [^\n]* INT\n",
+                                 "a signal does not end the driver through its "
+                                 "cleanup")
+
+
+class TheLayerADriverCleansUpOnEveryExit(unittest.TestCase):
+    """Run against stubs, because the defects were in paths a dry run never takes.
+
+    Its exit trap was `kill "${TELE_PID:-0}"`. Before the sampler started that is
+    `kill 0`, which signals the whole process group: a calibration that failed
+    took the caller down with it. On INT or TERM the trap re-entered itself until
+    bash overflowed its stack, and after a TERM it carried on into the next phase
+    unlocked and unsampled. The restore was "read back" from `clocks.max.sm`,
+    which reads its default while a lock is set, after resets whose failures were
+    swallowed, so the refusal for a restore that did not happen could not fire.
+    And it never took the lock it asked about.
+
+    The stubs: a `nvidia-smi` that keeps a lock in a state file and reports an
+    idle clock above idle while it is set, a `sudo` that runs its command, and an
+    `nvcc` that builds a load which writes one window, or fails, or sleeps.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+    DRIVER = "bench/run_z_layer_a.sh"
+    NVSMI = (
+        "#!/bin/sh\n"
+        'S="$STUB_STATE"\n'
+        'for a in "$@"; do\n'
+        '  case "$a" in\n'
+        '    -lgc) touch "$S/locked"; exit 0 ;;\n'
+        "    -lmc|-rmc) exit 0 ;;\n"
+        '    -rgc) [ -e "$S/reset_fails" ] && { echo "refused" >&2; exit 4; }\n'
+        '          rm -f "$S/locked"; exit 0 ;;\n'
+        "  esac\n"
+        "done\n"
+        'q=""\n'
+        'for a in "$@"; do case "$a" in --query-gpu=*) q="${a#--query-gpu=}" ;;\n'
+        "  --query-compute-apps=*) exit 0 ;; esac; done\n"
+        'sm=210; [ -e "$S/locked" ] && sm=1500; [ -e "$S/stuck" ] && sm=1800\n'
+        'case "$q" in\n'
+        "  uuid,name,driver_version,power.limit)\n"
+        '    echo "GPU-f71a8f68-0000-0000-0000-000000000000, NVIDIA GeForce RTX 3090, 580.1, 350.00 W" ;;\n'
+        '  clocks.sm) echo "$sm" ;;\n'
+        "  clocks.mem) echo 9501 ;;\n"
+        "  utilization.gpu) echo 0 ;;\n"
+        "  temperature.gpu) echo 35 ;;\n"
+        '  *) echo 0 ;;\n'
+        "esac\n")
+    SUDO = '#!/bin/sh\n[ "$1" = "-n" ] && shift\nexec "$@"\n'
+    NVCC = (
+        "#!/bin/sh\n"
+        'out=""\n'
+        'while [ $# -gt 0 ]; do [ "$1" = "-o" ] && { out="$2"; shift; }; shift; done\n'
+        "cat > \"$out\" <<'EOF'\n"
+        "#!/bin/sh\n"
+        '[ -e "$STUB_STATE/load_fails" ] && exit 5\n'
+        'echo $$ > "$STUB_STATE/load.pid"\n'
+        'echo "t,a,b,c,gbps"\n'
+        'exec sleep "${STUB_LOAD_SLEEP:-0}"\n'
+        "EOF\n"
+        'chmod +x "$out"\n')
+
+    def _run(self, state=(), env_extra=None, term_after=None):
+        with tempfile.TemporaryDirectory() as td:
+            td = Path(td)
+            b = td / "bin"
+            b.mkdir()
+            st = td / "state"
+            st.mkdir()
+            for name, body in (("nvidia-smi", self.NVSMI), ("sudo", self.SUDO),
+                               ("nvcc", self.NVCC)):
+                (b / name).write_text(body, encoding="utf-8")
+                (b / name).chmod(0o755)
+            for f in state:
+                (st / f).write_text("", encoding="utf-8")
+            lock = td / "gpu.lock"
+            env = {"PATH": f"{b}:{os.environ.get('PATH', '/usr/bin:/bin')}",
+                   "HOME": str(td), "TZ": "UTC", "CI": "1",
+                   "BENCH_ROOT": str(td / "bench"), "BENCH_GPU_LOCK": str(lock),
+                   "NVCC": str(b / "nvcc"), "STUB_STATE": str(st),
+                   "Z_CAL_CLOCKS": "1500", "Z_CAL_SECONDS": "2",
+                   "Z_COOL_TIMEOUT": "0", **(env_extra or {})}
+            outer = subprocess.Popen(
+                ["bash", "-c", f'bash "{self.ROOT / self.DRIVER}" T; '
+                               f'echo "driver rc=$?"; echo CALLER_ALIVE'],
+                env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, start_new_session=True)
+            try:
+                if term_after is not None:
+                    deadline = time.time() + 60
+                    while not (st / "load.pid").exists() and time.time() < deadline:
+                        time.sleep(0.05)
+                    self.assertTrue((st / "load.pid").exists(), "the load never started")
+                    time.sleep(term_after)
+                    kids = subprocess.run(["pgrep", "-P", str(outer.pid)],
+                                          capture_output=True, text=True).stdout.split()
+                    self.assertTrue(kids, "the driver is not running")
+                    for k in kids:
+                        os.kill(int(k), signal.SIGTERM)
+                out, _ = outer.communicate(timeout=120)
+            finally:
+                if outer.poll() is None:
+                    os.killpg(outer.pid, signal.SIGKILL)
+                    outer.wait()
+            load_alive = False
+            if (st / "load.pid").exists():
+                try:
+                    os.kill(int((st / "load.pid").read_text()), 0)
+                    load_alive = True
+                except OSError:
+                    pass
+            return out, lock.exists(), (st / "locked").exists(), load_alive
+
+    def _rc(self, out):
+        m = re.findall(r"driver rc=(\d+)", out)
+        self.assertEqual(len(m), 1, out[-800:])
+        return int(m[0])
+
+    def test_an_early_failure_ends_the_driver_and_not_its_caller(self):
+        out, lock_left, locked, _ = self._run(state=["load_fails"])
+        self.assertIn("CALLER_ALIVE", out,
+                      f"the driver's exit killed the shell that ran it: {out[-600:]}")
+        self.assertEqual(self._rc(out), 1, out[-600:])
+        self.assertIn("the load failed at core 1500", out)
+        self.assertIn("restored: idle at 210 MHz", out,
+                      "the restore was not read back from the idle clock")
+        self.assertFalse(lock_left, "the lock outlived the run that took it")
+        self.assertFalse(locked, "the card was left locked")
+
+    def test_a_restore_that_did_not_take_fails_the_run(self):
+        out, lock_left, _locked, _ = self._run(state=["load_fails", "stuck"])
+        self.assertIn("CALLER_ALIVE", out)
+        self.assertEqual(self._rc(out), 3,
+                         f"a card still above its idle clock read as restored: "
+                         f"{out[-600:]}")
+        self.assertIn("restore not confirmed", out)
+        self.assertFalse(lock_left)
+
+    def test_a_reset_that_was_refused_fails_the_run(self):
+        out, lock_left, _locked, _ = self._run(state=["load_fails", "reset_fails"])
+        self.assertEqual(self._rc(out), 3,
+                         f"a refused reset was swallowed: {out[-600:]}")
+        self.assertIn("reset of the core clock failed", out)
+        self.assertFalse(lock_left)
+
+    def test_a_term_stops_the_load_and_the_driver_at_once(self):
+        t0 = time.time()
+        out, lock_left, locked, load_alive = self._run(
+            env_extra={"STUB_LOAD_SLEEP": "60"}, term_after=0.5)
+        self.assertLess(time.time() - t0, 45,
+                        "the driver waited out the load before acting on TERM")
+        self.assertIn("CALLER_ALIVE", out)
+        self.assertEqual(self._rc(out), 143, out[-600:])
+        self.assertFalse(load_alive, "the load outlived the driver")
+        self.assertFalse(lock_left, "the lock outlived the driver")
+        self.assertFalse(locked, "the card was left locked")
+        self.assertIn("restored: idle at 210 MHz", out)
+
+    def test_a_held_lock_is_refused_and_left_alone(self):
+        with tempfile.TemporaryDirectory() as td:
+            lock = Path(td) / "held.lock"
+            lock.write_text("another measurement\n", encoding="utf-8")
+            out, lock_left, _locked, _ = self._run(
+                env_extra={"BENCH_GPU_LOCK": str(lock), "CI": ""})
+            self.assertNotEqual(self._rc(out), 0, out[-600:])
+            self.assertIn("a measurement holds", out, out[-600:])
+            self.assertTrue(lock.exists(), "the driver deleted another's lock")
+
+class PlanSsMasksMustBeCheckedAgainstTheHost(unittest.TestCase):
+    """The driver's refusals have to live where CI can execute them.
+
+    `bench/run_s_siblings.sh` reads `/sys` and refuses six conditions before it
+    spends half an hour of GPU time. None of those refusals can run on a runner,
+    which has four processors, no `cpufreq` and no siblings it will admit to. So
+    the logic is `validate_masks` in `bench/cpu_siblings.py` and the driver only
+    supplies the readings: the suite calls it with topologies it builds, and the
+    driver was exercised against the real host separately.
+
+    The fixture is not invented. Its sibling pairing is cross-checked against the
+    `/sys` dump inside the recorded topology run, and its clock tiers against the
+    three `BENCHMARK_ENV.md` records for this part.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+    RECORD = "v4_audit_2026_08_25/topology/topology_3090_20261003.txt"
+    DISTINCT = frozenset({0, 2, 4, 6, 8, 10, 12, 14})
+    PACKED = frozenset({0, 1, 2, 3, 4, 5, 8, 9})
+
+    def _mod(self):
+        sys.path.insert(0, str(self.ROOT / "bench"))
+        import cpu_siblings
+        return cpu_siblings
+
+    def _bench_host(self):
+        """The i9-13900K: eight P cores of two threads, sixteen E cores of one."""
+        ceiling, sibling = {}, {}
+        for c in range(16):
+            ceiling[c] = 5800 if c in (8, 9, 10, 11) else 5500
+            sibling[c] = {c & ~1, (c & ~1) + 1}
+        for c in range(16, 32):
+            ceiling[c] = 4300
+            sibling[c] = {c}
+        return ceiling, sibling
+
+    def test_the_fixture_is_the_pairing_the_recorded_run_read(self):
+        """Otherwise every case below is about a machine nobody measured."""
+        _ceiling, sibling = self._bench_host()
+        text = (self.ROOT / self.RECORD).read_text(encoding="utf-8")
+        found = {}
+        for m in re.finditer(r"cpu(\d+)\s+siblings=(\S+)", text):
+            got = set()
+            for part in m[2].split(","):
+                if "-" in part:
+                    lo, hi = part.split("-", 1)
+                    got |= set(range(int(lo), int(hi) + 1))
+                else:
+                    got.add(int(part))
+            found[int(m[1])] = got
+        self.assertEqual(len(found), 32,
+                         f"the record holds {len(found)} processors and the "
+                         f"fixture assumes 32")
+        self.assertEqual(found, sibling,
+                         "the fixture's pairing is not the one the recorded run "
+                         "read from /sys, so these cases are about a different "
+                         "machine")
+
+    def test_the_design_passes(self):
+        m = self._mod()
+        ceiling, sibling = self._bench_host()
+        bad, info = m.validate_masks(set(self.DISTINCT), set(self.PACKED), 8,
+                                     ceiling, sibling)
+        self.assertEqual(bad, [], f"the plan's own masks are refused: {bad}")
+        self.assertEqual(info["tiers"], [4300, 5500, 5800])
+        self.assertEqual(info["favoured_in_distinct"],
+                         info["favoured_in_packed"],
+                         "the design's own masks are not balanced on the "
+                         "favoured processors")
+        self.assertEqual((info["distinct_cores"], info["packed_cores"]), (8, 4))
+
+    def test_every_refusal_fires_on_its_own_condition(self):
+        m = self._mod()
+        ceiling, sibling = self._bench_host()
+        cases = (
+            ({0, 1, 2, 3, 4, 5, 6, 7}, 8, "favoured processors",
+             "the obvious packed mask, unbalanced on clock"),
+            ({0, 1, 2, 3, 4, 5, 8, 16}, 8, "lowest clock tier",
+             "an efficiency core in the packed set"),
+            ({0, 1, 2, 3, 4, 8, 9, 14}, 8, "fully packed",
+             "a processor in the packed set with no sibling in it"),
+            (set(self.DISTINCT), 8, "fully packed",
+             "packed equal to distinct"),
+            ({0, 1, 2, 3}, 8, "thread count",
+             "a set that is not the thread count"),
+            ({0, 1, 2, 3, 4, 5, 8, 99}, 8, "does not have",
+             "a processor this host does not have"),
+        )
+        for packed, threads, needle, what in cases:
+            with self.subTest(case=what):
+                bad, _info = m.validate_masks(set(self.DISTINCT), set(packed),
+                                              threads, ceiling, sibling)
+                self.assertTrue(bad, f"{what} was accepted")
+                self.assertTrue(
+                    any(needle in b for b in bad),
+                    f"{what} was refused for the wrong reason: {bad}")
+
+    def test_a_distinct_set_that_shares_a_core_is_refused(self):
+        m = self._mod()
+        ceiling, sibling = self._bench_host()
+        bad, _ = m.validate_masks({0, 1, 4, 6, 8, 10, 12, 14},
+                                  set(self.PACKED), 8, ceiling, sibling)
+        self.assertTrue(any("no-sharing condition" in b for b in bad),
+                        f"a distinct set holding two siblings was accepted: {bad}")
+
+    def test_a_single_tier_host_has_no_balance_to_check(self):
+        """A part with one clock tier must not be refused for lacking a top one."""
+        m = self._mod()
+        ceiling = {c: 5000 for c in range(16)}
+        sibling = {c: {c & ~1, (c & ~1) + 1} for c in range(16)}
+        bad, info = m.validate_masks(set(self.DISTINCT), set(self.PACKED), 8,
+                                     ceiling, sibling)
+        self.assertEqual(bad, [],
+                         f"a single-tier host was refused: {bad}")
+        self.assertEqual(info["tiers"], [5000])
+
+    def test_the_driver_calls_it_rather_than_holding_a_second_copy(self):
+        sh = (self.ROOT / "bench" / "run_s_siblings.sh").read_text(encoding="utf-8")
+        self.assertIn("from cpu_siblings import validate_masks", sh,
+                      "the driver does not import the shared check")
+        self.assertIn("validate_masks(distinct, packed, threads", sh,
+                      "the driver imports the check and does not call it")
+        # The refusal TEXTS must not be in the driver's code: two copies of a
+        # check drift, and this repository has removed that defect twice.
+        code = "\n".join(l for l in sh.splitlines()
+                          if not l.lstrip().startswith("#"))
+        for phrase in ("lowest clock tier", "fully packed",
+                       "no-sharing condition"):
+            self.assertNotIn(phrase, code,
+                             f"{phrase!r} is still spelled out in the driver, so "
+                             f"there are two copies of that refusal")
+
+class TheArmOrderMustNotPinOneArmToOnePosition(unittest.TestCase):
+    """Reversing an odd-length order leaves the middle element where it was.
+
+    Found by stopping a run after fifteen arm-runs and rebuilding the order from
+    the arm-runs rather than reading the manifest's label: the middle arm at
+    position 2 in every block, the other two only at 1 and 3, which over twelve
+    blocks is {1: 6, 3: 6} and {2: 12}. `BENCH_ORDER=mirrored` was copied from
+    run Y's driver, which has FOUR arms, where reversing gives each arm two
+    positions. Plan S has three.
+
+    Mean position is still balanced, (1 + 3) / 2 being 2, so a linear drift
+    within a block cancels for every arm. A first-position effect does not: the
+    outer arms take it half the time each and the middle one never, and the arms
+    are then not exchangeable. This repository has already discarded a run for
+    the same class of defect -- RETEST_TODO P1-3, where every freerun block ran
+    before every hard-cap block -- so it is disqualifying rather than a caveat.
+
+    `is_position_balanced` has said so all along and was only ever asked under
+    `latin`. That is the gap.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+    RUNNER = "bench/retest_runner.py"
+    S_ARMS = ["spec-dflash-n2", "spec-dflash-n2-packed",
+              "spec-dflash-n2-passive-packed"]
+    Y_ARMS = ["spec-dflash-n2", "spec-dflash-n2-ecore", "baseline",
+              "baseline-ecore"]
+
+    def _mod(self):
+        os.environ.setdefault("LLAMA_SERVER_BIN", "/bin/true")
+        spec = importlib.util.spec_from_file_location(
+            "rr_order", self.ROOT / self.RUNNER)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    @staticmethod
+    def _positions(sched):
+        pos = {}
+        for row in sched:
+            for i, a in enumerate(row, 1):
+                pos.setdefault(a, Counter())[i] += 1
+        return pos
+
+    def test_mirrored_with_an_odd_number_of_arms_is_refused(self):
+        m = self._mod()
+        with self.assertRaises(SystemExit) as cm:
+            m.build_schedule(list(self.S_ARMS), 12, "mirrored")
+        msg = str(cm.exception)
+        self.assertIn("pins the middle one", msg)
+        self.assertIn(self.S_ARMS[1], msg,
+                      "the refusal does not name the arm that would be pinned")
+        self.assertIn("latin", msg, "the refusal does not name the remedy")
+
+    def test_run_ys_four_arm_mirrored_design_still_builds(self):
+        """The guard must not reach back and invalidate a published run.
+
+        Mirroring balances mean position and carryover direction, not occupancy:
+        with four arms the first never reaches the middle positions, so
+        `is_position_balanced` calls that unbalanced too. Generalising the
+        refusal to every unbalanced mirrored schedule would have refused run Y's
+        own configuration, which is why it is specifically about an odd count.
+        """
+        m = self._mod()
+        sched = m.build_schedule(list(self.Y_ARMS), 12, "mirrored")
+        self.assertEqual(len(sched), 12)
+        pos = self._positions(sched)
+        self.assertEqual(sorted(pos[self.Y_ARMS[0]]), [1, 4],
+                         "run Y's first arm no longer alternates between the ends")
+
+    def test_latin_balances_position_and_first_in_block_for_three_arms(self):
+        m = self._mod()
+        sched = m.build_schedule(list(self.S_ARMS), 12, "latin")
+        pos = self._positions(sched)
+        for arm in self.S_ARMS:
+            with self.subTest(arm=arm):
+                self.assertEqual(
+                    dict(sorted(pos[arm].items())), {1: 4, 2: 4, 3: 4},
+                    f"{arm} does not hold every position the same number of "
+                    f"times: {dict(pos[arm])}")
+        first = Counter(row[0] for row in sched)
+        self.assertEqual(dict(first), {a: 4 for a in self.S_ARMS},
+                         "being first in a block is not balanced, which is the "
+                         "part a drift that is not linear loads onto")
+
+    def test_latin_is_refused_when_it_cannot_balance(self):
+        m = self._mod()
+        with self.assertRaises(SystemExit) as cm:
+            m.build_schedule(list(self.S_ARMS), 10, "latin")
+        self.assertIn("position-balanced", str(cm.exception))
+
+    def test_the_residual_latin_leaves_is_the_one_the_plan_states(self):
+        """Each arm has exactly one predecessor, and the plan says so.
+
+        A cyclic rotation balances position and first-in-block and leaves the
+        ordered adjacent pairs one-directional WITHIN a block: distinct is always
+        followed by packed, packed by passive, passive by distinct, and the
+        reverses occur only across the boundaries between blocks. The runner's
+        `williams` refuses an odd number of arms. Pinned here so that a schedule
+        of a different shape makes the plan's stated residual false and this test
+        say so.
+        """
+        m = self._mod()
+        sched = m.build_schedule(list(self.S_ARMS), 12, "latin")
+        pred = Counter()
+        for row in sched:
+            for i in range(1, len(row)):
+                pred[(row[i - 1], row[i])] += 1
+        for arm in self.S_ARMS:
+            befores = {a for (a, b) in pred if b == arm}
+            with self.subTest(arm=arm):
+                self.assertEqual(
+                    len(befores), 1,
+                    f"{arm} has {len(befores)} different predecessors; the plan "
+                    f"states exactly one and argues why that is immaterial")
+        # The content, not a word. A presence test for "predecessor" passes on a
+        # document that merely uses the word, and the first version of this
+        # checked the lower-case spelling against a heading that is upper-case,
+        # which is the other half of why presence is not a check.
+        plan = (self.ROOT / "v4_audit_2026_08_25"
+                / "PROSPECTIVE_PLAN_SIBLINGS.md").read_text(encoding="utf-8")
+        flat = " ".join(plan.replace("**", " ").replace("`", "").split()).lower()
+        for phrase, what in (
+            ("always followed by", "that the pairs are one-directional"),
+            ("williams", "what would balance it"),
+            ("refuses three", "why the runner's williams is not used here"),
+            ("identical gpu work", "the argument that it is immaterial"),
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, flat,
+                              f"the plan does not state {what}, so the residual "
+                              f"this schedule leaves is unstated rather than "
+                              f"accepted")
+
+    def test_the_driver_asks_for_latin(self):
+        sh = (self.ROOT / "bench" / "run_s_siblings.sh").read_text(
+            encoding="utf-8")
+        code = [l.strip() for l in sh.splitlines()
+                if not l.lstrip().startswith("#")]
+        orders = [l for l in code if l.startswith("export BENCH_ORDER=")]
+        self.assertEqual(orders, ["export BENCH_ORDER=latin"],
+                         f"the driver's order mode is {orders}, and three arms "
+                         f"under anything but latin is not position-balanced")
+
+class PlanSsThreeArmsMustFitInOneInvocation(unittest.TestCase):
+    """A16's step is BETWEEN invocations, so the arms cannot be in three of them.
+
+    Plan S contrasts three conditions on one arm: eight distinct physical cores,
+    four cores with both threads of each, and that second mask with the idle
+    OpenMP workers told to sleep at once. The first two are two cpu sets, which
+    `BENCH_PIN_CPUS` and `BENCH_PIN_ALT_CPUS` already express. The third needs a
+    different SERVER ENVIRONMENT for one arm, `OMP_WAIT_POLICY=passive`, and an
+    environment variable set for the invocation would reach all three arms.
+
+    So the third arm is an entry in `ARMS` with its base's flags and an entry in
+    `ARM_ENV` with the variable, and it carries the mask through the ordinary pin
+    suffix. It was `--poll 0` first, and the server these runs use is an OpenMP
+    build, where ggml never reads the poll level. These tests assert that the
+    three names resolve the way the plan needs, and that the record says what
+    the server was given, because the plan is executable only if they do.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+    RUNNER = "bench/retest_runner.py"
+    BASE = "spec-dflash-n2"
+    TWIN = "spec-dflash-n2-passive"
+
+    def _mod(self, **env):
+        keep = {k: os.environ.get(k) for k in env}
+        os.environ.update({k: v for k, v in env.items()})
+        os.environ.setdefault("LLAMA_SERVER_BIN", "/bin/true")
+        try:
+            spec = importlib.util.spec_from_file_location(
+                "rr_arms_" + "_".join(sorted(env)), self.ROOT / self.RUNNER)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            return mod
+        finally:
+            for k, v in keep.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+
+    def test_the_third_arm_is_the_second_plus_one_variable(self):
+        m = self._mod()
+        self.assertIn(self.BASE, m.ARMS)
+        self.assertIn(self.TWIN, m.ARMS,
+                      "the passive arm is gone, so plan S's third condition "
+                      "cannot be run inside the same invocation as the others")
+        self.assertEqual(
+            m.ARMS[self.TWIN], m.ARMS[self.BASE],
+            "the passive arm's server flags differ from its base's, so the "
+            "contrast would name two changes")
+        self.assertEqual(
+            m.ARM_ENV, {self.TWIN: {"OMP_WAIT_POLICY": "passive"}},
+            "the per-arm environment is not exactly the passive arm's one "
+            "variable, so some arm differs in something the plan does not vary")
+        self.assertNotIn("spec-dflash-n2-nopoll", m.ARMS,
+                         "the --poll 0 arm is back, and in the OpenMP build "
+                         "these runs use it is a treatment applied to nothing")
+
+    def test_the_three_names_resolve_to_two_cpu_sets(self):
+        distinct, packed = "0,2,4,6,8,10,12,14", "0,1,2,3,4,5,8,9"
+        m = self._mod(BENCH_PIN_SUFFIX="-alt", BENCH_PIN_CPUS=distinct,
+                      BENCH_PIN_ALT_CPUS=packed, BENCH_THREADS="8")
+        want = {self.BASE: distinct,
+                f"{self.BASE}-alt": packed,
+                f"{self.TWIN}-alt": packed}
+        for arm, cpus in want.items():
+            with self.subTest(arm=arm):
+                self.assertEqual(
+                    m.arm_cpus(arm), cpus,
+                    f"{arm} would run on {m.arm_cpus(arm)!r} and the plan needs "
+                    f"{cpus!r}")
+        self.assertEqual(
+            m.arm_base(f"{self.TWIN}-alt"), self.TWIN,
+            "the suffixed passive arm does not resolve to the passive arm, so "
+            "it would run as the base arm on the packed mask and the third "
+            "condition would be the second measured twice")
+
+    def test_a_global_poll_and_a_per_arm_poll_are_refused(self):
+        """Both would reach argv and only one would be recorded.
+
+        No arm in the table carries a poll flag today, so the refusal is shown on
+        one given such a flag here, and on the same arm without it. The arm is
+        named twice, so the check after this one, a repeated arm, stops `main`
+        before it could launch anything.
+        """
+        self.TWO = f"{self.BASE},{self.BASE}"
+        import signal as _signal
+        saved = (_signal.getsignal(_signal.SIGTERM), _signal.getsignal(_signal.SIGINT))
+        try:
+            with tempfile.TemporaryDirectory() as td:
+                for flag in ("--poll", "--poll-batch"):
+                    with self.subTest(flag=flag):
+                        m = self._mod(LLAMA_SERVER_BIN="/bin/true",
+                                      MODEL_TARGET="/dev/null",
+                                      MODEL_DFLASH="/dev/null",
+                                      BENCH_OUT=str(Path(td) / flag),
+                                      BENCH_ARMS=self.TWO, BENCH_POLL="25")
+                        m.ARMS[self.BASE] = m.ARMS[self.BASE] + [flag, "0"]
+                        with mock.patch.dict(os.environ, {"BENCH_ARMS": self.TWO}), \
+                                self.assertRaises(SystemExit) as cm:
+                            m.main()
+                        self.assertIn("argv would hold it twice", str(cm.exception))
+                m = self._mod(LLAMA_SERVER_BIN="/bin/true", MODEL_TARGET="/dev/null",
+                              MODEL_DFLASH="/dev/null",
+                              BENCH_OUT=str(Path(td) / "plain"),
+                              BENCH_ARMS=self.TWO, BENCH_POLL="25")
+                with mock.patch.dict(os.environ, {"BENCH_ARMS": self.TWO}), \
+                        self.assertRaises(SystemExit) as cm:
+                    m.main()
+                self.assertNotIn("argv would hold it twice", str(cm.exception),
+                                 "an arm with no poll flag of its own is refused, "
+                                 "so the check fires on the wrong condition")
+                # and it got as far as the next check, so nothing was launched
+                self.assertIn("BENCH_ARMS repeats", str(cm.exception))
+        finally:
+            _signal.signal(_signal.SIGTERM, saved[0])
+            _signal.signal(_signal.SIGINT, saved[1])
+
+    def test_an_inherited_openmp_variable_is_refused(self):
+        """It would reach every arm's server and no record would say so.
+
+        Except `OMP_NUM_THREADS`, which bench/host_guard.py sets in every
+        verification process and which ggml's explicit `num_threads` overrides;
+        it is recorded like the rest.
+        """
+        base = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "TZ": "UTC",
+                "LLAMA_SERVER_BIN": "/bin/true", "MODEL_TARGET": "/dev/null"}
+        for var in ("OMP_WAIT_POLICY", "GOMP_SPINCOUNT", "KMP_BLOCKTIME"):
+            with self.subTest(var=var):
+                r = subprocess.run(
+                    [sys.executable, "-c",
+                     f"import runpy; runpy.run_path({str(self.ROOT / self.RUNNER)!r})"],
+                    capture_output=True, text=True, timeout=120,
+                    env={**base, var: "1"}, cwd=self.ROOT)
+                self.assertNotEqual(r.returncode, 0)
+                self.assertIn(f"{var} set in the environment", r.stderr,
+                              r.stderr[-400:])
+        r = subprocess.run(
+            [sys.executable, "-c",
+             f"import runpy; runpy.run_path({str(self.ROOT / self.RUNNER)!r})"],
+            capture_output=True, text=True, timeout=120,
+            env={**base, "OMP_NUM_THREADS": "1"}, cwd=self.ROOT)
+        self.assertNotIn("set in the environment", r.stderr,
+                         "OMP_NUM_THREADS is refused, and every verification "
+                         "process here sets it")
+
+    def _records(self, out, arms, extra=None):
+        env = dict(os.environ)
+        for k in ("BENCH_POLL", "BENCH_CPU_STRICT", "BENCH_PIN_SUFFIX"):
+            env.pop(k, None)
+        for k in [k for k in env if k.startswith(("OMP_", "GOMP_", "KMP_"))]:
+            env.pop(k)
+        env.update({"LLAMA_SERVER_BIN": str(self.ROOT / "tests" / "fake_llama_server.py"),
+                    "MODEL_TARGET": "/dev/null", "MODEL_DFLASH": "/dev/null",
+                    "BENCH_ARMS": arms, "BENCH_REPEATS": "1",
+                    "BENCH_ORDER": "cyclic", "BENCH_OUT": str(out),
+                    "BENCH_PORT": free_port(), "BENCH_MAX_TOKENS": "8",
+                    "BENCH_FIT": "off"})
+        env.update(extra or {})
+        r = subprocess.run([sys.executable, str(self.ROOT / self.RUNNER)],
+                           env=env, capture_output=True, text=True, timeout=600)
+        self.assertEqual(r.returncode, 0, r.stdout[-1500:] + r.stderr[-1500:])
+        return {j["arm"]: j for j in
+                (json.loads(f.read_text(encoding="utf-8"))
+                 for f in sorted(Path(out).glob("*__rep*.json")))}
+
+    def test_the_record_names_what_the_server_was_given(self):
+        """The environment from the server's /proc, the poll from its argv.
+
+        The first version recorded the invocation's poll, so an arm carrying its
+        own would have been recorded as the default. The arm now differs in its
+        environment, and the record reads that back from the kernel, so an arm
+        whose server did not get the variable cannot be recorded as having it.
+        """
+        with tempfile.TemporaryDirectory() as d:
+            # The stand-in spins its main thread for a second before serving, so
+            # a record of the cumulative time would show it and a record of the
+            # requests' window does not.
+            got = self._records(Path(d) / "out", f"{self.BASE},{self.TWIN}",
+                                {"FAKE_BURN_AT_START": "1.0"})
+            self.assertEqual(got[self.TWIN].get("server_env"),
+                             {"OMP_WAIT_POLICY": "passive"},
+                             "the passive arm's server was not given the "
+                             "variable, or its record does not say so")
+            self.assertEqual(got[self.BASE].get("server_env"), {},
+                             "the base arm's server was given an OpenMP variable")
+            for arm in (self.BASE, self.TWIN):
+                with self.subTest(arm=arm):
+                    for field in ("poll", "poll_batch"):
+                        self.assertIn(field, got[arm],
+                                      f"the {field} field is gone, and an absent "
+                                      f"field is how the first seventy eight runs "
+                                      f"hid the parameter")
+                        self.assertIsNone(got[arm][field])
+                    thr = got[arm].get("server_threads")
+                    self.assertIsInstance(thr, dict, thr)
+                    self.assertNotIn("error", thr, thr)
+                    self.assertIsInstance(thr["clk_tck"], int)
+                    mains = [t for t in thr["threads"] if t["main"]]
+                    self.assertEqual(len(mains), 1,
+                                     "the main thread is not exactly one row")
+                    self.assertEqual(mains[0]["tid"], got[arm]["server_pid"])
+                    self.assertTrue(all(t["ticks"] >= 0 for t in thr["threads"]))
+                    self.assertLess(mains[0]["ticks"], 0.5 * thr["clk_tck"],
+                                    "the main thread's second of spinning before "
+                                    "the requests is in the record, so it is a "
+                                    "total and not the requests' window")
+                    self.assertTrue(all(0 <= t["processor_last"] < 4096
+                                        for t in thr["threads"]))
+        # And the invocation-level knob reaches BOTH pools' parameters, read
+        # from the same argv rather than echoed from the setting: `-tb` gives
+        # the batch pool its own parameters, so `--poll` alone would not.
+        with tempfile.TemporaryDirectory() as d:
+            got = self._records(Path(d) / "out", self.BASE,
+                                {"BENCH_POLL": "10", "BENCH_THREADS": "2"})
+            self.assertEqual(got[self.BASE].get("poll"), 10)
+            self.assertEqual(got[self.BASE].get("poll_batch"), 10,
+                             "--poll without --poll-batch beside -tb leaves the "
+                             "pool that verifies every draft at 50")
+
+
+class ArgvIntReadsWhatTheServerKeeps(unittest.TestCase):
+    """`_argv_int` is what an arm-run record says the threadpool ran at.
+
+    llama.cpp's parser keeps the LAST value a repeated flag is given, so a reader
+    that took the first would report the overridden one. The runner refuses an
+    invocation that would repeat `--poll`, which is why this cannot be shown end
+    to end; it is shown here instead, so that refusal is not the only thing
+    standing between the record and the server.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    def _fn(self):
+        os.environ.setdefault("LLAMA_SERVER_BIN", "/bin/true")
+        spec = importlib.util.spec_from_file_location(
+            "rr_argv_int", self.ROOT / "bench" / "retest_runner.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod._argv_int
+
+    def test_the_last_occurrence_wins(self):
+        f = self._fn()
+        self.assertEqual(f(["s", "--poll", "50", "-t", "8", "--poll", "0"],
+                           "--poll"), 0)
+
+    def test_absent_is_none_and_not_zero(self):
+        f = self._fn()
+        self.assertIsNone(f(["s", "-t", "8"], "--poll"))
+        self.assertIsNone(f(["s", "--polling", "3"], "--poll"),
+                          "a different flag that starts with the same letters "
+                          "was read as this one")
+
+    def test_a_flag_with_no_value_is_an_error(self):
+        f = self._fn()
+        with self.assertRaises(ValueError):
+            f(["s", "--poll"], "--poll")
+
+
+
+    def test_the_record_reads_each_flag_from_the_servers_argv(self):
+        """Not from the invocation's setting.
+
+        No arm carries a threadpool flag of its own today, so a run cannot show
+        the difference; the record's source is asserted instead. An arm given
+        one would otherwise be recorded at the invocation's value, which is how
+        plan S's first third arm would have read as the library default.
+        """
+        src = (Path(__file__).resolve().parents[1] / "bench" /
+               "retest_runner.py").read_text(encoding="utf-8")
+        fn = next(n for n in ast.parse(src).body
+                  if isinstance(n, ast.FunctionDef) and n.name == "run_arm")
+        got = {}
+        for node in ast.walk(fn):
+            if isinstance(node, ast.Dict):
+                for k, v in zip(node.keys, node.values):
+                    if isinstance(k, ast.Constant) and k.value in (
+                            "poll", "poll_batch", "cpu_strict"):
+                        got[k.value] = ast.unparse(v)
+        self.assertEqual(got, {
+            "poll": "_argv_int(proc._cmd, '--poll')",
+            "poll_batch": "_argv_int(proc._cmd, '--poll-batch')",
+            "cpu_strict": "_argv_int(proc._cmd, '--cpu-strict')"})
+
+class WhatTheServerLoadedMustBeRecordedNotInferred(unittest.TestCase):
+    """Hashing a directory answers what is there, not what was loaded.
+
+    `server_lib_sha256` lists the shared objects beside the binary. On the bench
+    host that misses the ones that decide the arithmetic: the server needs
+    `libcudart.so.12` and `libcublas.so.12`, no CUDA toolkit is installed there,
+    its `RUNPATH` names only its own build directory, and the only copies on the
+    machine are pip wheels inside two unrelated Python virtual environments. So
+    the CUDA runtime under all seventy eight published runs came from a library
+    path that nothing recorded, and no listing of a directory could have shown it.
+
+    `/proc/<pid>/maps` answers the other question. The tests here are about the
+    properties that make the answer trustworthy rather than about any particular
+    library, because the libraries differ per host and a runner has none of them.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+    RUNNER = "bench/retest_runner.py"
+
+    def _mod(self):
+        os.environ.setdefault("LLAMA_SERVER_BIN", "/bin/true")
+        spec = importlib.util.spec_from_file_location(
+            "rr_mapped", self.ROOT / self.RUNNER)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def test_it_reads_what_was_mapped_and_hashes_it(self):
+        m = self._mod()
+        proc = subprocess.Popen([sys.executable, "-c",
+                                 "import ssl, zlib, time; time.sleep(8)"])
+        try:
+            deadline = time.time() + 5.0
+            got = {}
+            while time.time() < deadline:
+                got = m._mapped_objects(proc.pid)
+                if "error" not in got and len(got) >= 3:
+                    break
+            self.assertNotIn("error", got, f"could not read the map: {got}")
+            self.assertGreaterEqual(
+                len(got), 3,
+                "fewer than three shared objects for a process that imported ssl "
+                "and zlib, so the parse is dropping most of what it reads")
+            for path, info in got.items():
+                self.assertTrue(path.startswith("/"), path)
+                self.assertIn(".so", Path(path).name,
+                              f"{path} is not a shared object; the model is "
+                              f"mmapped too and must not be in here")
+                self.assertRegex(info["sha256"], r"^[0-9a-f]{64}$")
+                for field in ("size", "mtime_ns", "inode"):
+                    self.assertIn(field, info,
+                                  f"{path} has no {field}, so a swap between two "
+                                  f"arms could not be detected cheaply")
+        finally:
+            proc.terminate()
+            proc.wait()
+
+    def test_an_unreadable_map_is_an_error_and_not_an_empty_dict(self):
+        """An empty dict reads as "nothing was mapped", which is never true."""
+        m = self._mod()
+        proc = subprocess.Popen([sys.executable, "-c", "pass"])
+        proc.wait()
+        got = m._mapped_objects(proc.pid)
+        self.assertIn("error", got,
+                      "a dead pid produced something other than an error, so a "
+                      "failure to read would be recorded as an absence")
+        self.assertNotEqual(got, {})
+
+    def test_the_hash_cache_is_keyed_on_identity_not_on_path(self):
+        """A library swapped between two arms has to be hashed again.
+
+        There is no run-level moment to hash the set, because the server starts
+        per arm-run, so the first one pays and the rest reuse. Keyed on path, a
+        swapped file would keep the first hash and the record would say nothing
+        changed, which is the whole defect this is here to catch.
+        """
+        m = self._mod()
+        # End to end, against a file this test maps itself. The version this
+        # replaced read the cache-key line out of the source and then checked that
+        # `os.stat` notices a rewrite, which is a property of the kernel rather
+        # than of this code: it never called `_mapped_objects` at all, and
+        # pyflakes found it only because the module it imported went unused.
+        with tempfile.TemporaryDirectory() as td:
+            lib = Path(td) / "libfake.so.1"
+            child = ("import mmap, sys, time\n"
+                     "f = open(sys.argv[1], 'rb')\n"
+                     "mm = mmap.mmap(f.fileno(), 0, prot=mmap.PROT_READ)\n"
+                     "sys.stdout.write('up\\n'); sys.stdout.flush()\n"
+                     "time.sleep(20)\n")
+
+            def mapped_hash(body: bytes) -> str:
+                lib.write_bytes(body)
+                proc = subprocess.Popen(
+                    [sys.executable, "-c", child, str(lib)],
+                    stdout=subprocess.PIPE, text=True)
+                try:
+                    self.assertEqual(proc.stdout.readline().strip(), "up",
+                                     "the child did not map the file")
+                    got = m._mapped_objects(proc.pid)
+                    self.assertIn(str(lib), got,
+                                  f"a mapped .so was not reported: {list(got)[:4]}")
+                    return got[str(lib)]["sha256"]
+                finally:
+                    proc.terminate()
+                    proc.wait()
+                    if proc.stdout is not None:
+                        proc.stdout.close()
+
+            first = mapped_hash(b"first content")
+            cached = len(m._MAPPED_SHA)
+            again = mapped_hash(b"a second content, of a different length")
+            self.assertNotEqual(
+                first, again,
+                "the file was rewritten and the recorded hash did not change, so "
+                "a library swapped between two arm-runs would be reported as the "
+                "one the first arm-run used")
+            self.assertGreater(
+                len(m._MAPPED_SHA), cached,
+                "the rewritten file reused its cache entry, which is what keying "
+                "on the path alone does")
+
+    def _held(self, path: Path):
+        """A child that maps `path` and holds it; returns the process."""
+        child = ("import mmap, sys, time\n"
+                 "f = open(sys.argv[1], 'rb')\n"
+                 "mm = mmap.mmap(f.fileno(), 0, prot=mmap.PROT_READ)\n"
+                 "sys.stdout.write('up\\n'); sys.stdout.flush()\n"
+                 "time.sleep(20)\n")
+        proc = subprocess.Popen([sys.executable, "-c", child, str(path)],
+                                stdout=subprocess.PIPE, text=True)
+        self.addCleanup(lambda: (proc.terminate(), proc.wait(), proc.stdout.close()))
+        self.assertEqual(proc.stdout.readline().strip(), "up")
+        return proc
+
+    def test_a_path_with_a_space_is_read_whole(self):
+        """`line.split()` cut it in two and the object went unrecorded."""
+        m = self._mod()
+        with tempfile.TemporaryDirectory() as td:
+            lib = Path(td) / "a dir" / "lib with space.so.1"
+            lib.parent.mkdir()
+            lib.write_bytes(b"spaced")
+            got = m._mapped_objects(self._held(lib).pid)
+            self.assertIn(str(lib), got, f"not reported: {list(got)[:6]}")
+            self.assertRegex(got[str(lib)].get("sha256", ""), r"^[0-9a-f]{64}$")
+
+    def test_a_library_replaced_while_mapped_is_an_error_not_a_hash(self):
+        """The kernel marks it ` (deleted)`; the path then holds another file.
+
+        The test for the marker could never be true, because the marker had been
+        split into a field of its own, so the record hashed the NEW file under
+        the path and called it what the process loaded.
+        """
+        m = self._mod()
+        with tempfile.TemporaryDirectory() as td:
+            lib = Path(td) / "libswap.so.1"
+            lib.write_bytes(b"what was loaded")
+            proc = self._held(lib)
+            fresh = Path(td) / "libswap.so.1.new"
+            fresh.write_bytes(b"what replaced it on disk")
+            os.replace(fresh, lib)
+            got = m._mapped_objects(proc.pid)
+            self.assertIn(str(lib), got, f"not reported: {list(got)[:6]}")
+            self.assertIn("error", got[str(lib)],
+                          f"a replaced library was hashed as if it were the one "
+                          f"loaded: {got[str(lib)]}")
+            self.assertNotIn("sha256", got[str(lib)])
+
+    def test_the_arm_run_record_carries_it(self):
+        src = (self.ROOT / self.RUNNER).read_text(encoding="utf-8")
+        self.assertIn('"server_mapped": _mapped_objects(proc.pid),', src,
+                      "the arm-run record does not carry what the server mapped, "
+                      "so the function exists and nothing calls it")
+
+
+class TheRunnersEnvironmentValidatorsMustActuallyValidate(unittest.TestCase):
+    """A validator with a broken pattern refuses everything and nothing notices.
+
+    `bench/retest_runner.py` screens its environment at import: a cpu list that is
+    not a cpu list, a thread count that is not a number, a polling level outside
+    the range the flag accepts. Those checks are the only thing between a typo and
+    a treatment that the manifest describes wrongly.
+
+    Added because one of them was broken while another was added beside it. An
+    over-escaped pattern turned `re.fullmatch(r"\\d+", THREADS)` into a match
+    against a literal backslash, so `BENCH_THREADS=8` was refused as "not a thread
+    count" and every arm-run would have failed to start. Four hundred and fifty
+    five tests passed over it, because every one of them checked what the runner
+    does with a GOOD value and none fed it a bad one, and a validator that refuses
+    everything looks exactly like a validator that is working.
+
+    So both ends, for every knob: a value that must be accepted and a value that
+    must be refused, with the refusal naming the variable.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+    RUNNER = "bench/retest_runner.py"
+
+    CASES = (
+        # variable, accepted, refused
+        ("BENCH_THREADS", "8", "abc"),
+        ("BENCH_POLL", "0", "101"),
+        ("BENCH_POLL", "50", "x"),
+        ("BENCH_CPU_STRICT", "0", "2"),
+        ("BENCH_PIN_CPUS", "0,2,4", "zero-two"),
+        ("BENCH_PIN_SUFFIX", "alt", "a b"),
+    )
+
+    def _run(self, var, value):
+        env = {"PATH": "/usr/bin:/bin", "TZ": "UTC",
+               "LLAMA_SERVER_BIN": "/bin/true", var: value}
+        # BENCH_PIN_CPUS on its own is refused for a different and correct reason,
+        # that pinning without a thread count moves two things at once, so the
+        # thread count rides along wherever a cpu list is the subject.
+        if var.startswith("BENCH_PIN"):
+            env["BENCH_THREADS"] = "8"
+        if var == "BENCH_PIN_SUFFIX":
+            env["BENCH_PIN_CPUS"] = "0,2"
+            env["BENCH_PIN_ALT_CPUS"] = "1,3"
+        return subprocess.run(
+            [sys.executable, str(self.ROOT / self.RUNNER), "--help"],
+            capture_output=True, text=True, env=env, timeout=120, cwd=self.ROOT)
+
+    def test_a_good_value_is_not_refused(self):
+        for var, good, _bad in self.CASES:
+            with self.subTest(var=var, value=good):
+                r = self._run(var, good)
+                both = r.stdout + r.stderr
+                self.assertNotIn(
+                    f"{var}={good!r}", both,
+                    f"{var}={good} was refused, so the check rejects valid input "
+                    f"and every run using it fails to start")
+
+    def test_a_bad_value_is_refused_by_name(self):
+        for var, _good, bad in self.CASES:
+            with self.subTest(var=var, value=bad):
+                r = self._run(var, bad)
+                both = r.stdout + r.stderr
+                self.assertIn(
+                    var, both,
+                    f"{var}={bad} was not refused, or the refusal does not name "
+                    f"the variable, so a typo reaches the server as a treatment")
+
+    def test_strict_placement_is_refused_while_no_mask_is_passed(self):
+        """It is a no-op without `--cpu-mask`, and this runner passes none.
+
+        `ggml_thread_cpumask_is_valid` is true only if a bit is set, and ggml
+        applies affinity only when it is, so strict placement with an all-zero
+        mask walks nothing. `taskset` does not fill that mask: it sets the process
+        affinity and leaves `cpuparams.cpumask` empty. Accepting 1 here would put
+        a treatment in the manifest that did not happen.
+        """
+        # The QUOTED flag, which is how it would appear as an argv element. A bare
+        # `--cpu-mask` is all over this file in the comment and the refusal that
+        # explain why it is not passed, and matching that would make the assertion
+        # fail on its own documentation.
+        src = (self.ROOT / self.RUNNER).read_text(encoding="utf-8")
+        passed = [l.strip() for l in src.splitlines() if '"--cpu-mask"' in l]
+        self.assertEqual(passed, [],
+                         "the runner passes --cpu-mask now, so strict placement "
+                         "is no longer a no-op and this refusal has to go")
+        r = self._run("BENCH_CPU_STRICT", "1")
+        self.assertIn("does nothing without --cpu-mask", r.stdout + r.stderr,
+                      "BENCH_CPU_STRICT=1 is accepted while nothing passes a mask")
+
+
+class ScratchOnTmpfsIsMemoryNotSpace(unittest.TestCase):
+    """`df` on a tmpfs reports a size limit, which is not what RAM can back.
+
+    `bench/run_data_mutations.sh` gives each shard two mirrors of the tree in
+    TMPDIR and checked only `df`. Two gate runs were killed at that step on a
+    16 GB tmpfs that df called 5.6 GB free, on a host with no swap and 13 GB of
+    mirrors abandoned by the runs before them. The check passed both times and
+    the kernel killed the process group, which from outside is a run that stopped
+    for no reason: no failing step, no message, and an exit status that came from
+    the signal rather than from anything the script decided.
+
+    So on tmpfs the comparison has to be against MemAvailable, and a run killed
+    mid-way has to be visible to the next one, because its mirrors are still
+    there and they are still memory.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+    SH = "bench/run_data_mutations.sh"
+
+    def _body(self):
+        return (self.ROOT / self.SH).read_text(encoding="utf-8")
+
+    def test_it_asks_what_filesystem_the_scratch_is_on(self):
+        self.assertIn('findmnt -no FSTYPE --target "$TMP_DIR"', self._body(),
+                      "the script does not ask whether TMPDIR is tmpfs, so its "
+                      "df check is the only check and df is the wrong question")
+
+    def test_it_compares_against_memory_when_it_is_tmpfs(self):
+        b = self._body()
+        self.assertIn("MemAvailable", b,
+                      "nothing reads MemAvailable, so a tmpfs that df calls free "
+                      "is accepted and the kernel decides instead")
+        self.assertIn("SwapTotal", b,
+                      "swap is not counted, so a host with swap would be refused "
+                      "work it could do")
+        self.assertRegex(
+            b, r'\[ "\$\(\(AVAIL_KB \+ SWAP_KB\)\)" -lt "\$NEED_KB" \]',
+            "the memory comparison is not against what the mirrors need")
+
+    def test_it_names_the_remedy(self):
+        self.assertIn("TMPDIR=/var/tmp", self._body(),
+                      "a refusal that does not say where to put the scratch sends "
+                      "the reader back to the same tmpfs")
+
+    def test_it_reports_mirrors_a_killed_run_left(self):
+        b = self._body()
+        self.assertIn('-type d -name work', b,
+                      "abandoned shard mirrors are not detected, so each killed "
+                      "run makes the next one more likely to be killed")
+        self.assertIn("abandoned shard mirror", b, "the note has no text")
+
+    def test_the_stale_count_cannot_kill_the_script(self):
+        """`find | wc -l` under pipefail is how this script exits 1 in silence.
+
+        It happened while writing the check: `find` returns non-zero on a
+        directory it cannot read, `pipefail` fails the assignment, and `set -e`
+        ends the script before a single line is printed. `--check-only` exited 1
+        on both /tmp and /var/tmp with no output at all.
+        """
+        b = self._body()
+        self.assertRegex(
+            b, r'STALE=\$\(\s*\{[^}]*find[^}]*\|\|\s*true;\s*\}\s*\|\s*wc -l\)',
+            "the stale-mirror count is not guarded against pipefail, so a "
+            "TMPDIR holding one unreadable directory kills the launcher silently")
+
+
 class AShardedJobMustCoverItsWholeList(unittest.TestCase):
     """A matrix one leg short skips that fraction of the work and stays green.
 
@@ -7589,8 +8901,62 @@ class TheLocalGateMustRunEveryStepTheWorkflowDoes(unittest.TestCase):
         self.assertEqual(named, [],
                          "the gate names a home-directory checkout in code, so "
                          "running it from one repository can attest another")
-        self.assertIn('SRC=$(cd "$(dirname "$0")/.." && pwd)', gate,
+        src = [l.strip() for l in code if l.startswith("SRC=")]
+        self.assertEqual(len(src), 1, f"expected one SRC= line, got {src}")
+        # Two acceptable sources and no third. `dirname $0` is the checkout while
+        # the script runs in place; once it re-execs a copy in TMPDIR so a mid-run
+        # edit cannot corrupt the run, `dirname $0` is that temp directory, so the
+        # origin it exports is the other. Anything else -- a written-down path, a
+        # bare `pwd` -- is the wrong-copy defect coming back.
+        self.assertIn('$(cd "$(dirname "$0")/.." && pwd)', src[0],
                       "SRC is not derived from the script's own location")
+        # If SRC takes an override at all, it has to be one THIS script sets.
+        # Pinning the name `CI_FAITHFUL_ORIGIN` would pass for any other name, so
+        # the name is read out of the line and the export is required for it --
+        # otherwise an environment variable from outside picks the checkout, which
+        # is the written-down path again with a different door.
+        m = re.fullmatch(r'SRC=\$\{([A-Za-z_][A-Za-z0-9_]*):-(.+)\}', src[0])
+        if m:
+            var, default = m.groups()
+            self.assertEqual(default, '$(cd "$(dirname "$0")/.." && pwd)',
+                             "the default is not the script's own location")
+            self.assertRegex(
+                gate, r'(?m)^\s*export ' + re.escape(var) + r'=',
+                f"SRC can be overridden by ${var}, which this script never sets, "
+                f"so the environment chooses which checkout gets attested")
+        else:
+            self.assertEqual(
+                src[0], 'SRC=$(cd "$(dirname "$0")/.." && pwd)',
+                "SRC is neither the script's own location nor a default for it")
+
+    def test_it_runs_a_copy_of_itself(self):
+        """Because bash reads a script by byte offset while it executes it.
+
+        An in-place edit of this gate during a run made bash resume at that offset
+        in the new text: a fragment of the file ran as a command, one step ran
+        twice, the last two steps did not run, and it exited 0. Nothing in the
+        gate noticed, and a gate whose verdict survives being half-run is worse
+        than no gate at all, because it is believed.
+
+        So the gate copies itself and runs the copy. Removing that restores a
+        silent failure mode, and the only thing that would show it is this.
+        """
+        gate = (self.ROOT / self.GATE).read_text(encoding="utf-8")
+        code = "\n".join(l for l in gate.splitlines()
+                         if not l.lstrip().startswith("#"))
+        self.assertIn('cat "$0" > "$_self"', code,
+                      "the gate no longer copies itself, so an edit during a run "
+                      "can make bash resume mid-line in the new text")
+        self.assertIn('bash "$_self" "$@"', code,
+                      "the gate copies itself and then does not run the copy")
+        self.assertIn('bash -n "$_self"', code,
+                      "the copy is not checked for syntax, and `cat` can itself "
+                      "race an edit: a mangled copy is the same failure again")
+        self.assertRegex(code, r'(?m)^\s*rm -f "\$_self"',
+                         "the copy is never removed")
+        self.assertIn('exit "$_rc"', code,
+                      "the gate discards the copy's exit status, which is the "
+                      "whole verdict")
 
     def test_the_unit_step_runs_on_a_runners_processor_count(self):
         """The one difference this gate used to hope about rather than eliminate.
@@ -7699,6 +9065,357 @@ class ThePushGuardMustBeInTheRepositoryToo(unittest.TestCase):
         """The comment that named a guard the tree did not hold now names a path."""
         self.assertIn("bench/hooks/pre-push.sh", self._gate(),
                       "the gate mentions a pre-push hook without saying where it is")
+
+
+class PlanSsArmsMustDifferInOneThingEach(unittest.TestCase):
+    """A three-arm design is only an experiment if the arms differ by one thing.
+
+    Plan S asks what shares a physical core with llama.cpp's main thread. Its
+    first arm takes one hyperthread from each of eight physical cores, its second
+    takes both hyperthreads of four, and its third adds `OMP_WAIT_POLICY=passive`
+    to the second's server environment. If the second arm's mask ever stopped
+    being a packed one, or the third ever differed from the second in more than
+    that variable, the document would still
+    read as a controlled contrast while measuring something else. The masks are
+    the design, so they are asserted here.
+
+    The document also makes four claims ABOUT THIS TREE, and each is the reason a
+    prerequisite exists: that nothing passes `--poll` or `--cpu-strict`, that no
+    manifest records either, and that no file says which processors share a core.
+    A prerequisite that quietly became satisfied, or quietly became false, would
+    leave the plan describing a repository that is not this one.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+    DOC = "v4_audit_2026_08_25/PROSPECTIVE_PLAN_SIBLINGS.md"
+
+    def _mod(self):
+        sys.path.insert(0, str(self.ROOT / "analysis"))
+        import plan_siblings_power
+        return plan_siblings_power
+
+    def _doc(self):
+        return (self.ROOT / self.DOC).read_text(encoding="utf-8")
+
+    def test_a_job_invokes_it(self):
+        wf = (self.ROOT / ".github" / "workflows" / "audit.yml").read_text(
+            encoding="utf-8")
+        self.assertIn("run: python analysis/plan_siblings_power.py",
+                      [l.strip() for l in wf.splitlines()],
+                      "no job derives the design table, so its hours and half "
+                      "widths are guarded by nothing")
+
+    def test_the_local_gate_invokes_it_too(self):
+        g = (self.ROOT / "bench" / "ci_faithful.sh").read_text(encoding="utf-8")
+        self.assertIn("analysis/plan_siblings_power.py", g,
+                      "the gate reproduces the claims job and this step is "
+                      "missing from it, which is the defect that let three "
+                      "workflow steps run only in CI")
+
+    def test_the_topology_figures_are_derived_from_the_recorded_runs(self):
+        """Seven figures were quoted from two runs and nothing derived any.
+
+        Four of the seven were wrong, each by one unit in the last place, because
+        the prose was written from an interactive run and a later run was
+        committed beside it as the evidence. Both readings were honest and they
+        were of different runs, which is exactly how a number and its cited
+        artefact come apart without anybody noticing.
+        """
+        m = self._mod()
+        doc = (self.ROOT / self.DOC).read_text(encoding="utf-8")
+        self.assertEqual(m.check_topology(doc), [])
+
+    def test_the_two_performance_tiers_must_be_separated_in_the_run(self):
+        """FAVOURED is named, not inferred, so a run that contradicts it must fail.
+
+        The derivation quotes `max` of the favoured set, and `max` is insensitive
+        to one of the four dropping out: a deliberate corruption that pushed cpu 8
+        down to a non-favoured rate left the quoted figure matching, because three
+        others were still above it. What the masks balance on is that the SET is
+        separated, so that is asserted. Fed synthetic rates here rather than a
+        file, because the condition cannot be produced on real hardware on demand
+        and a test that cannot reach its own branch is decoration.
+        """
+        m = self._mod()
+        def rec(solo):
+            return {"rel": "synthetic", "solo": solo,
+                    "pairs": [(0, 1, 0.5, "shared")], "control_cpu": 0,
+                    "control": 0.5, "agreed": 1}
+        separated = {c: 163700.0 for c in range(8)}
+        separated.update({c: 172500.0 for c in (8, 9, 10, 11)})
+        separated.update({c: 163700.0 for c in (12, 13, 14, 15)})
+        figs = m.topology_figures(rec(separated))
+        self.assertGreater(figs["fav_margin"], 0.0)
+        for broken, what in (
+            ({**separated, 8: 163000.0}, "a favoured processor drops out of the tier"),
+            ({**separated, 0: 173000.0}, "a non-favoured processor rises into it"),
+            ({**separated, 8: 163700.0}, "a favoured processor merely ties"),
+        ):
+            with self.subTest(case=what):
+                with self.assertRaises(SystemExit, msg=what) as cm:
+                    m.topology_figures(rec(broken))
+                self.assertIn("not separated", str(cm.exception))
+
+    def test_both_recorded_runs_are_present_and_parse(self):
+        m = self._mod()
+        for key, rel in m.TOPOLOGY.items():
+            with self.subTest(run=key):
+                self.assertTrue((self.ROOT / rel).is_file(),
+                                f"{rel} is cited by the document and is not here")
+                rec = m.read_topology(rel)
+                self.assertGreaterEqual(
+                    len(rec["solo"]), 8,
+                    f"{rel} records {len(rec['solo'])} solo rates; a run that "
+                    f"measured almost nothing would still pass a presence check")
+                self.assertEqual(
+                    rec["agreed"], len(rec["pairs"]),
+                    f"{rel} claims agreement on a different number of pairs than "
+                    f"it lists")
+
+    def test_the_derivation_is_actually_called(self):
+        """`check_doc` is called by a test; `check_topology` has to be called by
+        the script, because the claims job runs the script and not the test."""
+        src = (self.ROOT / "analysis" / "plan_siblings_power.py").read_text(
+            encoding="utf-8")
+        tree = ast.parse(src)
+        main = next((n for n in tree.body
+                     if isinstance(n, ast.FunctionDef) and n.name == "main"), None)
+        self.assertIsNotNone(main, "plan_siblings_power.py has no main()")
+        called = {ast.unparse(n.func) for n in ast.walk(main)
+                  if isinstance(n, ast.Call)}
+        self.assertIn("check_topology", called,
+                      "main() does not call check_topology, so the figures it "
+                      "derives are compared against nothing when the claims job "
+                      "runs the script")
+        self.assertIn("check_doc", called,
+                      "main() does not call check_doc either")
+
+    def test_the_design_table_matches_the_data(self):
+        m = self._mod()
+        inp = m.inputs()
+        self.assertEqual(m.check_doc(inp, m.design(inp)), [])
+
+    def _arms(self):
+        """The arm table, by its own row labels.
+
+        Asserting that a mask STRING is somewhere in the document is not enough:
+        the packed mask appears in two rows, so changing one of them leaves the
+        string present and the check green. The rows are what the design is.
+        """
+        arms = {}
+        for line in self._doc().splitlines():
+            if not line.startswith("| `"):
+                continue
+            c = [x.strip().strip("`") for x in line.strip().strip("|").split("|")]
+            if len(c) == 3 and re.fullmatch(r"[\d,]+", c[1].strip("`")):
+                arms[c[0]] = (c[1].strip("`"), c[2])
+        return arms
+
+    def test_the_masks_are_one_sibling_each_and_both_siblings_each(self):
+        """Arm one must share no physical core; arm two must share every one."""
+        arms = self._arms()
+        self.assertEqual(sorted(arms), ["distinct", "packed", "packed-passive"],
+                         f"the arms are not the three the plan names: {arms}")
+        distinct = [int(c) for c in arms["distinct"][0].split(",")]
+        packed = [int(c) for c in arms["packed"][0].split(",")]
+        self.assertEqual(packed, [int(c) for c in arms["packed-passive"][0].split(",")],
+                         "the two packed arms no longer share a mask")
+        # On x86 with two threads per core the kernel numbers siblings n and n+1
+        # within a core, so n >> 1 is the physical core. This is the topology the
+        # document says is unrecorded, which is why it is a prerequisite and not
+        # an assertion about the hardware: what is asserted is that the two masks
+        # are opposites UNDER that numbering, which is what makes them a contrast.
+        self.assertEqual(len({c >> 1 for c in distinct}), len(distinct),
+                         "the distinct arm shares a physical core with itself")
+        self.assertEqual(len({c >> 1 for c in packed}), len(packed) // 2,
+                         "the packed arm does not pack")
+        self.assertEqual(len(distinct), len(packed),
+                         "the arms do not use the same number of threads, so "
+                         "they differ in two things")
+
+    def test_the_arms_have_equal_exposure_to_the_favoured_cores(self):
+        """Two of this processor's performance cores are faster, so masks differ.
+
+        Measured on the bench host and recorded in
+        `v4_audit_2026_08_25/topology/topology_3090_20261003.txt`: processors 8, 9,
+        10 and 11 run about five per cent faster than the other twelve
+        performance-core threads, which is Turbo Boost Max 3.0 favouring their two
+        cores. That is not a hardware detail this test reads from the machine -- it
+        is a constant from a recorded measurement, which is why asserting it is
+        safe on a runner that has four processors and no such cores.
+
+        The first version of this design used `0,1,2,3,4,5,6,7` for `packed`,
+        which touches none of them, against a `distinct` mask that puts two of its
+        eight threads on them. Those two masks differ in sharing AND in clock, the
+        expected difference from the clock alone is larger than the one per cent
+        band the document pre-registers for "not the mechanism", and a confound
+        bigger than the smallest effect the design would call real is a different
+        experiment rather than a caveat.
+        """
+        FAVOURED = {8, 9, 10, 11}
+        arms = self._arms()
+        exposure = {}
+        for name, (mask, _) in arms.items():
+            cpus = {int(c) for c in mask.split(",")}
+            exposure[name] = len(cpus & FAVOURED)
+        got = sorted(set(exposure.values()))
+        self.assertEqual(
+            len(got), 1,
+            f"the arms do not have equal exposure to the favoured processors "
+            f"{sorted(FAVOURED)}: {exposure}. They differ in clock as well as in "
+            f"sharing, and the clock difference is larger than the band the "
+            f"document reserves for a null")
+        self.assertGreater(
+            exposure["distinct"], 0,
+            "no arm touches a favoured processor, which is only reachable by "
+            "dropping to six threads; if that is the design now, say so here")
+
+    def test_the_third_arm_differs_from_the_second_by_the_variable_alone(self):
+        doc = self._doc()
+        rows = [l for l in doc.splitlines()
+                if l.startswith("| `packed")]
+        self.assertEqual(len(rows), 2, f"expected two packed arms, got {rows}")
+        cells = [[c.strip() for c in r.strip("|").split("|")] for r in rows]
+        self.assertEqual(cells[0][1], cells[1][1],
+                         "the two packed arms do not share an affinity, so the "
+                         "third arm is not a one-variable contrast")
+        self.assertIn("`OMP_WAIT_POLICY=passive`", cells[1][2])
+        self.assertNotIn("OMP_", cells[0][2])
+        self.assertNotIn("--poll", cells[1][2],
+                         "the third arm names the poll flag again, which an "
+                         "OpenMP build does not read")
+
+    def test_it_predicts_a_size_before_the_run(self):
+        """A pre-registration that cannot be wrong is a description."""
+        doc = self._doc()
+        self.assertIn("I expect", doc,
+                      "no stated expectation, so no outcome can refute it")
+        self.assertIn("this plan was wrong", doc,
+                      "no stated refutation condition")
+
+    def test_it_says_the_mechanism_has_not_been_measured(self):
+        self.assertIn("nothing here has measured it", self._doc(),
+                      "the candidate is an inference from upstream source and "
+                      "the ordering of three figures; a plan that does not say "
+                      "so reads as a finding")
+
+    def test_it_states_what_the_third_arm_reaches_in_this_build(self):
+        """The lever has to be the one the binary reads, and a null has a limit.
+
+        The first version's lever was `--poll 0`, and in the OpenMP build these
+        runs use ggml never reads it: a treatment recorded everywhere and applied
+        to nothing. The plan has to say the build is an OpenMP one, cite the lines
+        that make the poll level dead in it, and say that the workers may not
+        spin at all while decoding, because then a null second arm tests nothing
+        and must not read as "spinning is not the mechanism".
+        """
+        doc = self._doc()
+        flat = " ".join(doc.split())
+        self.assertIn("is an OpenMP build", flat,
+                      "the plan does not say which build it is written for")
+        self.assertIn("`#ifndef GGML_USE_OPENMP`", flat,
+                      "the poll level's deadness is asserted without the line "
+                      "that shows it")
+        self.assertIn("`OPENMP = 1`", flat,
+                      "the build is called OpenMP without the record that says so")
+        self.assertIn("applies to every OpenMP team", flat,
+                      "the plan does not say what the variable reaches")
+        self.assertIn("doubt the workers spin at all", flat,
+                      "the plan does not say the mechanism may not run at all")
+        self.assertIn("does not say spinning is innocent", flat,
+                      "the secondary reading does not say what a null fails to "
+                      "exclude")
+        self.assertIn("server-context.cpp:1051", flat,
+                      "the target context's pool is asserted without its line")
+        self.assertIn("common/speculative.cpp", flat,
+                      "the drafter's context is named without its source")
+
+    def test_the_prerequisites_are_still_unsatisfied(self):
+        """Each prerequisite exists because of a fact about this tree."""
+        tracked = subprocess.run(["git", "ls-files", "-z"], cwd=self.ROOT,
+                                 capture_output=True, text=True, timeout=300)
+        self.assertEqual(tracked.returncode, 0, tracked.stderr)
+        paths = [q for q in tracked.stdout.split("\0") if q]
+        body = {}
+        me = Path(__file__).resolve().relative_to(self.ROOT).as_posix()
+        for q in paths:
+            # Documents SHOULD discuss the flags -- ERRATA, plan Y's and v5's
+            # readings all name `--poll`, and that is the corrected reasoning,
+            # not a driver passing it. What a prerequisite is about is executable
+            # code. This file is executable code and searching it would match the
+            # flag names in these very assertions, which is how this test failed
+            # the first time it ran.
+            if q in (me, "analysis/plan_siblings_power.py",
+                     "tests/mutate.py", "tests/data_mutate.py"):
+                continue
+            if not q.endswith((".py", ".sh", ".json")):
+                continue
+            try:
+                body[q] = (self.ROOT / q).read_text(encoding="utf-8")
+            except (UnicodeDecodeError, OSError):
+                continue
+
+        # 1 was CLOSED for the runner on 2026-10-03 and is still open for the
+        # corpus, and those are two different assertions. `--poll` is matched as a
+        # whole token: a substring search for "poll" takes "polling" and
+        # "pollute", and this file's own source would match the strings here,
+        # which is why it is excluded from `body`.
+        runner = body.get("bench/retest_runner.py", "")
+        self.assertTrue(runner, "the runner is not in the searched set")
+        for flag in ('"--poll"', '"--cpu-strict"'):
+            self.assertIn(
+                flag, runner,
+                f"the runner no longer passes {flag}, so plan S's third arm "
+                f"cannot be expressed and the parameter goes back to being "
+                f"unrecorded")
+        # Still NOT passed, and the refusal in the runner says why: strict
+        # placement reads a mask that only this flag fills, so raising
+        # BENCH_CPU_STRICT needs it first.
+        self.assertNotIn('"--cpu-mask"', runner,
+                         "the runner passes --cpu-mask now, so the plan's item 2 "
+                         "has to say what that changes about taskset")
+        # And the CORPUS is still without them, which is a different fact from the
+        # runner being able to record them. No committed manifest carries either
+        # key, so no published run here can be compared with a plan-S arm on this
+        # axis, and the document says so. When a run made with the new runner is
+        # committed this assertion has to be narrowed to the runs before it rather
+        # than deleted, because the old ones never will carry it.
+        jsons = [q for q in body if q.endswith(".json")]
+        self.assertGreater(len(jsons), 20,
+                           f"only {len(jsons)} json files searched; a check that "
+                           f"reads almost nothing passes for the wrong reason")
+        for key in ('"poll"', '"cpu_strict"'):
+            hits = sorted(q for q in jsons if key in body[q])
+            self.assertEqual(
+                hits, [],
+                f"{key} is now recorded in {hits}. A run made after the runner "
+                f"learned to record it has been committed, so narrow this to the "
+                f"earlier runs and say in the plan which ones carry it")
+
+        # 3 is CLOSED and the assertion is inverted. It used to require that
+        # nothing read `thread_siblings`, because the document said the tree could
+        # not check the topology. On 2026-10-03 it was measured, so what has to
+        # hold now is that the instrument and its record are both still here: a
+        # closed prerequisite whose evidence was deleted is an open one that reads
+        # as closed. `sibling` alone would be no use for either direction -- every
+        # other hit in this tree is the SIBLING REPOSITORY, qwen3.6-vllm-2x3090.
+        reads_topology = sorted(q for q, t in body.items()
+                                if "thread_siblings" in t)
+        self.assertIn(
+            "bench/cpu_siblings.py", reads_topology,
+            "nothing reads the sibling topology any more, so plan S's masks are "
+            "back to resting on a claim the tree cannot check")
+        evidence = self.ROOT / "v4_audit_2026_08_25" / "topology" / \
+            "topology_3090_20261003.txt"
+        self.assertTrue(evidence.is_file(),
+                        f"{evidence.name} is gone, and the document cites it as "
+                        f"what closed prerequisite 3")
+        rec = evidence.read_text(encoding="utf-8")
+        self.assertIn("agrees with /sys on all 15 pair(s)", rec,
+                      "the recorded run no longer reports agreement, so the "
+                      "document's claim about the masks is not what it cites")
+        self.assertIn("13th Gen Intel(R) Core(TM) i9-13900K", rec,
+                      "the record is not from the processor the plan is about")
 
 
 class PlanZsPremisesMustBeWhatTheDataSays(unittest.TestCase):
@@ -7895,3 +9612,1889 @@ class TheInstrumentsBehindA16sAddendumMustBeInTheTree(unittest.TestCase):
         self.assertIn('open(_sysfs(pci) / "resource0", "rb")', src)
         for bad in ("PROT_WRITE", "ACCESS_WRITE", '"r+b"', '"wb"'):
             self.assertNotIn(bad, src, f"the reader can write to the card: {bad}")
+
+
+class AnArmRunMustBeJoinableToATrace(unittest.TestCase):
+    """Run T4's complete trace cannot be attributed to any arm-run.
+
+    Arm-runs time their requests with `time.perf_counter()`, whose origin is
+    arbitrary, and the sampler writes wall clock. Nothing bridged them, so the only
+    anchor run T4 offers is its manifest's `created` against the first request,
+    which assumes no server launch precedes it -- one does. Reconstructed that way
+    the window LENGTHS come back to 924 s against 924 s of recorded request spans
+    and the alignment is still wrong, which `analysis/plan_z_power.py` demonstrates
+    on the arms' own VRAM footprints. The thermal profile across ERRATA A16's step
+    is therefore not recoverable from what that run recorded.
+
+    A join has two sides and this checks both.
+
+    The ARM-RUN side is unambiguous: an epoch float, and an ISO-8601 string with an
+    offset for a reader. Not nvidia-smi's spelling, because the eighteen traces here
+    carry THREE spellings and emitting one of them would suggest a string
+    comparison that silently matches nothing for twelve of them.
+
+    The TRACE side is one parser, in `bench/check_telemetry_cover.py`, required here
+    to read every row of every committed trace. It read ten of eighteen until
+    2026-10-02, and the file's own history records the first version reading none --
+    both times because it was tested against an example instead of against the data.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+    # ISO-8601, milliseconds, with an offset. `fromisoformat` reads it.
+    ISO = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}[+-]\d{4}$")
+
+    def _rr(self):
+        import importlib.util
+        os.environ.setdefault("LLAMA_SERVER_BIN", "/bin/true")
+        os.environ.setdefault("MODEL_TARGET", "/dev/null")
+        spec = importlib.util.spec_from_file_location(
+            "rr_join", self.ROOT / "bench" / "retest_runner.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def _parser(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "ctc_join", self.ROOT / "bench" / "check_telemetry_cover.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def test_one_parser_reads_every_row_of_every_committed_trace(self):
+        """Against the DATA, not an example. That is what was missing twice."""
+        import csv
+        import datetime as dt
+        m = self._parser()
+        tz = dt.timezone(dt.timedelta(hours=8))
+        traces = sorted(self.ROOT.glob("*/data/gpu_telemetry_*.csv"))
+        self.assertGreaterEqual(len(traces), 18, f"{len(traces)} traces found")
+        unparsed, total = [], 0
+        for p in traces:
+            with p.open(encoding="utf-8") as fh:
+                rd = csv.reader(fh)
+                hdr = [h.strip() for h in next(rd)]
+                for row in rd:
+                    if not row:
+                        continue
+                    total += 1
+                    d = {h: v.strip() for h, v in zip(hdr, row)}
+                    if (m._stamp(d, tz) is None
+                            and m._stamp({"timestamp": row[0].strip()}, tz) is None):
+                        unparsed.append(f"{p.name}: {row[0].strip()!r}")
+        self.assertEqual(unparsed[:4], [],
+                         f"{len(unparsed)} of {total} rows do not parse")
+        self.assertGreater(total, 10000, f"only {total} rows read")
+
+    def test_the_arm_run_side_is_iso_and_epoch(self):
+        rr = self._rr()
+        off = rr._wall_offset()
+        rows = [{"t_start": 100.0, "t_end": 103.5},
+                {"t_start": 103.5, "t_end": 107.25}]
+        w = rr._wall_window(rows, off, off)
+        self.assertEqual(w["offset_drift_s"], 0.0)
+        self.assertAlmostEqual(w["requests_started_unix"], 100.0 + off, places=6)
+        self.assertAlmostEqual(w["requests_ended_unix"], 107.25 + off, places=6)
+        for k in ("requests_started", "requests_ended"):
+            self.assertRegex(w[k], self.ISO, f"{k} is {w[k]!r}")
+        # and the string is the float, so a reader and a joiner cannot disagree
+        import datetime as dt
+        self.assertAlmostEqual(
+            dt.datetime.fromisoformat(w["requests_started"]).timestamp(),
+            w["requests_started_unix"], places=3)
+
+    def test_the_millisecond_carry(self):
+        """Rounding the fraction on its own printed `.1000`, which is four digits.
+
+        The defect was in the first version of this, and a value a ten-thousandth
+        under the second is all it takes.
+
+        Asserted by ROUND TRIP and not against a wall-clock hour. The first version
+        of this test checked for `T07:28:24.000`, which is that instant in +0800 and
+        not in UTC, and the CI reproduction runs with `TZ=UTC`:
+        `bench/check_telemetry_cover.py` carries a docstring about exactly this --
+        "a verifier whose verdict depends on `TZ` is not a verifier" -- and the
+        test written a day later had the same defect.
+        """
+        import datetime as dt
+        iso = self._rr()._iso
+        for unix, want in ((1790897303.9996, 1790897304.000),
+                           (1790897303.9994, 1790897303.999),
+                           (1790897303.0, 1790897303.000),
+                           (1790897303.5, 1790897303.500)):
+            got = iso(unix)
+            self.assertRegex(got, self.ISO, f"{unix} formats as {got!r}")
+            self.assertAlmostEqual(
+                dt.datetime.fromisoformat(got).timestamp(), want, places=3,
+                msg=f"{unix} -> {got!r}, which is not {want}")
+        for u in (1790897303.0005, 1790897303.99999):
+            self.assertRegex(iso(u), self.ISO, f"{u} formats wrong")
+
+    def test_the_offset_converts_a_monotonic_time(self):
+        rr = self._rr()
+        import datetime as dt
+        got = rr._iso(time.perf_counter() + rr._wall_offset())
+        # As instants, not as strings: `_iso` rounds to the millisecond and
+        # `strftime` truncates, so a string comparison failed one run in two
+        # thousand, whenever the clock sat in the last half millisecond.
+        self.assertLess(abs(dt.datetime.fromisoformat(got).timestamp() - time.time()),
+                        2.0, f"the offset does not convert: {got!r}")
+
+    def test_a_crashed_arm_run_has_offsets_and_no_window(self):
+        """A window over no requests would be a window over nothing, and a reader
+        cannot tell that from a window over one instant."""
+        rr = self._rr()
+        w = rr._wall_window([], 1.0, 2.0)
+        self.assertEqual(w["offset_drift_s"], 1.0)
+        for k in ("requests_started", "requests_started_unix"):
+            self.assertNotIn(k, w)
+        self.assertNotIn("requests_started",
+                         rr._wall_window([{"tag": "x"}], 1.0, 1.0))
+
+    def test_the_memory_instrument_records_the_reason_it_could_not_read(self):
+        """An instrument the run could not reach is a field that says why.
+
+        This box's kernel refuses to map the register at all, so the call fails
+        here, and failing is the case worth testing: a measurement must not be able
+        to stall or die on an instrument.
+        """
+        rr = self._rr()
+        got = rr.vram_temp()
+        self.assertTrue(isinstance(got, (float, str)), type(got))
+        if isinstance(got, str):
+            self.assertTrue(got.startswith("unavailable: "), got)
+        # The REASON the tool printed reaches the record. The first version
+        # recorded the exception's text, which says only the exit status.
+        reason = "resource0: CONFIG_IO_STRICT_DEVMEM refuses the BAR"
+        err = subprocess.CalledProcessError(1, ["sudo"], output=reason + "\n")
+        with mock.patch.object(rr.subprocess, "check_output", side_effect=err):
+            got = rr.vram_temp()
+        self.assertIn(reason, got, f"the tool's reason was dropped: {got!r}")
+        self.assertTrue(got.startswith("unavailable: "), got)
+        src = (self.ROOT / "bench" / "retest_runner.py").read_text(encoding="utf-8")
+        self.assertIn('["sudo", "-n", sys.executable, _vram_temp_tool()]', src,
+                      "the reading no longer goes through sudo -n, so it either "
+                      "cannot work or can wait on a prompt")
+        self.assertIn("timeout=20", src.split("def vram_temp")[1].split("def ")[0],
+                      "no timeout, so a measurement can stall on an instrument")
+
+
+class ASamplerMustNotBeAbleToWriteNothing(unittest.TestCase):
+    """A run whose telemetry silently went nowhere has happened twice here.
+
+    Once a driver passed a FILE PATH where a schema was expected, the sampler
+    rejected it and exited, and the eight-session crossover ran with no telemetry
+    at all. Once a driver looked for the trace under a name the sampler had not
+    used, so a complete trace was reported missing. On 2026-10-02 a third route was
+    found by running it: `$HOME/bench` was hardcoded with no override and no
+    writability check, so on a host without that directory the sampler printed
+    `TELEMETRY=...`, the line a driver takes as confirmation, and then failed on
+    every tick for the length of the run.
+
+    All three have the same outcome and the same cause, which is that nothing
+    looked at the sampler after starting it. `run_w_williams.sh` learned it and the
+    four drivers beside it did not, which is the shape this repository keeps
+    finding: a check that was right where it was written and was never moved.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+    SAMPLER = "bench/gpu_telemetry.sh"
+
+    def _drivers(self):
+        """Every script that starts the sampler, found rather than listed."""
+        # By the sampler's name and not by one spelling of its invocation: the
+        # first version looked for `bash "$TELE_SH"`, and the layer A driver,
+        # which writes `bash "$HERE/gpu_telemetry.sh"`, was outside all four
+        # checks below.
+        out = {}
+        for p in sorted((self.ROOT / "bench").glob("run_*.sh")):
+            src = p.read_text(encoding="utf-8")
+            code = "\n".join(l for l in src.splitlines() if not l.lstrip().startswith("#"))
+            if re.search(r'bash "\$[A-Z_]+(/gpu_telemetry\.sh)?"', code) and (
+                    "gpu_telemetry" in code):
+                out[f"bench/{p.name}"] = src
+        return out
+
+    def test_there_are_drivers_to_check(self):
+        got = self._drivers()
+        self.assertGreaterEqual(len(got), 7, f"found {sorted(got)}")
+        for rel in ("bench/run_s_siblings.sh", "bench/run_z_layer_a.sh"):
+            self.assertIn(rel, got, f"{rel} starts the sampler and is not checked")
+
+    def test_every_driver_names_the_trace_it_will_check(self):
+        """The sampler stamps the file with its own clock otherwise, and a driver
+        that guesses the name is a driver that can miss by one second."""
+        for rel, src in self._drivers().items():
+            with self.subTest(driver=rel):
+                self.assertRegex(src, r'TELE_CSV="\$[A-Z]+/gpu_telemetry_',
+                                 "does not name the trace")
+                self.assertRegex(src, r'BENCH_TELEMETRY_OUT="\$TELE_CSV" bash "\$',
+                                 "does not tell the sampler the name it will check")
+
+    def test_every_driver_checks_the_sampler_survived_startup(self):
+        for rel, src in self._drivers().items():
+            with self.subTest(driver=rel):
+                self.assertIn('kill -0 "$TELE_PID"', src,
+                              "starts the sampler and never looks at it again")
+
+    def test_every_driver_requires_the_trace_to_hold_samples(self):
+        """Existing is not enough: a sampler that dies leaves the header it made."""
+        for rel, src in self._drivers().items():
+            with self.subTest(driver=rel):
+                self.assertTrue(
+                    'tele_rows' in src or "BENCH_ROOT_TELECHECK" in src,
+                    "never checks that the trace holds more than its header")
+
+    def test_the_sampler_refuses_rather_than_sampling_into_nothing(self):
+        """Run for real, with a path it cannot create. No GPU is needed: the
+        refusal happens before the first sample."""
+        bad = "/proc/self/cannot/be/created/trace.csv"
+        env = dict(os.environ, BENCH_TELEMETRY_OUT=bad)
+        r = subprocess.run(["bash", str(self.ROOT / self.SAMPLER), "compact", "1", "X"],
+                           capture_output=True, text=True, timeout=60, env=env)
+        self.assertNotEqual(r.returncode, 0,
+                            "the sampler accepted a path it cannot write")
+        out = r.stdout + r.stderr
+        self.assertIn("cannot create", out, out[:300])
+        self.assertNotIn("TELEMETRY=", r.stdout,
+                         "it printed the line a driver reads as confirmation")
+
+    def test_its_header_counts_the_traces_this_tree_holds(self):
+        """The counts went stale when run Y added the fifth raw trace.
+
+        Attribution is by HEADER, because two schemas now share a timestamp
+        spelling and the filename says nothing about the schema.
+        """
+        kinds = {"wall_iso,ts,": "full", "ts,util,": "compact", "timestamp,": "raw"}
+        seen = {v: 0 for v in kinds.values()}
+        traces = sorted(self.ROOT.glob("*/data/gpu_telemetry_*.csv"))
+        self.assertTrue(traces, "no committed traces to count")
+        for t in traces:
+            head = t.read_text(encoding="utf-8").splitlines()[0]
+            for prefix, name in kinds.items():
+                if head.startswith(prefix):
+                    seen[name] += 1
+                    break
+            else:
+                self.fail(f"{t.name} has a header no schema writes: {head[:50]!r}")
+        src = (self.ROOT / self.SAMPLER).read_text(encoding="utf-8")
+        words = ("zero", "one", "two", "three", "four", "five", "six", "seven",
+                 "eight", "nine", "ten", "eleven", "twelve", "thirteen")
+        # Each schema's own paragraph of the header. The first version searched
+        # the whole file with `|One trace\b` as an alternative for `full`, and the
+        # header always says that, so the full count could never fail.
+        head = src.split("\nset -u", 1)[0]
+        paras = dict(re.findall(r"^#   (full|compact|raw) +(.*?)(?=^#   (?:full|compact|raw) |^#\s*$)",
+                                head, re.M | re.S))
+        self.assertEqual(sorted(paras), ["compact", "full", "raw"], paras)
+        for name, n in seen.items():
+            with self.subTest(schema=name):
+                self.assertLess(n, len(words), f"{n} is beyond what this spells")
+                self.assertRegex(
+                    paras[name], rf"(?i)\b{words[n]} traces?\b",
+                    f"the sampler's header does not say {name} is {words[n]}, "
+                    f"and this tree holds {n}")
+
+
+class EveryMeasurementMustNameItsCard(unittest.TestCase):
+    """Three physically distinct RTX 3090s, and nothing could tell them apart.
+
+    Until 2026-10-02 the only card identifier any committed run recorded was
+    `name`, which is "NVIDIA GeForce RTX 3090" on every one of them: not a uuid, not
+    a serial, in any arm-run, any manifest, or any document. `BENCHMARK_ENV.md`
+    shows the v1 host had TWO of them, and the bench host is a third, so the gap was
+    always there -- it only became load-bearing when a pilot measurement on a second
+    card was about to be taken deliberately.
+
+    A bandwidth figure, a thermal range and a power limit are properties of one
+    card and its cooling. A figure that cannot name its card can be attributed to
+    the wrong one for ever, and no later check can undo that.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+    # The cards measurements here may come from, by the eight hex digits that
+    # distinguish them. An UNDECLARED card fails: one nobody has written down is one
+    # that can be mistaken for any of the others.
+    CARDS = {
+        "f9db9841": "the `3090` bench host's card, bare metal, 350 W. Every "
+                    "published round was measured on this one",
+        "f71a8f68": "the dev box's card, a KVM guest, 420 W. Pilot work only: its "
+                    "thermal range is its own cooler's, and its kernel refuses to "
+                    "map the memory temperature register because "
+                    "CONFIG_IO_STRICT_DEVMEM is set and the nvidia driver claims "
+                    "BAR0",
+    }
+    PUBLISHED = "f9db9841"
+
+    def _runner(self):
+        import importlib.util
+        os.environ.setdefault("LLAMA_SERVER_BIN", "/bin/true")
+        os.environ.setdefault("MODEL_TARGET", "/dev/null")
+        spec = importlib.util.spec_from_file_location(
+            "rr_card", self.ROOT / "bench" / "retest_runner.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def test_the_runner_records_which_card(self):
+        fields = [f.strip() for f in self._runner().GPU_FIELDS.split(",")]
+        self.assertIn("uuid", fields,
+                      "the snapshot records no card identity, so two identical "
+                      "3090s produce indistinguishable data")
+        self.assertIn("name", fields)
+
+    def test_every_card_is_declared_with_what_it_is(self):
+        for k, why in self.CARDS.items():
+            self.assertRegex(k, r"^[0-9a-f]{8}$", f"{k!r} is not a uuid prefix")
+            self.assertGreater(len(why), 40, f"{k} is declared without saying what")
+        self.assertIn(self.PUBLISHED, self.CARDS)
+
+    def _offences(self, root: Path):
+        """Run directories whose arm-runs disagree on the card, name an undeclared
+        one, or carry a pilot card without saying so in the directory name."""
+        bad = []
+        for d in sorted(root.glob("*/data/*/")) + sorted(root.glob("*/data/*")):
+            if not d.is_dir():
+                continue
+            man = d / "manifest.json"
+            if not man.is_file():
+                continue
+            try:
+                fields = [f.strip() for f in str(json.loads(
+                    man.read_text(encoding="utf-8")).get("gpu_fields", "")).split(",")]
+            except Exception:                                    # noqa: BLE001
+                continue
+            if "uuid" not in fields:
+                continue                      # predates the field; nothing to check
+            i = fields.index("uuid")
+            seen = set()
+            for f in sorted(d.glob("*__rep*.json")):
+                j = json.loads(f.read_text(encoding="utf-8"))
+                for which in ("gpu_before", "gpu_after"):
+                    cells = [c.strip() for c in str(j.get(which, "")).split(",")]
+                    if len(cells) > i and cells[i].startswith("GPU-"):
+                        seen.add(cells[i])
+            if not seen:
+                continue
+            if len(seen) > 1:
+                bad.append(f"{d.name}: arm-runs disagree on the card: {sorted(seen)}")
+                continue
+            uuid = sorted(seen)[0]
+            prefix = uuid[len("GPU-"):len("GPU-") + 8]
+            if prefix not in self.CARDS:
+                bad.append(f"{d.name}: measured on {uuid}, which is not a declared "
+                           f"card. Declare it, or this figure can be attributed to "
+                           f"any 3090 here")
+            # a TOKEN, not a substring: `matrix_notpilot_...` contains "pilot"
+            # and is not a pilot. This repository has recorded a grep satisfied by
+            # another occurrence ten times, and the tenth was in this line.
+            elif prefix != self.PUBLISHED and "pilot" not in d.name.split("_"):
+                bad.append(f"{d.name}: measured on {uuid}, which is not the bench "
+                           f"host's card, and the directory name does not say pilot")
+        return bad
+
+    def test_no_committed_run_is_on_an_undeclared_or_mislabelled_card(self):
+        self.assertEqual(self._offences(self.ROOT), [])
+
+    def test_the_rule_is_not_vacuous(self):
+        """Committed runs predate the field, so the rule is exercised on a
+        constructed one. Three ways to be wrong, each required to fail."""
+        fields = self._runner().GPU_FIELDS
+        i = [f.strip() for f in fields.split(",")].index("uuid")
+
+        def snap(uuid):
+            cells = ["x"] * len(fields.split(","))
+            cells[i] = uuid
+            return ",".join(cells)
+
+        with tempfile.TemporaryDirectory() as t:
+            for name, uuids, want in (
+                    ("matrix_ok", ["GPU-f9db9841-0-0-0-0"], False),
+                    ("matrix_pilot_z", ["GPU-f71a8f68-0-0-0-0"], False),
+                    ("matrix_notpilot", ["GPU-f71a8f68-0-0-0-0"], True),
+                    ("matrix_plain_z", ["GPU-f71a8f68-0-0-0-0"], True),
+                    ("matrix_unknown", ["GPU-deadbeef-0-0-0-0"], True),
+                    ("matrix_two_cards", ["GPU-f9db9841-0-0-0-0",
+                                          "GPU-f71a8f68-0-0-0-0"], True)):
+                d = Path(t) / "v9_x" / "data" / name
+                d.mkdir(parents=True)
+                (d / "manifest.json").write_text(
+                    json.dumps({"gpu_fields": fields}), encoding="utf-8")
+                for k, u in enumerate(uuids):
+                    (d / f"arm__rep{k}.json").write_text(
+                        json.dumps({"gpu_before": snap(u), "gpu_after": snap(u)}),
+                        encoding="utf-8")
+                got = bool([b for b in self._offences(Path(t)) if name in b])
+                with self.subTest(case=name):
+                    self.assertEqual(got, want,
+                                     f"{name}: offence={got}, expected {want}")
+
+
+class TheClockLockGuardsMustNotBeDead(unittest.TestCase):
+    """`bench/run_z_layer_a.sh`'s "already locked" check never fired.
+
+    It looked for `ApplicationsClocksSetting` inside `nvidia-smi -q -d CLOCK`. Two
+    things were wrong at once: the event reasons are not in `-d CLOCK`, and
+    `Applications Clocks` is a different and deprecated mechanism that reads
+    "Requested functionality has been deprecated" on this driver. So the guard
+    matched nothing, on every run, and nothing said so.
+
+    It was found when an ad-hoc command timed out before its own restore and left
+    the card locked at 1800/9501 for twenty minutes. `clocks.max.sm` still read its
+    default 2130 -- that field is not what `-lgc` changes -- so a check on it said
+    "already restored" while the card sat at a locked clock. There is NO field that
+    reports a `-lgc` lock: what a lock looks like is an idle card whose clocks are
+    above idle, 1800 MHz and 118 W against 210 MHz and 36 W on this card.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+    DRIVER = "bench/run_z_layer_a.sh"
+
+    def _src(self):
+        return (self.ROOT / self.DRIVER).read_text(encoding="utf-8")
+
+    def test_it_does_not_look_for_the_deprecated_mechanism(self):
+        src = self._src()
+        code = "\n".join(l for l in src.splitlines()
+                         if not l.lstrip().startswith("#"))
+        self.assertNotIn("ApplicationsClocksSetting", code,
+                         "the driver tests a deprecated field that reads "
+                         "'deprecated' on this driver, so the check is dead")
+        self.assertNotIn("-q -d CLOCK", code,
+                         "the clocks event reasons are not in `-d CLOCK`, so a "
+                         "check that greps it matches nothing")
+
+    def test_it_detects_a_lock_by_what_a_lock_looks_like(self):
+        src = self._src()
+        for want in ("--query-gpu=utilization.gpu", "--query-compute-apps=pid",
+                     "--query-gpu=clocks.sm", "IDLE_SM_MAX"):
+            self.assertIn(want, src,
+                          f"the inherited-lock check does not read {want}, so it "
+                          f"cannot tell an idle locked card from an idle one")
+
+    def test_it_clears_an_inherited_lock_before_it_locks(self):
+        """Detecting is not enough: a run must not inherit a treatment."""
+        src = self._src().splitlines()
+        note = next(i for i, l in enumerate(src) if l.strip() == "inherited_lock_note")
+        clear = next(i for i, l in enumerate(src)
+                     if l.strip().startswith("unlock || die") and i > note)
+        first_lock = next(i for i, l in enumerate(src)
+                          if l.strip().startswith("lock ") and i > note)
+        self.assertLess(clear, first_lock,
+                        "the driver locks before clearing whatever was there")
+
+    def test_the_restore_is_on_every_exit_path(self):
+        """Every exit runs the cleanup and the cleanup restores.
+
+        A signal used to run the restore itself, from a trap that also ran
+        `kill 0` and re-entered itself; now a signal only exits and the exit path
+        restores once. `TheLayerADriverCleansUpOnEveryExit` runs those paths.
+        """
+        src = self._src()
+        self.assertIn("\ntrap cleanup EXIT\n", src, "no EXIT trap runs the cleanup")
+        self.assertIn("\ntrap 'exit 130' INT\n", src)
+        self.assertIn("\ntrap 'exit 143' TERM\n", src)
+        body = src[src.index("\ncleanup() {"):]
+        body = body[:body.index("\n}\n")]
+        self.assertIn("\n    restore\n", body, "the cleanup does not restore")
+        code = "\n".join(l for l in src.splitlines() if not l.lstrip().startswith("#"))
+        self.assertNotIn("kill 0", code)
+        self.assertNotIn('${TELE_PID:-0}', code,
+                         "an unset pid defaults to 0, and `kill 0` is the caller's "
+                         "whole process group")
+
+
+class ThePortAllocatorMustNotRaceTheKernel(unittest.TestCase):
+    """One test failed about one run in three under load, and printed nothing.
+
+    `free_port()` confirms a port unused and returns it; the stub binds it a moment
+    later. That window cannot be closed by checking harder, only by picking from a
+    range the kernel will not assign to anything else. Its docstring said the base
+    was outside the ephemeral range and the arithmetic put it inside: it returned
+    ports in [20000, 59999] while this kernel assigns [32768, 60999] to outbound
+    connections, so 68 % of what it handed out could be taken by any connection --
+    including the suite's own requests to the stub it was about to start.
+
+    Checked against `/proc` and not against a number written here, because the floor
+    is a kernel setting: a host configured lower would make this suite flaky again
+    and the test has to notice rather than agree with its own comment.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+    RANGE = Path("/proc/sys/net/ipv4/ip_local_port_range")
+
+    def _kernel_floor(self):
+        if not self.RANGE.is_file():
+            self.skipTest(f"{self.RANGE} is absent, so the floor cannot be read")
+        lo, _hi = (int(x) for x in self.RANGE.read_text().split())
+        return lo
+
+    def test_every_port_it_hands_out_is_below_the_kernel_floor(self):
+        floor = self._kernel_floor()
+        ports = {int(free_port()) for _ in range(300)}
+        self.assertEqual(len(ports), 300, "it handed out a port twice")
+        self.assertLess(max(ports), floor,
+                        f"it returned {max(ports)}, at or above the {floor} this "
+                        f"kernel assigns to outbound connections, so a port it just "
+                        f"confirmed free can be taken before the stub binds it")
+
+    def test_the_whole_declared_range_is_below_it(self):
+        """Not just the draws taken: the range itself, so a different PID cannot
+        land above the floor on a machine where this passed once."""
+        # the constants directly: they are module-level in this file, and importing
+        # it by bare name fails when it is loaded as `tests.test_harness_invariants`
+        floor = self._kernel_floor()
+        top = _PORT_LO + _PORT_SPAN - 1
+        self.assertLessEqual(top, floor - 1,
+                             f"the range tops out at {top}, not below {floor}")
+        self.assertGreater(_PORT_SPAN, 1000,
+                           "too few ports for concurrent suites to stay disjoint")
+
+    def test_the_assertion_that_hid_this_now_carries_the_output(self):
+        """A failing `assertEqual(returncode, 0)` with no message is a failure that
+        says nothing, and this one took a loop under load to diagnose.
+
+        Scoped to the CLASS that had it, by AST. The first version searched the whole
+        file and failed on its own source, because the string it forbids appears in
+        the test that forbids it -- which is the shape recorded a few hundred lines
+        up as "a grep for a phrase is satisfied by another occurrence", arriving from
+        the other side.
+        """
+        import ast as _ast
+        src = (self.ROOT / "tests" / "test_harness_invariants.py").read_text(
+            encoding="utf-8")
+        tree = _ast.parse(src)
+        cls = next((c for c in _ast.walk(tree) if isinstance(c, _ast.ClassDef)
+                    and c.name == "BothModesMustFitInOneInvocation"), None)
+        self.assertIsNotNone(cls, "the class this is about is gone")
+        body = _ast.get_source_segment(src, cls) or ""
+        self.assertTrue(body, "its source did not parse")
+        bare = 0
+        for call in _ast.walk(_ast.parse(body.strip())):
+            if not (isinstance(call, _ast.Call)
+                    and getattr(call.func, "attr", "") == "assertEqual"):
+                continue
+            # two arguments is a comparison with no message
+            if len(call.args) == 2 and "returncode" in _ast.unparse(call.args[0]):
+                bare += 1
+        self.assertEqual(bare, 0,
+                         "a returncode assertion there carries no message, so a "
+                         "failure prints nothing again")
+
+
+class PlanSsReadingMustVerifyTheDesignBeforeItReads(unittest.TestCase):
+    """`analysis/rederive_run_s.py` refuses a run that is not the registered design.
+
+    The first version printed a verdict from seven fields and checked none of the
+    design: a `packed` run on the distinct mask passed it. The second checked the
+    design and passed several conditions on ABSENCE, because a set of values that
+    is `{None}` has one member. And its band table dropped the sign, so a packed
+    arm three per cent faster read as "the candidate stands".
+
+    Every test here starts from one synthetic run that meets every condition the
+    plan registers, and breaks exactly one thing. A refusal that fires on the
+    clean run is as much a failure as one that does not fire on the broken one,
+    so the clean run is asserted to derive before anything is broken.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+    TAGS = ["t%d" % i for i in range(10)]
+    CAP = 300
+
+    def _mod(self):
+        sys.path.insert(0, str(self.ROOT / "analysis"))
+        import rederive_run_s
+        return rederive_run_s
+
+    def _run(self, tmp, effect=0.97, passive_effect=0.985, mutate=None, n=None):
+        """Write a complete, valid plan S run under `tmp` and return its path.
+
+        `mutate(records, manifest, run_dir)` may change anything before it is
+        written; a record carrying `_raw` is written as that text instead.
+        Rates: distinct varies by block, packed is `effect` of it and passive
+        `passive_effect` of it, with a small per-block wobble so the interval has
+        a width.
+        """
+        m = self._mod()
+        d = m.design()
+        arms = list(d["arms"])
+        blocks = n or d["blocks"]
+        run = Path(tmp) / "v9_test" / "data" / "matrix_S_siblings_20991231_000000"
+        run.mkdir(parents=True)
+        mapped = {"/opt/lib/libcudart.so.12": {"size": 1, "mtime_ns": 1,
+                                               "inode": 7, "sha256": "c" * 64},
+                  "/b/libggml-cuda.so": {"size": 2, "mtime_ns": 2,
+                                         "inode": 8, "sha256": "g" * 64},
+                  "/usr/lib/x86_64-linux-gnu/libgomp.so.1": {
+                      "size": 3, "mtime_ns": 3, "inode": 9, "sha256": "e" * 64}}
+        kernel = {d["distinct"]: "0,2,4,6,8,10,12,14",
+                  d["packed"]: "0-5,8-9", d["passive"]: "0-5,8-9"}
+        recs = []
+        pid = 1000
+        for k in range(blocks):
+            order = arms[k % 3:] + arms[:k % 3]
+            base_rate = 160.0 + 3.0 * (k % 4)
+            wobble = 1.0 + 0.002 * ((k * 7) % 5 - 2)
+            for pos, arm in enumerate(order):
+                rate = base_rate * {d["distinct"]: 1.0,
+                                    d["packed"]: effect * wobble,
+                                    d["passive"]: passive_effect / wobble}[arm]
+                mask = ",".join(str(c) for c in sorted(d["masks"][arm]))
+                argv = (["taskset", "-c", mask, "/b/llama-server", "-m", "/m/t.gguf",
+                         "--port", "18131", "-t", "8", "-tb", "8", "-md", "/m/d.gguf",
+                         "--spec-draft-n-max", "2"])
+                t0 = k * 1000.0 + pos * 100.0
+                pid += 1
+                recs.append({
+                    "arm": arm, "repeat": k, "crashed": None,
+                    "cpus_requested": mask, "cpus_allowed": kernel[arm],
+                    "threads": 8, "poll": None, "poll_batch": None,
+                    "cpu_strict": None, "server_pid": pid,
+                    "server_env": dict(d["env"][arm]),
+                    "server_threads": {"clk_tck": 100, "threads": [
+                        {"tid": pid, "name": "llama-server", "main": True,
+                         "ticks": 900, "processor_last": 0},
+                        {"tid": pid + 50000, "name": "llama-server",
+                         "main": False,
+                         "ticks": 20 if arm == d["passive"] else 400,
+                         "processor_last": 1}]},
+                    "server_loaded_commit": "3737e4137",
+                    "server_lib_sha256": {"libllama.so": "a" * 64},
+                    "server_mapped": json.loads(json.dumps(mapped)),
+                    "argv": argv,
+                    "rows": [{"tag": t, "predicted_n": self.CAP,
+                              "predicted_ms": 1000.0 * self.CAP / rate,
+                              "t_start": t0 + i} for i, t in enumerate(self.TAGS)],
+                })
+        man = {"prompt_tags": list(self.TAGS), "max_tokens": self.CAP,
+               "order_mode": "latin"}
+        if mutate:
+            mutate(recs, man, run)
+        for r in recs:
+            fname = r.pop("_file", None) or f"{r['arm']}__rep{r['repeat']}.json"
+            raw = r.pop("_raw", None)
+            (run / fname).write_text(raw if raw is not None else json.dumps(r),
+                                     encoding="utf-8")
+        (run / "manifest.json").write_text(json.dumps(man), encoding="utf-8")
+        if not (run / "NO_COMPLETE").exists():
+            (run / "RUN_COMPLETE.json").write_text("{}", encoding="utf-8")
+        return run
+
+    def _refusal(self, mutate, expect):
+        m = self._mod()
+        with tempfile.TemporaryDirectory() as t:
+            run = self._run(t, mutate=mutate)
+            bad, _info = m.conditions(run)
+            joined = " | ".join(bad)
+            self.assertTrue(bad, f"the broken run passed every condition "
+                                 f"(expected one about {expect!r})")
+            self.assertIn(expect, joined,
+                          f"refused, but not for the reason broken: {joined[:600]}")
+            with self.assertRaises(SystemExit):
+                m.derive(run)
+
+    # -- the clean run, first -------------------------------------------------
+
+    def test_the_clean_run_meets_every_condition_and_derives(self):
+        m = self._mod()
+        with tempfile.TemporaryDirectory() as t:
+            run = self._run(t)
+            bad, info = m.conditions(run)
+            self.assertEqual(bad, [], "the clean fixture is refused, so every "
+                                      "refusal test below would pass vacuously")
+            out = m.derive(run)
+            p = out["rows"][0]
+            self.assertAlmostEqual(p["change_pct"], -3.0, delta=0.1)
+            self.assertLess(p["ci_lo_pct"], p["change_pct"])
+            self.assertGreater(p["ci_hi_pct"], p["change_pct"])
+            self.assertEqual(p["df"], 11)
+            self.assertEqual(out["verdict_primary"],
+                             m.verdict(-3.0), "the reading is not the band of "
+                                              "the point estimate")
+            self.assertIn("candidate stands", out["verdict_primary"])
+            self.assertEqual(out["positions"],
+                             {a: {1: 4, 2: 4, 3: 4} for a in m.design()["arms"]})
+            # the JSON is strict JSON: no Infinity for the open bands
+            json.loads(json.dumps(out, allow_nan=False))
+            self.assertAlmostEqual(out["assumed_sd_pct"], 0.760, places=3)
+            self.assertAlmostEqual(out["assumed_effect_sd_pct"], 2.089, places=3)
+            # Two scales, each labelled: the design table's is a log ratio x100
+            # and the run's interval is back-transformed, and they differ.
+            self.assertAlmostEqual(p["half_width_pct"],
+                                   (_math.exp(p["half_width_log_x100"] / 100) - 1) * 100,
+                                   places=9)
+            self.assertAlmostEqual(p["sd_log_x100"], p["sd_log_ratio"] * 100, places=9)
+            # The other threads' processor time, per arm, from the records.
+            d = m.design()
+            want = {d["distinct"]: 4.0, d["packed"]: 4.0, d["passive"]: 0.2}
+            self.assertEqual(sorted(out["other_threads_cpu_s"]), sorted(want))
+            for arm, v in want.items():
+                self.assertAlmostEqual(out["other_threads_cpu_s"][arm], v, places=9)
+
+    def test_a_packed_arm_that_is_FASTER_does_not_read_as_support(self):
+        m = self._mod()
+        with tempfile.TemporaryDirectory() as t:
+            out = m.derive(self._run(t, effect=1.03))
+        self.assertGreater(out["rows"][0]["change_pct"], 2.5)
+        self.assertIn("packed faster", out["verdict_primary"])
+        self.assertNotIn("candidate stands", out["verdict_primary"])
+
+    # -- the bands ------------------------------------------------------------
+
+    def test_the_bands_are_signed_and_an_edge_goes_to_the_band_nearer_zero(self):
+        m = self._mod()
+        table = m.bands()
+        want = {-12.0: "too large", -10.0: "between the bands",
+                -6.0: "candidate stands", -3.0: "candidate stands",
+                -1.0: "null band", 0.0: "null band", 1.0: "null band",
+                1.0001: "packed faster", 3.0: "packed faster",
+                -0.9999: "null band", -1.0001: "candidate stands",
+                -6.0001: "between the bands", -10.0001: "too large"}
+        for x, frag in want.items():
+            with self.subTest(change=x):
+                self.assertIn(frag, m.verdict(x, table))
+        with self.assertRaises(ValueError):
+            m.verdict(float("nan"), table)
+
+    def test_an_interval_that_reaches_a_second_band_says_so(self):
+        m = self._mod()
+        table = m.bands()
+        two = m.reached(-1.4, -0.5, table)
+        self.assertEqual(len(two), 2, two)
+        self.assertIn("candidate stands", two[0])
+        self.assertIn("null band", two[1])
+        self.assertEqual(len(m.reached(-3.2, -2.1, table)), 1)
+        # the gap's text appears twice in no table today, but `reached` goes
+        # by position, so an interval across a repeated text is not shortened
+        span = m.reached(-11.0, 2.0, table)
+        self.assertEqual(len(span), len(table))
+
+    def test_the_edges_are_read_from_the_plan_not_held_here(self):
+        m = self._mod()
+        orig = m.PLAN
+        text = orig.read_text(encoding="utf-8")
+        with tempfile.TemporaryDirectory() as t:
+            p = Path(t) / "PLAN.md"
+            try:
+                m.PLAN = p
+                p.write_text(text.replace("**-6 % to -1 %, packed slower**",
+                                          "**-7 % to -1 %, packed slower**", 1),
+                             encoding="utf-8")
+                self.assertIn("candidate stands", m.verdict(-6.5, m.bands()),
+                              "moving the edge in the plan did not move it here")
+                p.write_text(text.replace("**Inside -1 % to +1 %**",
+                                          "**Inside one per cent**", 1),
+                             encoding="utf-8")
+                with self.assertRaises(SystemExit):
+                    m.bands()
+                p.write_text(text.replace("**Above +1 %, packed FASTER**",
+                                          "**Above +1 %**", 1), encoding="utf-8")
+                with self.assertRaises(SystemExit,
+                                       msg="a band with no direction was read"):
+                    m.bands()
+                p.write_text(text.replace("**Below -10 %**", "**Below -4 %**", 1),
+                             encoding="utf-8")
+                with self.assertRaises(SystemExit, msg="overlapping bands read"):
+                    m.bands()
+            finally:
+                m.PLAN = orig
+
+    def test_the_design_is_read_from_the_plan_not_held_here(self):
+        m = self._mod()
+        orig = m.PLAN
+        text = orig.read_text(encoding="utf-8")
+        d = m.design()
+        self.assertEqual(d["masks"][d["distinct"]],
+                         frozenset({0, 2, 4, 6, 8, 10, 12, 14}))
+        self.assertEqual(d["masks"][d["packed"]], frozenset({0, 1, 2, 3, 4, 5, 8, 9}))
+        self.assertEqual(d["masks"][d["passive"]], d["masks"][d["packed"]])
+        self.assertEqual((d["blocks"], d["threads"]), (12, 8))
+        self.assertEqual(d["env"], {d["distinct"]: {}, d["packed"]: {},
+                                    d["passive"]: {"OMP_WAIT_POLICY": "passive"}})
+        self.assertEqual((d["order"], d["cap"], d["commit"][:9]),
+                         ("latin", 300, "3737e4137"))
+        broken = [
+            ("| `packed-passive` | `0,1,2,3,4,5,8,9` |",
+             "| `packed-passive` | `0,1,2,3,4,5,6,7` |"),
+            ("| **12** | **36** |", "| **12** | **35** |"),
+            ("and `OMP_WAIT_POLICY=passive` in the server's environment",
+             "and the default wait"),
+            ("| `packed` | `0,1,2,3,4,5,8,9` | four performance cores",
+             "| `packed` | `0,1,2,3,4,5,8,9` | `OMP_WAIT_POLICY=active`, four performance cores"),
+            ("blocks of three in `latin` order", "blocks of three in a cyclic order"),
+            ("to a cap of `300` tokens", "to a cap of three hundred tokens"),
+            ("built from `3737e41370da1830a44c663f9929a0f27591ffa6`",
+             "built from the pinned commit"),
+        ]
+        with tempfile.TemporaryDirectory() as t:
+            p = Path(t) / "PLAN.md"
+            try:
+                m.PLAN = p
+                for old, new in broken:
+                    with self.subTest(old=old):
+                        self.assertIn(old, text)
+                        p.write_text(text.replace(old, new, 1), encoding="utf-8")
+                        with self.assertRaises(SystemExit):
+                            m.design()
+            finally:
+                m.PLAN = orig
+
+    # -- one condition broken at a time -------------------------------------
+
+    def test_each_registered_condition_is_refused_when_broken(self):
+        m = self._mod()
+        d = m.design()
+        D, P, N = d["distinct"], d["packed"], d["passive"]
+
+        def first(recs, arm):
+            return next(r for r in recs if r["arm"] == arm)
+
+        def drop(field):
+            def f(recs, man, run):
+                for r in recs:
+                    r.pop(field, None)
+            return f
+
+        def set1(arm, field, value):
+            def f(recs, man, run):
+                first(recs, arm)[field] = value
+            return f
+
+        def argv_swap(arm, old, new):
+            def f(recs, man, run):
+                a = first(recs, arm)["argv"]
+                a[a.index(old)] = new
+            return f
+
+        cases = [
+            ("packed asked for the distinct mask",
+             lambda recs, man, run: [r.update(cpus_requested="0,2,4,6,8,10,12,14",
+                                              cpus_allowed="0,2,4,6,8,10,12,14",
+                                              argv=["taskset", "-c",
+                                                    "0,2,4,6,8,10,12,14"]
+                                              + r["argv"][3:])
+                                     for r in recs if r["arm"] == P],
+             "the plan assigns it"),
+            ("the kernel narrowed a mask", set1(D, "cpus_allowed", "0,2,4,6"),
+             "the kernel gave"),
+            ("cpus_allowed never read back", set1(D, "cpus_allowed", None),
+             "no cpus_allowed"),
+            ("a thread count that is not the mask's size", set1(P, "threads", 7),
+             "threads 7"),
+            ("no server_loaded_commit anywhere", drop("server_loaded_commit"),
+             "no usable server_loaded_commit"),
+            ("two server builds", set1(N, "server_loaded_commit", "deadbeef"),
+             "different values of server_loaded_commit"),
+            ("no library hashes anywhere", drop("server_lib_sha256"),
+             "no usable server_lib_sha256"),
+            ("a library swapped between arms",
+             set1(P, "server_lib_sha256", {"libllama.so": "b" * 64}),
+             "different values of server_lib_sha256"),
+            ("nothing recorded as mapped", drop("server_mapped"),
+             "no usable server_mapped"),
+            ("the mapping could not be read",
+             set1(D, "server_mapped", {"error": "unreadable"}),
+             "no usable server_mapped"),
+            ("a different CUDA runtime mapped in one arm-run",
+             lambda recs, man, run: first(recs, N)["server_mapped"][
+                 "/opt/lib/libcudart.so.12"].update(sha256="d" * 64),
+             "different values of server_mapped"),
+            ("one server answered two arm-runs",
+             lambda recs, man, run: first(recs, P).update(
+                 server_pid=first(recs, D)["server_pid"]),
+             "server_pid is missing or repeats"),
+            ("a different model in one arm-run",
+             argv_swap(P, "/m/t.gguf", "/m/other.gguf"),
+             "different server command lines"),
+            ("a different draft length in one arm-run",
+             argv_swap(D, "2", "3"), "different server command lines"),
+            ("--poll 0 on the packed arm",
+             lambda recs, man, run: first(recs, P)["argv"].extend(["--poll", "0"]),
+             "threadpool flags"),
+            ("--poll 0 on the third arm, the first design",
+             lambda recs, man, run: [r["argv"].extend(["--poll", "0"])
+                                     for r in recs if r["arm"] == N],
+             "threadpool flags"),
+            ("a batch-pool flag nobody registered",
+             lambda recs, man, run: [r["argv"].extend(["--poll-batch", "0"])
+                                     for r in recs],
+             "threadpool flags"),
+            ("a poll recorded for an arm", set1(N, "poll", 0), "`poll` is 0"),
+            ("no poll field at all", drop("poll"), "no `poll` field"),
+            ("no poll_batch field at all", drop("poll_batch"),
+             "no `poll_batch` field"),
+            ("the third arm's server was not given the variable",
+             lambda recs, man, run: [r.update(server_env={})
+                                     for r in recs if r["arm"] == N],
+             "server environment does not match"),
+            ("the packed arm's server was given it",
+             set1(P, "server_env", {"OMP_WAIT_POLICY": "passive"}),
+             "server environment does not match"),
+            ("an OpenMP variable every arm inherited",
+             lambda recs, man, run: [r["server_env"].update(GOMP_SPINCOUNT="0")
+                                     for r in recs],
+             "server environment does not match"),
+            ("the environment could not be read",
+             set1(D, "server_env", {"error": "unreadable"}), "server_env is"),
+            ("no server_env field at all", drop("server_env"), "server_env is None"),
+            ("a build that mapped no libgomp",
+             lambda recs, man, run: [r["server_mapped"].pop(
+                 "/usr/lib/x86_64-linux-gnu/libgomp.so.1") for r in recs],
+             "mapped no libgomp"),
+            ("no per-thread processor time", drop("server_threads"),
+             "per-thread processor time is missing"),
+            ("a thread entry without its ticks",
+             set1(P, "server_threads", {"clk_tck": 100,
+                                        "threads": [{"tid": 1, "main": True}]}),
+             "per-thread processor time is missing"),
+            ("the per-thread time could not be read",
+             set1(P, "server_threads", {"error": "/proc unreadable"}),
+             "per-thread processor time is missing"),
+            ("an order the plan did not register",
+             lambda recs, man, run: man.update(order_mode="williams"),
+             "the plan registers 'latin'"),
+            ("a token cap the plan did not register",
+             lambda recs, man, run: [man.update(max_tokens=100)] + [
+                 x.update(predicted_n=100) for r in recs for x in r["rows"]],
+             "the token cap is 100"),
+            ("a build the plan is not written against",
+             lambda recs, man, run: [r.update(server_loaded_commit="deadbeef0")
+                                     for r in recs],
+             "is written against"),
+            ("an arm-run file that does not parse",
+             lambda recs, man, run: first(recs, D).update(_raw="{not json"),
+             "does not parse"),
+            ("a record whose block number is null",
+             set1(P, "repeat", None), "repeat is None"),
+            ("a request row without its time",
+             lambda recs, man, run: first(recs, P)["rows"][0].pop("predicted_ms"),
+             "a request row has no predicted_ms"),
+            ("taskset was handed a different mask than recorded",
+             lambda recs, man, run: first(recs, D)["argv"].__setitem__(2, "0,2"),
+             "taskset was given"),
+            ("a prompt missing from one arm-run",
+             lambda recs, man, run: first(recs, D)["rows"].pop(),
+             "against the manifest's"),
+            ("a request that stopped short of the cap",
+             lambda recs, man, run: first(recs, P)["rows"][0].update(predicted_n=287),
+             "did not generate the cap"),
+            ("no token cap in the manifest",
+             lambda recs, man, run: man.pop("max_tokens"),
+             "names no prompt set or token cap"),
+            ("a crashed arm-run",
+             set1(N, "crashed", {"tag": "__startup__", "error": "x"}),
+             "marked crashed"),
+            ("no RUN_COMPLETE.json",
+             lambda recs, man, run: (run / "NO_COMPLETE").write_text(""),
+             "no RUN_COMPLETE.json"),
+            ("the abandoned marker",
+             lambda recs, man, run: (run / "ABANDONED.txt").write_text("stopped"),
+             "ABANDONED.txt"),
+            ("the same order in every block, whatever the label says",
+             lambda recs, man, run: [
+                 x.update(t_start=r["repeat"] * 1000.0
+                          + {D: 0, P: 100, N: 200}[r["arm"]] + i)
+                 for r in recs for i, x in enumerate(r["rows"])],
+             "not balanced"),
+            ("an arm the plan does not name",
+             lambda recs, man, run: first(recs, D).update(arm="baseline"),
+             "the plan's are"),
+            ("a block missing for one arm",
+             lambda recs, man, run: recs.remove(first(recs, P)),
+             "not each of the 12 once"),
+            ("two files claiming one cell",
+             lambda recs, man, run: recs.append(
+                 {**json.loads(json.dumps(first(recs, P))),
+                  "_file": f"{P}__rep0b.json"}),
+             "two files claim one cell"),
+        ]
+        for name, mutate, expect in cases:
+            with self.subTest(name):
+                self._refusal(mutate, expect)
+
+    # -- what it shares with the rest of the repository ---------------------
+
+    def test_the_assumed_spread_is_derived_and_not_a_literal(self):
+        """A literal 0.760 returns the same value as the derivation does today.
+
+        So the value cannot tell them apart. What can is replacing the
+        derivation: a literal ignores it.
+        """
+        m = self._mod()
+        import load_run_power
+        real = load_run_power.measured
+        try:
+            load_run_power.measured = lambda: {"adjacent_diff_sd": 1.2345}
+            self.assertEqual(m.assumed_sd_pct(), 1.2345,
+                             "the spread did not follow load_run_power, so it "
+                             "is a second copy of a derived figure")
+        finally:
+            load_run_power.measured = real
+        import plan_z_power
+        real_d = plan_z_power.design
+        try:
+            plan_z_power.design = lambda: ([], {"sd_effect_pct": 6.789})
+            self.assertEqual(m.assumed_effect_sd_pct(), 6.789,
+                             "the design's second spread did not follow plan Z's "
+                             "derivation of it")
+        finally:
+            plan_z_power.design = real_d
+
+    def test_with_no_run_committed_it_exits_zero_and_still_checks_the_plan(self):
+        r = subprocess.run([sys.executable, str(self.ROOT / "analysis" /
+                                                "rederive_run_s.py")],
+                           capture_output=True, text=True, timeout=120,
+                           cwd=self.ROOT)
+        self.assertEqual(r.returncode, 0, r.stdout[-800:] + r.stderr[-800:])
+        self.assertIn("bands partition the line", r.stdout)
+
+    def test_the_claims_job_and_the_gate_run_it(self):
+        wf = (self.ROOT / ".github" / "workflows" / "audit.yml").read_text(
+            encoding="utf-8")
+        self.assertIn("run: python analysis/rederive_run_s.py",
+                      [l.strip() for l in wf.splitlines()],
+                      "no job runs the plan S reading, so the bands it parses "
+                      "and the design it checks are guarded by nothing")
+        g = (self.ROOT / "bench" / "ci_faithful.sh").read_text(encoding="utf-8")
+        self.assertIn("python3 analysis/rederive_run_s.py", g,
+                      "the gate reproduces the claims job and this step is "
+                      "missing from it")
+
+
+class OneDefinitionOfAPositionBalancedSchedule(unittest.TestCase):
+    """The runner and the analysis each hold `is_position_balanced`.
+
+    The analysis cannot import the runner, which reads its environment at import
+    and refuses without a server binary, so the copy is deliberate. What is not
+    acceptable is two definitions: they disagreed once already, the runner
+    accepting a two-arm, four-repeat schedule as balanced and the analysis
+    reporting it unbalanced, which CHANGELOG records. So the two bodies are
+    compared as code, docstrings aside.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    def _body(self, rel):
+        src = (self.ROOT / rel).read_text(encoding="utf-8")
+        fn = next(n for n in ast.walk(ast.parse(src))
+                  if isinstance(n, ast.FunctionDef)
+                  and n.name == "is_position_balanced")
+        body = fn.body
+        if (body and isinstance(body[0], ast.Expr)
+                and isinstance(getattr(body[0], "value", None), ast.Constant)
+                and isinstance(body[0].value.value, str)):
+            body = body[1:]
+        return [ast.dump(s) for s in body]
+
+    def test_the_two_bodies_are_the_same_code(self):
+        a = self._body("bench/retest_runner.py")
+        b = self._body("analysis/paired_blocks.py")
+        self.assertTrue(a, "the runner's definition is empty or gone")
+        self.assertEqual(a, b, "the runner and the analysis define a balanced "
+                               "schedule differently, so a run the runner "
+                               "accepts can be refused by the reading, or the "
+                               "reverse")
+
+
+class TheScheduleIsNotRebuiltAroundACrash(unittest.TestCase):
+    """`observed_schedule` refuses a crashed arm-run instead of renumbering.
+
+    It skipped an arm-run with no rows and kept a crashed one that had some,
+    while `load_blocks` drops every crashed one: the positions and the rates
+    described two different sets of arm-runs. And skipping is itself wrong, since
+    every arm after the gap moves up a place.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    def _pb(self):
+        sys.path.insert(0, str(self.ROOT / "analysis"))
+        import paired_blocks
+        return paired_blocks
+
+    def _write(self, run, arm, rep, t0, crashed=None, rows=True):
+        rec = {"arm": arm, "repeat": rep, "crashed": crashed,
+               "rows": ([{"predicted_n": 10, "predicted_ms": 100.0,
+                          "t_start": t0}] if rows else [])}
+        (run / f"{arm}__rep{rep}.json").write_text(json.dumps(rec),
+                                                   encoding="utf-8")
+
+    def test_a_clean_run_is_rebuilt(self):
+        pb = self._pb()
+        with tempfile.TemporaryDirectory() as t:
+            run = Path(t)
+            for rep in range(2):
+                for i, arm in enumerate(["a", "b"] if rep == 0 else ["b", "a"]):
+                    self._write(run, arm, rep, rep * 100 + i)
+            pos, n = pb.observed_schedule(run)
+            self.assertEqual(pos, {"a": [1, 2], "b": [2, 1]})
+            self.assertEqual(n, 2)
+
+    def test_a_crash_is_refused_with_or_without_rows(self):
+        pb = self._pb()
+        for rows in (True, False):
+            with self.subTest(rows=rows), tempfile.TemporaryDirectory() as t:
+                run = Path(t)
+                self._write(run, "a", 0, 0.0, crashed={"tag": "__startup__"},
+                            rows=rows)
+                self._write(run, "b", 0, 1.0)
+                with self.assertRaises(SystemExit) as cm:
+                    pb.observed_schedule(run)
+                self.assertIn("a__rep0.json", str(cm.exception))
+
+    def test_a_record_with_no_timestamps_is_refused(self):
+        pb = self._pb()
+        with tempfile.TemporaryDirectory() as t:
+            run = Path(t)
+            self._write(run, "a", 0, 0.0, rows=False)
+            self._write(run, "b", 0, 1.0)
+            with self.assertRaises(SystemExit):
+                pb.observed_schedule(run)
+
+
+def _analysis(name):
+    """Import an analysis module by name, with `analysis/` on the path."""
+    root = Path(__file__).resolve().parents[1]
+    if str(root / "analysis") not in sys.path:
+        sys.path.insert(0, str(root / "analysis"))
+    return importlib.import_module(name)
+
+
+class EveryProseFigureOutsideTheCensusIsAccountedFor(unittest.TestCase):
+    """`analysis/figure_registry.py --strict` is the guard for the excluded documents.
+
+    A sweep on 2026-10-03 changed one prose decimal at a time outside the census
+    and caught eight of twenty-six. The registry's first run then found plan X
+    quoting run Y's log-ratio defect, fixed in two documents and missed in a
+    third. Every test here breaks one thing the registry is for and requires it
+    to say so, after asserting the unbroken tree is clean.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    @classmethod
+    def setUpClass(cls):
+        cls.fr = _analysis("figure_registry")
+        cls.rep = cls.fr.reported()
+
+    def _tree(self, tmp, edit=None):
+        """A copy of every document in scope and every censused one, edited."""
+        tc = _analysis("table_coverage")
+        for rel in set(self.fr.scope()) | set(tc.DOCS):
+            dst = Path(tmp) / rel
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            dst.write_text((self.ROOT / rel).read_text(encoding="utf-8"),
+                           encoding="utf-8")
+        if edit:
+            rel, old, new = edit
+            p = Path(tmp) / rel
+            t = p.read_text(encoding="utf-8")
+            self.assertEqual(t.count(old), 1, f"{old!r} is not unique in {rel}")
+            p.write_text(t.replace(old, new), encoding="utf-8")
+        return Path(tmp)
+
+    def _audit(self, tmp, **kw):
+        real = self.fr.ROOT
+        try:
+            self.fr.ROOT = tmp
+            return self.fr.audit(kw.pop("rep", self.rep), **kw)
+        finally:
+            self.fr.ROOT = real
+
+    def test_the_tree_is_clean_and_the_scope_is_the_census_exclusions(self):
+        tc = _analysis("table_coverage")
+        self.assertEqual(self.fr.scope(), sorted(tc.EXCLUDED))
+        res = self.fr.audit(self.rep)
+        self.assertEqual(res["problems"], [])
+        bare = {d: r["bare"] for d, r in res["rows"].items() if r["bare"]}
+        self.assertEqual(bare, {})
+        n = sum(len(r["derived"]) for r in res["rows"].values())
+        self.assertGreater(n, 80, f"only {n} figures derived; a registry that "
+                                  f"asks no derivation anything passes vacuously")
+
+    def test_an_edited_figure_is_a_value_nothing_accounts_for(self):
+        with tempfile.TemporaryDirectory() as t:
+            root = self._tree(t, ("v4_audit_2026_08_25/PROSPECTIVE_PLAN_Y_CORE_PINNING.md",
+                                  "Six blocks is 0.34 and", "Six blocks is 0.35 and"))
+            res = self._audit(root)
+        self.assertIn("0.35", res["rows"][
+            "v4_audit_2026_08_25/PROSPECTIVE_PLAN_Y_CORE_PINNING.md"]["bare"])
+
+    def test_an_archived_figure_edited_is_caught_too(self):
+        with tempfile.TemporaryDirectory() as t:
+            root = self._tree(t, ("pr_comment.md", "7.620 ms", "7.621 ms"))
+            res = self._audit(root)
+        self.assertIn("7.621", res["rows"]["pr_comment.md"]["bare"])
+
+    def test_a_cross_document_quote_follows_the_derivation(self):
+        """Run Y's 14.42 is held to rederive_run_y, not to a string.
+
+        Plan X's quote is now one `rederive_run_y` compares as a sentence, so it
+        is derived for plan X directly; plan Z still quotes it as derived
+        elsewhere. Take it out of every derivation's set and both have to show.
+        """
+        rep = {m: {d: set(v) for d, v in docs.items()} for m, docs in self.rep.items()}
+        for d in rep["rederive_run_y"].values():
+            d.discard("14.42")
+        for d in rep["plan_siblings_power"].values():
+            d.discard("14.42")
+        res = self.fr.audit(rep)
+        self.assertTrue(any("14.42" in p and "PLAN_Z" in p for p in res["problems"]),
+                        f"a quote whose source stopped deriving it was accepted: "
+                        f"{res['problems'][:3]}")
+        x = "v4_audit_2026_08_25/PROSPECTIVE_PLAN_X_HOST_LOAD.md"
+        self.assertIn("14.42", res["rows"][x]["bare"],
+                      "plan X's quote stayed covered after its derivation dropped it")
+
+    def test_a_quote_must_still_be_in_its_source(self):
+        acc = {d: dict(v) for d, v in self.fr.ACCOUNTED.items()}
+        acc["v4_audit_2026_08_25/PROSPECTIVE_PLAN_X_HOST_LOAD.md"]["3.5"] = (
+            "quote", "BENCHMARK_ENV.md")
+        res = self.fr.audit(self.rep, acc)
+        self.assertTrue(any("3.5" in p and "does not carry it" in p
+                            for p in res["problems"]), res["problems"][:3])
+
+    def test_a_stale_or_redundant_entry_is_a_problem(self):
+        acc = {d: dict(v) for d, v in self.fr.ACCOUNTED.items()}
+        x = "v4_audit_2026_08_25/PROSPECTIVE_PLAN_X_HOST_LOAD.md"
+        acc[x]["15.6"] = ("underived", "the log-ratio defect's value")
+        acc[x]["139.359"] = ("underived", "a value a derivation already reports")
+        res = self.fr.audit(self.rep, acc)
+        joined = " | ".join(res["problems"])
+        self.assertIn("no longer carries", joined)
+        self.assertIn("already reports", joined)
+
+    def test_strict_fails_on_what_it_reports(self):
+        real = self.fr.audit
+        try:
+            self.fr.audit = lambda *a, **k: {
+                "rows": {"x.md": {"derived": set(), "bare": {"1.23"}}},
+                "problems": []}
+            old_argv = sys.argv
+            sys.argv = ["figure_registry.py", "--strict"]
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(self.fr.main(), 1)
+            sys.argv = ["figure_registry.py"]
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(self.fr.main(), 0)
+        finally:
+            self.fr.audit = real
+            sys.argv = old_argv
+
+    def test_the_claims_job_and_the_gate_run_it_strict(self):
+        wf = (self.ROOT / ".github" / "workflows" / "audit.yml").read_text(
+            encoding="utf-8")
+        self.assertIn("run: python analysis/figure_registry.py --strict",
+                      [l.strip() for l in wf.splitlines()])
+        g = (self.ROOT / "bench" / "ci_faithful.sh").read_text(encoding="utf-8")
+        self.assertIn("python3 analysis/figure_registry.py --strict", g)
+
+
+class EachDerivationChecksWhatItReports(unittest.TestCase):
+    """`checked_figures()` must be what each derivation's own check compares.
+
+    The registry trusts it, so a derivation that reported one list and checked
+    another would make a covered figure guarded by nothing. Each test adds a value
+    the document does not carry to the function both callers share, and requires
+    the derivation's own check to fail on it.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+    WRONG = "9.876 %"
+
+    def _patched(self, mod, fn_name, extra):
+        real = getattr(mod, fn_name)
+
+        def fake(*a, **k):
+            out = dict(real(*a, **k))
+            out["a figure the document does not carry"] = extra
+            return out
+        return real, fake
+
+    def test_plan_z(self):
+        m = _analysis("plan_z_power")
+        real, fake = self._patched(m, "prose_figures", self.WRONG)
+        try:
+            m.prose_figures = fake
+            self.assertTrue(any(self.WRONG in b for b in m.check_doc()))
+            self.assertIn(self.WRONG, m.checked_figures()[m.DOC].values())
+        finally:
+            m.prose_figures = real
+
+    def test_plan_siblings(self):
+        m = _analysis("plan_siblings_power")
+        real, fake = self._patched(m, "prose_figures", self.WRONG)
+        try:
+            m.prose_figures = fake
+            inp = m.inputs()
+            self.assertTrue(any(self.WRONG in b for b in m.check_doc(inp, m.design(inp))))
+            self.assertIn(self.WRONG, m.checked_figures()[m.DOC].values())
+        finally:
+            m.prose_figures = real
+
+    def test_run_y(self):
+        m = _analysis("rederive_run_y")
+        real, fake = self._patched(m, "tel_figures", "9.9")
+        try:
+            m.tel_figures = fake
+            bad = m.check_doc(m.DOCS[1], m.derive(), m.telemetry())
+            self.assertTrue(any("9.9" in b for b in bad), bad[:3])
+            self.assertIn("9.9", m.checked_figures()[m.DOCS[1]].values())
+        finally:
+            m.tel_figures = real
+
+    def test_plan_x(self):
+        m = _analysis("load_run_power")
+        real, fake = self._patched(m, "prose_figures", self.WRONG)
+        try:
+            m.prose_figures = fake
+            bad = m.check_prose(m.PLAN.read_text(encoding="utf-8"))
+            self.assertTrue(any(self.WRONG in b for b in bad), bad)
+            doc = str(m.PLAN.relative_to(m.ROOT))
+            self.assertIn(self.WRONG, m.checked_figures()[doc].values())
+        finally:
+            m.prose_figures = real
+        # and main --check runs it, which a test of the function cannot show
+        src = (self.ROOT / "analysis" / "load_run_power.py").read_text(encoding="utf-8")
+        tree = ast.parse(src)
+        main = next(n for n in tree.body
+                    if isinstance(n, ast.FunctionDef) and n.name == "main")
+        self.assertIn("check_prose(txt)", ast.unparse(main))
+
+    def test_plan_x_reads_a_number_whole(self):
+        m = _analysis("load_run_power")
+        self.assertEqual(m.check_prose("held at 10.12 % and 0.120 %",
+                                       {"x": "0.12 %"}),
+                         ["x is 0.12 % and the plan does not carry it"])
+        self.assertEqual(m.check_prose("held at 0.12 % here", {"x": "0.12 %"}), [])
+        self.assertEqual(m.check_prose("D is −25.309 here", {"d": "-25.309"}), [])
+
+    def test_plan_y_hours_column(self):
+        m = _analysis("rederive_run_y")
+        pp = m.plan_power()
+        self.assertEqual({n: f"{h:.2f}" for n, h in pp["predicted_hours"].items()},
+                         {6: "0.34", 12: "0.68", 18: "1.02"})
+        doc = self.ROOT / m.DOCS[1]
+        text = doc.read_text(encoding="utf-8")
+        old = "| 6 | 0.34 |"
+        self.assertEqual(text.count(old), 1)
+        real = m.ROOT
+        with tempfile.TemporaryDirectory() as t:
+            p = Path(t) / m.DOCS[1]
+            p.parent.mkdir(parents=True)
+            p.write_text(text.replace(old, "| 6 | 0.35 |"), encoding="utf-8")
+            try:
+                m.ROOT = Path(t)
+                bad = m.check_plan_power(pp)
+            finally:
+                m.ROOT = real
+        self.assertTrue(any("hours for 6 blocks" in b for b in bad), bad)
+
+
+class LayerAsReadingHasTestsOfItsOwn(unittest.TestCase):
+    """`analysis/layer_a_slope.py` had none, in the unit job or the mutations.
+
+    The claims job ran its `--check`, so a broken README row would have failed
+    there; nothing showed the check was not decorative. These run it against the
+    committed pilot and against a README with one figure changed.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    def _run(self, readme_edit=None):
+        m = _analysis("layer_a_slope")
+        pilot = m.pilot_dir()
+        with tempfile.TemporaryDirectory() as t:
+            # the pilot directory and its README, at the same relative depth
+            dst = Path(t) / pilot.relative_to(self.ROOT)
+            shutil.copytree(pilot, dst)
+            readme = self.ROOT / pilot.parent.parent / "README.md"
+            text = readme.read_text(encoding="utf-8")
+            if readme_edit:
+                old, new = readme_edit
+                self.assertEqual(text.count(old), 1, f"{old!r} is not unique")
+                text = text.replace(old, new)
+            (dst.parent.parent / "README.md").write_text(text, encoding="utf-8")
+            return subprocess.run(
+                [sys.executable, str(self.ROOT / "analysis" / "layer_a_slope.py"),
+                 "--check", str(dst)], capture_output=True, text=True, timeout=300)
+
+    def test_the_committed_pilot_holds_every_premise(self):
+        r = self._run()
+        self.assertEqual(r.returncode, 0, r.stdout[-1200:] + r.stderr[-600:])
+        self.assertIn("every premise holds", r.stdout)
+
+    def test_a_changed_row_fails(self):
+        r = self._run(("| R, the bandwidth change across it | 0.014 % |",
+                       "| R, the bandwidth change across it | 0.015 % |"))
+        self.assertEqual(r.returncode, 1, r.stdout[-800:])
+        self.assertIn("WRONG", r.stdout)
+
+    def test_a_changed_prose_figure_fails(self):
+        r = self._run(("The range is 17.4 °C", "The range is 17.5 °C"))
+        self.assertEqual(r.returncode, 1, r.stdout[-800:])
+        self.assertIn("MISSING", r.stdout)
+
+    def test_what_it_reports_is_what_it_checks(self):
+        m = _analysis("layer_a_slope")
+        v = m.derive(m.pilot_dir(), say=lambda *a, **k: None)
+        rows, prose = m.readme_figures(v)
+        got = next(iter(m.checked_figures().values()))
+        self.assertEqual(got, {**{k: x for k, x in rows.items() if x is not None},
+                               **prose})
+
+
+class A16HasOneSource(unittest.TestCase):
+    """A16's step and divergence were literals in three scripts, 3.93 and 1.67.
+
+    Each had a comment naming `plan_z_power.py` as the derivation. They ask it now,
+    at the precision every document quotes, so a change in the data reaches all
+    three and a literal reintroduced in any of them is visible here.
+    """
+
+    def test_the_derivation_gives_the_quoted_values(self):
+        z = _analysis("plan_z_power")
+        self.assertEqual(z.a16_quoted(), {"step_pct": 3.93, "divergence_c": 1.67})
+
+    def test_every_consumer_follows_it(self):
+        z = _analysis("plan_z_power")
+        real = z.a16_quoted
+        try:
+            z.a16_quoted = lambda: {"step_pct": 9.99, "divergence_c": 2.5}
+            self.assertEqual(_analysis("plan_siblings_power").a16_step_pct(), 9.99)
+            self.assertEqual(_analysis("rederive_run_y").a16_step_pct(), 9.99)
+            self.assertEqual(_analysis("layer_a_slope").a16(), (9.99, 2.5))
+        finally:
+            z.a16_quoted = real
+
+    def test_the_derivation_follows_the_data(self):
+        z = _analysis("plan_z_power")
+        real = z.step_thermal_state
+        try:
+            z.step_thermal_state = lambda: {"gap_pct": 4.444, "after_delta_c": 0.777}
+            self.assertEqual(z.a16_quoted(), {"step_pct": 4.44, "divergence_c": 0.78})
+        finally:
+            z.step_thermal_state = real
+
+
+class BothQuotesOfTheSuiteSizesAreTheSuites(unittest.TestCase):
+    """The PR body quotes the mutation counts twice, and only one was checked.
+
+    `verify_claims.py` holds "N code and M data perturbations" to the two suites,
+    and is bound to the release tag, so it cannot grow a second assertion. The
+    other quote, "N code and M data and document perturbations", went stale at 73
+    once while the data suite grew to 84, was fixed, and then sat at 94 while the
+    code suite grew past 190. This holds it the way the bound checker holds the
+    first.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    @staticmethod
+    def _n(rel):
+        tree = ast.parse((Path(__file__).resolve().parents[1] / rel).read_text(
+            encoding="utf-8"))
+        for node in tree.body:
+            if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                    and getattr(node.targets[0], "id", None) == "MUTATIONS"):
+                return len(node.value.elts)
+        return None
+
+    def test_both_quotes(self):
+        body = " ".join((self.ROOT / "PULL_REQUEST.md").read_text(
+            encoding="utf-8").split())
+        code, data = self._n("tests/mutate.py"), self._n("tests/data_mutate.py")
+        self.assertGreater(code, 100)
+        for form in (f"{code} code and {data} data perturbations",
+                     f"{code} code and {data} data and document perturbations"):
+            with self.subTest(form=form):
+                self.assertIn(form, body)
+        # and no other count is quoted in either form
+        quoted = set(re.findall(r"(\d+) code and (\d+) data (?:and document )?"
+                                r"perturbations", body))
+        self.assertEqual(quoted, {(str(code), str(data))}, quoted)
+
+
+class RunYsOutputIsIdenticalToTheTokenAndThatIsChecked(unittest.TestCase):
+    """Both run Y documents say the output is identical to the token.
+
+    What checked it was three sums per arm, which two different outputs of the
+    same length can share. The derivation now compares every request's content,
+    reasoning and token ids across the two conditions, and refuses on one
+    difference.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    def test_every_request_matches_in_the_committed_run(self):
+        m = _analysis("rederive_run_y")
+        same = m.outputs_identical()
+        self.assertEqual(set(same), {f for f, _s in m.CONTRASTS})
+        for fast, (n_same, n_fast, n_slow) in same.items():
+            with self.subTest(arm=fast):
+                self.assertEqual((n_same, n_fast, n_slow), (120, 120, 120))
+        self.assertEqual(m.check_outputs(same), [])
+
+    def test_one_changed_token_is_refused(self):
+        m = _analysis("rederive_run_y")
+        with tempfile.TemporaryDirectory() as t:
+            dst = Path(t) / m.RUN.name
+            shutil.copytree(m.RUN, dst)
+            f = dst / "baseline-ecore__rep3.json"
+            j = json.loads(f.read_text(encoding="utf-8"))
+            j["rows"][0]["tokens"] = list(j["rows"][0]["tokens"])
+            j["rows"][0]["tokens"][-1] += 1
+            f.write_text(json.dumps(j), encoding="utf-8")
+            same = m.outputs_identical(dst)
+        self.assertEqual(same["baseline"][0], 119)
+        bad = m.check_outputs(same)
+        self.assertTrue(bad and "baseline" in bad[0], bad)
+
+    def test_main_runs_the_check(self):
+        src = (self.ROOT / "analysis" / "rederive_run_y.py").read_text(encoding="utf-8")
+        main = next(n for n in ast.parse(src).body
+                    if isinstance(n, ast.FunctionDef) and n.name == "main")
+        self.assertIn("check_outputs(same)", ast.unparse(main))
+
+
+class AReviewOfPR7FoundTheseAndEachHasAGuard(unittest.TestCase):
+    """What an adversarial review of the branch found, one test per finding.
+
+    Each was reproduced by the reviewer and none was caught by anything here:
+    a design table could carry a row nothing derived, two derived figures could
+    swap places, a whole number derived from data could change, the layer A slope
+    was fitted through an offset between two invocations, and a sampler wrote
+    NVML's error text into its trace where every driver counts samples.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+    RUNNER = "bench/retest_runner.py"
+
+    def _doc_copy(self, mod, rel, old, new):
+        """Point `mod.ROOT` at a copy of the tree's `rel` with one edit."""
+        text = (self.ROOT / rel).read_text(encoding="utf-8")
+        self.assertEqual(text.count(old), 1, f"{old!r} is not unique in {rel}")
+        td = tempfile.TemporaryDirectory()
+        self.addCleanup(td.cleanup)
+        dst = Path(td.name) / rel
+        dst.parent.mkdir(parents=True)
+        dst.write_text(text.replace(old, new), encoding="utf-8")
+        real = mod.ROOT
+        mod.ROOT = Path(td.name)
+        self.addCleanup(setattr, mod, "ROOT", real)
+
+    # -- a row nothing derived ------------------------------------------------
+
+    def test_a_design_row_nothing_derives_is_refused_in_plan_s(self):
+        m = _analysis("plan_siblings_power")
+        inp = m.inputs()
+        rows = m.design(inp)
+        self.assertEqual(m.check_doc(inp, rows), [])
+        self._doc_copy(m, m.DOC, "| 18 | 54 | 0.75 |",
+                       "| 24 | 72 | 1.00 | 0.12 % | 33 | 0.15 % | 26 |\n| 18 | 54 | 0.75 |")
+        bad = m.check_doc(inp, rows)
+        self.assertTrue(any("nothing derives" in b for b in bad), bad)
+
+    def test_a_row_nothing_derives_or_a_row_twice_is_refused_in_plan_z(self):
+        m = _analysis("plan_z_power")
+        want = {"6": {"blocks": "6", "x": "1"}, "12": {"blocks": "12", "x": "2"}}
+        head = "| blocks | x |"
+        for lines, needle in (
+                ([head, "|---|---|", "| 6 | 1 |", "| 12 | 2 |", "| 24 | 3 |"],
+                 "that nothing derives"),
+                ([head, "|---|---|", "| 6 | 1 |", "| 12 | 2 |", "| 12 | 2 |"],
+                 "twice")):
+            with self.subTest(needle=needle):
+                bad = []
+                m._check_table(lines, "| blocks |", want, bad, "doc", "design")
+                self.assertTrue(any(needle in b for b in bad), bad)
+        bad = []
+        m._check_table([head, "|---|---|", "| 6 | 1 |", "| 12 | 2 |"],
+                       "| blocks |", want, bad, "doc", "design")
+        self.assertEqual(bad, [])
+
+    def test_a_label_on_two_rows_is_refused_in_layer_a(self):
+        r = LayerAsReadingHasTestsOfItsOwn._run(
+            self, ("| R, the bandwidth change across it | 0.014 % |",
+                   "| R, the bandwidth change across it | 0.140 % |\n"
+                   "| R, the bandwidth change across it | 0.014 % |"))
+        self.assertEqual(r.returncode, 1, r.stdout[-800:])
+        self.assertIn("the label is on two rows", r.stdout)
+
+    # -- two derived figures swapped ------------------------------------------
+
+    def test_plan_s_spreads_swapped_are_refused(self):
+        """Each sentence given the other spread, one at a time."""
+        m = _analysis("plan_siblings_power")
+        inp = m.inputs()
+        for old, new, needle in (
+                ("about five times the within-invocation spread\nof 0.760 %",
+                 "about five times the within-invocation spread\nof 2.089 %",
+                 "within-invocation spread of 0.760 %"),
+                ("within-block log ratios spread 2.089 %",
+                 "within-block log ratios spread 0.760 %",
+                 "within-block log ratios spread 2.089 %")):
+            with self.subTest(needle=needle):
+                self._doc_copy(m, m.DOC, old, new)
+                bad = m.check_doc(inp, m.design(inp))
+                self.assertTrue(any(needle in b for b in bad), bad)
+                m.ROOT = self.ROOT
+
+    def test_plan_x_run_y_arms_swapped_are_refused(self):
+        m = _analysis("rederive_run_y")
+        rows = m.derive()
+        self.assertEqual(m.check_plan_x(rows), [])
+        self._doc_copy(m, m.PLAN_X, "costs **14.42 %** of the decode rate on "
+                       "`spec-dflash-n2` and\n**14.73 %** on `baseline`",
+                       "costs **14.73 %** of the decode rate on "
+                       "`spec-dflash-n2` and\n**14.42 %** on `baseline`")
+        self.assertTrue(m.check_plan_x(rows))
+        src = (self.ROOT / "analysis" / "rederive_run_y.py").read_text(encoding="utf-8")
+        main = next(n for n in ast.parse(src).body
+                    if isinstance(n, ast.FunctionDef) and n.name == "main")
+        self.assertIn("check_plan_x(rows)", ast.unparse(main))
+
+    def test_plan_x_d_levels_swapped_are_refused(self):
+        m = _analysis("load_run_power")
+        txt = m.PLAN.read_text(encoding="utf-8")
+        figs = {"D over the slow blocks": "-25.309", "D over the fast blocks": "-25.529"}
+        self.assertEqual(m.check_prose(txt, figs), [])
+        swapped = txt.replace("−25.309", "@").replace("−25.529", "−25.309").replace("@", "−25.529")
+        self.assertTrue(m.check_prose(swapped, figs))
+
+    def test_the_hazard_ends_are_compared_as_their_sentence(self):
+        m = _analysis("load_run_power")
+        flat = " ".join(m.PLAN.read_text(encoding="utf-8").replace("**", "").split())
+
+        def end(moves, holds):
+            return {"-2": {"moves": moves}, "0": {"holds": holds}}
+        right = {"fast": end(0.82, 0.64), "slow": end(0.92, 0.85)}
+        swapped = {"fast": end(0.92, 0.85), "slow": end(0.82, 0.64)}
+        self.assertIn(m.hazard_ends_sentence(right), flat)
+        self.assertNotIn(m.hazard_ends_sentence(swapped), flat)
+
+    # -- whole numbers no census reads ----------------------------------------
+
+    def test_layer_a_whole_numbers_are_compared(self):
+        for old, new in (("319 noise floors", "318 noise floors"),
+                         ("held for **all 2358**", "held for **all 2357**"),
+                         ("That is **2,582** times", "That is **2,583** times"),
+                         ("sensitivity is 2,582 times", "sensitivity is 2,583 times")):
+            with self.subTest(old=old):
+                r = LayerAsReadingHasTestsOfItsOwn._run(self, (old, new))
+                self.assertEqual(r.returncode, 1, r.stdout[-600:])
+                self.assertIn("MISSING", r.stdout)
+
+    def test_plan_z_whole_numbers_are_compared(self):
+        m = _analysis("plan_z_power")
+        self.assertEqual(m.check_doc(), [])
+        for old, new in (("2358 telemetry samples", "2357 telemetry samples"),
+                         ("which is 2,582 times", "which is 2,583 times")):
+            with self.subTest(old=old):
+                self._doc_copy(m, m.DOC, old, new)
+                self.assertTrue(m.check_doc())
+                m.ROOT = self.ROOT
+
+    # -- the layer A slope ----------------------------------------------------
+
+    def test_the_slope_is_fitted_within_each_phase(self):
+        """Two phases with no slope inside either and an offset between them.
+
+        One line through both reads the offset as temperature; one slope with
+        an intercept per phase reads zero.
+        """
+        m = _analysis("layer_a_slope")
+        asc = [{"temp": 50.0 + i, "bw": 828.0} for i in range(10)]
+        desc = [{"temp": 55.0 + i, "bw": 828.2} for i in range(10)]
+        fit = m.within_phase_slope([asc, desc])
+        self.assertAlmostEqual(fit["slope"], 0.0, places=12)
+        pooled = m.ols([r["temp"] for r in asc + desc], [r["bw"] for r in asc + desc])
+        self.assertGreater(abs(pooled["slope"]), 0.01)
+
+    def test_the_bound_widens_for_correlated_residuals(self):
+        m = _analysis("layer_a_slope")
+        import random
+        rnd = random.Random(7)
+        e, white, red = 0.0, [], []
+        for i in range(120):
+            w = rnd.gauss(0, 0.05)
+            e = 0.8 * e + w
+            white.append({"temp": 50 + i * 0.1, "bw": 828 + w})
+            red.append({"temp": 50 + i * 0.1, "bw": 828 + e})
+        fw, fr = m.within_phase_slope([white]), m.within_phase_slope([red])
+        self.assertLess(abs(fw["rho"]), 0.3)
+        self.assertGreater(fr["rho"], 0.5)
+        self.assertLess(fr["n_eff"], fr["n"] / 3)
+        self.assertEqual(fr["df"], int(fr["n_eff"]) - 2)
+        # the half width recomputed by hand, with the widening
+        xs = [r["temp"] for r in red]
+        ys = [r["bw"] for r in red]
+        mx, my = sum(xs) / len(xs), sum(ys) / len(ys)
+        sxx = sum((x - mx) ** 2 for x in xs)
+        b = sum((x - mx) * (y - my) for x, y in zip(xs, ys)) / sxx
+        s2 = sum((y - my - b * (x - mx)) ** 2 for x, y in zip(xs, ys)) / (len(xs) - 2)
+        k = _math.sqrt((1 + fr["rho"]) / (1 - fr["rho"]))
+        self.assertAlmostEqual(fr["half"],
+                               m.t_critical_975(fr["df"]) * _math.sqrt(s2 / sxx) * k,
+                               places=12)
+        self.assertGreater(k, 2.0, "the fixture is not correlated enough to show it")
+
+    # -- the sampler ----------------------------------------------------------
+
+    def test_a_failed_query_is_not_a_sample(self):
+        """NVML's error text went into the trace, and every driver counts rows."""
+        with tempfile.TemporaryDirectory() as td:
+            b = Path(td) / "bin"
+            b.mkdir()
+            smi = b / "nvidia-smi"
+            smi.write_text("#!/bin/sh\necho 'Unable to determine the device handle' >&2\n"
+                           "exit 9\n", encoding="utf-8")
+            smi.chmod(0o755)
+            out = Path(td) / "t.csv"
+            env = dict(os.environ, PATH=f"{b}:{os.environ.get('PATH', '/usr/bin:/bin')}",
+                       BENCH_TELEMETRY_OUT=str(out))
+            p = subprocess.Popen(["bash", str(self.ROOT / "bench" / "gpu_telemetry.sh"),
+                                  "compact", "1", "X"], env=env,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            try:
+                deadline = time.time() + 20
+                err = Path(str(out) + ".err")
+                while time.time() < deadline and not (
+                        err.exists() and len(err.read_text().splitlines()) >= 2):
+                    time.sleep(0.2)
+            finally:
+                p.terminate()
+                p.wait()
+            self.assertEqual(len(out.read_text().splitlines()), 1,
+                             "an error line was written into the trace as a sample")
+            self.assertIn("Unable to determine", err.read_text())
+
+    # -- plan S's driver ------------------------------------------------------
+
+    def test_the_plan_s_driver_refuses_a_build_without_openmp(self):
+        """The third arm's lever is libgomp's; checked on the binary, with ldd."""
+        for ldd_out, expect in (("", "does not load libgomp"),
+                                ("\tlibgomp.so.1 => /usr/lib/libgomp.so.1 (0x1)",
+                                 "libgomp is among the server's libraries")):
+            with self.subTest(expect=expect), tempfile.TemporaryDirectory() as td:
+                td = Path(td)
+                b = td / "bin"
+                b.mkdir()
+                (b / "ldd").write_text(f"#!/bin/sh\nprintf '%s\\n' '{ldd_out}'\n",
+                                       encoding="utf-8")
+                server = td / "llama-server"
+                server.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+                for f in (b / "ldd", server):
+                    f.chmod(0o755)
+                # A copy of bench/ outside any checkout, so the runner-at-HEAD
+                # check takes its "cannot check" branch whatever the working
+                # tree holds; that check is not what this is about.
+                shutil.copytree(self.ROOT / "bench", td / "repo" / "bench",
+                                ignore=shutil.ignore_patterns("__pycache__"))
+                r = subprocess.run(
+                    ["bash", str(td / "repo" / "bench" / "run_s_siblings.sh"), "--check"],
+                    capture_output=True, text=True, timeout=180, cwd=td,
+                    env={"PATH": f"{b}:/usr/bin:/bin", "HOME": str(td), "TZ": "UTC",
+                         "BENCH_GPU_LOCK": str(td / "no.lock"),
+                         # other suites' runners on this host are not measuring
+                         "BENCH_ALLOW_CONTENDED": "1",
+                         "LLAMA_SERVER_BIN": str(server)})
+                self.assertIn(expect, r.stdout + r.stderr, (r.stdout + r.stderr)[-800:])
+
+    def test_the_plan_s_driver_checks_its_run_with_the_reading(self):
+        sh = (self.ROOT / "bench" / "run_s_siblings.sh").read_text(encoding="utf-8")
+        self.assertIn('python3 "$HERE/../analysis/rederive_run_s.py" --conditions "$out" || rc=1',
+                      sh, "the driver no longer checks its run with the reading's "
+                          "own conditions")
+        self.assertNotIn("<<'PY'\nimport json", sh,
+                         "an inline second copy of the run check is back")
+
+    def test_the_reading_checks_a_directory_from_the_command_line(self):
+        t = PlanSsReadingMustVerifyTheDesignBeforeItReads()
+        with tempfile.TemporaryDirectory() as d:
+            good = t._run(d)
+            r = subprocess.run([sys.executable, str(self.ROOT / "analysis" /
+                                                    "rederive_run_s.py"),
+                                "--conditions", str(good)],
+                               capture_output=True, text=True, timeout=120)
+            self.assertEqual(r.returncode, 0, r.stderr[-600:])
+            (good / "RUN_COMPLETE.json").unlink()
+            r = subprocess.run([sys.executable, str(self.ROOT / "analysis" /
+                                                    "rederive_run_s.py"),
+                                "--conditions", str(good)],
+                               capture_output=True, text=True, timeout=120)
+            self.assertEqual(r.returncode, 1)
+            self.assertIn("no RUN_COMPLETE.json", r.stderr)
+
+    def test_a_term_unwinds_the_runner_through_its_finally(self):
+        """A TERM ended the runner at once, leaving its server on the port."""
+        import signal as _signal
+        saved = (_signal.getsignal(_signal.SIGTERM), _signal.getsignal(_signal.SIGINT))
+        try:
+            m = PlanSsThreeArmsMustFitInOneInvocation._mod(
+                self, LLAMA_SERVER_BIN="/bin/true", MODEL_TARGET="/dev/null")
+            with mock.patch.dict(os.environ, {"BENCH_ARMS": "baseline,baseline",
+                                              "BENCH_OUT": tempfile.mkdtemp()}), \
+                    self.assertRaises(SystemExit):
+                m.main()
+            handler = _signal.getsignal(_signal.SIGTERM)
+            self.assertIs(handler, m._term_is_an_interrupt,
+                          "TERM still ends the runner without its finally")
+            with self.assertRaises(KeyboardInterrupt):
+                handler(_signal.SIGTERM, None)
+        finally:
+            _signal.signal(_signal.SIGTERM, saved[0])
+            _signal.signal(_signal.SIGINT, saved[1])
+
+    # -- plan S's masks: the sixth refusal ------------------------------------
+
+    def test_two_sets_spanning_as_many_cores_are_refused(self):
+        """Reachable only on a topology the other five do not refuse first: one
+        where every processor names a sibling set of its own."""
+        m = PlanSsMasksMustBeCheckedAgainstTheHost._mod(self)
+        ceiling = {c: 5500 for c in range(16)}
+        sibling = {c: {c, c ^ 1, 100 + c} for c in range(16)}
+        distinct = {0, 2, 4, 6, 8, 10, 12, 14}
+        packed = {0, 1, 2, 3, 4, 5, 8, 9}
+        bad, _ = m.validate_masks(distinct, packed, 8, ceiling, sibling)
+        self.assertTrue(any("same condition written twice" in b for b in bad), bad)
+
+    def test_the_candidate_stands_only_if_the_workers_were_seen_to_spin(self):
+        """The predicted band waits on the per-thread processor time.
+
+        The plan found, before any run, that the workers may not spin at all while
+        decoding. So a cost in the predicted band reads as the candidate only when
+        the passive arm's other threads used at most half the packed arm's time.
+        """
+        t = PlanSsReadingMustVerifyTheDesignBeforeItReads()
+        m = t._mod()
+        with tempfile.TemporaryDirectory() as d:
+            out = m.derive(t._run(d))
+        self.assertIn("candidate stands", out["verdict_primary"])
+        self.assertTrue(out["spin_observed"])
+        self.assertTrue(out["candidate_stands"])
+
+        def no_spin(recs, man, run):
+            for r in recs:
+                for th in r["server_threads"]["threads"]:
+                    if not th["main"]:
+                        th["ticks"] = 400
+        with tempfile.TemporaryDirectory() as d:
+            out = m.derive(t._run(d, mutate=no_spin))
+        self.assertIn("candidate stands", out["verdict_primary"])
+        self.assertFalse(out["spin_observed"])
+        self.assertFalse(out["candidate_stands"],
+                         "a cost with no spinning seen read as the candidate")
+
+    def test_the_teardown_runs_with_both_signals_blocked(self):
+        """A second interrupt inside `stop_server` left the server on the port."""
+        src = (self.ROOT / "bench" / "retest_runner.py").read_text(encoding="utf-8")
+        fn = next(n for n in ast.parse(src).body
+                  if isinstance(n, ast.FunctionDef) and n.name == "run_arm")
+        body = ast.unparse(fn)
+        i_block = body.find("signal.pthread_sigmask(signal.SIG_BLOCK")
+        i_stop = body.find("stop_server(proc")
+        self.assertGreater(i_block, 0, "the teardown is not shielded")
+        self.assertLess(i_block, i_stop)
+        self.assertIn("signal.SIGINT, signal.SIGTERM", body[i_block:i_stop])
+

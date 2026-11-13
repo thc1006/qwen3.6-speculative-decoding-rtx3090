@@ -87,6 +87,20 @@ def step_thermal_state() -> dict:
     return out
 
 
+def a16_quoted() -> dict:
+    """A16's step and its core-temperature divergence, as the documents quote them.
+
+    Two decimals each, which is how every document here writes them: 3.93 % and
+    1.67 degrees. Three scripts used them, and each held its own literal with a
+    comment saying this file derives it -- three copies of a derived figure, which
+    is the defect a derivation exists to remove. They ask here now, and get the
+    value at the precision they always used, so nothing they print moves.
+    """
+    s = step_thermal_state()
+    return {"step_pct": round(s["gap_pct"], 2),
+            "divergence_c": round(s["after_delta_c"], 2)}
+
+
 def trace_is_not_attributable() -> dict:
     """Why the plan's first prerequisite is a timestamp.
 
@@ -285,7 +299,14 @@ def _check_table(lines, head_starts, want, bad, doc, what):
             if not ln.strip().startswith("|"):
                 break
             continue
+        # A row nobody derived, or a row twice, is refused: looking up only the
+        # expected rows let either sit in the table and pass.
         if cells[0] not in want:
+            bad.append(f"{doc}: the {what} table has a row {cells[0]!r} that nothing "
+                       f"derives")
+            continue
+        if cells[0] in seen:
+            bad.append(f"{doc}: the {what} table has row {cells[0]!r} twice")
             continue
         seen.add(cells[0])
         for col, cell in zip(cols, cells):
@@ -298,21 +319,31 @@ def _check_table(lines, head_starts, want, bad, doc, what):
                    f"{first!r}")
 
 
-def check_doc() -> list[str]:
-    """The two tables cell by cell, and every figure the prose derives.
+def _flat_cells(cells) -> dict:
+    """A table's expected cells, whatever shape the builder returns, as one dict."""
+    out = {}
+    items = cells.items() if isinstance(cells, dict) else enumerate(cells)
+    for k, v in items:
+        if isinstance(v, (dict, list, tuple)):
+            out.update({f"{k} {kk}": vv for kk, vv in _flat_cells(v).items()})
+        else:
+            out[str(k)] = str(v)
+    return out
 
-    The levers table is NOT checked: its rows are what the card answered on one
-    day, which is host state and not in this tree. It says so in the document.
+
+def prose_figures() -> dict:
+    """The prose figures `check_doc` compares, as the document writes them.
+
+    One function with two callers, `check_doc` and `checked_figures`, so a
+    figure added here is checked AND counted as covered, and one removed stops
+    being both. The first attempt at this extraction left the literal in
+    `check_doc` as well, which made two copies in one file -- the defect it was
+    meant to remove.
     """
-    s, (rows, inp) = step_thermal_state(), design()
+    s = step_thermal_state()
+    inp = design()[1]
     t = trace_is_not_attributable()
-    text = (ROOT / DOC).read_text(encoding="utf-8")
-    lines = text.splitlines()
-    bad: list[str] = []
-    _check_table(lines, ("| level |",), step_cells(s), bad, DOC, "step")
-    _check_table(lines, ("| blocks |",), design_cells(rows), bad, DOC, "design")
-    flat = " ".join(text.replace("**", " ").replace("`", " ").split())
-    figures = {
+    return {
         "A16's step": f"{s['gap_pct']:.2f} %",
         "how much hotter the faster level ends": f"{s['after_delta_c']:.2f} °C",
         "the trace's samples": f"{t['samples']} samples",
@@ -323,7 +354,57 @@ def check_doc() -> list[str]:
         "run Y's own block spread": f"{inp['sd_effect_pct']:.3f} %",
         "the per-block cost": f"{inp['per_block_hours'] * 60:.1f} min",
         "the arm-runs to a block": f"{_word(inp['arm_runs_per_block'])} arm-runs",
+        # Layer A's first premise, quoted in the outcome section. Nothing else
+        # checks it: `layer_a_slope.py` computes it and asserts it is below one
+        # per cent, and the round's own README does not quote it.
+        "layer A's calibration spread": f"{_layer_a()['spread']:.3f} %",
+        # And the two whole numbers the outcome section quotes from layer A,
+        # which no census reads: both were changed in a review and nothing failed.
+        "layer A's samples": f"all {len(_layer_a()['tel'])} telemetry samples",
+        "layer A's ratio to the bound":
+            f"{_layer_a()['need_B'] / _layer_a()['B_hi']:,.0f} times the upper bound",
     }
+
+
+def _layer_a() -> dict:
+    import layer_a_slope                                            # noqa: E402
+    return layer_a_slope.derive(layer_a_slope.pilot_dir(),
+                                say=lambda *a, **k: None)
+
+
+def checked_figures() -> dict:
+    """Every figure this file compares in its document, for the registry.
+
+    The prose figures, and the cells of the two tables `check_doc` compares
+    cell by cell, so a sentence quoting a cell counts as derived. Only the prose
+    ones go through the forbidden-neighbour check: a table's rows are one step
+    apart by construction, and treating them as prose raised a false failure on
+    the first run.
+    """
+    s = step_thermal_state()
+    rows = design()[0]
+    tables = {f"step table {k}": v for k, v in _flat_cells(step_cells(s)).items()}
+    tables.update({f"design table {k}": v
+                   for k, v in _flat_cells(design_cells(rows)).items()})
+    return {DOC: {**tables, **prose_figures()}}
+
+
+def check_doc() -> list[str]:
+    """The two tables cell by cell, and every figure the prose derives.
+
+    The levers table is NOT checked: its rows are what the card answered on one
+    day, which is host state and not in this tree. It says so in the document.
+    """
+    s = step_thermal_state()
+    rows = design()[0]
+    t = trace_is_not_attributable()
+    text = (ROOT / DOC).read_text(encoding="utf-8")
+    lines = text.splitlines()
+    bad: list[str] = []
+    _check_table(lines, ("| level |",), step_cells(s), bad, DOC, "step")
+    _check_table(lines, ("| blocks |",), design_cells(rows), bad, DOC, "design")
+    flat = " ".join(text.replace("**", " ").replace("`", " ").split())
+    figures = prose_figures()
     # Each figure comes with the values that must NOT appear. A presence check
     # alone is weak where a figure is quoted twice, which the arm-runs per block
     # is: one occurrence can be edited and the other still satisfies it.

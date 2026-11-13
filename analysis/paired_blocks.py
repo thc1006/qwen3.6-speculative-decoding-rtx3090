@@ -68,13 +68,29 @@ def observed_schedule(run_dir: Path) -> tuple[dict[str, list[int]], int]:
     within a block without needing the driver log. This is the difference
     between verifying the design and reading the label the manifest recorded:
     run T's manifest says `latin` and its arms sit at positions [1,3,2,1].
+
+    Refuses rather than guesses when an arm-run crashed or carries no request
+    timestamps. It used to skip an arm-run with no rows and keep a crashed one
+    that had some, while `load_blocks` drops every crashed one, so the schedule
+    and the rates could describe two different sets of arm-runs. Neither choice
+    is right on its own: an arm-run that crashed before its first request has
+    no timestamp, and leaving it out moves every arm after it in its block up a
+    place, so the positions would describe a schedule that did not run. A run
+    with a crashed arm-run fails the runner's own validation and is not
+    published, so refusing costs nothing a reading depends on.
     """
     per_block: dict[int, list[tuple[float, str]]] = defaultdict(list)
-    for f in glob.glob(str(run_dir / "*__rep*.json")):
+    for f in sorted(glob.glob(str(run_dir / "*__rep*.json"))):
         r = json.loads(Path(f).read_text(encoding="utf-8"))
-        if not r.get("rows"):
-            continue
-        per_block[r["repeat"]].append((min(x["t_start"] for x in r["rows"]), r["arm"]))
+        name = Path(f).name
+        if r.get("crashed"):
+            sys.exit(f"{name}: crashed, so where the arms after it ran in its "
+                     f"block cannot be rebuilt from the data")
+        starts = [x.get("t_start") for x in r.get("rows") or []]
+        if not starts or any(not isinstance(t, (int, float)) for t in starts):
+            sys.exit(f"{name}: no t_start on {'any' if not starts else 'every'} "
+                     f"request, so its place in the order cannot be rebuilt")
+        per_block[r["repeat"]].append((min(starts), r["arm"]))
     pos: dict[str, list[int]] = defaultdict(list)
     for rep in sorted(per_block):
         for i, (_, arm) in enumerate(sorted(per_block[rep])):

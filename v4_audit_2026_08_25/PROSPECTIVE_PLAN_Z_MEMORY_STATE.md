@@ -15,12 +15,15 @@ temperature, and page-cache or allocator state.
 
 Run Y settled the size of the first. A full move to the eight efficiency cores
 costs **14.42 %** of the decode rate, so A16's step is **0.27** of a full
-displacement, or roughly two of eight threads landing slow. That is the right
-shape and the right order of magnitude, and it is arithmetic until a run sets the
-number of displaced threads and measures the response. That successor is the
-leading candidate, run Y's own outcome section names it, and nothing has listed it
-as an item yet; `RETEST_TODO.md` carries the page-cache hypothesis as the
-successor to run X and not this one.
+displacement: the right order of magnitude, and the host rather than the card.
+
+That fraction is **not** a count of threads, and
+[`PROSPECTIVE_PLAN_SIBLINGS.md`](PROSPECTIVE_PLAN_SIBLINGS.md) gives the reason:
+every layer is on the card, so those threads have almost no arithmetic while
+decoding, the one host operation found so far running as a single task on the main
+thread, and a barrier takes its slowest thread's time either way. What the host variable actually is, that plan pre-registers: what shares a
+physical core with the main thread, which is the leading candidate and is three
+arms of thirty minutes rather than a sweep.
 
 This plan is about the second quantity, and the reason to spend anything on it
 now is that it became measurable on 2026-10-01. A16 said the junction temperature
@@ -128,6 +131,27 @@ Layer A does **not** separate memory temperature from core temperature. It does
 not need to: what is being excluded is the thermal channel as a whole, and a
 bound that covers both is stronger than one that covers either.
 
+**Which card, and which index.** The slope is the transferable half of this and the
+range is not, so it matters which card each is measured on. The bench host's card is
+`GPU-f9db9841`, bare metal, 350 W. The box these sessions run on holds a second
+RTX 3090, `GPU-f71a8f68`, in a KVM guest at 420 W: the same GA102 and the same
+memory, a different cooler and a wider power envelope. A slope measured there is
+evidence about the mechanism and **not a coefficient that transfers**, because board
+designs differ in how the back-side memory modules are cooled and the onset
+temperature can differ with them. The asymmetry is what makes a pilot worth running:
+a slope indistinguishable from zero across forty degrees would be strong evidence
+against the mechanism as a class and would end this plan cheaply, and a non-zero one
+would have to be re-measured on the card A16's step happened on.
+
+On that second card the memory temperature **cannot be read at all**:
+`CONFIG_IO_STRICT_DEVMEM=y` makes the kernel refuse to map any IO region a driver
+has claimed, the `nvidia` driver claims BAR0, and both routes fail with what look
+like two unrelated errors, `EINVAL` through the card's own `resource0` and `EPERM`
+through `/dev/mem`. `iomem=relaxed` on the kernel command line disables that check;
+it needs a reboot and weakens a hardening, and this plan does not ask for it. The
+thermal index there is the core temperature `nvidia-smi` reports everywhere, which
+is what the paragraph above already licenses.
+
 **Pre-registered reading.** Let *R* be the change in achieved bandwidth across
 the full reachable range, idle to plateau, read as a fraction of the cold value.
 
@@ -141,6 +165,46 @@ observed between the two levels is under two degrees and has the wrong sign. If
 
 This is deliberately generous to the hypothesis. It grants the maximum possible
 elasticity and the maximum possible divergence.
+
+### What the pilot read, and what it does not yet settle
+
+Layer A ran on 2026-10-02 on the pilot card, published as
+[`../v6_pilot_layer_a_2026_10_02/`](../v6_pilot_layer_a_2026_10_02/) and derived by
+[`../analysis/layer_a_slope.py`](../analysis/layer_a_slope.py), which also reads that
+round's README back row by row. Clocks locked at 1800 and 9501 MHz and held for all
+2358 telemetry samples at a spread of zero; the calibration flat to 0.205 % across
+five core clocks, so the load was memory bound; the control executed, with nine
+temperatures visited by both phases. Across 51.6 to 69.0 °C, **R is 0.014 %**.
+
+So the rule above fires: the hypothesis is excluded for A16's step and layer B is
+not run. It fires on a narrower range than it was written for. *R* was to span idle
+to plateau, and the pilot spans the range above, because below about 51 °C the load
+heats the card faster than a window resolves; the round's README says so. The
+exclusion does not rest on the range, though: the slope's upper bound carried over
+the whole span the rule names is still under a tenth of a per cent. Put against
+A16's own figures rather than an invented divergence, its two levels differ by
+1.67 °C, so the sensitivity would have to be 2.35 % per °C, which is 2,582 times
+the upper bound measured. That bound is the one the round's README now carries, a
+slope fitted within each phase and widened for drift; the first, fitted through
+both phases at once, made the ratio smaller. A16's own thermal record also has the
+faster level as the hotter one.
+
+**That reading is on `GPU-f71a8f68` and the step is on `GPU-f9db9841`.** By the
+paragraph above, a null on the pilot card is strong evidence about GA102 with
+GDDR6X as a class and is NOT the bench card's number: board designs differ in how
+the back-side memory modules are cooled, so the onset temperature can differ with
+them. **Repeating layer A on the bench host is what converts this from evidence
+about the class into the exclusion for A16**, and until that runs the exclusion is
+asserted of the class and not of the card the step happened on. It is about an hour
+and it is the only GPU work this plan still needs.
+
+Two things that repeat should carry. The control ran but cannot attribute: the two
+phases agree to 0.022 % at matched temperatures and they are two separate
+invocations of the load, so a constant offset across every bin is what run-to-run
+variation looks like -- seven invocations at a flat plateau spread 0.013 %, about
+the same size. Attribution needs replicated pairs, or both phases inside one
+process. And the memory register IS readable on the bench host, so that repeat can
+index thermal state by the memory temperature rather than by the core's.
 
 ## Layer B, only if layer A does not end it
 
@@ -195,6 +259,11 @@ appear in a run that measures it.
 - It cannot test thread displacement, which run Y made the leading candidate.
 - It cannot separate memory temperature from core temperature, by design.
 - It cannot reproduce A16's step. Nothing can, on demand.
+- It bounds the BANDWIDTH channel only. A thermal effect acting through memory
+  LATENCY rather than streaming throughput is untouched: the load is a pure stream,
+  and a decode step's KV-cache access is scattered, where row-buffer behaviour and
+  latency matter rather than peak throughput. That is a different hypothesis, this
+  plan does not test it, and the exclusion above does not reach it.
 - It says nothing about any card but this one. The register offset is per
   architecture and the thermal range is this cooler and this case.
 
@@ -216,9 +285,11 @@ has already paid for once, in the form the payment took.
    register, beside the core temperature it already records. The reader exists,
    as `bench/vram_temp.py`, and returns the reason rather than raising when it
    cannot map the BAR, which is the shape `bench/retest_runner.py` already uses
-   for `nvidia-smi`. What is missing is the runner calling it: mapping a PCI BAR
-   needs root and the runner does not have it, so this is a `sudo -n` invocation
-   whose failure has to be recorded rather than swallowed.
+   for `nvidia-smi`. **Landed on 2026-10-02**: the runner calls it through
+   `sudo -n`, with a timeout so a measurement cannot stall on an instrument, and
+   records the reading or the reason. Mapping a PCI BAR needs root, so the reason
+   is the usual case off the bench host, and the reader explains a refusal now
+   rather than reporting an errno.
 4. ~~**A bandwidth microbenchmark in this repository**, reporting a time series
    rather than one aggregate~~ **Landed on 2026-10-02 as
    `bench/vram_bandwidth.cu`**, which emits a csv row per window with a wall-clock
@@ -230,6 +301,15 @@ has already paid for once, in the form the payment took.
    temperature and a slope needs the scatter it is fitted through, so that plateau
    measurement is a prerequisite in its own right and nothing may be claimed from
    this tool until it is published.
+
+   **First readings, 2026-10-02, on the pilot card.** It compiles clean under
+   `nvcc 13.3` with `-Wall -Wextra`, sustains **828.4** to **828.7 GB/s** at the
+   documented four gibibyte buffers, which is the same figure the bench host gives
+   and is the two cards hitting the same specification at the same efficiency, and
+   its window-to-window spread over four consecutive windows is **0.036 %**. That is
+   two orders of magnitude below the step this plan is about, so the instrument has
+   the resolution. Four windows is not a noise floor; a plateau of thirty, with its
+   spread published, is.
 5. **A derivation script for every table either layer publishes**, wired into the
    claims job, as `analysis/plan_z_power.py` is for this document. Run Y's result
    table was hand-computed and three of its columns were wrong.

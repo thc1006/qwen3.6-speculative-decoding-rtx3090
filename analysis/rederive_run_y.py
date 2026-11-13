@@ -142,6 +142,16 @@ def _split(line: str) -> list[str]:
     return [c.strip() for c in line.strip().strip("|").split("|")]
 
 
+def tel_figures(tel: dict | None) -> dict:
+    """The telemetry means the prose quotes, one decimal, as both documents spell them.
+
+    One function with two callers, `check_doc` and `checked_figures`.
+    """
+    return {f"{name} in the {cond} condition": f"{v:.1f}"
+            for cond in ("fast", "slow")
+            for name, v in (tel or {}).get(cond, {}).items()}
+
+
 def check_doc(doc: str, rows: list[dict], tel: dict | None = None,
               tot: dict | None = None, pro: dict | None = None) -> list[str]:
     """Every cell of every arm row, and every figure the prose quotes.
@@ -174,12 +184,10 @@ def check_doc(doc: str, rows: list[dict], tel: dict | None = None,
             if cell != want[col]:
                 bad.append(f"{doc}: {r['arm']} column {col!r} is {cell!r} "
                            f"and the data gives {want[col]!r}")
-    for cond in ("fast", "slow"):
-        for name, v in (tel or {}).get(cond, {}).items():
-            # one decimal, as both documents spell them
-            if f"{v:.1f}" not in text:
-                bad.append(f"{doc}: does not carry {name} {v:.1f} for the {cond} "
-                           f"condition of {CONTRASTS[0][0]}")
+    for what, v in tel_figures(tel).items():
+        if v not in text:
+            bad.append(f"{doc}: does not carry {what} {v} for "
+                       f"{CONTRASTS[0][0]}")
     for what, (v, forb) in (pro or {}).items():
         forbidden = sorted({w for w in forb if w != v})
         if v not in text:
@@ -206,6 +214,43 @@ def token_totals() -> dict:
                          d + sum(r["draft_n"] for r in j["rows"]),
                          a + sum(r["draft_n_accepted"] for r in j["rows"])]
     return out
+
+
+def outputs_identical(run: pathlib.Path | None = None) -> dict:
+    """Per contrast: how many (block, prompt) requests match across conditions.
+
+    Content, reasoning and the token ids, compared whole. Both documents say the
+    output is identical to the token; `token_totals` compares three sums, which
+    two different outputs of the same length can share, so the sentence was
+    checked by something weaker than what it says.
+    """
+    run = run or RUN
+
+    def load(arm):
+        out = {}
+        for q in sorted(run.glob(f"{arm}__rep*.json")):
+            j = json.loads(q.read_text(encoding="utf-8"))
+            if j["arm"] != arm:
+                continue
+            for r in j["rows"]:
+                out[(j["repeat"], r["tag"])] = json.dumps(
+                    [r.get("content"), r.get("reasoning_content"), r.get("tokens")])
+        return out
+    res = {}
+    for fast, slow in CONTRASTS:
+        a, b = load(fast), load(slow)
+        res[fast] = (sum(1 for k in a if a[k] == b.get(k)), len(a), len(b))
+    return res
+
+
+def check_outputs(same: dict) -> list[str]:
+    bad = []
+    for fast, (n_same, n_fast, n_slow) in same.items():
+        if not n_fast or n_same != n_fast or n_fast != n_slow:
+            bad.append(f"{fast}: {n_same} of {n_fast} requests match their slow "
+                       f"counterpart ({n_slow} of those). The documents say the "
+                       f"output is identical to the token, and it is not.")
+    return bad
 
 
 def telemetry() -> dict:
@@ -244,11 +289,17 @@ def telemetry() -> dict:
     return out
 
 
-# ERRATA A16's step, which this archive's own checker holds. Taken as an input
-# here rather than re-derived, and named so that the share below is traceable to
-# it: the share was the one figure that moved with the log-ratio defect, because
-# it was computed against the wrong bound.
-A16_STEP_PCT = 3.93
+def a16_step_pct() -> float:
+    """ERRATA A16's step, which this archive's own checker holds.
+
+    Taken from `analysis/plan_z_power.py`, which derives it from run T4's own
+    arm-runs, at the two decimals every document quotes. It was a literal here,
+    and in two other scripts, each with a comment naming where it came from; the
+    share below is traceable to it, and the share was the one figure that moved
+    with the log-ratio defect, because it was computed against the wrong bound.
+    """
+    import plan_z_power                                            # noqa: E402
+    return plan_z_power.a16_quoted()["step_pct"]
 
 
 def derived_prose() -> dict:
@@ -272,6 +323,7 @@ def derived_prose() -> dict:
         return f"{n:,}".replace(",", " ")
 
     first = derive()[0]
+    step = a16_step_pct()
     log_change = abs(first["mean_log_ratio"] * 100)
     bound = first["one_sided_bound_pct"]
     # the bound as it was published, on the log scale
@@ -289,17 +341,69 @@ def derived_prose() -> dict:
         # A16's step as a share of a full displacement, the one figure that moved
         # with the log-ratio defect. Both arms round alike.
         "A16's step as a share of a full displacement":
-            (f"{A16_STEP_PCT / change:.2f}",
+            (f"{step / change:.2f}",
              # the log-scale change; the one-sided bound, which is not a full
              # displacement and is what the published `0.23` divided by; the same
              # bound on the log scale, which is where that `0.23` actually came
              # from; and the two adjacent roundings
-             [f"{A16_STEP_PCT / log_change:.2f}",
-              f"{A16_STEP_PCT / bound:.2f}",
-              f"{A16_STEP_PCT / log_bound:.2f}",
-              f"{A16_STEP_PCT / change - 0.01:.2f}",
-              f"{A16_STEP_PCT / change + 0.01:.2f}"]),
+             [f"{step / log_change:.2f}",
+              f"{step / bound:.2f}",
+              f"{step / log_bound:.2f}",
+              f"{step / change - 0.01:.2f}",
+              f"{step / change + 0.01:.2f}"]),
     }
+
+
+PLAN_X = "v4_audit_2026_08_25/PROSPECTIVE_PLAN_X_HOST_LOAD.md"
+
+
+def plan_x_quotes(rows: list[dict]) -> dict:
+    """Plan X's sentence quoting run Y, each figure beside the arm it belongs to.
+
+    Plan X quoted run Y's log ratios as percentages after the two documents that
+    carry the table were corrected, and the registry then found it. But it found
+    it by presence: swapping the two arms' figures, or the two limits, left every
+    value present and passed. So the quote is compared as the sentence it is.
+    """
+    by = {r["arm"]: r for r in rows}
+    n2, base = by["spec-dflash-n2"], by["baseline"]
+    return {
+        "run Y's change, by arm":
+            f"costs {abs(n2['change_pct']):.2f} % of the decode rate on "
+            f"`spec-dflash-n2` and {abs(base['change_pct']):.2f} % on `baseline`",
+        "the one-sided limits, in the same order":
+            f"one-sided upper limits of {n2['one_sided_bound_pct']:.2f} % and "
+            f"{base['one_sided_bound_pct']:.2f} %",
+    }
+
+
+def check_plan_x(rows: list[dict]) -> list[str]:
+    flat = " ".join((ROOT / PLAN_X).read_text(encoding="utf-8")
+                    .replace("**", "").split())
+    return [f"{PLAN_X}: does not say {want!r} ({what})"
+            for what, want in plan_x_quotes(rows).items() if want not in flat]
+
+
+def checked_figures() -> dict:
+    """Every figure this file compares, keyed by document, for the registry.
+
+    The table cells as `cells` formats them, the telemetry means, and for the
+    round's README the derived prose; `main` passes the same three to
+    `check_doc` for the same documents. The power table's bound column is the
+    plan's, compared by `check_plan_power`, and is reported for the plan.
+    """
+    rows = derive()
+    table = {f"{r['arm']} {col}": cell for r in rows
+             for col, cell in cells(r).items() if col != "arm"}
+    common = {**table, **tel_figures(telemetry())}
+    pp = plan_power()
+    bounds = {f"the bound for {n} blocks": f"{b:.2f} %"
+              for n, b in pp["bounds"].items()}
+    bounds.update({f"the hours for {n} blocks": f"{h:.2f}"
+                   for n, h in pp["predicted_hours"].items()})
+    return {DOCS[0]: {**common, **{w: v for w, (v, _f) in derived_prose().items()}},
+            DOCS[1]: {**common, **bounds},
+            PLAN_X: plan_x_quotes(rows)}
 
 
 # the pre-registration's power table: blocks, hours, the one-sided bound a true
@@ -337,10 +441,20 @@ def plan_power() -> dict:
         j = json.loads(q.read_text(encoding="utf-8"))
         starts += [r["t_start"] for r in j["rows"]]
     span_h = (max(ends) - min(starts)) / 3600.0
+    # The hours column, as the plan says it computed it: "run T4's own arm-run
+    # durations plus its measured per-arm-run overhead", for the two arms this
+    # run has, four arm-runs a block. It was compared only for the chosen row,
+    # and only against the span the run took, so the other two rows and the
+    # prose quoting them were derived by nothing.
+    m, wc = load_run_power.measured(), load_run_power.wall_clock()
+    per_arm_run_s = (st.fmean([m["durations"][a] for a, _ in CONTRASTS])
+                     + wc["overhead_per_arm_run"])
     return {
         "sd_pct": sd,
         "created": created,
         "observed_span_hours": span_h,
+        "predicted_hours": {n: n * 2 * len(CONTRASTS) * per_arm_run_s / 3600.0
+                            for n in PLAN_POWER_BLOCKS},
         "bounds": {n: t_critical_95_one_sided(n - 1) * sd / math.sqrt(n)
                    for n in PLAN_POWER_BLOCKS},
     }
@@ -366,6 +480,11 @@ def check_plan_power(pp: dict) -> list[str]:
         if got != want:
             bad.append(f"{doc}: the bound for {n} blocks is {got!r} and the "
                        f"measured spread gives {want!r}")
+        want_h = f"{pp['predicted_hours'][n]:.2f}"
+        got_h = cells_[1].replace("*", "").strip()
+        if got_h != want_h:
+            bad.append(f"{doc}: the hours for {n} blocks are {got_h!r} and run "
+                       f"T4's arm-run durations give {want_h!r}")
     missing = sorted(set(pp["bounds"]) - seen)
     if missing:
         bad.append(f"{doc}: the power table has no row for {missing} blocks, so "
@@ -410,6 +529,14 @@ def main() -> None:
                      f"the output is identical to the token, and it is not.")
         print(f"  {fast}: generated {tot[fast][0]}, drafted {tot[fast][1]}, "
               f"accepted {tot[fast][2]}, identical in both conditions")
+    same = outputs_identical()
+    bad_out = check_outputs(same) + check_plan_x(rows)
+    if bad_out:
+        sys.exit("\n".join(bad_out))
+    print(f"  {PLAN_X} quotes both arms' figures beside the arm each belongs to")
+    for fast, (n_same, n_fast, _n_slow) in same.items():
+        print(f"  {fast}: all {n_fast} requests identical to the token, content, "
+              f"reasoning and token ids, in both conditions")
     tel, pro, pp = telemetry(), derived_prose(), plan_power()
     print(f"  {CONTRASTS[0][0]} `gpu_after` means, twelve snapshots per condition:")
     for name, unit in (("clocks.current.sm", " MHz"), ("power.draw", " W"),

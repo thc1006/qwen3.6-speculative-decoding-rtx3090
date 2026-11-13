@@ -28,11 +28,48 @@
 # memory, or the disk can still be red there. Such a test has to derive what it
 # needs from the host it is on, and say so when the host cannot supply it.
 #
+# Nor the runner's IMAGE. `ubuntu-latest` moved from 24.04 to 26.04 in October
+# 2026, and there `/bin/sleep` is a link into uutils' multi-call binary, which
+# picks the utility from argv[0]. A test that copied it to a file named
+# `llama-server` passed here and on every 24.04 runner, and failed on the first
+# 26.04 one, which was the merge of #6 into master. Running the unit job in an
+# `ubuntu:26.04` container with the CI's interpreter mounted is how it was
+# reproduced; this script does not do that, so a test that leans on what a system
+# binary does with its own name is not covered by a green run here.
+#
 # What it does NOT reproduce is named at the end rather than left for a reader
 # to notice: the `charts` job, which pins 3.13 and so has to be run separately
 # on a 3.13 interpreter, and the evidence workflow, which needs a published
 # release and is rehearsed against the real archives instead.
 set -u
+
+# --- run from a copy of this file, not from this file ----------------------
+# bash reads a script by byte offset as it executes it, so editing this file
+# DURING a run makes bash resume at that offset in the new text. The observed
+# result: fragments of the file ran as commands, one step ran twice, the last
+# two steps did not run at all, and the script exited 0. A gate whose verdict
+# survives being half-run is worse than no gate, and nothing in it noticed.
+#
+# Copying first makes the text immutable for the duration. The copy is checked
+# for syntax because `cat` can itself race an edit, and a mangled copy would
+# reintroduce exactly the failure this avoids.
+if [ "${CI_FAITHFUL_REEXEC:-}" != "1" ]; then
+    _self=$(mktemp "${TMPDIR:-/tmp}/ci_faithful.XXXXXX.sh") || exit 2
+    cat "$0" > "$_self" || { rm -f "$_self"; exit 2; }
+    if ! bash -n "$_self"; then
+        rm -f "$_self"
+        echo "FAIL: the copy of this script does not parse, so it was being" >&2
+        echo "      written while it was being read. Nothing ran." >&2
+        exit 2
+    fi
+    _origin=$(cd "$(dirname "$0")/.." && pwd) || exit 2
+    export CI_FAITHFUL_REEXEC=1
+    export CI_FAITHFUL_ORIGIN="$_origin"
+    bash "$_self" "$@"
+    _rc=$?
+    rm -f "$_self"
+    exit "$_rc"
+fi
 
 die() { echo "FAIL: $*" >&2; exit 2; }
 
@@ -42,7 +79,8 @@ SHA_IN=${1:?usage: bench/ci_faithful.sh <commit>}
 # home directory; in a repository that spelling would clone some other checkout
 # than the one the script came from, which is the wrong-copy defect that put this
 # file here, arriving by the other door.
-SRC=$(cd "$(dirname "$0")/.." && pwd)
+# The re-exec above runs a copy in TMPDIR, so `dirname $0` is not the checkout.
+SRC=${CI_FAITHFUL_ORIGIN:-$(cd "$(dirname "$0")/.." && pwd)}
 [ -d "$SRC/.git" ] || die "$SRC is not a git repository; run this from a checkout"
 W=${CI_REPRO_DIR:-$HOME/ci_repro}
 WANT_PY=3.12
@@ -171,6 +209,10 @@ run load_run_power -- python3 analysis/load_run_power.py --check
 # mean log ratio printed as a percentage.
 run rederive_run_y -- python3 analysis/rederive_run_y.py
 run plan_z_power -- python3 analysis/plan_z_power.py
+run plan_siblings -- python3 analysis/plan_siblings_power.py
+run rederive_run_s -- python3 analysis/rederive_run_s.py
+run figure_registry -- python3 analysis/figure_registry.py --strict
+run layer_a_slope -- python3 analysis/layer_a_slope.py --check v6_pilot_layer_a_2026_10_02/data/pilot_layer_a_pilotB_20261002_171035
 run past_threshold -- python3 analysis/past_threshold_fit.py
 # The sixth step of that job, which this script did not have either: every run
 # directory carrying RUN_COMPLETE.json has to aggregate under `--strict`, and the

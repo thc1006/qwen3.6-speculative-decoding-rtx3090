@@ -223,6 +223,19 @@ not a measurement: efficiency cores differ from performance cores in more than
 clock, having no second thread and a different cache hierarchy, so the share is an
 upper reading.
 
+**Corrected on 2026-11-13: the clock ratio was the wrong one for six of the eight
+processors.** 5800 MHz is the ceiling of four of the host's sixteen
+performance-core threads, and the fast set reached two of them, `8` and `10`; the
+other six reach 5500, which
+[`topology/topology_3090_20261003.txt`](topology/topology_3090_20261003.txt) and
+`BENCHMARK_ENV.md` record. Against 5500 the same arithmetic gives about three
+fifths for both arms. Which processor the main thread ran on is not recorded, so
+the share is between about a half and about three fifths on the clock alone. The
+architectural difference above moves it by an amount and in a direction nothing
+here has measured: on the multiply chains of `bench/cpu_ilp.c` an efficiency
+core does more per clock than a performance core, which would push the share
+up, and that kernel is not llama.cpp's host work. Nothing this plan concludes depends on which.
+
 ## What this does to run X, and what it does not settle
 
 The plan for run X said a null here would make it unnecessary. The opposite
@@ -230,7 +243,34 @@ happened, so run X is warranted, and the section of that plan which recommended
 this run first is corrected rather than left standing.
 
 It does not settle A16. A16's step is 3.93 %, which is 0.27 of a full
-displacement, or roughly two of the eight threads landing on efficiency cores.
+displacement.
+
+A displacement cannot be read as a count of threads. Every target and drafter
+layer is on the card, so llama.cpp's eight CPU threads have almost no arithmetic
+while decoding: the one host operation found so far, the embedding lookup, is
+planned as a single task and runs on the main thread, and nothing here has
+looked for others. What a displacement moves is
+the MAIN thread's work. And even if they were on it, a barrier over statically split work
+takes its slowest thread's time, so displacing one thread would cost what
+displacing eight does and no linear interpolation between them exists.
+
+What is left that is bimodal, drawn fresh at every server launch, and of this
+size is what shares a physical core with the main thread. The server is an
+OpenMP build, so its idle workers are libgomp's, which spin before they sleep; a
+worker spinning on the main thread's hyperthread sibling takes issue slots from
+it, and whether the scheduler puts one there is a coin toss per launch. A sibling
+under a full compute load would cost far more than this step; a yielding spin
+costs about this much. That is the successor, pre-registered in
+[`PROSPECTIVE_PLAN_SIBLINGS.md`](PROSPECTIVE_PLAN_SIBLINGS.md), and it is an
+inference from the offload and the spin, not a measurement; that plan also says
+why the workers may not spin at all while decoding.
+
+**Corrected on 2026-11-13.** This paragraph first named `--poll`, whose default of
+50 sets how long ggml's own threadpool spins. In the OpenMP build these runs use
+ggml never reads it, and the plan above records the lines.
+
+The sentences below are what this plan said before that was worked out, and the
+reasoning they rest on is the one corrected above.
 Every published run here passes no thread count and no affinity, llama.cpp chooses
 eight threads of the thirty-two logical processors, and each arm-run starts a
 fresh server and therefore draws its own placement. That is A16's shape, per

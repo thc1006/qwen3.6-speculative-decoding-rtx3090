@@ -236,6 +236,36 @@ jobs:
         # no value. This derives the table from the arm-runs and compares both
         # copies of it cell by cell.
         run: python analysis/rederive_run_y.py
+      - name: layer A's pilot still reads what its round says it reads
+        # Five premises as conditions, not notes: both clocks held for every sample,
+        # the load was memory bound, the control executed, and the round's README
+        # quotes the figures this derives. A pre-registered reading whose premises
+        # are not checked is a number with a sentence next to it.
+        run: python analysis/layer_a_slope.py --check v6_pilot_layer_a_2026_10_02/data/pilot_layer_a_pilotB_20261002_171035
+      - name: plan S's design table is what run Y measured
+        # A pre-registration whose power table nothing derives is a table of
+        # estimates. This one reuses run Y's own within-invocation spread and its own
+        # per-arm-run cost, so the hours and the half widths are measured rather than
+        # guessed, and the script compares them to the document row by row.
+        run: python analysis/plan_siblings_power.py
+      - name: plan S's reading verifies its design before it reads
+        # The analysis the plan pledged, wired in before its data exists. With
+        # no run committed it parses the plan's bands and checks that they
+        # partition the line; with one it refuses any arm-run whose mask, server,
+        # argv, poll, prompts or position differ from what the plan registered,
+        # and only then derives the two contrasts. Its first version printed a
+        # verdict from seven fields and read a packed arm three per cent FASTER
+        # as support for the hypothesis.
+        run: python analysis/rederive_run_s.py
+      - name: every prose figure outside the census is derived or accounted for
+        # The documents outside the decimal census carried figures no derivation
+        # checked: a sweep that changed one at a time caught eight of twenty-six.
+        # This asks each derivation what it compares and requires every other
+        # prose decimal to be entered with a kind and a reason, verified where it
+        # can be, so an edited figure is a value nothing accounts for. Its first
+        # run found plan X still quoting run Y's log-ratio defect, corrected in
+        # the two documents that carry the table and missed in the third.
+        run: python analysis/figure_registry.py --strict
       - name: plan Z's premises and design table are what the committed data says
         # A pre-registration that quotes the recorded state on both sides of A16's
         # step, and the reason run T4's trace cannot be attributed to an arm-run,

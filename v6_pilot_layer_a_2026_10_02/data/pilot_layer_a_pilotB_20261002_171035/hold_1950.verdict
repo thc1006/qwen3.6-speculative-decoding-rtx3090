@@ -1,0 +1,7 @@
+FAIL: the sm clock was asked to hold 1950 MHz and 47 of 62 samples are not it, down to 1935. A run whose clock moved is not a run at locked clocks.
+hold_1950.csv: 62 samples
+  sm       min 1935 max 1950 mean 1938.6 sd 6.48
+  mem      min 9501 max 9501 mean 9501.0 sd 0.00
+  temp     min 63 max 72 mean 69.6 sd 1.86
+  power    min 138 max 307 mean 296.9 sd 36.16
+  mem held at 9501 MHz for all 62 samples

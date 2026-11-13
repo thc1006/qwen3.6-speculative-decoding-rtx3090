@@ -95,7 +95,13 @@ export BENCH_FLAVOR=master
 unset BENCH_IGNORE_EOS || true
 
 echo "telemetry $TELE_SH $TELE_SCHEMA $TELE_INTERVAL $LABEL"
-bash "$TELE_SH" "$TELE_SCHEMA" "$TELE_INTERVAL" "$LABEL" &
+# The driver names the trace so it can check THAT file. The sampler stamps it with
+# its OWN `date`, and `bench/run_w_williams.sh` looked for the driver's `$STAMP`,
+# which is the same second only if the two calls do not straddle one. Naming it
+# here also makes the convention true rather than probable: the trace and the
+# matrix directory share a stamp because one variable sets both.
+TELE_CSV="$BENCH/gpu_telemetry_${LABEL}_$STAMP.csv"
+BENCH_TELEMETRY_OUT="$TELE_CSV" bash "$TELE_SH" "$TELE_SCHEMA" "$TELE_INTERVAL" "$LABEL" &
 TELE_PID=$!
 trap 'kill "$TELE_PID" 2>/dev/null || true' EXIT
 # It was started and never looked at again. A sampler that dies in the first
@@ -158,9 +164,13 @@ wait "$TELE_PID" 2>/dev/null || tele_rc=$?
 # and this lookup was not, so run W2 wrote a complete trace, this found
 # nothing, and the cover check never ran. The driver reported the failure,
 # which is the only reason it was seen.
-TELE_CSV=$(find "$BENCH" -maxdepth 1 -name "gpu_telemetry_${LABEL}_$STAMP.csv" | head -1)
-if [ -z "$TELE_CSV" ]; then
-    echo "FAIL: no telemetry trace for this run" >&2; rc=1
+# was a `find` for a name this driver GUESSED the sampler would use
+# `-z "$TELE_CSV"` until the driver started naming the file: the variable is set
+# above and can no longer be empty, so that test was dead and the cover check ran
+# on whatever the name happened to be. What matters is whether the FILE is there
+# with samples in it.
+if [ ! -s "$TELE_CSV" ]; then
+    echo "FAIL: no telemetry trace at $TELE_CSV" >&2; rc=1
 else
     python3 "$BENCH_ROOT_TELECHECK" "$TELE_CSV" "$RUN_T0" "$RUN_T1" "$TELE_INTERVAL" || rc=1
 fi

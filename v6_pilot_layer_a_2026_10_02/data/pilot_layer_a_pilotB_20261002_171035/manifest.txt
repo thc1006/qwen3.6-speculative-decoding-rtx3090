@@ -1,0 +1,6 @@
+card    GPU-f71a8f68-b0bb-670a-6982-a6a37475d18c  NVIDIA GeForce RTX 3090  driver 610.43.02  limit 420.00 W W
+source  d5977f8cb10719714e2cb903189c2a70f71c2ef71f7deea9f98da5af17f25106
+nvcc    Cuda compilation tools, release 13.3, V13.3.73
+design  mem 9501, calibrate [1200 1500 1800 1950 2100], ascending 600s,
+        descending 1800s, windows 5s and
+        10s, idle 20s, cool to 40 C

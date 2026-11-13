@@ -25,6 +25,9 @@ Environment knobs, used by the tests to drive failure paths:
   FAKE_RECORD_REQUESTS=<path>
                              append every request body to this file as JSONL,
                              so a test can assert what treatment was sent
+  FAKE_BURN_AT_START=<s>     spin the main thread this many seconds before
+                             serving, so processor time accrued BEFORE the
+                             requests is distinguishable from time during them
 """
 from __future__ import annotations
 
@@ -151,6 +154,10 @@ def _exit_when_orphaned() -> None:
 
 
 threading.Thread(target=_exit_when_orphaned, daemon=True).start()
+if os.environ.get("FAKE_BURN_AT_START"):
+    _until = time.monotonic() + float(os.environ["FAKE_BURN_AT_START"])
+    while time.monotonic() < _until:
+        pass
 # A readiness signal for the one test that needs to know the watchdog is armed,
 # written only when asked so that no other test sees a byte of difference. The
 # open port is not that signal: it says the socket bound, which is neither

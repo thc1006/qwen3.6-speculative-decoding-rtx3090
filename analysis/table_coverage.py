@@ -83,6 +83,24 @@ EXCLUDED = {
         "said check_data_integrity.py guarded those tables, and that walks "
         "directory structure and reads no published value: the whole table was "
         "unchecked for five days and three of its columns were wrong",
+    "v6_pilot_layer_a_2026_10_02/README.md":
+        "a pilot round, and on a card no published round was measured on, which is "
+        "why its directory name carries `pilot` as a token. Not censused while v4.2 "
+        "stands for the reason the three plans give: verify_claims.py pins "
+        "len(DOCS) and the decimal prose census and is bound to that tag. What "
+        "guards its table is analysis/layer_a_slope.py, which derives every row from "
+        "the committed trace and both phases and compares them by ROW LABEL -- not "
+        "by presence, because R appears twice in that document, and not by "
+        "forbidding adjacent values, because the run-to-run spread it also quotes is "
+        "one step from R and that produced a false failure",
+    "v4_audit_2026_08_25/PROSPECTIVE_PLAN_SIBLINGS.md":
+        "not censused while v4.2 stands, for the reason the plans beside it give: "
+        "verify_claims.py pins len(DOCS) and the decimal prose census and is bound "
+        "to that tag, and this document quotes decimals from run Y and from its own "
+        "design table. What guards that table is analysis/plan_siblings_power.py, "
+        "which derives every row from run Y's own spread and its own per-arm-run "
+        "cost and compares them by row label, and which forbids the values one step "
+        "either side of each prose figure because the displacement is quoted twice",
     "v4_audit_2026_08_25/PROSPECTIVE_PLAN_Z_MEMORY_STATE.md":
         "not censused while v4.2 stands, for the reason the two plans beside it "
         "give: verify_claims.py pins len(DOCS) and the decimal prose census and is "
@@ -130,8 +148,11 @@ EXCLUDED = {
     "v4_audit_2026_08_25/patches/README.md": "provenance note; hashes, not measurements",
     # marked DO NOT POST at the top and never sent: it is a record of claims
     # this repository retracted, and every number in it is quoted from ERRATA
-    # beside the finding that refutes it
-    "pr_comment.md": "a retracted draft, never posted; its numbers are ERRATA's",
+    # beside the finding that refutes it -- except two, the TPOT of 7.620 and
+    # 5.976 ms it quotes from the upstream reporter, which
+    # `analysis/figure_registry.py` found are in no censused document
+    "pr_comment.md": "a retracted draft, never posted; its numbers are ERRATA's, "
+                     "apart from two it quotes from the upstream thread",
 }
 # Each reader is bound to one document, so a header literal only covers a table
 # in THAT document. Matching on the header alone counted a duplicated table in

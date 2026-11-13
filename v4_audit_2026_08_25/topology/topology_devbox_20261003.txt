@@ -1,0 +1,67 @@
+# Measured processor topology of the development box
+host: thc1006-debian13
+date: 2026-10-03T08:16:50Z (UTC)
+cpu: 13th Gen Intel(R) Core(TM) i9-13900
+virtualisation: kvm
+kernel source sha256: 7c4b4629f33d49b083faabcdb264e322aed6497f7c283a23acf99126132e1116
+driver sha256: 8c047eeb453dfe1bdbae84a9bad631ba308f791c60edc4aff867041b6518156c
+cc: cc (Debian 14.2.0-19) 14.2.0
+loadavg at start: 0.66
+command: python3 bench/cpu_siblings.py --pairs all --seconds 1.0 --repeats 3
+
+## what /sys says, per processor
+cpu0   siblings=0        core_id=0   
+cpu1   siblings=1        core_id=1   
+cpu2   siblings=2        core_id=2   
+cpu3   siblings=3        core_id=3   
+cpu4   siblings=4        core_id=4   
+cpu5   siblings=5        core_id=5   
+cpu6   siblings=6        core_id=6   
+cpu7   siblings=7        core_id=7   
+
+## what the measurement says
+8 processors [0, 1, 2, 3, 4, 5, 6, 7], 28 pair(s), 53 runs of 1.0 s is about 0.9 min
+  /sys claims 8 physical core(s): 0, 1, 2, 3, 4, 5, 6, 7
+  solo rates:
+    cpu 0     158939.4 blocks/s
+    cpu 1     159080.0 blocks/s
+    cpu 2     159194.2 blocks/s
+    cpu 3     159075.0 blocks/s
+    cpu 4     158875.7 blocks/s
+    cpu 5     159233.7 blocks/s
+    cpu 6     158921.0 blocks/s
+    cpu 7     159153.8 blocks/s
+  control, two threads on cpu 0 alone: 0.501
+  pairs:
+      0 + 1    0.999  distinct   /sys says different
+      0 + 2    1.001  distinct   /sys says different
+      0 + 3    1.000  distinct   /sys says different
+      0 + 4    1.002  distinct   /sys says different
+      0 + 5    0.996  distinct   /sys says different
+      0 + 6    0.998  distinct   /sys says different
+      0 + 7    1.000  distinct   /sys says different
+      1 + 2    0.999  distinct   /sys says different
+      1 + 3    0.999  distinct   /sys says different
+      1 + 4    1.001  distinct   /sys says different
+      1 + 5    0.998  distinct   /sys says different
+      1 + 6    0.999  distinct   /sys says different
+      1 + 7    1.000  distinct   /sys says different
+      2 + 3    1.000  distinct   /sys says different
+      2 + 4    1.001  distinct   /sys says different
+      2 + 5    0.993  distinct   /sys says different
+      2 + 6    0.999  distinct   /sys says different
+      2 + 7    0.996  distinct   /sys says different
+      3 + 4    0.999  distinct   /sys says different
+      3 + 5    0.996  distinct   /sys says different
+      3 + 6    1.000  distinct   /sys says different
+      3 + 7    1.001  distinct   /sys says different
+      4 + 5    0.999  distinct   /sys says different
+      4 + 6    0.995  distinct   /sys says different
+      4 + 7    0.989  distinct   /sys says different
+      5 + 6    0.997  distinct   /sys says different
+      5 + 7    0.999  distinct   /sys says different
+      6 + 7    1.000  distinct   /sys says different
+
+measurement agrees with /sys on all 28 pair(s)
+no pair on this machine is a sibling pair by /sys, so the shared band was never exercised here and this run does not validate it. The same-processor control is what was checked.
+exit: 0

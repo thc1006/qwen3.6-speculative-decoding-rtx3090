@@ -18,7 +18,9 @@
 #            twelve traces, including the one behind ERRATA A16's thermal
 #            comparison for run T.
 #   raw      nvidia-smi's own `--format=csv` header, 10 fields, 1 s. Runs T3,
-#            O3 and later; four traces.
+#            O3 and later; five traces, counting run Y's. The counts here are
+#            derived from the committed traces by a test, because this one said
+#            four after run Y added the fifth.
 #
 # `analysis/thermal_report.py` reads whichever it is given. The trace that
 # belongs to a run shares its timestamp: gpu_telemetry_<label>_<stamp>.csv
@@ -29,7 +31,31 @@ INTERVAL="${2:-5}"
 LABEL="${3:-}"
 SUFFIX="$(date +%Y%m%d_%H%M%S)"
 [ -n "$LABEL" ] && SUFFIX="${LABEL}_${SUFFIX}"
-OUT="$HOME/bench/gpu_telemetry_${SUFFIX}.csv"
+# The path, and a caller that can name it. `$HOME/bench` was written here with no
+# override, so this could not run on a host that has no such directory and could
+# not be tested anywhere. Worse, a driver could not know the file's name: this
+# stamps it with its OWN `date`, and `bench/run_w_williams.sh` looks for the
+# driver's `$STAMP` instead, which is the same second only if the two calls do not
+# straddle one. `BENCH_TELEMETRY_OUT` lets the driver say the name and then check
+# that exact file.
+OUT_DIR="${BENCH_TELEMETRY_DIR:-$HOME/bench}"
+OUT="${BENCH_TELEMETRY_OUT:-$OUT_DIR/gpu_telemetry_${SUFFIX}.csv}"
+mkdir -p "$(dirname "$OUT")" 2>/dev/null || true
+# Fail, loudly, before anything prints the line a driver reads as confirmation.
+# Without this the sampler printed `TELEMETRY=...` and then failed on every tick
+# for the length of the run, writing nothing: a three-hour matrix can finish with
+# no record of what the card was doing and the only evidence is a stderr stream
+# nobody reads. The same OUTCOME has happened twice here by other routes -- a file
+# path passed where a schema was expected, and a trace this driver looked for
+# under the wrong name -- and both times the run reported success.
+if ! : > "$OUT" 2>/dev/null; then
+    echo "FAIL: cannot create $OUT." >&2
+    echo "      Set BENCH_TELEMETRY_DIR to a directory this user can write, or" >&2
+    echo "      BENCH_TELEMETRY_OUT to the file itself. Refusing to sample into" >&2
+    echo "      nothing: a run with no telemetry cannot rule out thermal" >&2
+    echo "      downclocking biasing its later arms, which is why this exists." >&2
+    exit 1
+fi
 
 case "$SCHEMA" in
 full)
@@ -66,8 +92,22 @@ raw)
 esac
 
 echo "TELEMETRY=$OUT  schema=$SCHEMA  interval=${INTERVAL}s"
+# A failed query goes to `$OUT.err`, not into the trace. It used to be appended
+# to the CSV with `2>&1`, so a driver that counts the trace's rows -- every one of
+# them does, to refuse a run whose sampler wrote nothing -- counted NVML's error
+# text as samples: four ticks of "Unable to determine the device handle" passed
+# as four rows. A row in the trace is now a sample or it is not there.
 while true; do
-    [ "$PREFIX_WALL" -eq 1 ] && printf '%s,' "$(date -Iseconds)" >> "$OUT"
-    nvidia-smi --query-gpu="$FIELDS" --format=csv,noheader >> "$OUT" 2>&1
+    wall="$(date -Iseconds)"
+    if row=$(nvidia-smi --query-gpu="$FIELDS" --format=csv,noheader 2>&1) \
+            && [ -n "$row" ]; then
+        if [ "$PREFIX_WALL" -eq 1 ]; then
+            printf '%s,%s\n' "$wall" "$row" >> "$OUT"
+        else
+            printf '%s\n' "$row" >> "$OUT"
+        fi
+    else
+        printf '%s %s\n' "$wall" "$row" >> "$OUT.err"
+    fi
     sleep "$INTERVAL"
 done

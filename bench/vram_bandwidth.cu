@@ -61,6 +61,25 @@ __global__ void stream(float4 *__restrict__ dst, const float4 *__restrict__ src,
     for (; i < n; i += stride) dst[i] = src[i];
 }
 
+// `GPU-f71a8f68-b0bb-...`, the spelling `nvidia-smi --query-gpu=uuid` writes.
+//
+// Not decoration. This repository holds measurements from at least three
+// physically distinct RTX 3090s and NOTHING in it can tell them apart: the only
+// card identifier any committed run records is `name`, which is
+// "NVIDIA GeForce RTX 3090" on every one of them. A bandwidth figure is a property
+// of one card's memory and its cooling, so a figure that cannot name its card is
+// a figure that can be attributed to the wrong one for ever.
+static void uuid_str(const cudaUUID_t *u, char *out, size_t n)
+{
+    const unsigned char *b = (const unsigned char *)u->bytes;
+    snprintf(out, n,
+             "GPU-%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-"
+             "%02x%02x%02x%02x%02x%02x",
+             b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
+             b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15]);
+}
+
+
 static double monotonic(void)
 {
     struct timespec t;
@@ -126,12 +145,22 @@ int main(int argc, char **argv)
     // Header to stderr, so stdout is a csv a reader can join on without stripping
     // anything. The repository has one defect from a header that was published as
     // a data row and one from a sample that was published as a header.
-    fprintf(stderr, "%s, %d SMs, %d blocks x %d threads, %.2f GiB per buffer\n",
-            p.name, p.multiProcessorCount, blocks, threads,
+    char uuid[64], bus[32];
+    uuid_str(&p.uuid, uuid, sizeof uuid);
+    if (cudaDeviceGetPCIBusId(bus, (int)sizeof bus, 0) != cudaSuccess)
+        snprintf(bus, sizeof bus, "unknown");
+    fprintf(stderr, "%s %s at %s, %d SMs, %d blocks x %d threads, "
+                    "%.2f GiB per buffer\n",
+            p.name, uuid, bus, p.multiProcessorCount, blocks, threads,
             bytes / 1073741824.0);
     fprintf(stderr, "seconds %.0f, window %.1f, idle %.1f\n",
             seconds, window, idle);
-    printf("wall_iso,elapsed_s,window_s,passes,gbytes_per_s\n");
+    // The uuid is a column and not only a banner, so every ROW names its card. A
+    // banner lives in a log beside the csv and a log can be lost: this repository
+    // has one complete trace it cannot attribute to an arm-run, and the lesson is
+    // that identity belongs in the data and not next to it. Twenty-four bytes a
+    // row against a figure that could otherwise be read off the wrong card.
+    printf("wall_iso,elapsed_s,window_s,passes,gbytes_per_s,gpu_uuid\n");
     fflush(stdout);
 
     double t0 = monotonic();
@@ -156,8 +185,8 @@ int main(int argc, char **argv)
         double w = monotonic() - w0;
         wall_iso(stamp, sizeof stamp);
         // read plus write on every pass
-        printf("%s,%.3f,%.3f,%llu,%.1f\n", stamp, w0 - t0, w, passes,
-               passes * 2.0 * bytes / w / 1e9);
+        printf("%s,%.3f,%.3f,%llu,%.1f,%s\n", stamp, w0 - t0, w, passes,
+               passes * 2.0 * bytes / w / 1e9, uuid);
         fflush(stdout);
         if (idle > 0.0) {
             double i0 = monotonic();

@@ -78,9 +78,21 @@ export BENCH_FLAVOR=master
 # freerun half into the capped one and measure nothing
 unset BENCH_IGNORE_EOS || true
 
-bash "$TELE_SH" "$TELE_SCHEMA" "$TELE_INTERVAL" "V3" &
+# The driver names the trace so it can check THAT file. The sampler stamps it with
+# its OWN `date`, and `bench/run_w_williams.sh` looked for the driver's `$STAMP`,
+# which is the same second only if the two calls do not straddle one. Naming it
+# here also makes the convention true rather than probable: the trace and the
+# matrix directory share a stamp because one variable sets both.
+TELE_CSV="$BENCH/gpu_telemetry_V3_$STAMP.csv"
+BENCH_TELEMETRY_OUT="$TELE_CSV" bash "$TELE_SH" "$TELE_SCHEMA" "$TELE_INTERVAL" "V3" &
 TELE_PID=$!
 trap 'kill "$TELE_PID" 2>/dev/null || true' EXIT
+# Started and never looked at again. A sampler that dies in the first second
+# leaves a one-line trace and the run still reports success, so the one record of
+# what the card was doing is missing exactly when it is wanted. This check was in
+# `run_w_williams.sh` and in none of the four drivers beside it.
+sleep 2
+kill -0 "$TELE_PID" 2>/dev/null || { echo "FAIL: telemetry died at startup" >&2; exit 1; }
 
 DONE=""; FAILED=""
 for session in 1 2; do
@@ -112,4 +124,9 @@ for d in "$BENCH"/matrix_V3_s*_"$STAMP"; do
     n=$(find "$d" -maxdepth 1 -name '*__rep*.json' -printf . | wc -c)
     [ "$n" -eq 100 ] || { echo "FAIL: $d has $n arm-runs, expected 100" >&2; rc=1; }
 done
+# and the trace has to hold SAMPLES, not just the header it was created with
+tele_rows=0
+[ -s "$TELE_CSV" ] && tele_rows=$(( $(wc -l < "$TELE_CSV") - 1 ))
+echo "telemetry rows:$tele_rows"
+[ "$tele_rows" -ge 1 ] || { echo "FAIL: $TELE_CSV holds no samples" >&2; rc=1; }
 exit "$rc"

@@ -195,6 +195,32 @@ for _n, _v in (("BENCH_PIN_CPUS", PIN_CPUS), ("BENCH_PIN_ALT_CPUS", PIN_ALT_CPUS
         sys.exit(f"{_n}={_v!r} is not a taskset cpu list")
 if THREADS and not re.fullmatch(r"\d+", THREADS):
     sys.exit(f"BENCH_THREADS={THREADS!r} is not a thread count")
+# The threadpool's other two parameters, which this runner could not express until
+# 2026-10-03 and which have defaults that are not neutral. `llama-server --help`
+# from the build the runs record, 3737e413, prints `--poll <0...100>` with
+# default 50 and `--cpu-strict <0|1>` with default 0, and `ggml_threadpool_params_init`
+# is where those come from. 50 is 1024 * 128 * 50 `PAUSE` iterations per worker per
+# wait before it sleeps, so "unset" is a loud condition rather than a quiet one.
+# They are recorded whether or not they are passed: an absent named field is what
+# makes the absence visible, and argv alone never prompted anyone to look.
+POLL = os.environ.get("BENCH_POLL", "").strip()
+CPU_STRICT = os.environ.get("BENCH_CPU_STRICT", "").strip()
+if POLL and not (re.fullmatch(r"\d+", POLL) and 0 <= int(POLL) <= 100):
+    sys.exit(f"BENCH_POLL={POLL!r} is not a polling level in 0..100")
+if CPU_STRICT and CPU_STRICT not in ("0", "1"):
+    sys.exit(f"BENCH_CPU_STRICT={CPU_STRICT!r} is not 0 or 1")
+if CPU_STRICT == "1":
+    # Refused, and not because of taskset. Strict placement walks
+    # `params.cpuparams.cpumask`, which only `--cpu-mask` fills; `taskset` sets the
+    # PROCESS affinity and leaves that mask all zero. In ggml,
+    # `ggml_thread_cpumask_is_valid` (ggml-cpu.c:2682) is true only if some bit is
+    # set, and affinity is applied only when it is (3211), so with no `--cpu-mask`
+    # the strict branch has nothing to walk and the flag is a complete no-op. This
+    # runner passes no `--cpu-mask`, so accepting 1 would record a treatment that
+    # did not happen, which is the defect this file exists to remove. The knob is
+    # here so the VALUE is recorded; raising it needs `--cpu-mask` first.
+    sys.exit("BENCH_CPU_STRICT=1 does nothing without --cpu-mask, which this "
+             "runner does not pass: it would be recorded as on and have no effect")
 if (PIN_CPUS or PIN_ALT_CPUS) and not THREADS:
     sys.exit("pinning without BENCH_THREADS would change the cpu set and the "
              "thread count in one step, so the contrast would name neither")
@@ -520,6 +546,15 @@ ARMS: dict[str, list[str]] = {
     "spec-dflash-n8":  _dflash(8),
     "spec-dflash-n16": _dflash(16),
 
+    # Plan S's third arm. Its server flags are its base's; what differs is the
+    # server's ENVIRONMENT, which `ARM_ENV` below carries. It was first an entry
+    # here with `--poll 0`, and that flag does nothing to the binary these runs
+    # use: it is an OpenMP build (run Y's server log prints `OPENMP = 1`), and
+    # in ggml-cpu.c at 3737e4137 the poll level is read only inside
+    # `#ifndef GGML_USE_OPENMP`. OpenMP's own workers wait as libgomp says,
+    # which `OMP_WAIT_POLICY` sets.
+    "spec-dflash-n2-passive": _dflash(2),
+
     # p_min truncates a draft once the drafter's confidence drops below it. The
     # default CHANGED between the binaries this repository has used:
     #   9789512 / bcb5eeb64 -> 0.75   (every archived v1/v2/v3 number)
@@ -571,6 +606,43 @@ ARMS: dict[str, list[str]] = {
     "ngram-map-k4v-m4":   _ngram("ngram-map-k4v", ["--spec-ngram-map-k4v-size-n", "12",
                                                    "--spec-ngram-map-k4v-size-m", "4"]),
 }
+
+
+# Per-arm server ENVIRONMENT, for the settings llama.cpp's runtime reads from
+# the environment rather than from argv. One entry: plan S's third arm, where
+# `OMP_WAIT_POLICY=passive` makes libgomp's idle workers sleep at once instead
+# of spinning first (`GOMP_SPINCOUNT`, 300000 rounds when the policy is unset).
+# It is per arm rather than per invocation for the reason the flags table is:
+# the three arms of plan S have to share one invocation, because A16's step is
+# between invocations. Keyed by BASE arm, like the flags, so the pin and
+# hard-cap suffixes carry it.
+ARM_ENV: dict[str, dict[str, str]] = {
+    "spec-dflash-n2-passive": {"OMP_WAIT_POLICY": "passive"},
+}
+# The runtime's variables, by prefix: libgomp's `OMP_` and `GOMP_`, and the
+# `KMP_` spelling LLVM's and Intel's runtimes read, which ggml itself sets when
+# it is absent. One of these in the INVOCATION's environment would reach every
+# arm and be recorded nowhere, so it is refused below; an arm that needs one
+# says so in `ARM_ENV`, and every arm-run records what its server was given.
+# `OMP_NUM_THREADS` alone is let through: `bench/host_guard.py` sets it in every
+# verification process and its children, ggml passes `num_threads` explicitly so
+# it does not size the team, and the arm-run records it like the rest.
+RUNTIME_ENV_PREFIXES = ("OMP_", "GOMP_", "KMP_")
+_inherited_runtime_env = sorted(k for k in os.environ
+                                if k.startswith(RUNTIME_ENV_PREFIXES)
+                                and k != "OMP_NUM_THREADS")
+if _inherited_runtime_env:
+    sys.exit(f"{', '.join(_inherited_runtime_env)} set in the environment this "
+             f"runner was started with. Every arm's server would inherit "
+             f"{'them' if len(_inherited_runtime_env) > 1 else 'it'} and no record "
+             f"would say so; unset {'them' if len(_inherited_runtime_env) > 1 else 'it'}, "
+             f"and put a per-arm setting in ARM_ENV.")
+for _a, _e in ARM_ENV.items():
+    if _a not in ARMS:
+        sys.exit(f"ARM_ENV names {_a!r}, which is not an arm")
+    if any(not k.startswith(RUNTIME_ENV_PREFIXES) for k in _e):
+        sys.exit(f"ARM_ENV[{_a!r}] sets {sorted(_e)}, and only the OpenMP "
+                 f"runtime's variables belong there")
 
 
 def arm_is_hardcap(arm: str) -> bool:
@@ -762,6 +834,83 @@ def _server_lib_hashes() -> dict:
     return seen
 
 
+# Keyed on IDENTITY, not on path. There is no run-level moment at which to hash
+# the mapped set: the server starts per arm-run and nothing is mapped before it.
+# So the first arm-run pays for the whole set and the rest pay nothing, while a
+# library swapped between two arms gets a new key and is hashed again. Keying on
+# path alone would have kept the first hash and reported a swap as no change,
+# which is the defect this exists to catch.
+_MAPPED_SHA: dict[tuple, str] = {}
+
+
+def _mapped_objects(pid: int) -> dict:
+    """Every shared object the process has actually mapped, with its identity.
+
+    `server_lib_sha256` hashes the directory beside the binary, which answers what
+    is THERE and not what was LOADED. On this bench host the two differ in a way
+    that matters: the server needs `libcudart.so.12` and `libcublas.so.12`, no
+    CUDA toolkit is installed, its `RUNPATH` names only its own build directory,
+    and the only copies of those two on the machine are pip wheels inside
+    unrelated Python virtual environments. The CUDA runtime under every published
+    run here therefore came from a library path nothing recorded, and no listing
+    of a directory could have shown it.
+
+    Shared objects only. llama.cpp mmaps the model by default, so a 21 GiB gguf is
+    a file-backed mapping as well; its hash is already `target_sha256` and hashing
+    it here would add twenty one gigabytes per arm-run to a measurement.
+
+    On failure this returns a dict with an `error` key rather than an empty one. An
+    empty dict reads as "nothing was mapped", which is false for any dynamically
+    linked process and is exactly the invisible absence that let the CUDA runtime
+    go unrecorded for seventy eight runs.
+    """
+    try:
+        raw = Path(f"/proc/{pid}/maps").read_text(encoding="utf-8")
+    except OSError as e:
+        return {"error": f"/proc/{pid}/maps unreadable: {e}"}
+    out: dict = {}
+    for line in raw.splitlines():
+        # Five fields and then the path, which may itself contain spaces: split
+        # once at most five times. `line.split()` cut a path with a space in two
+        # and dropped it, and cut " (deleted)" into a field of its own, so the
+        # test for it below could never be true.
+        parts = line.split(maxsplit=5)
+        if len(parts) < 6:
+            continue
+        path = parts[5]
+        deleted = path.endswith(" (deleted)")
+        if deleted:
+            path = path[:-len(" (deleted)")]
+        # a sixth field that is not an absolute path is a pseudo-mapping like [heap]
+        if not path.startswith("/"):
+            continue
+        if ".so" not in Path(path).name:
+            continue
+        if path in out:
+            continue
+        # The kernel appends " (deleted)" when the mapped file is gone from its
+        # path, which is also what replacing it looks like. Hashing the path then
+        # describes a file the process never loaded, so it is an error.
+        if deleted:
+            out[path] = {"error": "mapped, then deleted or replaced on disk, so "
+                                  "the path no longer holds what was loaded"}
+            continue
+        try:
+            st = os.stat(path)
+        except OSError as e:
+            out[path] = {"error": f"stat failed: {e}"}
+            continue
+        key = (path, st.st_size, st.st_mtime_ns, st.st_ino, st.st_dev)
+        if key not in _MAPPED_SHA:
+            _MAPPED_SHA[key] = sha256(path)
+        out[path] = {"size": st.st_size, "mtime_ns": st.st_mtime_ns,
+                     "inode": st.st_ino, "sha256": _MAPPED_SHA[key]}
+    if not out:
+        return {"error": f"no shared object mapped by pid {pid}, which cannot be "
+                         f"true of a dynamically linked process"}
+    return out
+
+
 def sha256(path: str) -> str:
     h = hashlib.sha256()
     with open(path, "rb") as fh:
@@ -782,7 +931,18 @@ GPU_FIELDS = (
     "clocks.current.graphics,clocks.max.graphics,"
     "clocks.current.sm,clocks.current.memory,clocks.max.memory,"
     "power.draw,power.limit,power.default_limit,power.max_limit,"
-    "temperature.gpu,pstate,clocks_throttle_reasons.active"
+    "temperature.gpu,pstate,clocks_throttle_reasons.active,"
+    # WHICH CARD. Appended on 2026-10-02, and not cosmetic: this repository holds
+    # measurements from at least three physically distinct RTX 3090s -- the v1 host
+    # had two of them and the bench host is a third -- and the only card identifier
+    # any committed run recorded was `name`, which is "NVIDIA GeForce RTX 3090" on
+    # every one. Nothing in the tree could say which card produced any figure, and
+    # a bandwidth or a temperature is a property of one card and its cooling.
+    #
+    # Appended rather than inserted: both consumers read this snapshot through the
+    # manifest's own `gpu_fields` by NAME, so position does not matter to them, and
+    # appending cannot move a field for anything that reads by index.
+    "uuid"
 )
 
 
@@ -793,6 +953,107 @@ def nvidia_smi() -> str:
             text=True, timeout=20).strip()
     except Exception as e:  # noqa: BLE001
         return f"unavailable: {e}"
+
+
+# `bench/vram_temp.py`, which reads the GDDR6X temperature NVML does not expose.
+# Beside this file so a run cannot be measured with a copy the repository does not
+# hold: that is the shape ERRATA A16's addendum was in for a day.
+def _vram_temp_tool() -> str:
+    """Beside this file, resolved when needed rather than at import.
+
+    `Path(__file__)` at module level broke a test that execs this module's prelude
+    to read a constant out of it, because that context has no `__file__`. A harness
+    whose prelude cannot be read without being a file on disk is a harness its own
+    tests cannot inspect.
+    """
+    return str(Path(__file__).resolve().parent / "vram_temp.py")
+
+
+def vram_temp() -> float | str:
+    """The GDDR6X temperature, or the reason there is none.
+
+    Through `sudo -n`, because mapping a PCI BAR needs `CAP_SYS_RAWIO` and this
+    process does not have it. `-n` so a host without passwordless sudo fails at
+    once instead of waiting on a prompt no one will answer, and a timeout as well,
+    because a measurement must not be able to stall on an instrument.
+
+    Same shape as `nvidia_smi()`: an instrument the run could not reach is recorded
+    as the REASON it could not. A missing field and a field that says why are not
+    the same evidence, and ERRATA A16 is an entry about a quantity nothing
+    recorded.
+    """
+    try:
+        out = subprocess.check_output(
+            ["sudo", "-n", sys.executable, _vram_temp_tool()],
+            text=True, timeout=20, stderr=subprocess.STDOUT)
+        return float(out.strip())
+    except subprocess.CalledProcessError as e:
+        # The tool writes WHY it could not read the sensor -- the permission,
+        # the kernel's strict devmem policy, the remedy -- and the exit status
+        # alone says none of it.
+        why = " ".join((e.output or "").split())[:300]
+        return f"unavailable: exit {e.returncode}: {why or 'no output'}"
+    except Exception as e:                                        # noqa: BLE001
+        return f"unavailable: {e}"
+
+
+def _wall_offset() -> float:
+    """Seconds to add to a `time.perf_counter()` value to get a Unix timestamp.
+
+    `perf_counter`'s origin is arbitrary, so a row's `t_start` means nothing to
+    anything outside this process. The sampler writes nvidia-smi's wall clock, and
+    run T4's complete five-second trace therefore cannot be attributed to any
+    arm-run: the thermal profile across ERRATA A16's step is not recoverable from
+    what that run recorded, which is the first prerequisite
+    `PROSPECTIVE_PLAN_Z_MEMORY_STATE.md` lists.
+    """
+    return time.time() - time.perf_counter()
+
+
+def _iso(unix: float) -> str:
+    """A Unix timestamp as ISO-8601 with an offset, to milliseconds.
+
+    NOT nvidia-smi's spelling. The eighteen traces this repository holds carry
+    THREE: `2026-08-25T20:57:07+08:00` from the full schema's wall prefix,
+    `2026/08/26 20:32:51.659` from nvidia-smi, and `2026/08/2601:47:50.693` from an
+    older compact schema that stripped every space in the row. Emitting one of them
+    here would suggest a join is a string comparison, and it would be a string
+    comparison that silently matches nothing for two thirds of the traces.
+
+    So the arm-run side is unambiguous -- an epoch float beside this, and
+    `bench/check_telemetry_cover.py` holds the one parser that reads all three on
+    the trace side. This spelling is the manifest's own, which `fromisoformat`
+    reads.
+    """
+    whole, ms = divmod(int(round(unix * 1000)), 1000)
+    return (time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(whole))
+            + f".{ms:03d}" + time.strftime("%z", time.localtime(whole)))
+
+
+def _wall_window(rows: list, off_before: float, off_after: float) -> dict:
+    """What a trace needs to be joined to this arm-run.
+
+    Both offsets, because the wall clock can be slewed under a run and a reader is
+    entitled to see whether it was; `offset_drift_s` is their difference and is the
+    size of that correction. The window is the REQUEST window, from the first
+    request to start to the last to finish, because that is the interval a sample
+    either falls in or does not.
+    """
+    out = {"monotonic_offset_before": off_before,
+           "monotonic_offset_after": off_after,
+           "offset_drift_s": off_after - off_before}
+    timed = [r for r in rows
+             if isinstance(r.get("t_start"), (int, float))
+             and isinstance(r.get("t_end"), (int, float))]
+    if timed:
+        t0 = min(r["t_start"] for r in timed) + off_before
+        t1 = max(r["t_end"] for r in timed) + off_after
+        # the epoch floats are what a join uses; the strings are for a reader
+        out["requests_started_unix"] = t0
+        out["requests_ended_unix"] = t1
+        out["requests_started"] = _iso(t0)
+        out["requests_ended"] = _iso(t1)
+    return out
 
 
 def port_is_free(port: int) -> bool:
@@ -896,10 +1157,12 @@ def wait_health(port: int, timeout: float = 300.0,
 
 def start_server(extra: list[str], log_path: Path,
                  args_of_arm: list[str] | None = None,
-                 cpus: str = "") -> subprocess.Popen:
+                 cpus: str = "",
+                 arm_env: dict[str, str] | None = None) -> subprocess.Popen:
     args_of_arm = args_of_arm if args_of_arm is not None else extra
     env = os.environ.copy()
     env["CUDA_VISIBLE_DEVICES"] = GPU
+    env.update(arm_env or {})
     common = list(COMMON_ARGS)
     extra = [a for a in extra if a != KV_FP16]
     if KV_FP16 in list(args_of_arm):
@@ -916,6 +1179,23 @@ def start_server(extra: list[str], log_path: Path,
         SERVER, "-m", TARGET, "--host", "127.0.0.1", "--port", str(PORT)]
     if THREADS:
         cmd += ["-t", THREADS, "-tb", THREADS]
+    # After `-t`, because these are the same threadpool's parameters and argv
+    # should show them together. Passed only when asked for: a run that does not
+    # set them is recorded as not setting them, and the null in the record is what
+    # says the library default applied.
+    #
+    # `--poll-batch` goes with `--poll`, always. `-tb` above gives the batch
+    # parameters a thread count of their own, and `postprocess_cpu_params`
+    # (common/common.cpp at 3737e4137) copies `--poll` into them only when that
+    # count is unset; so `--poll` alone would leave the batch pool at 50, the two
+    # parameter sets would no longer match, a second pool would be built, and
+    # every speculative verification -- a batch of the sampled token and the
+    # draft -- would run on the pool the flag did not reach. Neither reaches an
+    # OpenMP build at all, which is what the binary here is: see `ARM_ENV`.
+    if POLL:
+        cmd += ["--poll", POLL, "--poll-batch", POLL]
+    if CPU_STRICT:
+        cmd += ["--cpu-strict", CPU_STRICT]
     if FIT and FIT_TARGET:
         cmd += ["--fit-target", FIT_TARGET]
     if CONCURRENCY > 1:
@@ -938,6 +1218,88 @@ def start_server(extra: list[str], log_path: Path,
                             stderr=subprocess.STDOUT, preexec_fn=os.setsid)
     proc._cmd = cmd  # type: ignore[attr-defined]
     return proc
+
+
+def _argv_int(cmd: list, flag: str) -> int | None:
+    """The integer `flag` takes in `cmd`, or None when `flag` is absent.
+
+    The LAST occurrence, because that is the one llama.cpp's parser keeps. The
+    runner refuses an invocation that would put `--poll` in argv twice, so in
+    practice there is one; reading the last anyway means this reports what the
+    server used even if that refusal is ever removed.
+    """
+    if flag not in cmd:
+        return None
+    i = len(cmd) - 1 - cmd[::-1].index(flag)
+    if i + 1 >= len(cmd):
+        raise ValueError(f"{flag} is the last element of argv and has no value")
+    return int(cmd[i + 1])
+
+
+def _runtime_env(pid: int) -> dict:
+    """The OpenMP runtime's variables in the server's environment, as the kernel has it.
+
+    Read from `/proc/<pid>/environ`, the environment the process was started
+    with, rather than from the dict this runner passed: the record should say
+    what the server was GIVEN, which is the same question `cpus_allowed` answers
+    for the mask. `taskset` execs in place, so the pid is the server's. Only the
+    runtime's prefixes are kept; the rest of an environment is noise and some of
+    it is private. An unreadable environment is an `error`, never an empty
+    dict, because empty is the value that means "none was set".
+    """
+    try:
+        raw = Path(f"/proc/{pid}/environ").read_bytes()
+    except OSError as e:
+        return {"error": f"/proc/{pid}/environ unreadable: {e}"}
+    out = {}
+    for item in raw.split(b"\0"):
+        k, sep, v = item.decode("utf-8", "replace").partition("=")
+        if sep and k.startswith(RUNTIME_ENV_PREFIXES):
+            out[k] = v
+    return out
+
+
+def _thread_times(pid: int) -> dict:
+    """{tid: (name, cpu ticks so far, processor last run on)} for every thread.
+
+    From `/proc/<pid>/task/<tid>/stat`: utime plus stime, fields 14 and 15, and
+    the processor, field 39. The name is between the first `(` and the LAST `)`,
+    because a thread name may itself contain either, so the fields are counted
+    from after that. A thread that exits between the listing and the read is
+    skipped; one whose line cannot be parsed is an error rather than a guess.
+    """
+    out = {}
+    try:
+        tids = sorted(int(t) for t in os.listdir(f"/proc/{pid}/task"))
+    except OSError as e:
+        raise RuntimeError(f"/proc/{pid}/task unreadable: {e}") from e
+    for tid in tids:
+        try:
+            line = Path(f"/proc/{pid}/task/{tid}/stat").read_text(encoding="utf-8")
+        except OSError:
+            continue
+        lp, rp = line.find("("), line.rfind(")")
+        rest = line[rp + 2:].split()
+        if lp < 0 or rp < lp or len(rest) < 37:
+            raise RuntimeError(f"cannot parse /proc/{pid}/task/{tid}/stat")
+        out[tid] = (line[lp + 1:rp], int(rest[11]) + int(rest[12]), int(rest[36]))
+    return out
+
+
+def _thread_cpu(before: dict, after: dict, pid: int) -> list:
+    """What each server thread spent on a processor while the requests ran.
+
+    This is the observation plan S's mechanism has never had: a worker that
+    spins accrues processor time between graphs and one that sleeps does not,
+    and the main thread is the one whose tid is the pid. Ticks are
+    `SC_CLK_TCK` per second, recorded beside them.
+    """
+    rows = []
+    for tid, (name, ticks, cpu) in sorted(after.items()):
+        rows.append({"tid": tid, "name": name, "main": tid == pid,
+                     "ticks": ticks - before.get(tid, (name, 0, cpu))[1],
+                     "processor_last": cpu})
+    return rows
 
 
 def _cpus_allowed(pid: int) -> str | None:
@@ -1362,6 +1724,36 @@ def build_schedule(arms: list[str], repeats: int, mode: str) -> list[list[str]]:
                      "carryover-balanced; refusing to run under a false label")
         return sched
     if mode == "mirrored":
+        # Reversing an odd-length order leaves the middle element where it was, so
+        # with an odd number of arms one of them holds the same position in every
+        # block while the others alternate between the ends. Seen in the fifteen
+        # arm-runs of a plan S attempt that was stopped for it, the middle arm at
+        # position 2 in every block; over twelve blocks the schedule gives the
+        # outer two {1: 6, 3: 6} and the middle one {2: 12}.
+        #
+        # Mean position is still balanced -- (1 + 3) / 2 is 2 -- so a LINEAR drift
+        # within a block cancels for every arm. A first-position effect does not:
+        # the outer arms take it half the time each and the middle one never, and
+        # the arms are then not exchangeable. `is_position_balanced` says this
+        # schedule is unbalanced and was only ever asked under `latin`, which is
+        # the gap this closes.
+        #
+        # Not generalised to "refuse any mirrored schedule that is not
+        # position-balanced": an EVEN arm count is also not balanced by that
+        # definition, because the first arm never reaches the middle positions,
+        # and that is the design run Y published. Mirroring balances mean position
+        # and carryover direction, not occupancy. What is wrong here is the
+        # asymmetry BETWEEN arms, which only an odd count produces.
+        if n % 2 == 1:
+            sys.exit(
+                f"BENCH_ORDER=mirrored with {n} arms pins the middle one: "
+                f"{arms[n // 2]!r} would hold position {n // 2 + 1} in every one "
+                f"of the {repeats} blocks while the others alternate between the "
+                f"ends. Mean position is still balanced, so a linear drift within "
+                f"a block cancels, but a first-position effect does not, and the "
+                f"arms are then not exchangeable. Use BENCH_ORDER=latin: for "
+                f"{n} arms over a multiple of {n} repeats it puts every arm in "
+                f"every position the same number of times.")
         sched = [arms if r % 2 == 0 else list(reversed(arms)) for r in range(repeats)]
     else:
         step = max(1, n // max(1, repeats))
@@ -1388,8 +1780,10 @@ def run_arm(arm: str, rep: int) -> dict:
     # 100 % utilisation. The continuous trace from bench/gpu_telemetry.sh is the
     # authority for GPU state; these two snapshots are a convenience.
     gpu_before = nvidia_smi()
+    vram_before = vram_temp()
     mem_before = gpu_mem_used_mib()
-    proc = start_server(extra, log_path, args_of_arm=extra, cpus=arm_cpus(arm))
+    proc = start_server(extra, log_path, args_of_arm=extra, cpus=arm_cpus(arm),
+                        arm_env=ARM_ENV.get(arm_base(arm)))
     try:
         try:
             ready_s = wait_health(PORT, proc=proc)
@@ -1398,6 +1792,8 @@ def run_arm(arm: str, rep: int) -> dict:
             return {"arm": arm, "repeat": rep, "ready_s": None,
                     "argv": proc._cmd,  # type: ignore[attr-defined]
                     "gpu_before": gpu_before, "gpu_after": nvidia_smi(),
+                    "vram_temp_before": vram_before,
+                    "vram_temp_after": vram_temp(),
                     "server_log": str(log_path.relative_to(OUT)),
                     "crashed": {"tag": "__startup__", "error": f"{type(e).__name__}: {e}",
                                 "returncode": proc.poll()},
@@ -1423,11 +1819,23 @@ def run_arm(arm: str, rep: int) -> dict:
             return {"arm": arm, "repeat": rep, "ready_s": ready_s,
                     "argv": proc._cmd,  # type: ignore[attr-defined]
                     "gpu_before": gpu_before, "gpu_after": nvidia_smi(),
+                    "vram_temp_before": vram_before,
+                    "vram_temp_after": vram_temp(),
                     "server_log": str(log_path.relative_to(OUT)),
                     "crashed": {"tag": "__warmup__", "error": f"{type(e).__name__}: {e}",
                                 "returncode": proc.poll()},
                     "rows": []}
+        off_before = _wall_offset()
+        try:
+            threads_before, threads_err = _thread_times(proc.pid), None
+        except RuntimeError as e:
+            threads_before, threads_err = {}, str(e)
         rows, crashed, wall_s = run_prompt_set(arm, rep, proc)
+        try:
+            threads_after = _thread_times(proc.pid)
+        except RuntimeError as e:
+            threads_after, threads_err = {}, threads_err or str(e)
+        off_after = _wall_offset()
         n_tok = sum(r["predicted_n"] for r in rows)
         agg = n_tok / wall_s if wall_s > 0 else float("nan")
         peak = max_client_requests_in_flight(rows)
@@ -1449,10 +1857,42 @@ def run_arm(arm: str, rep: int) -> dict:
             "cpus_requested": arm_cpus(arm) or None,
             "cpus_allowed": _cpus_allowed(proc.pid),
             "threads": int(THREADS) if THREADS else None,
+            # The same threadpool's other two parameters. A null means the
+            # flag was absent and the library default applied, 50 for poll
+            # and 0 for cpu_strict on the build these runs use; an absent
+            # FIELD meant nobody had considered it, which is what the first
+            # seventy eight runs in this repository look like.
+            # Read out of the argv this server was started with, not out of
+            # BENCH_POLL. Plan S's third arm carries `--poll 0` in its OWN
+            # flags, because BENCH_POLL is per invocation and cannot express
+            # it, and the first version recorded the invocation's value: null
+            # for that arm, which by the definition above says the default of
+            # 50 applied to a server that ran at 0.
+            "poll": _argv_int(proc._cmd, "--poll"),  # type: ignore[attr-defined]
+            "poll_batch": _argv_int(proc._cmd, "--poll-batch"),  # type: ignore[attr-defined]
+            "cpu_strict": _argv_int(proc._cmd, "--cpu-strict"),  # type: ignore[attr-defined]
+            # What the OpenMP runtime was told, read back from the kernel. The
+            # build these runs use is an OpenMP one, so this, and not `poll`,
+            # is how its idle workers wait: `{}` is libgomp's default, which
+            # spins before it sleeps.
+            "server_env": _runtime_env(proc.pid),
+            # And whether they did: each thread's processor time across the
+            # measured requests, which is what spinning costs and sleeping does
+            # not. Taken before the first measured request and after the last.
+            "server_threads": ({"error": threads_err} if threads_err else
+                               {"clk_tck": os.sysconf("SC_CLK_TCK"),
+                                "threads": _thread_cpu(threads_before,
+                                                       threads_after, proc.pid)}),
             "server_identity": dict(server_identity(log_path), props=props),
             # Taken per arm-run, not once per run: the run-level hash cannot
             # see a binary replaced between two arms.
             "server_lib_sha256": _server_lib_hashes(),
+            # And what it ACTUALLY mapped, which is a different question.
+            # The line above hashes the directory beside the binary; this
+            # one reads /proc/<pid>/maps, so it sees the CUDA runtime that
+            # came from somewhere else entirely and that no manifest in
+            # this repository has ever recorded.
+            "server_mapped": _mapped_objects(proc.pid),
             "server_loaded_commit": server_identity(log_path).get("commit"),
             # `server_log_sha256` is filled in by the driver after the server is
             # stopped: hashing it here would hash a file still being written.
@@ -1464,12 +1904,25 @@ def run_arm(arm: str, rep: int) -> dict:
             "max_in_flight": peak,  # deprecated alias, runs A-R used this name
             "argv": proc._cmd,  # type: ignore[attr-defined]
             "gpu_before": gpu_before, "gpu_after": nvidia_smi(),
+            "vram_temp_before": vram_before,
+            "vram_temp_after": vram_temp(),
+            # What a sampler trace needs to be joined to this arm-run. Rows
+            # carry `t_start` and `t_end` from `time.perf_counter()`, whose
+            # origin is arbitrary; add an offset to get a Unix timestamp.
+            "wall_clock": _wall_window(rows, off_before, off_after),
             "server_log": str(log_path.relative_to(OUT)),
             "crashed": crashed,
             "rows": rows,
         }
     finally:
-        TEARDOWN[(arm, rep)] = stop_server(proc, baseline_mib=mem_before)
+        # Blocked, not ignored: a TERM or an INT that arrives now is delivered
+        # once the server is down, instead of unwinding out of `stop_server`
+        # before it has killed anything.
+        _held = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGINT, signal.SIGTERM})
+        try:
+            TEARDOWN[(arm, rep)] = stop_server(proc, baseline_mib=mem_before)
+        finally:
+            signal.pthread_sigmask(signal.SIG_SETMASK, _held)
 
 
 def validate_run(out: Path, arms: list[str], repeats: int,
@@ -1552,7 +2005,19 @@ def validate_run(out: Path, arms: list[str], repeats: int,
     return problems
 
 
+def _term_is_an_interrupt(signum, _frame) -> None:
+    raise KeyboardInterrupt(f"signal {signum}")
+
+
 def main() -> None:
+    # A TERM ends this process at once by default, and the server it started is
+    # in a session of its own (`os.setsid`), so it would be left answering on the
+    # port with the card busy and no record saying so. As an interrupt it unwinds
+    # through `run_arm`'s `finally`, which stops the server with both signals
+    # blocked, so a second one cannot interrupt the teardown. SIGINT is left as
+    # it was given: a driver starts this in the background, where the shell has
+    # it ignored, and stops it with TERM alone.
+    signal.signal(signal.SIGTERM, _term_is_an_interrupt)
     missing = [n for n, v in (("LLAMA_SERVER_BIN", SERVER), ("MODEL_TARGET", TARGET)) if not v]
     if missing:
         sys.exit(f"set {', '.join(missing)}")
@@ -1594,6 +2059,17 @@ def main() -> None:
         print(f"  note: {', '.join(AMBIGUOUS_ARMS)} are real arms whose names "
               f"also read as '<arm>{HARDCAP_SUFFIX}'; each runs as ITSELF, and "
               f"the manifest records that under `ambiguous_arms`.", flush=True)
+    # A global BENCH_POLL and an arm whose own flags carry `--poll` would both
+    # reach argv. llama.cpp takes the last one, and the record would name the
+    # other: a manifest that says poll 50 for a server that ran at 0. Refused
+    # rather than resolved, because the resolution would be invisible.
+    _poll_arms = sorted(a for a in arms
+                        if {"--poll", "--poll-batch"} & set(ARMS.get(arm_base(a), [])))
+    if POLL and _poll_arms:
+        sys.exit(f"BENCH_POLL={POLL} is set and these arms carry --poll in their "
+                 f"own flags: {', '.join(_poll_arms)}. argv would hold it twice and the "
+                 f"recorded value would be whichever this runner wrote rather than "
+                 f"the one the server used. Set one or the other.")
     dupes = sorted({a for a in arms if arms.count(a) > 1})
     if dupes:
         # Two entries write the same `<arm>__rep<n>.json`, so the second
@@ -1625,6 +2101,13 @@ def main() -> None:
         # launcher records nothing about the code that answered the requests, so
         # every shared object in the same directory is hashed too.
         "server_lib_sha256": _server_lib_hashes(),
+        # The INVOCATION's setting, BENCH_POLL and BENCH_CPU_STRICT. An arm that
+        # carries its own `--poll` shows it under `arms` below, and each arm-run
+        # records the value its server's argv actually held.
+        "poll": int(POLL) if POLL else None,
+        "cpu_strict": int(CPU_STRICT) if CPU_STRICT else None,
+        # Per-arm server environment, `ARM_ENV`, for the arms in this run.
+        "arm_env": {a: ARM_ENV[arm_base(a)] for a in arms if arm_base(a) in ARM_ENV},
         "target": TARGET, "target_sha256": sha256(TARGET),
         "draft": DRAFT or None,
         "draft_sha256": sha256(DRAFT) if DRAFT else None,

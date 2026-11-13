@@ -122,10 +122,13 @@ its step, reps 0 to 2 against reps 3 to 5:
 One arm got faster while another got slower. **No arm-agnostic host cost can do
 that**, under any of the three denominators tabulated later, because a cost per
 token, per forward pass or per target step moves every arm the same way. The
-plan's own pre-registered statistic agrees: D over those six blocks is −25.309
-before the step and −25.529 after, a shift of +0.220 ms per token with a Welch t
-of 6.25 and an interval excluding zero. The split point was chosen by eye and
-this is therefore corroboration and not a test, which is exactly why the run
+plan's own pre-registered statistic agrees: D, `spec-dflash-n2` minus
+`spec-draft-n8` in milliseconds per token, is −25.309 over the three slow blocks
+and −25.529 over the three fast ones, so the slow level sits 0.220 ms per token
+above the fast one, with a Welch t of 6.25 and an interval excluding zero. That
+sentence used to say "before" and "after" and then "a shift of +0.220", which
+reads the opposite way: in time order D fell. The split point was chosen by eye
+and this is therefore corroboration and not a test, which is exactly why the run
 below fixes the split in advance.
 
 **And no whole-host component is detectable between any pair of arms.** Aligning
@@ -153,19 +156,35 @@ experiment is run Y, it was pre-registered in
 run on 2026-09-26, and it came back the other way.
 
 Pinning the server to eight efficiency cores rather than eight performance cores,
-a clock cut of 26 %, costs **15.6 %** of the decode rate on `spec-dflash-n2` and
-**15.9 %** on `baseline`, with intervals excluding zero by a wide margin and a
-one-sided upper limit near 16.6 % on both. The output is identical to the token,
+a clock cut of 22 % to 26 % depending on which performance core it is measured
+from, costs **14.42 %** of the decode rate on `spec-dflash-n2` and
+**14.73 %** on `baseline`, with intervals excluding zero by a wide margin and
+one-sided upper limits of 15.34 % and 15.30 %. The output is identical to the token,
 the GPU's SM clock is the same or higher in the slow condition, and its power,
 utilisation and temperature all fall: the card is waiting on the host.
 
-So processor speed reaches this workload hard. About half a token's time is host
-work that scales with clock. **Run X is warranted, not made unnecessary**, and its
+So processor speed reaches this workload hard. Between about a half and about
+three fifths of a token's time is host work that scales with clock, depending on
+which of those two clocks the main thread had; plan Y has the arithmetic and its
+correction. **Run X is warranted, not made unnecessary**, and its
 design gains a reason it did not have: CPU contention is a channel this workload
 demonstrably rides on, rather than one this plan hoped to bound away.
 
+**Corrected on 2026-11-13.** The paragraph above quoted run Y's mean log ratios
+printed as percentages, the defect commit 68d72f6 corrected in the two documents
+that carry run Y's table and missed here, because nothing compared a figure quoted
+in a third document with the derivation. Each was about a point too high: about
+fifteen and a half and about sixteen for the two changes, and a limit near sixteen
+and a half for both bounds. The values above are what
+[`../analysis/rederive_run_y.py`](../analysis/rederive_run_y.py) derives, and
+[`../analysis/figure_registry.py`](../analysis/figure_registry.py) now holds every
+decimal in this document to a derivation or to a stated reason. The conclusions
+drawn from them do not move: the share of a token's time that scales with clock
+was computed from the back-transformed ratio, and a quarter of a displacement
+moves by less than half a point.
+
 It also changes what run X has to control. Applying load changes which processors
-are free, and a displacement of two of eight threads is worth about 4 % here, so
+are free, and a quarter of a full displacement is worth a little under 4 % here, so
 the pinning this plan already mandates is not a precaution but the difference
 between a measurement and a confound.
 

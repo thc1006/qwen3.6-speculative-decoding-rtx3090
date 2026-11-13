@@ -99,6 +99,45 @@ def read_raw(pci: str = DEFAULT_PCI) -> int:
             m.close()
 
 
+def _why_refused(pci: str, err: Exception) -> str:
+    """A refused mapping, explained, because the errno is not the reason.
+
+    `CONFIG_IO_STRICT_DEVMEM=y` makes the kernel refuse to map any IO region a
+    driver has CLAIMED, and the `nvidia` driver claims BAR0. Both routes then fail
+    and they look like two unrelated problems: `resource0` gives `EINVAL` and
+    `/dev/mem` gives `EPERM`. They are one policy.
+
+    Measured on 2026-10-02: the bench host reads this register and the box these
+    sessions run on cannot, with the same card generation and the same offset. An
+    instrument that reports `[Errno 22] Invalid argument` sends a reader looking at
+    the offset, which is the one thing that was right.
+    """
+    bits = [f"{type(err).__name__}: {err}"]
+    d = pathlib.Path("/sys/bus/pci/devices") / pci
+    try:
+        bits.append(f"driver={(d / 'driver').resolve().name}")
+    except OSError:
+        bits.append("driver=none")
+    for path, label in (("/sys/kernel/security/lockdown", "lockdown"),):
+        try:
+            bits.append(f"{label}={pathlib.Path(path).read_text().strip()}")
+        except OSError:
+            pass
+    try:
+        rel = os.uname().release
+        cfg = pathlib.Path(f"/boot/config-{rel}").read_text(encoding="utf-8")
+        strict = "CONFIG_IO_STRICT_DEVMEM=y" in cfg
+        bits.append(f"CONFIG_IO_STRICT_DEVMEM={'y' if strict else 'n'}")
+        if strict:
+            bits.append("the kernel refuses to map an IO region a driver has "
+                        "claimed; `iomem=relaxed` on the kernel command line "
+                        "disables that check, needs a reboot, and weakens a "
+                        "hardening. The offset is not the problem")
+    except OSError:
+        pass
+    return "unavailable: " + "; ".join(bits)
+
+
 def reading(pci: str = DEFAULT_PCI):
     """Degrees, or the reason there are none.
 
@@ -110,6 +149,9 @@ def reading(pci: str = DEFAULT_PCI):
         return celsius(read_raw(pci))
     except SystemExit as e:                                  # a refusal is a reason
         return f"unavailable: {e}"
+    except (OSError, ValueError) as e:
+        # the mapping, which is the case worth explaining
+        return _why_refused(pci, e)
     except Exception as e:                                   # noqa: BLE001
         return f"unavailable: {e}"
 
