@@ -9767,16 +9767,172 @@ class AnArmRunMustBeJoinableToATrace(unittest.TestCase):
         # recorded the exception's text, which says only the exit status.
         reason = "resource0: CONFIG_IO_STRICT_DEVMEM refuses the BAR"
         err = subprocess.CalledProcessError(1, ["sudo"], output=reason + "\n")
-        with mock.patch.object(rr.subprocess, "check_output", side_effect=err):
+        with mock.patch.object(rr, "_gpu_pci", return_value="00000000:01:00.0"), \
+                mock.patch.object(rr.subprocess, "check_output", side_effect=err):
             got = rr.vram_temp()
         self.assertIn(reason, got, f"the tool's reason was dropped: {got!r}")
         self.assertTrue(got.startswith("unavailable: "), got)
         src = (self.ROOT / "bench" / "retest_runner.py").read_text(encoding="utf-8")
-        self.assertIn('["sudo", "-n", sys.executable, _vram_temp_tool()]', src,
+        self.assertIn('["sudo", "-n", sys.executable, _vram_temp_tool(), "--pci", pci]', src,
                       "the reading no longer goes through sudo -n, so it either "
                       "cannot work or can wait on a prompt")
         self.assertIn("timeout=20", src.split("def vram_temp")[1].split("def ")[0],
                       "no timeout, so a measurement can stall on an instrument")
+
+
+class TheMemoryTemperatureIsReadOffTheCardThatWasMeasured(unittest.TestCase):
+    """`vram_temp.py` read `GPU_PCI` or `0000:01:00.0`, and the runner reached it
+    through `sudo`, whose default `env_reset` drops `GPU_PCI`. So every record
+    read the card at `0000:01:00.0`, whichever card `BENCH_GPU` named. The bench
+    host has one card, so no published reading is affected; a second card would
+    have put one card's memory temperature in another card's record."""
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    def _vt(self):
+        sys.path.insert(0, str(self.ROOT / "bench"))
+        self.addCleanup(sys.path.remove, str(self.ROOT / "bench"))
+        import importlib
+        import vram_temp
+        return importlib.reload(vram_temp)
+
+    def _rr(self):
+        return AnArmRunMustBeJoinableToATrace._rr(self)
+
+    def test_both_spellings_of_an_address_name_one_device(self):
+        vt = self._vt()
+        self.assertEqual(vt.pci_address("00000000:01:00.0"), "0000:01:00.0")
+        self.assertEqual(vt.pci_address("00000000:0A:00.0"), "0000:0a:00.0")
+        self.assertEqual(vt.pci_address("0000:02:00.1"), "0000:02:00.1")
+        for bad in ("01:00.0", "0000:01:00", "0000:01:00.8", "0000:1:00.0",
+                    "../../../../dev/mem", "0000:01:00.0/..", ""):
+            with self.assertRaises(SystemExit, msg=bad):
+                vt.pci_address(bad)
+
+    def test_the_argument_wins_over_the_variable(self):
+        """The argument is what survives sudo, so it is what must be read."""
+        vt = self._vt()
+        seen = []
+        with mock.patch.object(vt, "reading", side_effect=lambda p: seen.append(p) or 40.0), \
+                mock.patch.object(vt.sys, "argv", ["vram_temp.py", "--pci", "00000000:02:00.0"]), \
+                mock.patch.dict(os.environ, {"GPU_PCI": "0000:01:00.0"}), \
+                contextlib.redirect_stdout(io.StringIO()):
+            vt.main()
+        self.assertEqual(seen, ["0000:02:00.0"])
+
+    def test_the_runner_passes_the_cards_address(self):
+        rr = self._rr()
+        calls = []
+
+        def fake(argv, **kw):
+            calls.append(list(argv))
+            if argv[0] == "nvidia-smi":
+                return "00000000:01:00.0\n"
+            return "41.5\n"
+        with mock.patch.object(rr.subprocess, "check_output", side_effect=fake):
+            got = rr.vram_temp()
+        self.assertEqual(got, 41.5)
+        sudo = [c for c in calls if c[0] == "sudo"]
+        self.assertEqual(len(sudo), 1, calls)
+        self.assertEqual(sudo[0][-2:], ["--pci", "00000000:01:00.0"],
+                         "the reader is not told which card, so it reads the default")
+
+    def test_a_cuda_index_among_several_cards_is_refused(self):
+        """CUDA's index is fastest first unless told otherwise; nvidia-smi's is
+        bus order. With two cards the same digit can name different devices."""
+        rr = self._rr()
+        two = "00000000:01:00.0\n00000000:02:00.0\n"
+        calls = []
+
+        def fake(argv, **kw):
+            calls.append(list(argv))
+            if "-i" in argv:
+                return "00000000:02:00.0\n"
+            if argv[0] == "nvidia-smi":
+                return two
+            return "41.5\n"
+        env = {k: v for k, v in os.environ.items() if k != "CUDA_DEVICE_ORDER"}
+        with mock.patch.object(rr, "GPU", "1"), \
+                mock.patch.dict(os.environ, env, clear=True), \
+                mock.patch.object(rr.subprocess, "check_output", side_effect=fake):
+            got = rr.vram_temp()
+        self.assertIsInstance(got, str)
+        self.assertTrue(got.startswith("unavailable: 2 cards"), got)
+        self.assertFalse([c for c in calls if c[0] == "sudo"],
+                         "it read a card it could not name")
+        calls.clear()
+        with mock.patch.object(rr, "GPU", "1"), \
+                mock.patch.dict(os.environ, {"CUDA_DEVICE_ORDER": "PCI_BUS_ID"}), \
+                mock.patch.object(rr.subprocess, "check_output", side_effect=fake):
+            got = rr.vram_temp()
+        self.assertEqual(got, 41.5)
+        self.assertIn(["nvidia-smi", "-i", "1", "--query-gpu=pci.bus_id",
+                       "--format=csv,noheader"], calls)
+        self.assertEqual([c for c in calls if c[0] == "sudo"][0][-1],
+                         "00000000:02:00.0")
+
+
+class NoTestLeavesATemporaryDirectoryBehind(unittest.TestCase):
+    """One did, on every run: `tempfile.mkdtemp()` passed as `BENCH_OUT` and
+    never removed. A `mkdtemp` is a directory the caller owns, so the function
+    that makes one must also remove it."""
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    def test_every_mkdtemp_is_removed_by_its_function(self):
+        """Per call, by name. The first version of this asked whether the
+        function mentioned `rmtree(` or `addCleanup(` anywhere, and the leak it
+        was written for survived it: put back beside a cleanup of something
+        else, an inline `mkdtemp()` passed as a value read as removed."""
+        def is_mkdtemp(n):
+            return (isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                    and n.func.attr == "mkdtemp")
+        found = 0
+        for path in sorted((self.ROOT / "tests").glob("*.py")):
+            src = path.read_text(encoding="utf-8")
+            for fn in ast.walk(ast.parse(src)):
+                if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    continue
+                calls = [n for n in ast.walk(fn) if is_mkdtemp(n)]
+                if not calls:
+                    continue
+                found += len(calls)
+                named = {}
+                for a in ast.walk(fn):
+                    if (isinstance(a, ast.Assign) and len(a.targets) == 1
+                            and isinstance(a.targets[0], ast.Name)):
+                        for n in ast.walk(a.value):
+                            if is_mkdtemp(n):
+                                named[id(n)] = a.targets[0].id
+                removers = set()
+                for c in ast.walk(fn):
+                    if (isinstance(c, ast.Call) and isinstance(c.func, (ast.Attribute, ast.Name))
+                            and getattr(c.func, "attr", getattr(c.func, "id", ""))
+                            in ("rmtree", "addCleanup")):
+                        removers |= {n.id for a in c.args for n in ast.walk(a)
+                                     if isinstance(n, ast.Name)}
+                for c in calls:
+                    where = f"{path.name}:{c.lineno} in {fn.name}"
+                    self.assertIn(id(c), named,
+                                  f"{where}: a mkdtemp with no name, so nothing "
+                                  f"can remove it")
+                    self.assertIn(named[id(c)], removers,
+                                  f"{where}: `{named[id(c)]}` is made with mkdtemp "
+                                  f"and never passed to rmtree or addCleanup")
+        self.assertGreater(found, 0, "no mkdtemp found, so this proved nothing")
+
+    def test_the_check_sees_the_leak_it_was_written_for(self):
+        """The known positive, so a green result above is not a blind one."""
+        leak = ('def t(self):\n    out = tempfile.TemporaryDirectory()\n'
+                '    self.addCleanup(out.cleanup)\n'
+                '    f({"BENCH_OUT": tempfile.mkdtemp()})\n')
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "tests").mkdir()
+            (Path(d) / "tests" / "t.py").write_text(leak, encoding="utf-8")
+            probe = type(self)("test_every_mkdtemp_is_removed_by_its_function")
+            probe.ROOT = Path(d)
+            with self.assertRaises(AssertionError):
+                probe.test_every_mkdtemp_is_removed_by_its_function()
 
 
 class ASamplerMustNotBeAbleToWriteNothing(unittest.TestCase):
@@ -11430,11 +11586,13 @@ class AReviewOfPR7FoundTheseAndEachHasAGuard(unittest.TestCase):
         """A TERM ended the runner at once, leaving its server on the port."""
         import signal as _signal
         saved = (_signal.getsignal(_signal.SIGTERM), _signal.getsignal(_signal.SIGINT))
+        out = tempfile.TemporaryDirectory()
+        self.addCleanup(out.cleanup)
         try:
             m = PlanSsThreeArmsMustFitInOneInvocation._mod(
                 self, LLAMA_SERVER_BIN="/bin/true", MODEL_TARGET="/dev/null")
             with mock.patch.dict(os.environ, {"BENCH_ARMS": "baseline,baseline",
-                                              "BENCH_OUT": tempfile.mkdtemp()}), \
+                                              "BENCH_OUT": out.name}), \
                     self.assertRaises(SystemExit):
                 m.main()
             handler = _signal.getsignal(_signal.SIGTERM)

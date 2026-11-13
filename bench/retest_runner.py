@@ -969,6 +969,43 @@ def _vram_temp_tool() -> str:
     return str(Path(__file__).resolve().parent / "vram_temp.py")
 
 
+def _gpu_pci() -> str:
+    """The PCI address of the card this run measures, or why it has none.
+
+    `vram_temp.py` reads the card at the address it is given and at
+    `0000:01:00.0` when given none, and it used to be given none: `GPU_PCI` in
+    this process's environment never reached it, because `sudo` resets the
+    environment. On a host with two cards and `BENCH_GPU=1`, the record would
+    have carried the other card's memory temperature under this card's name.
+
+    A device that is not a UUID or a PCI address is a CUDA index, and CUDA
+    numbers devices fastest first unless `CUDA_DEVICE_ORDER=PCI_BUS_ID`, while
+    `nvidia-smi -i` numbers them in bus order. Only with one card, or with the
+    bus order set, do the two agree; otherwise this refuses rather than guesses.
+    """
+    try:
+        listed = subprocess.check_output(
+            ["nvidia-smi", "--query-gpu=pci.bus_id", "--format=csv,noheader"],
+            text=True, timeout=20).split()
+        if not listed:
+            return "unavailable: nvidia-smi lists no card"
+        if len(listed) == 1:
+            return listed[0]
+        if (GPU.isdigit()
+                and os.environ.get("CUDA_DEVICE_ORDER") != "PCI_BUS_ID"):
+            return (f"unavailable: {len(listed)} cards and BENCH_GPU={GPU} is a "
+                    f"CUDA index, which need not be nvidia-smi's index unless "
+                    f"CUDA_DEVICE_ORDER=PCI_BUS_ID")
+        got = subprocess.check_output(
+            ["nvidia-smi", "-i", GPU, "--query-gpu=pci.bus_id",
+             "--format=csv,noheader"], text=True, timeout=20).split()
+        if len(got) != 1:
+            return f"unavailable: BENCH_GPU={GPU} names {len(got)} cards"
+        return got[0]
+    except Exception as e:                                        # noqa: BLE001
+        return f"unavailable: {e}"
+
+
 def vram_temp() -> float | str:
     """The GDDR6X temperature, or the reason there is none.
 
@@ -982,9 +1019,12 @@ def vram_temp() -> float | str:
     the same evidence, and ERRATA A16 is an entry about a quantity nothing
     recorded.
     """
+    pci = _gpu_pci()
+    if pci.startswith("unavailable: "):
+        return pci
     try:
         out = subprocess.check_output(
-            ["sudo", "-n", sys.executable, _vram_temp_tool()],
+            ["sudo", "-n", sys.executable, _vram_temp_tool(), "--pci", pci],
             text=True, timeout=20, stderr=subprocess.STDOUT)
         return float(out.strip())
     except subprocess.CalledProcessError as e:
