@@ -4,6 +4,12 @@
     sudo python3 bench/vram_temp.py              # one reading, in degrees
     sudo python3 bench/vram_temp.py 1 60         # every second for a minute, as csv
     sudo python3 bench/vram_temp.py --probe      # what it would read, and from where
+    sudo python3 bench/vram_temp.py --pci 0000:02:00.0 1 60   # another card
+
+`--pci` and not only `GPU_PCI`, because `sudo` resets the environment: with the
+default `env_reset`, `GPU_PCI=... sudo python3 bench/vram_temp.py` reads the
+default card, and on a host with two cards that is a temperature of the other
+one. The argument survives sudo; the variable does not.
 
 ERRATA A16 said the memory-junction temperature "needs a sensor the platform does
 not offer". It does not. NVML does not expose it, which is a different statement:
@@ -51,6 +57,25 @@ VENDOR_NVIDIA = "0x10de"
 # the low twelve bits, in thirty-seconds of a degree Celsius
 MASK, SCALE = 0x00000FFF, 32.0
 DEFAULT_PCI = "0000:01:00.0"
+
+
+def pci_address(s: str) -> str:
+    """The sysfs spelling of a PCI address, from either spelling of it.
+
+    nvidia-smi prints `00000000:01:00.0`, an eight-digit domain in upper case;
+    sysfs names the device `0000:01:00.0`. Anything that is not an address in
+    one of those two shapes is refused rather than looked up.
+    """
+    parts = s.strip().lower().split(":")
+    hexd = set("0123456789abcdef")
+    if (len(parts) != 3 or not parts[0] or len(parts[0]) > 8
+            or len(parts[1]) != 2 or "." not in parts[2]):
+        raise SystemExit(f"{s!r} is not a PCI address")
+    dev, _, fn = parts[2].partition(".")
+    if (not set(parts[0] + parts[1] + dev) <= hexd or len(dev) != 2
+            or fn not in tuple("01234567")):
+        raise SystemExit(f"{s!r} is not a PCI address")
+    return f"{int(parts[0], 16):04x}:{parts[1]}:{dev}.{fn}"
 
 
 def celsius(raw: int) -> float:
@@ -172,6 +197,11 @@ def _probe(pci: str) -> None:
 def main() -> None:
     argv = sys.argv[1:]
     pci = os.environ.get("GPU_PCI", DEFAULT_PCI)
+    if argv and argv[0] == "--pci":
+        if len(argv) < 2:
+            sys.exit("--pci takes an address")
+        pci, argv = argv[1], argv[2:]
+    pci = pci_address(pci)
     if argv and argv[0] == "--probe":
         if len(argv) != 1:
             sys.exit("--probe takes no other argument")
@@ -179,8 +209,8 @@ def main() -> None:
         return
     for a in argv:
         if a.startswith("-"):
-            sys.exit(f"unknown option {a!r}; the options are --probe, or "
-                     f"INTERVAL [COUNT]")
+            sys.exit(f"unknown option {a!r}; the options are [--pci ADDRESS] "
+                     f"then --probe, or INTERVAL [COUNT]")
     if not argv:
         v = reading(pci)
         if isinstance(v, str):
