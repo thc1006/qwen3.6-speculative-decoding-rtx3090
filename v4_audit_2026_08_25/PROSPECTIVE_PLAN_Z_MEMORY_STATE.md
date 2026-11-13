@@ -19,9 +19,9 @@ displacement: the right order of magnitude, and the host rather than the card.
 
 That fraction is **not** a count of threads, and
 [`PROSPECTIVE_PLAN_SIBLINGS.md`](PROSPECTIVE_PLAN_SIBLINGS.md) gives the reason:
-every layer is on the card, so those threads do no arithmetic while decoding and
-are not on the critical path, and a barrier takes its slowest thread's time either
-way. What the host variable actually is, that plan pre-registers: what shares a
+every layer is on the card, so those threads have almost no arithmetic while
+decoding, the one host operation found so far running as a single task on the main
+thread, and a barrier takes its slowest thread's time either way. What the host variable actually is, that plan pre-registers: what shares a
 physical core with the main thread, which is the leading candidate and is three
 arms of thirty minutes rather than a sweep.
 
@@ -177,9 +177,16 @@ five core clocks, so the load was memory bound; the control executed, with nine
 temperatures visited by both phases. Across 51.6 to 69.0 °C, **R is 0.014 %**.
 
 So the rule above fires: the hypothesis is excluded for A16's step and layer B is
-not run. Put against A16's own figures rather than an invented divergence, its two
-levels differ by 1.67 °C, so the sensitivity would have to be 2.35 % per °C, which
-is 1,678 times the upper bound measured. A16's own thermal record also has the
+not run. It fires on a narrower range than it was written for. *R* was to span idle
+to plateau, and the pilot spans the range above, because below about 51 °C the load
+heats the card faster than a window resolves; the round's README says so. The
+exclusion does not rest on the range, though: the slope's upper bound carried over
+the whole span the rule names is still under a tenth of a per cent. Put against
+A16's own figures rather than an invented divergence, its two levels differ by
+1.67 °C, so the sensitivity would have to be 2.35 % per °C, which is 2,582 times
+the upper bound measured. That bound is the one the round's README now carries, a
+slope fitted within each phase and widened for drift; the first, fitted through
+both phases at once, made the ratio smaller. A16's own thermal record also has the
 faster level as the hotter one.
 
 **That reading is on `GPU-f71a8f68` and the step is on `GPU-f9db9841`.** By the

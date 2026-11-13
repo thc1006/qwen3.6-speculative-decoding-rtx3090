@@ -531,7 +531,7 @@ directory, and the host has no CUDA toolkit: no `/usr/local/cuda` of any version
 no `nvcc`, and nothing `ldconfig` knows about either library. The only copies on
 the machine are pip wheels inside two unrelated Python virtual environments. So
 every run recorded here was launched with a library path that this repository does
-not name: the manifests carry a hash for each of the three `libggml` objects and
+not name: a manifest that hashes any hashes the four `libggml` objects, and
 none for the CUDA runtime under them. Reproducing a run therefore needs a fact that
 is not in the tree, and two runs could differ in that fact while their manifests
 matched.

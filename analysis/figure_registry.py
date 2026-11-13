@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Every prose figure outside the census is derived, or accounted for with a reason.
+"""Every prose decimal outside the census is derived, or accounted for with a reason.
 
     python3 analysis/figure_registry.py           # the coverage, and what is bare
     python3 analysis/figure_registry.py --strict  # and exit 1 on anything bare or stale
@@ -48,6 +48,21 @@ value nothing accounts for, and `--strict` fails on it. An entry for a value the
 document no longer carries also fails, and so does one for a value a derivation
 already reports there: an exemption that outlives its reason is how a list like
 this goes stale.
+
+What it does not do
+-------------------
+It reads DECIMALS. A whole number is not a figure it can see, so "319 noise
+floors" or "all 2358 samples" is guarded only where a derivation quotes it,
+which since 2026-11-13 the layer A and plan Z derivations do for theirs.
+
+And "derived" means the value is in the document, not that it is in the right
+sentence. Two derived values swapped between two places are each still present,
+and a review of this branch swapped run Y's two arms in plan X, the two ends of
+plan X's hazard interval and plan S's two spreads, and this passed all three.
+Placement is the derivation's to check, and those pairs are now compared as the
+sentences they are by `rederive_run_y`, `load_run_power` and
+`plan_siblings_power`. A last-digit perturbation of every prose decimal is
+caught; a transposition is caught where a derivation anchors it.
 """
 from __future__ import annotations
 
@@ -98,8 +113,6 @@ ACCOUNTED: dict[str, dict[str, tuple[str, str]]] = {
         "29.7": ("quote", _A13[0]), "41.3": ("quote", _A13[0]),
         "72.8": ("quote", _A13[0]), "73.0": ("quote", _A13[0]),
         "0.64": _HAZARD, "0.82": _HAZARD, "0.85": _HAZARD, "0.92": _HAZARD,
-        "14.42": ("derived", "rederive_run_y"), "14.73": ("derived", "rederive_run_y"),
-        "15.30": ("derived", "rederive_run_y"), "15.34": ("derived", "rederive_run_y"),
     },
     _Y: {
         "0.27": ("derived", "rederive_run_y"),

@@ -354,6 +354,36 @@ def derived_prose() -> dict:
     }
 
 
+PLAN_X = "v4_audit_2026_08_25/PROSPECTIVE_PLAN_X_HOST_LOAD.md"
+
+
+def plan_x_quotes(rows: list[dict]) -> dict:
+    """Plan X's sentence quoting run Y, each figure beside the arm it belongs to.
+
+    Plan X quoted run Y's log ratios as percentages after the two documents that
+    carry the table were corrected, and the registry then found it. But it found
+    it by presence: swapping the two arms' figures, or the two limits, left every
+    value present and passed. So the quote is compared as the sentence it is.
+    """
+    by = {r["arm"]: r for r in rows}
+    n2, base = by["spec-dflash-n2"], by["baseline"]
+    return {
+        "run Y's change, by arm":
+            f"costs {abs(n2['change_pct']):.2f} % of the decode rate on "
+            f"`spec-dflash-n2` and {abs(base['change_pct']):.2f} % on `baseline`",
+        "the one-sided limits, in the same order":
+            f"one-sided upper limits of {n2['one_sided_bound_pct']:.2f} % and "
+            f"{base['one_sided_bound_pct']:.2f} %",
+    }
+
+
+def check_plan_x(rows: list[dict]) -> list[str]:
+    flat = " ".join((ROOT / PLAN_X).read_text(encoding="utf-8")
+                    .replace("**", "").split())
+    return [f"{PLAN_X}: does not say {want!r} ({what})"
+            for what, want in plan_x_quotes(rows).items() if want not in flat]
+
+
 def checked_figures() -> dict:
     """Every figure this file compares, keyed by document, for the registry.
 
@@ -372,7 +402,8 @@ def checked_figures() -> dict:
     bounds.update({f"the hours for {n} blocks": f"{h:.2f}"
                    for n, h in pp["predicted_hours"].items()})
     return {DOCS[0]: {**common, **{w: v for w, (v, _f) in derived_prose().items()}},
-            DOCS[1]: {**common, **bounds}}
+            DOCS[1]: {**common, **bounds},
+            PLAN_X: plan_x_quotes(rows)}
 
 
 # the pre-registration's power table: blocks, hours, the one-sided bound a true
@@ -499,9 +530,10 @@ def main() -> None:
         print(f"  {fast}: generated {tot[fast][0]}, drafted {tot[fast][1]}, "
               f"accepted {tot[fast][2]}, identical in both conditions")
     same = outputs_identical()
-    bad_out = check_outputs(same)
+    bad_out = check_outputs(same) + check_plan_x(rows)
     if bad_out:
         sys.exit("\n".join(bad_out))
+    print(f"  {PLAN_X} quotes both arms' figures beside the arm each belongs to")
     for fast, (n_same, n_fast, _n_slow) in same.items():
         print(f"  {fast}: all {n_fast} requests identical to the token, content, "
               f"reasoning and token ids, in both conditions")

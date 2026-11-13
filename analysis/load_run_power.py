@@ -648,15 +648,31 @@ def check_prose(txt: str, figures: dict | None = None) -> list[str]:
     """
     flat = _flat(txt)
     bad = []
-    for what, v in (figures or prose_figures()).items():
+    figures = figures or prose_figures()
+    for what, v in figures.items():
         if not re.search(r"(?<![\w.])" + re.escape(v) + r"(?![\w])", flat):
             bad.append(f"{what} is {v} and the plan does not carry it")
+    # The two levels' D, as the sentence that says which is which: present in
+    # the wrong order they still passed the presence check above.
+    slow, fast = figures.get("D over the slow blocks"), figures.get("D over the fast blocks")
+    if slow and fast:
+        want = f"is {slow} over the three slow blocks and {fast} over the three fast ones"
+        if want not in flat:
+            bad.append(f"D's two levels are not stated as {want!r}")
     return bad
 
 
 def checked_figures() -> dict:
     """Every prose figure this file compares without simulating, for the registry."""
     return {str(PLAN.relative_to(ROOT)): prose_figures()}
+
+
+def hazard_ends_sentence(ends: dict) -> str:
+    """The plan's sentence about the hazard interval's two ends, from their rows."""
+    f, s_ = ends["fast"], ends["slow"]
+    return (f"At the fast end of the hazard interval the last row is "
+            f"{f['-2']['moves']:.2f} and {f['0']['holds']:.2f}; at the slow "
+            f"end, {s_['-2']['moves']:.2f} and {s_['0']['holds']:.2f}.")
 
 
 def check_plan(txt, m, p_table, ms, nz, keys, dl, sg, cc, wc, ends, washouts):
@@ -725,10 +741,17 @@ def check_plan(txt, m, p_table, ms, nz, keys, dl, sg, cc, wc, ends, washouts):
         wantw = [f"{r['-2']['moves']:.2f}", f"{r['0']['holds']:.2f}"]
         if cells[1:3] != wantw:
             missing.append(f"washout row {label!r} prints {cells[1:3]} not {wantw}")
-    for label, r in ends.items():
-        for v in (f"{r['-2']['moves']:.2f}", f"{r['0']['holds']:.2f}"):
-            if v not in txt:
-                missing.append(f"hazard {label} end {v}")
+    # As the sentence, not four presences: the fast end's pair and the slow
+    # end's swapped, or each pair reversed, left all four values in the text.
+    if set(ends) == {"fast", "slow"}:
+        want = hazard_ends_sentence(ends)
+        if want not in " ".join(txt.replace("**", "").split()):
+            missing.append(f"hazard ends: expected {want!r}")
+    else:
+        for label, r in ends.items():
+            for v in (f"{r['-2']['moves']:.2f}", f"{r['0']['holds']:.2f}"):
+                if v not in txt:
+                    missing.append(f"hazard {label} end {v}")
     for want in (f"{wc['with_overhead_h']:.2f} hours",
                  f"{wc['total_h']:.2f}"):
         if want not in txt:

@@ -1507,9 +1507,9 @@ same as one this platform lacks; the second addendum below records reading it.
 > So placement is a candidate for this entry with the right order of magnitude:
 > the step is **just over a quarter** of a full displacement. It may not be read
 > as a count of threads, which an earlier version of this addendum did: every
-> target and drafter layer sits on the card, so those threads do no arithmetic
-> while decoding and are not on the critical path, and a barrier over statically
-> split work is set by its slowest thread, so displacing one costs what eight do.
+> target and drafter layer sits on the card, so those threads have almost no
+> arithmetic while decoding, the one host operation found so far being a single task,
+> and a barrier over split work is set by its slowest thread: one costs what eight do.
 > The entry is not retracted and nothing above it is withdrawn; what changes is
 > that "nothing recorded distinguishes them" has a named, measured quantity now.
 >
@@ -2229,7 +2229,7 @@ tables happen to reach, which is the only reason the figure moved. The prose
 half of this repository is, to a first approximation, unchecked.
 
 **And that census counts decimals only.** In the same prose, on the same lines,
-sit **2 657** whole numbers, **360** of which are not a string literal in the
+sit **2 657** whole numbers, **359** of which are not a string literal in the
 checker either. They are reported beside the decimals rather than folded into
 them, because the probe below sampled the decimal population and the rate it
 publishes is about that population; widening what a measured rate refers to,

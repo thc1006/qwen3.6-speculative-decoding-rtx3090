@@ -3,22 +3,29 @@
 
     python3 analysis/rederive_run_s.py            # verify, derive, print
     python3 analysis/rederive_run_s.py --json     # the same, as JSON
+    python3 analysis/rederive_run_s.py --conditions DIR   # only verify DIR
+
+The third form is what `bench/run_s_siblings.sh` runs on the directory it has
+just written, so the driver's check of its own run and the reading's check of
+the committed one are one function.
 
 Exits 0 with a message when no plan S run is committed, so the claims job can run
 it from the day it is written rather than from the day the data lands. A script
 wired in later is a script nobody wires in.
 
-Written before the data: the first version was committed while a run that was
-later abandoned sat in its third block, and no plan S run has produced a number
-since. What that run's arm-runs showed before it was stopped is recorded in the
-plan's reading section, by name.
+Written before the data. The first version was written while a first attempt at
+the run was in progress, and committed after that attempt had been stopped, in
+the commit that records why it was stopped (76d8583); nothing derived a contrast
+from it, this file included, and no plan S run has produced a number since. What
+that attempt's arm-runs showed before it was stopped is recorded in the plan's
+reading section, by name.
 
 WHY THIS VERIFIES BEFORE IT DERIVES
 -----------------------------------
 The first version read seven fields out of an arm-run record that carries
 twenty-three. It never asked whether an arm got the processors it requested,
 whether the three arms ran the same server, whether the thread count matched,
-or whether exactly one of them carried `--poll 0`. It computed a ratio and
+or whether exactly one of them carried the third arm's setting. It computed a ratio and
 printed a verdict. A run where `packed` had quietly run on the distinct mask
 would have passed it without a word.
 
@@ -61,8 +68,11 @@ PLAN = ROOT / "v4_audit_2026_08_25" / "PROSPECTIVE_PLAN_SIBLINGS.md"
 MINUS = "−"          # U+2212, which is what the documents carry
 # Flags that set a threadpool, in llama.cpp's spelling at the pinned commit:
 # `-C/--cpu-mask`, `-Cr/--cpu-range`, `--cpu-strict`, `--prio`, `--poll`, each
-# with a `-batch` twin, and the `--spec-draft-` ones that land nowhere. Only the
-# third arm may carry one, `--poll 0`.
+# with a `-batch` twin, and the `--spec-draft-` ones that land nowhere. No arm may
+# carry one. The third arm first carried `--poll 0`, and the server these runs
+# use is an OpenMP build, where ggml never reads it: what differs in the third
+# arm is the server's environment, `OMP_WAIT_POLICY`, which the record reads back
+# from `/proc` as `server_env`.
 POOL_SHORT = ("-C", "-Cr", "-Cb", "-Crb")
 POOL_WORDS = ("poll", "cpu-mask", "cpu-range", "cpu-strict", "prio")
 
@@ -111,10 +121,20 @@ def design() -> dict:
     """
     text = _plan_text()
     arms_sec = _section(text, "The three arms")
-    rows = re.findall(r"^\| `([^`]+)` \| `([0-9,]+)` \|", arms_sec, re.M)
+    rows = re.findall(r"^\| `([^`]+)` \| `([0-9,]+)` \| (.*) \|$", arms_sec, re.M)
     if len(rows) != 3:
         raise SystemExit(f"{PLAN.name}: the arm table has {len(rows)} rows of "
-                         f"the form | `name` | `mask` |, and the plan has three arms")
+                         f"the form | `name` | `mask` | and |, and the plan has "
+                         f"three arms")
+    # The server environment each arm is given, written in the table's third
+    # column as `NAME=value`. Only the OpenMP runtime's variables can appear
+    # there, and only the third arm may carry any.
+    envs = [dict(re.findall(r"`((?:OMP|GOMP|KMP)_[A-Z_]+)=([^`\s]+)`", r[2]))
+            for r in rows]
+    if envs[0] or envs[1] or not envs[2]:
+        raise SystemExit(f"{PLAN.name}: the arm table gives the environments "
+                         f"{envs}; the first two arms take none and the third "
+                         f"exactly the setting it differs by")
     flat = " ".join(arms_sec.split())
     m = re.search(r"It runs them as `([^`]+)`, `([^`]+)` and `([^`]+)`", flat)
     if not m:
@@ -123,17 +143,17 @@ def design() -> dict:
     names = list(m.groups())
     if len(set(names)) != 3:
         raise SystemExit(f"{PLAN.name}: the runner's arm names repeat: {names}")
-    masks = {name: frozenset(cpus(mask)) for name, (_cond, mask) in zip(names, rows)}
+    masks = {name: frozenset(cpus(mask)) for name, (_cond, mask, _and) in zip(names, rows)}
     sizes = {len(v) for v in masks.values()}
     if len(sizes) != 1:
         raise SystemExit(f"{PLAN.name}: the masks have {sorted(sizes)} processors; "
                          f"the plan holds the thread count fixed, so they must "
                          f"be the same size")
-    distinct, packed, nopoll = names
-    if masks[packed] != masks[nopoll]:
+    distinct, packed, passive = names
+    if masks[packed] != masks[passive]:
         raise SystemExit(f"{PLAN.name}: the second and third arms have different "
                          f"masks, and the third is meant to differ from the "
-                         f"second by `--poll 0` alone")
+                         f"second by its environment alone")
     if masks[distinct] == masks[packed]:
         raise SystemExit(f"{PLAN.name}: the first two arms have the same mask, so "
                          f"the primary contrast is between nothing")
@@ -148,9 +168,27 @@ def design() -> dict:
         raise SystemExit(f"{PLAN.name}: the chosen row says {blocks} blocks and "
                          f"{arm_runs} arm-runs, which is not {len(names)} arms "
                          f"a block")
-    return {"distinct": distinct, "packed": packed, "nopoll": nopoll,
+
+    # What the plan fixes for every arm alike: the order, the token cap and the
+    # build. Read from the plan so a run with a different one is refused rather
+    # than compared: the predecessor structure the plan states is `latin`'s, the
+    # same GPU work is the cap's, and every line number the plan cites is the
+    # build's.
+    def one_of(pat, what, src=flat):
+        found = re.findall(pat, src)
+        if len(found) != 1:
+            raise SystemExit(f"{PLAN.name}: {what} is written {len(found)} times "
+                             f"in a form this can read (/{pat}/), and it has to be "
+                             f"exactly once")
+        return found[0]
+    order = one_of(r"blocks of three in `(\w+)` order", "the order")
+    cap = int(one_of(r"to a cap of `(\d+)` tokens", "the token cap"))
+    commit = one_of(r"built from `([0-9a-f]{40})`", "the build",
+                    " ".join(text.split()))
+    return {"distinct": distinct, "packed": packed, "passive": passive,
             "arms": tuple(names), "masks": masks, "blocks": blocks,
-            "threads": sizes.pop()}
+            "threads": sizes.pop(), "env": dict(zip(names, envs)),
+            "order": order, "cap": cap, "commit": commit}
 
 
 def assumed_sd_pct() -> float:
@@ -287,14 +325,15 @@ def _run_dir() -> pathlib.Path | None:
     return found[0] if found else None
 
 
-def _normalised_argv(rec: dict, arm: str, d: dict) -> tuple[list | None, list]:
-    """The argv with the two designed differences taken out, and what was wrong.
+def _normalised_argv(rec: dict) -> tuple[list | None, list]:
+    """The argv with the designed difference taken out, and what was wrong.
 
-    `taskset -c <mask>` is the first designed difference and must name the mask
-    the record says was requested; `--poll 0` is the second and must appear in
-    the third arm exactly once and nowhere else. What is left has to be the same
-    for every arm-run, so a model, a drafter, a draft length, a context size or
-    a thread count that differs anywhere shows up as a difference here.
+    `taskset -c <mask>` is the one difference argv may show, and it must name the
+    mask the record says was requested. The third arm's difference is its
+    environment, which argv does not carry, so no threadpool flag may appear in
+    any arm. What is left has to be the same for every arm-run, so a model, a
+    drafter, a draft length, a context size or a thread count that differs
+    anywhere shows up as a difference here.
     """
     bad = []
     argv = rec.get("argv")
@@ -307,17 +346,10 @@ def _normalised_argv(rec: dict, arm: str, d: dict) -> tuple[list | None, list]:
         bad.append(f"taskset was given {argv[2]!r} and the record says "
                    f"{rec.get('cpus_requested')!r} was requested")
     argv = argv[3:]
-    if arm == d["nopoll"]:
-        at = [i for i, a in enumerate(argv) if a == "--poll"]
-        if len(at) != 1 or at[0] + 1 >= len(argv) or argv[at[0] + 1] != "0":
-            bad.append(f"the third arm carries --poll {len(at)} time(s), and it "
-                       f"must carry `--poll 0` exactly once")
-        else:
-            del argv[at[0]:at[0] + 2]
     left = [a for a in argv if _pool_flag(a)]
     if left:
-        bad.append(f"threadpool flags {left} in argv, and the plan varies only "
-                   f"`--poll` and only in the third arm")
+        bad.append(f"threadpool flags {left} in argv, which an OpenMP build does "
+                   f"not read and the plan does not vary")
     return argv, bad
 
 
@@ -351,9 +383,37 @@ def conditions(run: pathlib.Path, d: dict | None = None) -> tuple[list, dict]:
     recs = []
     for f in files:
         try:
-            recs.append((f.name, json.loads(f.read_text(encoding="utf-8"))))
+            r = json.loads(f.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as e:
             bad.append(f"{f.name}: does not parse: {e}")
+            continue
+        if not isinstance(r, dict):
+            bad.append(f"{f.name}: is not an arm-run record")
+            continue
+        recs.append((f.name, r))
+    # A refusal, not a crash: a record of the wrong shape further down would
+    # raise, and the reasons gathered so far would be lost with it.
+    shape = []
+    for name, r in recs:
+        if not isinstance(r.get("repeat"), int) or isinstance(r.get("repeat"), bool):
+            shape.append(f"{name}: repeat is {r.get('repeat')!r}, not a block number")
+        for x in r.get("rows") or []:
+            miss = [k for k in ("tag", "predicted_n", "predicted_ms", "t_start")
+                    if not isinstance(x, dict) or x.get(k) is None]
+            if miss:
+                shape.append(f"{name}: a request row has no {', '.join(miss)}")
+                break
+    if shape:
+        return bad + shape, {}
+
+    # What the plan fixes for every arm alike.
+    if man.get("order_mode") != d["order"]:
+        bad.append(f"the order is {man.get('order_mode')!r} and the plan "
+                   f"registers {d['order']!r}; the predecessor structure the "
+                   f"plan states is that order's")
+    if man.get("max_tokens") != d["cap"]:
+        bad.append(f"the token cap is {man.get('max_tokens')!r} and the plan "
+                   f"registers {d['cap']}")
 
     crashed = [n for n, r in recs if r.get("crashed")]
     if crashed:
@@ -414,6 +474,11 @@ def conditions(run: pathlib.Path, d: dict | None = None) -> tuple[list, dict]:
             bad.append(f"{len(vals)} different values of {field} across the "
                        f"arm-runs, so the arms did not run the same server")
     one("server_loaded_commit")
+    commits = {str(r.get("server_loaded_commit") or "") for _n, r in recs}
+    if any(len(c) < 7 or not d["commit"].startswith(c) for c in commits):
+        bad.append(f"the server reports commit(s) {sorted(commits)}, and the plan "
+                   f"is written against {d['commit'][:12]}: every source line it "
+                   f"cites is that build's")
     one("server_lib_sha256")
     # Path and content, not inode or mtime: those identify a file, and the
     # question is whether the same code was mapped.
@@ -425,27 +490,59 @@ def conditions(run: pathlib.Path, d: dict | None = None) -> tuple[list, dict]:
                    "that nothing of one arm's placement survives into the next "
                    "rests on every arm-run starting a fresh server")
 
-    # 3. the argv: the designed differences out, everything else identical
-    shapes, recorded_poll = set(), []
+    # 3. the argv: the mask out, everything else identical, no pool flag
+    shapes, recorded_poll, env_bad, gomp_bad, thr_bad = set(), [], [], [], []
     for name, r in recs:
         arm = r.get("arm")
         if arm not in d["masks"]:
             continue
-        argv, why = _normalised_argv(r, arm, d)
+        argv, why = _normalised_argv(r)
         bad += [f"{name}: {w}" for w in why]
         if argv is not None:
             shapes.add(json.dumps(argv))
-        if "poll" not in r:
-            recorded_poll.append(f"{name}: no `poll` field")
-        elif r["poll"] != (0 if arm == d["nopoll"] else None):
-            recorded_poll.append(f"{name}: `poll` is {r['poll']!r}")
+        for field in ("poll", "poll_batch"):
+            if field not in r:
+                recorded_poll.append(f"{name}: no `{field}` field")
+            elif r[field] is not None:
+                recorded_poll.append(f"{name}: `{field}` is {r[field]!r}")
+        # 3a. the third arm's difference, read back from the server's /proc
+        env = r.get("server_env")
+        if not isinstance(env, dict) or "error" in env:
+            env_bad.append(f"{name}: server_env is {env!r}")
+        elif env != d["env"][arm]:
+            env_bad.append(f"{name}: {arm} was given {env} and the plan "
+                           f"gives it {d['env'][arm]}")
+        # 3b. the build is an OpenMP one, so the environment is the lever
+        mapped = r.get("server_mapped")
+        if isinstance(mapped, dict) and "error" not in mapped and not any(
+                pathlib.PurePath(q).name.startswith("libgomp") for q in mapped):
+            gomp_bad.append(name)
+        # 3c. the observation the mechanism needs
+        thr = r.get("server_threads")
+        if (not isinstance(thr, dict) or "error" in thr
+                or not isinstance(thr.get("threads"), list) or not thr["threads"]
+                or not isinstance(thr.get("clk_tck"), int)
+                or not all(isinstance(t, dict) and isinstance(t.get("ticks"), int)
+                           and isinstance(t.get("main"), bool)
+                           for t in thr["threads"])):
+            thr_bad.append(f"{name}: server_threads is {thr!r}"[:160])
     if len(shapes) > 1:
         bad.append(f"{len(shapes)} different server command lines once the mask "
-                   f"and the third arm's `--poll 0` are taken out; the arms "
-                   f"differ in something the plan does not vary")
+                   f"is taken out; the arms differ in something the plan does "
+                   f"not vary")
     if recorded_poll:
         bad.append(f"the recorded poll does not match the design: "
                    f"{'; '.join(recorded_poll[:3])}")
+    if env_bad:
+        bad.append(f"the server environment does not match the design: "
+                   f"{'; '.join(env_bad[:3])}")
+    if gomp_bad:
+        bad.append(f"{len(gomp_bad)} arm-run(s) mapped no libgomp, e.g. "
+                   f"{gomp_bad[0]}: without OpenMP the third arm's setting "
+                   f"reaches nothing")
+    if thr_bad:
+        bad.append(f"the per-thread processor time is missing: "
+                   f"{'; '.join(thr_bad[:2])}")
 
     # 4. the same work: every prompt, every request run to the cap
     tags, cap = man.get("prompt_tags"), man.get("max_tokens")
@@ -476,8 +573,8 @@ def conditions(run: pathlib.Path, d: dict | None = None) -> tuple[list, dict]:
         return bad, info
     try:
         sched, n_blocks = observed_schedule(run)
-    except SystemExit as e:
-        bad.append(f"the order cannot be rebuilt: {e}")
+    except (SystemExit, KeyError, TypeError, ValueError, json.JSONDecodeError) as e:
+        bad.append(f"the order cannot be rebuilt: {type(e).__name__}: {e}")
         return bad, info
     counts = {a: dict(sorted(Counter(v).items())) for a, v in sorted(sched.items())}
     if not is_position_balanced(sched):
@@ -486,6 +583,44 @@ def conditions(run: pathlib.Path, d: dict | None = None) -> tuple[list, dict]:
                    f"the same number of times")
     info.update({"positions": counts, "blocks_observed": n_blocks})
     return bad, info
+
+
+def other_threads_cpu_s(run: pathlib.Path, d: dict) -> dict:
+    """Per arm, the mean processor seconds the server's threads OTHER than the
+    main one spent while the requests ran.
+
+    Descriptive, not part of any band. It is the observation the plan's
+    candidate has never had: a worker that spins between graphs accrues
+    processor time and one that sleeps does not. It does not separate
+    libgomp's workers from the server's other threads, which carry the same
+    name, so it is read as a difference between arms that share everything
+    but the wait policy, the packed and passive arms, and not as a level.
+    """
+    per_arm: dict = {a: [] for a in d["arms"]}
+    for f in sorted(run.glob("*__rep*.json")):
+        r = json.loads(f.read_text(encoding="utf-8"))
+        thr = r["server_threads"]
+        per_arm[r["arm"]].append(
+            sum(t["ticks"] for t in thr["threads"] if not t["main"])
+            / thr["clk_tck"])
+    return {a: st.fmean(v) for a, v in per_arm.items()}
+
+
+def spin_observed(cpu_s: dict, d: dict) -> bool:
+    """Whether the workers were seen to spin, by the plan's own rule.
+
+    The predicted band says the candidate stands only if the other threads'
+    processor time in the passive arm is at most half of that in the packed arm,
+    per arm-run. Parsed from the band's text rather than held here.
+    """
+    sec = " ".join(_section(_plan_text(), "The pre-registered reading").split())
+    m = re.search(r"processor time in `packed-passive` at most (half) of that in "
+                  r"`packed`, per arm-run", sec)
+    if not m:
+        raise SystemExit(f"{PLAN.name}: the predicted band does not state the "
+                         f"spinning rule in a form this can read")
+    packed, passive = cpu_s[d["packed"]], cpu_s[d["passive"]]
+    return packed > 0 and passive <= 0.5 * packed
 
 
 def derive(run: pathlib.Path | None = None) -> dict:
@@ -502,7 +637,7 @@ def derive(run: pathlib.Path | None = None) -> dict:
     blocks = load_blocks(run)
     table = bands()
     rows = []
-    for base, other in ((d["distinct"], d["packed"]), (d["packed"], d["nopoll"])):
+    for base, other in ((d["distinct"], d["packed"]), (d["packed"], d["passive"])):
         have = sorted(b for b, v in blocks.items() if base in v and other in v)
         if len(have) != d["blocks"]:
             raise SystemExit(
@@ -530,11 +665,21 @@ def derive(run: pathlib.Path | None = None) -> dict:
             "ci_lo_pct": (math.exp(m - half) - 1) * 100,
             "ci_hi_pct": (math.exp(m + half) - 1) * 100,
             "half_width_pct": (math.exp(half) - 1) * 100,
+            # The design tables' half width and spreads are mean log ratios
+            # times a hundred, which is not the same scale as a back-transformed
+            # percentage: 1.33 there is 1.34 here at twelve blocks. Both are
+            # given, each labelled, so nothing is compared across the two.
+            "half_width_log_x100": half * 100,
             "blocks": len(lr), "df": df, "mean_log_ratio": m,
-            "sd_log_ratio": sd, "sd_pct": (math.exp(sd) - 1) * 100,
+            "sd_log_ratio": sd, "sd_log_x100": sd * 100,
         })
     primary = rows[0]
+    cpu_s = other_threads_cpu_s(run, d)
+    spun = spin_observed(cpu_s, d)
+    band = verdict(primary["change_pct"], table)
     return {"run": run.name, "rows": rows,
+            "other_threads_cpu_s": cpu_s, "spin_observed": spun,
+            "candidate_stands": "candidate stands" in band and spun,
             "bands": [{"lo": lo if math.isfinite(lo) else None,
                        "hi": hi if math.isfinite(hi) else None, "reading": t}
                       for lo, hi, t in table],
@@ -547,10 +692,22 @@ def derive(run: pathlib.Path | None = None) -> dict:
 
 def main() -> int:
     args = sys.argv[1:]
+    if args[:1] == ["--conditions"]:
+        if len(args) != 2:
+            print("usage: rederive_run_s.py --conditions DIR", file=sys.stderr)
+            return 2
+        bad, info = conditions(pathlib.Path(args[1]))
+        for b in bad:
+            print(f"FAIL: {b}", file=sys.stderr)
+        if bad:
+            return 1
+        print(f"every condition plan S registers holds in {args[1]}: "
+              f"{info.get('arm_runs')} arm-runs, positions {info.get('positions')}")
+        return 0
     for a in args:
         if a != "--json":
-            print(f"unknown argument {a!r}; the only one is --json",
-                  file=sys.stderr)
+            print(f"unknown argument {a!r}; the only ones are --json and "
+                  f"--conditions DIR", file=sys.stderr)
             return 2
     as_json = "--json" in args
     d = design()
@@ -580,17 +737,26 @@ def main() -> int:
               f"{_pct(r['change_pct'])}  "
               f"[{_pct(r['ci_lo_pct'])}, {_pct(r['ci_hi_pct'])}]")
         print(f"     {r['blocks']} blocks, df {r['df']}, half width "
-              f"{_pct(r['half_width_pct'])}, within-block sd "
-              f"{r['sd_pct']:.3f} % against the {out['assumed_sd_pct']:.3f} % and "
-              f"{out['assumed_effect_sd_pct']:.3f} % the design was computed on")
+              f"{_pct(r['half_width_pct'])}")
+        print(f"     on the design table's scale, log ratio x100: half width "
+              f"{r['half_width_log_x100']:.2f}, within-block sd "
+              f"{r['sd_log_x100']:.3f} against the {out['assumed_sd_pct']:.3f} and "
+              f"{out['assumed_effect_sd_pct']:.3f} the design was computed on")
     p = out["rows"][0]
     print(f"\n  primary, packed against distinct: {_pct(p['change_pct'])}")
     print(f"  pre-registered reading: {out['verdict_primary']}")
+    if "candidate stands" in out["verdict_primary"] and not out["candidate_stands"]:
+        print("  BUT the other threads' processor time does not show the workers "
+              "spinning, so by the plan's rule the candidate does not stand: "
+              "sharing a core costs this much and the spinning worker is not why")
     if len(out["interval_reaches"]) > 1:
         print("  its 95 % interval reaches: "
               + "; and ".join(out["interval_reaches"]))
-    print("  secondary, nopoll against packed: reported above; the plan registers "
-          "no numeric band for it")
+    print("  secondary, passive against packed: reported above; the plan "
+          "registers no numeric band for it")
+    print("  processor seconds of the server's other threads, per arm-run:")
+    for arm, v in out["other_threads_cpu_s"].items():
+        print(f"    {arm:34s} {v:8.1f} s")
     print("\n  the design, verified from the arm-runs and not from a label:")
     for arm, pos in out["positions"].items():
         print(f"    {arm:34s} positions {pos}")

@@ -20,11 +20,14 @@
 #
 # WHAT THIS REFUSES, each for a reason this repository has already paid for:
 #
-#   1. a GPU that is already being measured. The lock is whole-host.
+#   1. a GPU that is already being measured. The lock is whole-host: this asks
+#      bench/host_guard.py, which searches every lock path and the process table,
+#      and then takes the lock itself, atomically, and removes it on exit.
 #   2. clocks that are ALREADY locked when it starts. Something left them that way
 #      and a run inheriting them is a run whose treatment it did not set.
 #   3. a load binary that is not this repository's source. Run Y's launcher refuses
 #      a runner that is not `bench/retest_runner.py` at HEAD, for the same reason.
+#      Outside a git checkout there is no HEAD to compare with, and it says so.
 #   4. a card that is not declared in `tests/test_harness_invariants.py`. A figure
 #      from an undeclared card can be attributed to any 3090 here.
 #   5. a lock the driver did not actually apply. Read back, every time.
@@ -32,8 +35,9 @@
 #      the power cap, and a run whose clock moved is not a run at locked clocks.
 #      Checked against the sampler's own trace at the end, not assumed.
 #   7. a restore that did not happen. The clocks are restored from a trap on every
-#      exit path and the restore is read back; a card left locked would silently
-#      halve every later measurement on this host.
+#      exit path and the restore is read back from the idle card's clock, and a
+#      restore that did not take ends the run with status 3; a card left locked
+#      would silently halve every later measurement on this host.
 set -u
 
 LABEL="${1:-pilotA}"
@@ -104,7 +108,10 @@ mkdir -p "$OUT" || die "cannot create $OUT"
 #    a binary nobody can tie to a commit.
 SRC="$REPO/bench/vram_bandwidth.cu"
 [ -f "$SRC" ] || die "no $SRC"
-if git -C "$REPO" rev-parse --git-dir > /dev/null 2>&1; then
+if ! git -C "$REPO" rev-parse --git-dir > /dev/null 2>&1; then
+    echo "NOTE: $REPO is not a git checkout, so $SRC cannot be compared with a" >&2
+    echo "      commit; its sha256 goes into the manifest and that is all." >&2
+else
     want="$(git -C "$REPO" show HEAD:bench/vram_bandwidth.cu | sha256sum | cut -d' ' -f1)"
     have="$(sha256sum "$SRC" | cut -d' ' -f1)"
     [ "$want" = "$have" ] || die "$SRC differs from HEAD. Commit it or check it out:
@@ -112,6 +119,11 @@ if git -C "$REPO" rev-parse --git-dir > /dev/null 2>&1; then
       tree $have"
 fi
 LOAD="$OUT/vram_bandwidth"
+# The load runs on CUDA's device 0 and every nvidia-smi call here names
+# `-i $GPU_INDEX`. On a host with more than one card those are the same card only
+# if CUDA numbers them by bus as nvidia-smi does, and only if CUDA sees the one.
+export CUDA_DEVICE_ORDER=PCI_BUS_ID
+export CUDA_VISIBLE_DEVICES="$GPU_INDEX"
 "$NVCC" -O3 -arch=sm_86 -Xcompiler -Wall,-Wextra -o "$LOAD" "$SRC" \
     > "$OUT/build.log" 2>&1 || { cat "$OUT/build.log" >&2; die "the load did not build"; }
 
@@ -160,24 +172,100 @@ inherited_lock_note() {
     fi
 }
 
+# Non-zero if either reset failed. They were `|| true` and the restore was then
+# "read back" from `clocks.max.sm`, which reads its default while a lock is set
+# (see above), so refusal 7 could not fire.
 unlock() {
-    sudo -n nvidia-smi -i "$GPU_INDEX" -rgc > /dev/null 2>&1 || true
-    sudo -n nvidia-smi -i "$GPU_INDEX" -rmc > /dev/null 2>&1 || true
+    local rc=0 said
+    TOUCHED=1
+    said=$(sudo -n nvidia-smi -i "$GPU_INDEX" -rgc 2>&1) \
+        || { rc=1; echo "reset of the core clock failed: $said" >&2; }
+    said=$(sudo -n nvidia-smi -i "$GPU_INDEX" -rmc 2>&1) \
+        || { rc=1; echo "reset of the memory clock failed: $said" >&2; }
     sleep 1
+    return "$rc"
 }
 
+# 7. read the restore back, from what a lock LOOKS like: an idle card above its
+#    idle clock. A card that is not idle cannot answer, and that is a failure to
+#    verify rather than a pass.
+smi() { nvidia-smi -i "$GPU_INDEX" --query-gpu="$1" --format=csv,noheader,nounits 2>/dev/null; }
 RESTORED=0
+RESTORE_FAILED=0
+TOUCHED=0
 restore() {
     [ "$RESTORED" = 1 ] && return 0
     RESTORED=1
-    unlock
-    # 7. read the restore back. A card left locked halves every later measurement.
-    local sm mem
-    sm=$(nvidia-smi -i "$GPU_INDEX" --query-gpu=clocks.max.sm --format=csv,noheader,nounits)
-    mem=$(nvidia-smi -i "$GPU_INDEX" --query-gpu=clocks.max.memory --format=csv,noheader,nounits)
-    echo "restored: max sm ${sm} MHz, max mem ${mem} MHz" | tee -a "$OUT/clocks.log"
+    [ "$TOUCHED" = 1 ] || return 0
+    unlock || RESTORE_FAILED=1
+    local sm util apps waited=0 said
+    while :; do
+        sm=$(smi clocks.sm); util=$(smi utilization.gpu)
+        apps=$(nvidia-smi -i "$GPU_INDEX" --query-compute-apps=pid \
+            --format=csv,noheader 2>/dev/null | grep -c . || true)
+        case "$sm$util" in *[!0-9]*|"") said="unreadable: sm '$sm', util '$util'"; break ;; esac
+        if [ "$util" -ne 0 ] || [ "$apps" -ne 0 ]; then
+            said="the card is busy (util $util %, $apps compute apps), so the restore cannot be read"
+        elif [ "$sm" -le "$IDLE_SM_MAX" ]; then
+            said=""; break
+        else
+            said="idle at $sm MHz, above the $IDLE_SM_MAX it idles at unlocked"
+        fi
+        [ "$waited" -ge 15 ] && break
+        sleep 1; waited=$((waited + 1))
+    done
+    if [ -n "$said" ]; then
+        RESTORE_FAILED=1
+        echo "FAIL: restore not confirmed: $said" | tee -a "$OUT/clocks.log" >&2
+    else
+        echo "restored: idle at $sm MHz after ${waited}s" | tee -a "$OUT/clocks.log"
+    fi
 }
-trap 'restore; kill "${TELE_PID:-0}" 2>/dev/null || true' EXIT INT TERM
+
+# Every child this script starts is named here so the exit path can stop it.
+# The trap used to be `kill "${TELE_PID:-0}"` on EXIT, INT and TERM: before the
+# telemetry started that is `kill 0`, which signals the whole process group, the
+# caller included, and on INT or TERM it re-entered itself until bash overflowed
+# its stack; after a TERM it also carried on into the next phase, unlocked and
+# unsampled. Now a signal only exits, and the exit does the cleaning, once.
+TELE_PID=""
+HOLD_TELE_PID=""
+LOAD_PID=""
+LOCK_OURS=0
+# shellcheck disable=SC2317  # called from a trap, which shellcheck cannot see
+cleanup() {
+    [ -n "$LOAD_PID" ] && kill "$LOAD_PID" 2>/dev/null
+    [ -n "$HOLD_TELE_PID" ] && kill "$HOLD_TELE_PID" 2>/dev/null
+    [ -n "$TELE_PID" ] && kill "$TELE_PID" 2>/dev/null
+    restore
+    [ "$LOCK_OURS" = 1 ] && rm -f "$GPU_LOCK"
+    [ "$RESTORE_FAILED" = 1 ] && exit 3
+    return 0
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+# The lock, taken now that the exit path removes it. Created with noclobber, so a
+# second measurement that passed the guard's check in the same moment cannot also
+# take it, and removed only by the process that created it.
+GPU_LOCK="${BENCH_GPU_LOCK:-$HOME/.gpu-in-use.lock}"
+( set -C; printf 'plan Z layer A %s, pid %s, started %s\nhost %s\nout %s\n' \
+    "$LABEL" "$$" "$(date -Is)" "$(hostname)" "$OUT" > "$GPU_LOCK" ) 2>/dev/null \
+    || die "$GPU_LOCK appeared after the check, so another measurement started here"
+LOCK_OURS=1
+
+# The load in the background and waited for, so a signal is acted on now rather
+# than when a thirty minute phase ends.
+run_load() {  # run_load OUT ERR ARGS...
+    local out="$1" err="$2" rc=0
+    shift 2
+    "$LOAD" "$@" > "$out" 2> "$err" &
+    LOAD_PID=$!
+    wait "$LOAD_PID" || rc=$?
+    LOAD_PID=""
+    return "$rc"
+}
 
 # 5. apply and READ BACK
 lock() {  # lock CORE_MHZ MEM_MHZ
@@ -221,7 +309,7 @@ cool_to() {  # cool_to CELSIUS WHY
 }
 
 inherited_lock_note
-unlock
+unlock || die "could not reset the clocks before starting"
 
 say "plan Z layer A -> $(basename "$OUT")"
 {
@@ -238,8 +326,8 @@ say "calibrate"
 : > "$OUT/calibrate.csv"
 for core in $CAL_CLOCKS; do
     lock "$core" "$MEM_CLOCK"
-    "$LOAD" --seconds "$CAL_SECONDS" --window "$((CAL_SECONDS / 2))" \
-        > "$OUT/cal_$core.csv" 2> "$OUT/cal_$core.err" \
+    run_load "$OUT/cal_$core.csv" "$OUT/cal_$core.err" \
+        --seconds "$CAL_SECONDS" --window "$((CAL_SECONDS / 2))" \
         || die "the load failed at core $core"
     best=$(tail -n +2 "$OUT/cal_$core.csv" | cut -d, -f5 | sort -g | tail -1)
     echo "$core,$best" >> "$OUT/calibrate.csv"
@@ -269,18 +357,19 @@ echo "  at plateau, highest first: $CANDIDATES"
 #     `-lgc` is a request and the power cap outranks it; finding that out at the end
 #     of a forty-five minute run costs the run.
 hold_test() {  # hold_test CORE
-    local core="$1" t csv
+    local core="$1" csv
     lock "$core" "$MEM_CLOCK"
     csv="$OUT/hold_$core.csv"
     BENCH_TELEMETRY_OUT="$csv" bash "$HERE/gpu_telemetry.sh" full 1 "hold$core" &
-    t=$!
+    HOLD_TELE_PID=$!
     sleep 2
-    kill -0 "$t" 2>/dev/null || die "telemetry died during the hold test"
-    "$LOAD" --seconds "${Z_HOLD_SECONDS:-60}" --window 10 \
-        > "$OUT/hold_$core.load.csv" 2> "$OUT/hold_$core.err" \
-        || { kill "$t" 2>/dev/null; die "the load failed at core $core"; }
-    kill "$t" 2>/dev/null || true
-    wait "$t" 2>/dev/null || true
+    kill -0 "$HOLD_TELE_PID" 2>/dev/null || die "telemetry died during the hold test"
+    run_load "$OUT/hold_$core.load.csv" "$OUT/hold_$core.err" \
+        --seconds "${Z_HOLD_SECONDS:-60}" --window 10 \
+        || die "the load failed at core $core"
+    kill "$HOLD_TELE_PID" 2>/dev/null || true
+    wait "$HOLD_TELE_PID" 2>/dev/null || true
+    HOLD_TELE_PID=""
     python3 "$HERE/check_clocks_held.py" "$csv" "$core" "$MEM_CLOCK" \
         > "$OUT/hold_$core.verdict" 2>&1
 }
@@ -308,7 +397,7 @@ done
 # The lock goes on after the cooling and the sampler starts after the lock, so the
 # trace covers locked time only and `check_clocks_held.py` can hold every sample in
 # it to the lock.
-unlock
+unlock || die "could not reset the clocks before cooling"
 cool_to "$COOL_TO" "before the ascending phase, with the clocks restored"
 lock "$LOCK_CORE" "$MEM_CLOCK"
 TELE_CSV="$OUT/gpu_telemetry_${LABEL}_$STAMP.csv"
@@ -322,8 +411,8 @@ sleep 2
 kill -0 "$TELE_PID" 2>/dev/null || die "telemetry died at startup"
 
 say "ascending"
-"$LOAD" --seconds "$ASC_SECONDS" --window "$ASC_WINDOW" \
-    > "$OUT/ascending.csv" 2> "$OUT/ascending.err" || die "the ascending phase failed"
+run_load "$OUT/ascending.csv" "$OUT/ascending.err" \
+    --seconds "$ASC_SECONDS" --window "$ASC_WINDOW" || die "the ascending phase failed"
 # NO cooling here. Plan Z says the descending phase comes "after the plateau",
 # and the first version of this cooled first: the duty cycle then equilibrated near
 # idle and the phase spanned 1.2 C at 52, never crossing the ascending phase's
@@ -331,11 +420,13 @@ say "ascending"
 # or the control does not exist, and it did not: no temperature was visited by
 # both, so the run produced a tidy number and no attribution.
 say "descending"
-"$LOAD" --seconds "$DESC_SECONDS" --window "$DESC_WINDOW" --idle "$IDLE" \
-    > "$OUT/descending.csv" 2> "$OUT/descending.err" || die "the descending phase failed"
+run_load "$OUT/descending.csv" "$OUT/descending.err" \
+    --seconds "$DESC_SECONDS" --window "$DESC_WINDOW" --idle "$IDLE" \
+    || die "the descending phase failed"
 
 kill "$TELE_PID" 2>/dev/null || true
 wait "$TELE_PID" 2>/dev/null || true
+TELE_PID=""
 restore
 
 # --- fail closed -----------------------------------------------------------
@@ -350,6 +441,18 @@ tele_rows=0
 echo "telemetry rows:$tele_rows"
 [ "$tele_rows" -ge 60 ] || { echo "FAIL: $TELE_CSV holds $tele_rows samples" >&2; rc=1; }
 
+# 4. and every window was measured on the card the manifest names. The load
+#    writes its uuid into every row; nothing compared it with CARD_UUID.
+python3 - "$CARD_UUID" "$OUT/ascending.csv" "$OUT/descending.csv" <<'UUID' || rc=1
+import csv
+import sys
+
+want, files = sys.argv[1], sys.argv[2:]
+bad = sorted({r.get("gpu_uuid") for f in files for r in csv.DictReader(open(f))}
+             - {want})
+if bad:
+    sys.exit(f"FAIL: windows measured on {bad}, and the manifest names {want}")
+UUID
 # 6. the clock HELD. `-lgc` is a request and the power cap outranks it.
 python3 "$HERE/check_clocks_held.py" "$TELE_CSV" "$LOCK_CORE" "$MEM_CLOCK" || rc=1
 # 8. and the CONTROL ran. Two phases that share no temperature cannot separate
@@ -357,6 +460,8 @@ python3 "$HERE/check_clocks_held.py" "$TELE_CSV" "$LOCK_CORE" "$MEM_CLOCK" || rc
 #    exists. A run that did not execute its own control must not read as one that
 #    did, so this is a condition and not a note.
 python3 "$REPO/analysis/layer_a_slope.py" --check "$OUT" || rc=1
+# 7. and the restore was confirmed, read back above.
+[ "$RESTORE_FAILED" = 0 ] || rc=1
 verdict=FAILED
 [ "$rc" = 0 ] && verdict=complete
 echo "=== layer A $verdict -> $OUT ==="

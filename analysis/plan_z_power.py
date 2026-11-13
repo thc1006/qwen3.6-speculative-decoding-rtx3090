@@ -299,7 +299,14 @@ def _check_table(lines, head_starts, want, bad, doc, what):
             if not ln.strip().startswith("|"):
                 break
             continue
+        # A row nobody derived, or a row twice, is refused: looking up only the
+        # expected rows let either sit in the table and pass.
         if cells[0] not in want:
+            bad.append(f"{doc}: the {what} table has a row {cells[0]!r} that nothing "
+                       f"derives")
+            continue
+        if cells[0] in seen:
+            bad.append(f"{doc}: the {what} table has row {cells[0]!r} twice")
             continue
         seen.add(cells[0])
         for col, cell in zip(cols, cells):
@@ -351,6 +358,11 @@ def prose_figures() -> dict:
         # checks it: `layer_a_slope.py` computes it and asserts it is below one
         # per cent, and the round's own README does not quote it.
         "layer A's calibration spread": f"{_layer_a()['spread']:.3f} %",
+        # And the two whole numbers the outcome section quotes from layer A,
+        # which no census reads: both were changed in a review and nothing failed.
+        "layer A's samples": f"all {len(_layer_a()['tel'])} telemetry samples",
+        "layer A's ratio to the bound":
+            f"{_layer_a()['need_B'] / _layer_a()['B_hi']:,.0f} times the upper bound",
     }
 
 

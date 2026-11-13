@@ -177,6 +177,52 @@ def ols(xs, ys):
             "resid_sd": math.sqrt(s2), "lag1": num / den if den else float("nan")}
 
 
+def within_phase_slope(phases: dict) -> dict | None:
+    """One slope, an intercept per phase, and an interval that allows for drift.
+
+    The phases are two invocations of the load and differ by a constant that is
+    run-to-run variation (section 4), so one line through both fits that offset as
+    if it were temperature: the pilot's first published slope was mostly the
+    0.022 % between the two runs, opposite in sign to the ascending phase's slope
+    and several times the size of either phase's, inside
+    either phase. Each phase is centred on its own means and the slope is fitted
+    through both centred sets, which is the common slope of an analysis of
+    covariance.
+
+    Consecutive windows are not independent, so the interval is widened for the
+    residuals' lag-one correlation rho, taken within each phase: the standard
+    error by sqrt((1 + rho) / (1 - rho)), which is the factor for a regressor
+    that drifts as slowly as temperature does, and the degrees of freedom from
+    the effective count n (1 - rho) / (1 + rho). A negative rho is not used to
+    narrow it.
+    """
+    xs_c, ys_c = [], []
+    for w in phases:
+        if len(w) < 3:
+            return None
+        mx, my = st.fmean(r["temp"] for r in w), st.fmean(r["bw"] for r in w)
+        xs_c.append([r["temp"] - mx for r in w])
+        ys_c.append([r["bw"] - my for r in w])
+    sxx = sum(x * x for xs in xs_c for x in xs)
+    if sxx == 0:
+        return None
+    b = sum(x * y for xs, ys in zip(xs_c, ys_c) for x, y in zip(xs, ys)) / sxx
+    n = sum(len(xs) for xs in xs_c)
+    res = [[y - b * x for x, y in zip(xs, ys)] for xs, ys in zip(xs_c, ys_c)]
+    den = sum(r * r for rs in res for r in rs)
+    s2 = den / (n - 1 - len(phases))
+    se = math.sqrt(s2 / sxx)
+    num = sum(rs[i] * rs[i + 1] for rs in res for i in range(len(rs) - 1))
+    rho = num / den if den else 0.0
+    k, n_eff = 1.0, float(n)
+    if rho > 0:
+        k = math.sqrt((1 + rho) / (1 - rho))
+        n_eff = n * (1 - rho) / (1 + rho)
+    df = max(int(n_eff) - 1 - len(phases), 1)
+    return {"slope": b, "half": t_critical_975(df) * se * k, "rho": rho,
+            "n": n, "n_eff": n_eff, "df": df}
+
+
 def derive(d: pathlib.Path, say=print) -> dict:
     """Sections 1 to 6: every quantity the reading and the README rest on.
 
@@ -303,14 +349,24 @@ def derive(d: pathlib.Path, say=print) -> dict:
     cold = st.fmean([r["bw"] for r in allw if r["temp"] <= lo + 1.0])
     hot_bw = st.fmean([r["bw"] for r in allw if r["temp"] >= hi - 1.0])
     R = 100.0 * (cold - hot_bw) / cold
-    pooled = ols(temps, bws)
     mean_bw = st.fmean(bws)
-    B = 100.0 * pooled["slope"] / mean_bw if pooled else 0.0
-    B_hi = abs(B) + (100.0 * pooled["half"] / mean_bw if pooled else 0.0)
+    fit = within_phase_slope([phases[p][0] for p in phases])
+    if fit is None:
+        sys.exit("the within-phase slope cannot be fitted: a phase has fewer than "
+                 "three windows or no temperature range")
+    B = 100.0 * fit["slope"] / mean_bw
+    B_hi = abs(B) + 100.0 * fit["half"] / mean_bw
+    pooled = ols(temps, bws)
     say(f"   thermal range traversed: {lo:.1f} to {hi:.1f} C = {hi - lo:.1f}")
     say(f"   bandwidth cold {cold:.1f} -> hot {hot_bw:.1f} GB/s, R = {R:+.3f} %")
-    say(f"   pooled slope B = {B:+.5f} % per C, 95 % upper bound on |B| "
-          f"= {B_hi:.5f}")
+    say(f"   slope B, one per phase sharing a slope = {B:+.5f} % per C, 95 % upper "
+          f"bound on |B| = {B_hi:.5f}")
+    say(f"     residual lag-one correlation {fit['rho']:+.2f}, so {fit['n']} "
+          f"windows count as {fit['n_eff']:.0f} and the interval has {fit['df']} df")
+    if pooled:
+        say(f"     one line through both phases would give "
+            f"{100.0 * pooled['slope'] / mean_bw:+.5f}, which is mostly the offset "
+            f"between the two invocations and is not the slope")
     say(f"   plan Z excludes the hypothesis for A16's step if R is below "
           f"{step} %: {'EXCLUDED' if abs(R) < step else 'NOT excluded'}")
     # Against A16's OWN divergence rather than an invented one. Dividing the step by
@@ -330,6 +386,7 @@ def derive(d: pathlib.Path, say=print) -> dict:
               f"away from zero")
     return {"tel": tel, "spread": spread, "both": both, "mean_off": mean_off,
             "plateau": plateau, "lo": lo, "hi": hi, "R": R, "B": B, "B_hi": B_hi,
+            "rho": fit["rho"], "n_eff": fit["n_eff"],
             "need_B": need_B, "floor": floor, "step": step, "div_c": div_c}
 
 
@@ -343,8 +400,9 @@ def readme_figures(v: dict) -> tuple[dict, dict]:
     rows = {
         "the thermal range": f"{v['lo']:.1f} to {v['hi']:.1f} C",
         "R, the bandwidth change across it": f"{abs(v['R']):.3f} %",
-        "the slope B": f"{v['B']:+.5f} % per C".replace("+", ""),
-        "the 95 % upper bound on its magnitude": f"{v['B_hi']:.5f} % per C",
+        "the slope B, one line per phase sharing it": f"{v['B']:+.5f} % per C",
+        "the 95 % upper bound on its magnitude, widened for drift":
+            f"{v['B_hi']:.5f} % per C",
         f"the noise floor, {len(v['plateau'])} windows at the plateau":
             f"{v['floor']:.4f} %",
         "the shared bins the control used": f"{len(v['both'])}",
@@ -356,10 +414,18 @@ def readme_figures(v: dict) -> tuple[dict, dict]:
     for k in ("sm", "mem"):
         xs = [x[k] for x in v["tel"] if x[k] is not None]
         sds.append(st.stdev(xs) if len(xs) > 1 else 0.0)
+    ratio = v["need_B"] / v["B_hi"]
     prose = {"the required sensitivity": f"{v['need_B']:.2f} % per C",
-             "the ratio to the bound": f"{v['need_B'] / v['B_hi']:,.0f}",
+             "the ratio to the bound": f"That is {ratio:,.0f} times the upper bound",
+             "the ratio to the bound, in the limits":
+                 f"sensitivity is {ratio:,.0f} times the bound",
              "how far either clock moved": f"sd {max(sds):.3f}",
-             "the range traversed": f"The range is {v['hi'] - v['lo']:.1f} C"}
+             "the range traversed": f"The range is {v['hi'] - v['lo']:.1f} C",
+             # Whole numbers, which no census reads: each was changed in the
+             # review of this branch and nothing failed.
+             "the samples the clocks held for": f"all {len(v['tel'])}",
+             "the step in noise floors": f"{v['step'] / v['floor']:.0f} noise floors",
+             "the residuals' correlation": f"lag-one correlation of {v['rho']:.2f}"}
     return rows, prose
 
 
@@ -416,15 +482,23 @@ def main() -> int:
         # No row label may contain a pipe, escaped or not: a `\|` in a cell splits
         # the row into three on any naive split, and the two-cell filter then drops
         # it silently. The label says "its magnitude" rather than "|B|".
-        rows = {}
+        rows, twice = {}, []
         for line in text.splitlines():
             if not line.strip().startswith("|"):
                 continue
             cells = [c.strip() for c in line.strip().strip("|").split("|")]
             if len(cells) == 2 and not cells[0].startswith("---"):
+                # A label twice: a dict keeps the last, so a wrong row above a
+                # right one with the same label was never compared.
+                if cells[0] in rows:
+                    twice.append(cells[0])
                 rows[cells[0]] = cells[1]
         want_rows, want_prose = readme_figures(v)
         bad = []
+        for k in twice:
+            print(f"    WRONG   {k}: the label is on two rows, and only one can be "
+                  f"the figure")
+            bad.append(k)
         for k, v in want_rows.items():
             if v is None:
                 continue
@@ -436,7 +510,7 @@ def main() -> int:
                 bad.append(k)
         # and the two the prose carries, which are distinctive enough to find
         for what, want in want_prose.items():
-            ok = want in text
+            ok = want in " ".join(text.split())
             print(f"    {'ok     ' if ok else 'MISSING'} {what}: {want}")
             if not ok:
                 bad.append(what)

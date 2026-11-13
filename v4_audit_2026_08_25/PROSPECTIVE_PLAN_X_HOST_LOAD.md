@@ -156,14 +156,17 @@ experiment is run Y, it was pre-registered in
 run on 2026-09-26, and it came back the other way.
 
 Pinning the server to eight efficiency cores rather than eight performance cores,
-a clock cut of 26 %, costs **14.42 %** of the decode rate on `spec-dflash-n2` and
+a clock cut of 22 % to 26 % depending on which performance core it is measured
+from, costs **14.42 %** of the decode rate on `spec-dflash-n2` and
 **14.73 %** on `baseline`, with intervals excluding zero by a wide margin and
 one-sided upper limits of 15.34 % and 15.30 %. The output is identical to the token,
 the GPU's SM clock is the same or higher in the slow condition, and its power,
 utilisation and temperature all fall: the card is waiting on the host.
 
-So processor speed reaches this workload hard. About half a token's time is host
-work that scales with clock. **Run X is warranted, not made unnecessary**, and its
+So processor speed reaches this workload hard. Between about a half and about
+three fifths of a token's time is host work that scales with clock, depending on
+which of those two clocks the main thread had; plan Y has the arithmetic and its
+correction. **Run X is warranted, not made unnecessary**, and its
 design gains a reason it did not have: CPU contention is a channel this workload
 demonstrably rides on, rather than one this plan hoped to bound away.
 

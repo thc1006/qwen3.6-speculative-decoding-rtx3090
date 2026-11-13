@@ -92,8 +92,22 @@ raw)
 esac
 
 echo "TELEMETRY=$OUT  schema=$SCHEMA  interval=${INTERVAL}s"
+# A failed query goes to `$OUT.err`, not into the trace. It used to be appended
+# to the CSV with `2>&1`, so a driver that counts the trace's rows -- every one of
+# them does, to refuse a run whose sampler wrote nothing -- counted NVML's error
+# text as samples: four ticks of "Unable to determine the device handle" passed
+# as four rows. A row in the trace is now a sample or it is not there.
 while true; do
-    [ "$PREFIX_WALL" -eq 1 ] && printf '%s,' "$(date -Iseconds)" >> "$OUT"
-    nvidia-smi --query-gpu="$FIELDS" --format=csv,noheader >> "$OUT" 2>&1
+    wall="$(date -Iseconds)"
+    if row=$(nvidia-smi --query-gpu="$FIELDS" --format=csv,noheader 2>&1) \
+            && [ -n "$row" ]; then
+        if [ "$PREFIX_WALL" -eq 1 ]; then
+            printf '%s,%s\n' "$wall" "$row" >> "$OUT"
+        else
+            printf '%s\n' "$row" >> "$OUT"
+        fi
+    else
+        printf '%s %s\n' "$wall" "$row" >> "$OUT.err"
+    fi
     sleep "$INTERVAL"
 done

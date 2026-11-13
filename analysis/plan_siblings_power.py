@@ -138,6 +138,19 @@ def check_doc(inp: dict, rows: list[dict]) -> list[str]:
     unknown = [c for c in cols if c not in known]
     if unknown:
         return [f"{DOC}: the design table has column(s) {unknown} that nothing derives"]
+    # Every row the table HAS must be one the data derives. Looking up only the
+    # derived rows let a row nobody derived sit in the table and pass every check.
+    table = []
+    for ln in lines[heads[0] + 1:]:
+        if not ln.strip().startswith("|"):
+            break
+        c = _split(ln)
+        if c and not c[0].startswith("---"):
+            table.append(c[0])
+    extra = sorted(set(table) - {str(r["blocks"]) for r in rows})
+    if extra:
+        bad.append(f"{DOC}: the design table has row(s) for {extra} blocks, which "
+                   f"nothing derives")
     for r in rows:
         want = cells(r)
         got = [ln for ln in lines[heads[0]:] if _split(ln)[:1] == [str(r["blocks"])]]
@@ -163,6 +176,15 @@ def check_doc(inp: dict, rows: list[dict]) -> list[str]:
             near = f"{y:.{dec}f}{tail}"
             if near != v and near in text:
                 bad.append(f"{DOC}: carries {near} where {what} is {v}")
+    # The two spreads beside what each is. Presence passed with them swapped:
+    # "five times the within-invocation spread of 2.089 %" carried both values.
+    flat = " ".join(text.split())
+    pf = prose_figures(inp)
+    null_sd, effect_sd = pf["the within-invocation spread"], pf["run Y's own block spread"]
+    for ctx in (f"within-invocation spread of {null_sd}",
+                f"within-block log ratios spread {effect_sd}"):
+        if ctx not in flat:
+            bad.append(f"{DOC}: does not say {ctx!r}")
     return bad
 
 

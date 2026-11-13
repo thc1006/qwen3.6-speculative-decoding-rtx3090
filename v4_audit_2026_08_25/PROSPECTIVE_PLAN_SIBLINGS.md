@@ -12,6 +12,15 @@ measurement it describes, and every figure it quotes about data already committe
 is derived by
 [`../analysis/plan_siblings_power.py`](../analysis/plan_siblings_power.py).
 
+**The third arm was changed on 2026-11-13, before any run of it, because the
+flag it was built on reaches nothing in this binary.** The server these runs use
+is an OpenMP build, and ggml reads `--poll` only when it is built without OpenMP.
+Item 7 has the lines. The third arm now differs from the second in the server's
+environment, `OMP_WAIT_POLICY=passive`, which is the setting OpenMP's own workers
+read, and every arm-run records each server thread's processor time, which is the
+first observation of the mechanism this plan names. What had been seen of any run
+when this was changed is in the reading section.
+
 ## Why this plan exists, and why the previous reading was wrong
 
 ERRATA A16 is a **3.93 %** step between two levels of one arm's decode rate inside
@@ -25,10 +34,16 @@ landing slow*. It cannot be one, and the reasons are not subtle.
 
 **The eight threads are not on the critical path.** Every target layer and every
 drafter layer is on the card — the memory fitter chose that, and ERRATA records the
-fit. So llama.cpp's CPU threadpool does no arithmetic while decoding. What run Y's
-displacement moved was the work that remains on the host: sampling, graph build and
-launch, the speculative accept and reject bookkeeping, and the synchronisation with
-the driver. That work is on the **main** thread.
+fit. One operation per forward pass is known to stay on the host by design: the input layer,
+which `src/llama-model.cpp` keeps on the CPU at 1463 to 1465 because offloading it
+gains little, and its one operation, the embedding lookup, is planned as a single
+task, `ggml/src/ggml-cpu/ggml-cpu.c` at 2336 to 2342, so it runs on the main
+thread. Unless some other operation falls back to the CPU, which nothing here has
+checked, the other seven threads have no arithmetic to do while decoding. What run
+Y's displacement moved was the work that remains on the host: sampling, the
+embedding lookup, graph build and launch, the speculative accept and reject
+bookkeeping, and the synchronisation with the driver. That work is on the **main**
+thread.
 
 **And a barrier does not interpolate.** If those threads did split work statically,
 the step time is the slowest thread's, so displacing one thread would cost what
@@ -40,23 +55,40 @@ physical core with the main thread**.
 
 ## The candidate, stated before it is tested
 
-`--poll` defaults to **50**, and that is not a nominal amount of spinning:
-`ggml_graph_compute_poll_for_work` turns it into 6,553,600 `PAUSE` iterations per
-worker per wait before the worker falls back to a condvar sleep. A worker spinning
-on the main thread's hyperthread sibling takes issue slots from it. Whether the
-scheduler puts one there is drawn afresh at every server launch, and every
-published run here passes no affinity at all, which is exactly a bimodal,
-per-invocation, unrecorded variable.
+The server these runs use is an OpenMP build, so the eight threads are libgomp's.
+When a parallel region ends, a libgomp worker spins before it sleeps: up to
+`GOMP_SPINCOUNT` rounds, 300,000 when `OMP_WAIT_POLICY` is unset, which is what
+every run here left it. A worker spinning on the main thread's hyperthread sibling
+takes issue slots from it. Whether the scheduler puts one there is drawn afresh at
+every server launch, and run T4, where the step lives, passed no affinity at all,
+which is exactly a bimodal, per-invocation, unrecorded variable.
 
-One asymmetry to carry into the reading, because it bounds what the third arm can
-show: `--poll` reaches the target context's threadpool and not the drafter's. The
-drafter's context is built without an attached pool and takes the library default
-whatever the flag says. Prerequisite 2 has the lines that show it.
+This document first named ggml's own threadpool and its `--poll` level, 50 by
+default, which spins 6,553,600 `PAUSE` iterations per worker per wait. That pool
+exists only in a build without OpenMP. Item 7 has the lines, and the third arm
+was changed for it before it ran.
 
-**This is an inference and nothing here has measured it.** No run in this
-repository records which processor any llama.cpp thread ran on, so the placement
-has never been observed, let alone its cost. What follows is why it is worth half
-an hour rather than why it is true.
+**There is a reason to doubt the workers spin at all while decoding**, and it was
+found from the source before any run. A worker spins only after a region it took
+part in, and the only operation this document can name on the CPU during decoding,
+the embedding lookup above, is planned as one task, so the region it would open
+has one thread and wakes no worker. If nothing else falls back to the CPU, no
+worker spins, the candidate below is wrong at its root, and a cost in `packed`
+would have to come from something else that shares the core. That is what the
+per-thread processor time every arm-run now records can show, because a worker
+that spins accrues processor time and one that sleeps does not.
+
+`OMP_WAIT_POLICY` is read once per process and applies to every OpenMP team in
+it, so the third arm reaches the drafter's waiting as well as the target's. The
+first version of this plan carried an asymmetry here, `--poll` reaching the
+target's pool and not the drafter's; under OpenMP it does not arise.
+
+**This is an inference and nothing here has measured it.** No committed run in
+this repository records which processor any llama.cpp thread ran on, so the
+placement has never been observed, let alone its cost. The arm-runs of this plan
+will be the first to record it, each server thread's processor time and the
+processor it last ran on. What follows is why it is worth half an hour rather than
+why it is true.
 
 The ordering is what fits. A full displacement of the host work costs 14.42 %; the
 step is roughly a quarter of that, and about five times the within-invocation spread
@@ -69,9 +101,9 @@ putting the main thread on an efficiency core would cost.
 
 What that ordering does not give is a predicted size, because the host's share of a
 token is itself unmeasured here. Run Y bounds it only as a product: the share times
-how much slower an efficiency core runs that work equals 14.42 %, and the second
-factor is unrecorded. The arms below measure the cost directly instead of inferring
-it from that product.
+the extra time an efficiency core takes over that work is the growth in time per
+token that a 14.42 % loss of rate implies, and the second factor is unrecorded. The
+arms below measure the cost directly instead of inferring it from that product.
 
 Run Y's own fast set, `0,2,4,6,8,10,12,14`, happens to take one sibling from each of
 eight physical performance cores, so it avoided this by accident. Run T4, where the
@@ -85,24 +117,29 @@ Each differs from the one above it in exactly one thing.
 |---|---|---|
 | `distinct` | `0,2,4,6,8,10,12,14` | one thread from each of the eight performance cores. Run Y's fast condition |
 | `packed` | `0,1,2,3,4,5,8,9` | four performance cores, both threads of each |
-| `packed-nopoll` | `0,1,2,3,4,5,8,9` | and `--poll 0`, so the target pool's idle workers sleep |
+| `packed-passive` | `0,1,2,3,4,5,8,9` | and `OMP_WAIT_POLICY=passive` in the server's environment, so idle OpenMP workers sleep at once |
 
 [`../bench/run_s_siblings.sh`](../bench/run_s_siblings.sh) is the driver, and
 those three names are conditions rather than the runner's. It runs them as
-`spec-dflash-n2`, `spec-dflash-n2-packed` and `spec-dflash-n2-nopoll-packed`,
-twelve blocks of three in `latin` order, all in ONE invocation. That last part
-is not a convenience: A16's step is BETWEEN invocations, so an arm measured in
-its own invocation is confounded with the variable this plan exists to isolate.
-`BENCH_POLL` is per invocation and could not express the third condition, so it
-is an entry in the runner's `ARMS` table, which is where per-arm server flags
-live, and it differs from its base by exactly `--poll 0`.
+`spec-dflash-n2`, `spec-dflash-n2-packed` and `spec-dflash-n2-passive-packed`,
+twelve blocks of three in `latin` order, all in ONE invocation, every request
+generating to a cap of `300` tokens. That ONE invocation is not a convenience:
+A16's step is BETWEEN invocations, so an arm measured in its own invocation is
+confounded with the variable this plan exists to isolate. An environment variable
+set for the invocation would reach all three arms, so the third condition is an
+entry in the runner's `ARM_ENV` table, which gives one arm's server a variable the
+others do not get. It differs from its base in exactly that variable, and every
+arm-run records what its server was given as `server_env`, read back from the
+server's `/proc/<pid>/environ` rather than from what the runner meant to pass.
 
 **The order is `latin`, and the first attempt at this run was stopped for not
 being.** `BENCH_ORDER=mirrored` was copied from run Y's driver, which has four
 arms: reversing an even-length order gives each arm two positions. Three arms
 reverse to leave the middle one where it was, and rebuilding the order from the
-arm-runs of the stopped attempt showed exactly that, two arms at positions
-{1: 6, 3: 6} and `spec-dflash-n2-packed` at {2: 12}. Mean position is still
+fifteen arm-runs of the stopped attempt showed exactly that: `spec-dflash-n2-packed`
+at position 2 in every block it ran and the other two only ever at 1 and 3. Over
+twelve blocks the schedule would have put the outer two at {1: 6, 3: 6} and the
+middle one at {2: 12}, which the runner now computes and refuses. Mean position is still
 balanced, so a linear drift within a block cancels, but a first-position effect
 does not: the outer arms take it half the time each and the middle one never, and
 the arms are then not exchangeable. This repository has discarded a run for the
@@ -112,18 +149,21 @@ over twelve blocks puts each of the three arms in each of the three positions
 four times and makes each of them first in four blocks, and the runner validates
 that before it spends any GPU time.
 
-What `latin` does not balance is the PREDECESSOR. A cyclic rotation leaves the
-adjacent pairs one-directional: `distinct` is always followed by `packed`,
-`packed` by `nopoll`, `nopoll` by `distinct`, eight times each over the twelve
-blocks, and the reverses never occur. So each arm always has the same arm before
-it. `williams` balances that and requires one block per arm, which is three
-blocks and an interval several times wider than this design needs, so it is not
-available at this precision.
+What `latin` does not balance is the PREDECESSOR. Within a block a cyclic
+rotation leaves the adjacent pairs one-directional: `distinct` is
+always followed by `packed`, `packed` by `passive`, `passive` by `distinct`, eight times each over
+the twelve blocks, and the reverse pairs occur only across the eleven boundaries
+between blocks. So within a block each arm always has the same arm before it.
+`williams` does not remedy that here: the runner's Williams square needs an even
+number of arms and refuses three, and a carryover-balanced design for three arms
+is two squares, six sequences, which the runner does not build. Twelve blocks
+would hold it twice, so precision is not what rules it out; it is a design this
+plan would have to add, and it keeps `latin`.
 
 The argument that the residual is immaterial is an argument and not a
 measurement, and it is this: the three arms do identical GPU work. Same model,
 same drafter, same prompts, same draft length, three hundred tokens each. They
-differ in which processors the server may use and in one poll flag, and every
+differ in which processors the server may use and in one environment variable, and every
 arm-run starts a fresh server, so nothing of the previous arm's placement
 survives into the next process. What survives is the card's thermal and power
 state, and that is set by the GPU work, which does not differ. If that argument
@@ -143,9 +183,9 @@ CI never executes. `bash bench/run_s_siblings.sh --check` runs all six against
 the host without touching the card.
 
 Same binary, same model, same prompts, same thread count, all three on performance
-cores. `packed` against `distinct` is the hyperthread question. `packed-nopoll`
-against `packed` asks whether the cost is the target pool's spinning, and if it is,
-that flag is a remedy for the part of the spinning the flag reaches.
+cores. `packed` against `distinct` is the hyperthread question. `packed-passive`
+against `packed` asks whether the cost is the OpenMP workers' spinning, and if it
+is, that variable is a remedy for it.
 
 **`packed` is not the obvious mask, and the measurement is why.** The obvious one
 is `0,1,2,3,4,5,6,7`, which is what this document said first. Measuring the bench
@@ -153,9 +193,10 @@ host's processors one at a time, which is what
 [`../bench/cpu_siblings.py`](../bench/cpu_siblings.py) does and
 [`topology/topology_3090_20261003.txt`](topology/topology_3090_20261003.txt)
 records, found that `8`, `9`, `10` and `11` run about five per cent faster than the
-other twelve performance-core threads: 172.6 against 163.7 thousand blocks per
-second, four processors each way, with every processor's own three repeats inside
-two tenths of a per cent. Those are the two cores Turbo Boost Max 3.0 favours.
+other twelve performance-core threads: the fastest of the four and the fastest of
+the twelve at 172.6 against 163.7 thousand blocks per second, and every one of the
+four faster than every one of the twelve. Those are the two cores Turbo Boost Max
+3.0 favours.
 
 The measurement confirmed this rather than discovering it, and that is the part
 worth recording against myself. `BENCHMARK_ENV.md`'s CPU addendum has said since
@@ -216,9 +257,13 @@ effect widens the spread and the precision under an effect is the one that
 matters: run Y's own twelve within-block log ratios spread 2.089 %. This plan did
 not, so its table stated only the optimistic precision. Under run Y's spread
 twelve blocks give 1.33 %, the step is three half widths from zero rather than
-eight, and the interval is wider than the null band, so a point estimate inside
-it would come with an interval reaching both neighbours, which the reading section
-reports as reaching them rather than resolving. Twelve stays the choice, because
+eight, and the interval is wider than the null band: a point estimate inside it
+comes with an interval reaching at least one neighbour, and both when it is within
+a third of a per cent of zero, which the reading section reports as reaching them
+rather than resolving. These half widths are on the scale of a mean log ratio
+times a hundred, the scale of the spreads they come from; the derivation prints
+them on that scale and the run's interval back-transformed, each labelled. Twelve
+stays the choice, because
 it was registered before the first attempt ran and the reading does not depend on
 which spread holds; what twelve buys under each is stated so that a reader does
 not have to work it out, and the derivation reports the observed spread beside
@@ -240,8 +285,10 @@ stands". A gain refutes the mechanism; the omission was here, not only there.
   variable is something else. That is a real outcome and it would send this back to
   the list, not to a bigger version of the same run.
 - **-6 % to -1 %, packed slower**: the size a yielding spin predicts, and A16's
-  step is inside that band. The candidate stands and the next question is the
-  second arm.
+  step is inside that band. The candidate stands only if the workers were seen
+  to spin: the other threads' processor time in `packed-passive` at most half of
+  that in `packed`, per arm-run. Otherwise sharing a core costs this much and
+  the spinning worker is not why, and the reading says that instead.
 - **Below -10 %**: too large for a yielding spin. Something is taking the core
   rather than sharing it, and the reading would be about that instead.
 - **Above +1 %, packed FASTER**: not predicted by anything here. Packing four cores
@@ -266,25 +313,42 @@ date is the one a reader can check. What had been seen of that attempt is exactl
 this: the driver's progress lines for its first arm-run, `spec-dflash-n2` in block
 0, which print each request's decode rate, ten of them; and every arm-run's
 `t_start`, read to rebuild the order. No rate of `spec-dflash-n2-packed` or
-`spec-dflash-n2-nopoll-packed` was displayed and no contrast was computed, so no
+`spec-dflash-n2-nopoll-packed`, the third arm's name then, was displayed and no
+contrast was computed, so no
 revision here could have been fitted to one. The attempt's fifteen arm-runs stay
 on the bench host beside an `ABANDONED.txt` that says why, and nothing in this
 repository is derived from them.
 
-Secondary: `packed-nopoll` against `packed`. If it removes the cost, the spinning
-worker is the mechanism and `--poll 0` is the remedy. If it does not, the reading
-is weaker than it looks: the flag quiets the target context's pool and the
-drafter's workers keep spinning either way, so a null says the target pool's spin
-is not the whole cost. It does not say spinning is innocent. The run that could
-say that is one which places the drafter's threads as well, and today the only
-instrument that reaches them is `taskset` with the placement recorded.
+**Revised again on 2026-11-13, and this time the arm, not the bands.** A review of
+this branch found that the third arm's `--poll 0` reaches nothing in the OpenMP
+build the runs use, item 7, and the arm became `OMP_WAIT_POLICY=passive`; the
+secondary reading below and the expectation after it were rewritten for it, and
+the paragraph on whether the workers spin at all was added, and the predicted
+band's "the candidate stands" was made to wait on that observation, with the
+rule written in the band. Nothing of any run had
+been seen since the inventory above: the bench host has been unreachable since
+before the bands were committed, and the only arm-runs of this plan that exist
+are that stopped attempt's fifteen, on that host. The primary contrast, its band
+edges and its expectation are unchanged.
 
-I expect `packed` to lose 2 % to 5 % of the decode rate against `distinct`, and
-`--poll 0` to recover part of that. How large a part I will not
-predict, because the drafter's pool is outside the flag's reach and what share of
-the spinning is the drafter's has not been measured. Writing the first number here
-is the point: if `packed` comes back inside one per cent, this plan was wrong and
-the step is not about hyperthread sharing.
+Secondary: `packed-passive` against `packed`. If it removes the cost, a spinning
+OpenMP worker is the mechanism and `OMP_WAIT_POLICY=passive` is the remedy. If it
+does not, the per-thread processor time separates two readings. If the other
+threads' processor time is clearly lower under `passive`, the workers were
+spinning and their spin is not the cost: spinning is then excluded as the
+mechanism for this build, and a cost in `packed` is something else that shares
+the core. If it is not lower, the workers were not spinning in either arm, which
+is what a decode whose only CPU operation is a single task predicts, and the
+secondary contrast tests nothing. It does not say spinning is innocent in a build
+or a fit where the workers have work. The threads that time does not separate are
+the server's own: libgomp's workers carry the server's name, so it is read as a
+difference between the two packed arms and not as a level.
+
+I expect `packed` to lose 2 % to 5 % of the decode rate against `distinct`; that
+was written on 2026-10-02 and stands. For the third arm I make no prediction of
+size, and since the single-task finding above I would not be surprised by none.
+Writing the first number here is the point: if `packed` comes back inside one per
+cent, this plan was wrong and the step is not about hyperthread sharing.
 
 ## What this cannot do
 
@@ -307,7 +371,8 @@ the step is not about hyperthread sharing.
 
 The flags were traced through the pinned commit's own sources before this list
 was written, and two of the five items changed shape because of what that found.
-Every line number below is `3737e4137`'s.
+The trace missed one thing, that the build is an OpenMP one, and item 7 is what
+that cost. Every line number below is `3737e4137`'s.
 
 1. **CLOSED on 2026-10-03 for the runner, and permanently open for the corpus.**
    Neither default is neutral: `ggml_threadpool_params_init` in `ggml/src/ggml.c`
@@ -317,12 +382,23 @@ Every line number below is `3737e4137`'s.
    `ggml/src/ggml-cpu/ggml-cpu.c:3172`, spins `1024 * 128 * poll` times, so
    **6,553,600 `PAUSE` iterations** per worker per wait before it falls back to a
    condvar sleep. At `--poll 0` it is zero rounds and the worker sleeps at once.
+   All of that is the threadpool of a build WITHOUT OpenMP. In the build these runs
+   use none of it executes, item 7, which is why the third arm no longer uses it.
 
    `bench/retest_runner.py` now takes `BENCH_POLL` and `BENCH_CPU_STRICT`, screens
-   them, puts `--poll` into argv beside `-t`, and records `poll` and `cpu_strict`
-   in the arm-run record and in the run manifest. They are recorded whether or not
-   they are passed, because a **null field** is what makes the absence visible and
-   argv alone never prompted anyone to look.
+   them, puts `--poll` into argv beside `-t`, and records `poll`, `poll_batch` and
+   `cpu_strict` in the arm-run record and in the run manifest. They are recorded
+   whether or not they are passed, because a **null field** is what makes the
+   absence visible and argv alone never prompted anyone to look. `--poll-batch`
+   goes with `--poll`: the runner passes `-tb` beside `-t`, which gives the batch
+   parameters a thread count of their own, and `postprocess_cpu_params`,
+   `common/common.cpp` at 288 to 297, copies the poll level into them only when
+   that count is unset. So `--poll` alone would leave the batch parameters at 50,
+   the two sets would no longer match, `ggml_threadpool_params_match`,
+   `ggml/src/ggml.c` at 8061 to 8066, and `common_threadpools::init` would build a
+   second pool, `common/common.cpp` at 1800 to 1826; every speculative
+   verification is a batch of the sampled token and the draft and runs on that
+   one, `src/llama-context.cpp` at 1385 and 2479.
 
    `BENCH_CPU_STRICT=1` is refused, and the reason is not `taskset`. Strict
    placement reads `params.cpuparams.cpumask`, which only `--cpu-mask` fills;
@@ -346,6 +422,10 @@ Every line number below is `3737e4137`'s.
    happens wherever the kernel puts a thread, and in `distinct` no two are, so it
    cannot. The placement within the set is the kernel's and the contrast does not
    depend on it.
+   In the OpenMP build these runs use, neither context's pool has threads of its
+   own: both run their graphs as `#pragma omp parallel` regions on libgomp's
+   workers, `ggml-cpu.c` at 3383 to 3402, so the threads `taskset` places are
+   libgomp's, and the drafter's work runs on them too.
    The server's TARGET context gets a threadpool built from `params.cpuparams`:
    `tools/server/server-context.cpp:1051` calls `common_init_from_params`, whose
    constructor at `common/common.cpp:1290` calls `threadpools.init` at 1408, and
@@ -378,7 +458,7 @@ Every line number below is `3737e4137`'s.
    what the suite asserts is the arithmetic that turns rates into a verdict.
 4. **CLOSED on 2026-10-03: the binary the runs used accepts the flags.** The
    source says so at the pinned commit, `common/arg.cpp` giving `-C/--cpu-mask` at
-   1534, `-Cr/--cpu-range` at 1548, `--cpu-strict` at 1554 and `--poll` at 1571
+   1534, `-Cr/--cpu-range` at 1544, `--cpu-strict` at 1554 and `--poll` at 1571
    with no `.set_examples(...)` restricting any of them. The artefact now says so
    too. Seventy seven of the seventy eight committed runs record
    `server_sha256` `b6a5c490bb932ffa`, run T4 and run Y among them, and the file
@@ -407,11 +487,14 @@ Every line number below is `3737e4137`'s.
    kernel did not grant, two server builds, two library sets beside the binary
    or two sets of shared objects actually mapped, one server process answering
    two arm-runs, a thread count that is not the mask's size, a threadpool flag
-   anywhere but `--poll 0` in the third arm, a model, drafter, draft length or
-   prompt set that differs between arms, a request that stopped short of the
-   token cap, a crashed arm-run, a directory the runner did not attest as
-   complete, or a position count that is not balanced. A field that is absent
-   is a refusal, never a pass. The claims job and the local gate both run it.
+   in any arm, a server environment other than the one the arm table gives, a
+   build that mapped no libgomp, a record without each thread's processor time, an
+   order, token cap or build other than the ones registered here, a model,
+   drafter, draft length or prompt set that differs between arms, a request that
+   stopped short of the token cap, a crashed arm-run, a directory the runner did
+   not attest as complete, or a position count that is not balanced. A field that
+   is absent is a refusal, never a pass, and a record of the wrong shape is a
+   refusal rather than a crash. The claims job and the local gate both run it.
    With no run committed it parses the arms, the masks, the block count and the
    reading's bands out of this document and checks that the bands partition the
    line, so it has been guarding the reading since the day it was wired in
@@ -455,7 +538,7 @@ Every line number below is `3737e4137`'s.
 
    Per arm-run that is a few dozen `stat` calls. The cost was measured before the
    design was chosen: `libcublasLt.so.12` alone is 714 MiB and the mapped CUDA set
-   is 815, so hashing it per arm-run would be 28 GiB over thirty six of them,
+   is 815, so hashing it per arm-run would be nearly 29 GiB over thirty six of them,
    inside a measurement, and CPU work inside a measurement is what the host guard
    exists to refuse.
 
@@ -463,3 +546,31 @@ Every line number below is `3737e4137`'s.
    mtime and inode would reuse the cached hash. That is not a realistic accident.
    And the seventy eight runs already committed carry none of this, which is why
    the arms of this plan compare against each other and not against them.
+7. **CLOSED on 2026-11-13: the build is an OpenMP one, and the third arm was
+   changed for it before it ran.** `ggml/CMakeLists.txt` turns `GGML_OPENMP` on
+   by default at 245, and nothing this repository records as a build command turns
+   it off. Run Y's own server log, on the bench host and this binary, prints
+   `OPENMP = 1` in its `system_info` line. In that build ggml's threadpool has no
+   worker threads, `ggml-cpu.c` at 3314 to 3346, and every multi-threaded graph is a
+   `#pragma omp parallel` region, 3383 to 3402; the poll level is read only in
+   `ggml_graph_compute_poll_for_work`, 3172, inside the `#ifndef GGML_USE_OPENMP`
+   block that runs from 3140 to 3276. So `--poll 0` would have been a treatment
+   recorded in every manifest and applied to nothing.
+
+   libgomp's workers wait as libgomp says. With `OMP_WAIT_POLICY` unset a worker
+   spins up to `GOMP_SPINCOUNT` rounds, 300,000 by default, or 100 when the process
+   runs more OpenMP threads than it may use processors, and then sleeps; `passive`
+   makes it sleep at once. ggml sets `KMP_BLOCKTIME` when it is absent, which is
+   the variable of LLVM's and Intel's runtimes; the libgomp on the development box
+   carries no such name and the one on the bench host has not been checked.
+
+   So the third arm is `OMP_WAIT_POLICY=passive`, given to that arm's server alone
+   by the runner's `ARM_ENV`. The runner refuses any other OpenMP variable in the
+   environment it was started with, because that would reach every arm unrecorded,
+   and records `server_env` for every arm-run from `/proc/<pid>/environ`. The
+   driver refuses a server that does not load libgomp, and `rederive_run_s.py`
+   refuses an arm-run that did not map it. Every arm-run also records
+   `server_threads`, each thread's processor time across the measured requests and
+   the processor it last ran on, read from `/proc/<pid>/task`, which is what says
+   whether the workers spun at all.
+

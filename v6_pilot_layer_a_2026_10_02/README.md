@@ -33,8 +33,8 @@ direction at different elapsed times.
 |---|---|
 | the thermal range | 51.6 to 69.0 °C |
 | R, the bandwidth change across it | 0.014 % |
-| the slope B | -0.00099 % per °C |
-| the 95 % upper bound on its magnitude | 0.00140 % per °C |
+| the slope B, one line per phase sharing it | +0.00024 % per °C |
+| the 95 % upper bound on its magnitude, widened for drift | 0.00091 % per °C |
 | the noise floor, 64 windows at the plateau | 0.0123 % |
 | the shared bins the control used | 9 |
 | the mean phase offset in them | 0.022 % |
@@ -47,7 +47,7 @@ step. It is **0.014 %**.
 Put against A16's own numbers rather than an invented divergence: A16's two levels
 differ by 1.67 °C of core temperature, so for memory thermal state to produce a
 3.93 % step through bandwidth, with elasticity at the fully memory-bound ceiling of
-one, the sensitivity would have to be **2.35 % per °C**. That is **1,678** times the
+one, the sensitivity would have to be **2.35 % per °C**. That is **2,582** times the
 upper bound measured here. Equivalently, at that upper bound the memory would have
 to diverge by thousands of degrees between the two levels.
 
@@ -57,6 +57,19 @@ And the step is 319 noise floors from zero, so the instrument is not the limit.
 opposite of what a thermal explanation predicts. This measurement says the
 bandwidth channel cannot carry the step; A16's own thermal record says the sign is
 wrong as well.
+
+**The slope was corrected on 2026-11-13, and the reading did not depend on it.**
+The rule reads R. B is how R was going to be put in context, and its first version
+fitted one line through both phases: the phases are two invocations of the load
+and differ by the constant offset below, so that line fitted the offset as if it
+were temperature, and the slope it published was mostly the gap between two runs,
+opposite in sign to the ascending phase's, which spans most of the range, and
+several times the size of either phase's. B is now one slope with an
+intercept per phase. Consecutive windows are not independent either, so its bound
+is widened for the residuals' lag-one correlation of 0.25, which turns the windows
+into about three fifths as many independent ones. Both changes came from a review
+of this round, and the bound came out narrower than the first, because the first
+one's residuals carried the offset too.
 
 ## What this does not establish
 
@@ -95,7 +108,7 @@ wrong as well.
   temperature, and a load that is constant cannot create or remove a slope; it was
   constant to within those six minutes. What it can do is inflate the scatter, and
   that widens the bound rather than narrowing it, which is the direction that makes
-  the exclusion harder rather than easier. The required sensitivity is 1678 times
+  the exclusion harder rather than easier. The required sensitivity is 2,582 times
   the bound, so the margin absorbs a long way more inflation than a single busy
   processor can produce.
 
